@@ -51,14 +51,15 @@ def parse_item_details(text: str | None) -> tuple[str, int | None, int | None, l
 			else:
 				if depth > 0:
 					buf.append(ch)
+		# if string ended but we are still inside a paren block, accept incomplete as a part
+		if depth > 0 and buf:
+			parts.append(''.join(buf).strip())
 		return parts
 
 	parts = split_top_level(text)
-	# base name is text with any parentheses removed
-	base = re.sub(r"\([^()]*\)", "", text)
-	while re.search(r"\([^()]*\)", base):  # in case of nested leftovers
-		base = re.sub(r"\([^()]*\)", "", base)
-	base = base.strip() or text.strip()
+	# base name: everything before the first '('
+	idx = text.find('(')
+	base = (text[:idx] if idx != -1 else text).strip()
 
 	height: int | None = None
 	weight: int | None = None
