@@ -129,9 +129,9 @@ def commit_import(body: dict):
 					item = session.exec(select(Item).where(Item.sku == sku)).first()
 					if not item:
 						item = Item(sku=sku, name=item_name)
-							session.add(item)
-							session.flush()
-							run.created_items += 1
+						session.add(item)
+						session.flush()
+						run.created_items += 1
 
 					order = Order(
 						tracking_no=rec.get("tracking_no"),
@@ -143,10 +143,10 @@ def commit_import(body: dict):
 						shipment_date=rec.get("shipment_date"),
 						source="bizim",
 					)
-						session.add(order)
-						session.flush()
-						run.created_orders += 1
-						matched_order_id = order.id
+					session.add(order)
+					session.flush()
+					run.created_orders += 1
+					matched_order_id = order.id
 
 				else:  # kargo
 					order = find_order_by_tracking(session, rec.get("tracking_no"))
