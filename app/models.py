@@ -12,6 +12,8 @@ class Client(SQLModel, table=True):
     tax_id: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = Field(default=None, index=True)
+    height_cm: Optional[int] = Field(default=None, description="Client height in centimeters")
+    weight_kg: Optional[int] = Field(default=None, description="Client weight in kilograms")
     unique_key: Optional[str] = Field(default=None, index=True, unique=True)
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)

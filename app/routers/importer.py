@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any
+import re
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from sqlmodel import select
@@ -19,6 +20,46 @@ router = APIRouter(prefix="")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BIZIM_DIR = PROJECT_ROOT / "bizimexcellerimiz"
 KARGO_DIR = PROJECT_ROOT / "kargocununexcelleri"
+def parse_item_details(text: str | None) -> tuple[str, int | None, int | None, list[str]]:
+	"""Extract base item name, height(cm), weight(kg), and extra notes from parentheses.
+
+	Patterns handled:
+	- "NAME (180,75) (NOTE)" -> ("NAME", 180, 75, ["NOTE"]) 
+	- If first parentheses isn't two numbers, treat all parentheses as notes.
+	"""
+	if not text:
+		return "Genel Ürün", None, None, []
+	# collect parentheses content
+	parts = re.findall(r"\(([^()]*)\)", text)
+	# base name is text with parentheses removed
+	base = re.sub(r"\([^()]*\)", "", text).strip()
+	if not base:
+		base = text.strip()
+	height: int | None = None
+	weight: int | None = None
+	notes: list[str] = []
+	if parts:
+		# try to parse first as height/weight
+		nums = re.findall(r"\d{2,3}", parts[0])
+		if len(nums) >= 2:
+			try:
+				height = int(nums[0])
+				weight = int(nums[1])
+			except Exception:
+				pass
+			# remaining parentheses are notes
+			for p in parts[1:]:
+				n = p.strip()
+				if n:
+					notes.append(n)
+		else:
+			# none numeric, all are notes
+			for p in parts:
+				n = p.strip()
+				if n:
+					notes.append(n)
+	return base, height, weight, notes
+
 
 
 @router.get("/runs")
@@ -145,7 +186,14 @@ def commit_import(body: dict):
 							run.updated_clients += 1
 					matched_client_id = client.id
 
-					item_name = rec.get("item_name") or "Genel Ürün"
+					item_name_raw = rec.get("item_name") or "Genel Ürün"
+					base_name, height_cm, weight_kg, extra_notes = parse_item_details(item_name_raw)
+					# update client with parsed metrics if present
+					if height_cm is not None:
+						client.height_cm = client.height_cm or height_cm
+					if weight_kg is not None:
+						client.weight_kg = client.weight_kg or weight_kg
+					item_name = base_name
 					sku = slugify(item_name)
 					item = session.exec(select(Item).where(Item.sku == sku)).first()
 					if not item:
@@ -154,6 +202,10 @@ def commit_import(body: dict):
 						session.flush()
 						run.created_items += 1
 
+					order_notes = rec.get("notes") or None
+					if extra_notes:
+						joined = ", ".join(extra_notes)
+						order_notes = f"{order_notes} | {joined}" if order_notes else joined
 					order = Order(
 						tracking_no=rec.get("tracking_no"),
 						client_id=client.id,  # type: ignore
@@ -163,6 +215,7 @@ def commit_import(body: dict):
 						total_amount=rec.get("total_amount"),
 						shipment_date=rec.get("shipment_date"),
 						source="bizim",
+						notes=order_notes,
 					)
 					session.add(order)
 					session.flush()
@@ -228,35 +281,32 @@ def reset_database():
 @router.post("/upload")
 async def upload_excel(
 	source: str = Form(..., description="'bizim' or 'kargo'"),
-	file: UploadFile = File(...),
+	files: list[UploadFile] = File(...),
 ):
 	if source not in ("bizim", "kargo"):
 		raise HTTPException(status_code=400, detail="source must be 'bizim' or 'kargo'")
 	folder = BIZIM_DIR if source == "bizim" else KARGO_DIR
 	folder.mkdir(parents=True, exist_ok=True)
 
-	filename = file.filename or "upload.xlsx"
-	# Ensure .xlsx extension
-	if not filename.lower().endswith(".xlsx"):
-		filename = f"{filename}.xlsx"
-	# Make filename unique if exists
-	dst = folder / filename
-	ctr = 1
-	while dst.exists():
-		stem = dst.stem
-		ext = dst.suffix
-		dst = folder / f"{stem}-{ctr}{ext}"
-		ctr += 1
+	saved: list[dict[str, Any]] = []
+	for file in files:
+		filename = file.filename or "upload.xlsx"
+		if not filename.lower().endswith(".xlsx"):
+			filename = f"{filename}.xlsx"
+		dst = folder / filename
+		ctr = 1
+		while dst.exists():
+			stem = dst.stem
+			ext = dst.suffix
+			dst = folder / f"{stem}-{ctr}{ext}"
+			ctr += 1
+		content = await file.read()
+		dst.write_bytes(content)
+		records = read_bizim_file(str(dst)) if source == "bizim" else read_kargo_file(str(dst))
+		saved.append({
+			"filename": dst.name,
+			"row_count": len(records),
+			"sample": records[:3],
+		})
 
-	content = await file.read()
-	dst.write_bytes(content)
-
-	# Return a quick preview as convenience
-	records = read_bizim_file(str(dst)) if source == "bizim" else read_kargo_file(str(dst))
-	return {
-		"status": "ok",
-		"source": source,
-		"filename": dst.name,
-		"row_count": len(records),
-		"sample": records[:5],
-	}
+	return {"status": "ok", "source": source, "files": saved}

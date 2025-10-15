@@ -33,7 +33,7 @@
 					<option value="bizim">bizim</option>
 					<option value="kargo">kargo</option>
 				</select>
-				<input type="file" name="file" accept=".xlsx" required style="margin-left:6px" />
+				<input type="file" name="files" multiple accept=".xlsx" required style="margin-left:6px" />
 				<button type="submit" style="margin-left:6px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Upload</button>
 			</form>
 		</div>
@@ -140,13 +140,16 @@
 					const res = await fetch('/import/upload', { method: 'POST', body: data });
 					if (!res.ok) throw new Error('Upload failed');
 					const json = await res.json();
-					result.textContent = `Uploaded ${json.filename} (${json.row_count} rows). Preview shown in console.`;
-					console.log('Preview sample', json.sample);
-					// Optionally auto-commit: send to /import/commit
-					if (confirm('Dosya yüklendi. İçe aktarılsın mı?')) {
-						const res2 = await fetch('/import/commit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: json.source, filename: json.filename })});
-						const j2 = await res2.json();
-						alert(`İçe aktarıldı. Clients: ${j2.created_clients}, Orders: ${j2.created_orders}, Items: ${j2.created_items}`);
+					console.log('Uploaded files preview', json.files);
+					result.textContent = `Uploaded ${json.files.length} file(s).`;
+					// Offer to commit each file sequentially
+					if (confirm('Dosyalar yüklendi. Hepsini içe aktarmak ister misiniz?')) {
+						for (const f of json.files) {
+							const res2 = await fetch('/import/commit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: json.source, filename: f.filename })});
+							const j2 = await res2.json();
+							console.log('Committed', f.filename, j2);
+						}
+						alert('Tüm dosyalar içe aktarıldı.');
 						location.reload();
 					}
 				} catch (err) {
