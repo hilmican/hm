@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    container_name: hm-kargo
+    ports:
+      - "8388:8388"
+    volumes:
+      - ./:/app
+      - ./bizimexcellerimiz:/app/bizimexcellerimiz
+      - ./kargocununexcelleri:/app/kargocununexcelleri
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8388"]

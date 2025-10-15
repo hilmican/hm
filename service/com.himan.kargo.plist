@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.himan.kargo</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/hilmibaycan/Projeler-Aktif/hm/scripts/run.sh</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>WorkingDirectory</key>
+	<string>/Users/hilmibaycan/Projeler-Aktif/hm</string>
+	<key>StandardOutPath</key>
+	<string>/Users/hilmibaycan/Projeler-Aktif/hm/service/kargo.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/hilmibaycan/Projeler-Aktif/hm/service/kargo.err.log</string>
+</dict>
+</plist>

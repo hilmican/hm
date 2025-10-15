@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlmodel==0.0.22
+SQLAlchemy==2.0.36
+pydantic==2.10.6
+jinja2==3.1.4
+python-multipart==0.0.9
+openpyxl==3.1.5
+rapidfuzz==3.9.7
+orjson==3.10.7
