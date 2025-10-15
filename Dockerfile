@@ -5,11 +5,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps for openpyxl, etc.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-	build-essential \
-	&& rm -rf /var/lib/apt/lists/*
-
 # Copy requirements and install
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
