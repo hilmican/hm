@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Client {{ client.id }}</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        h1 { margin-bottom: 8px; }
+        .meta { color: #6b7280; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+        th { background: #fafafa; position: sticky; top: 0; }
+        a { color: #2563eb; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <a href="/clients/table">← Back to Clients</a>
+    <h1>{{ client.name }}</h1>
+    <div class="meta">Tel: {{ client.phone }} · City: {{ client.city }} · Height: {{ client.height_cm }} · Weight: {{ client.weight_kg }}</div>
+
+    <h2>Orders</h2>
+    <table>
+        <thead>
+            <tr><th>ID</th><th>Tracking</th><th>Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Source</th></tr>
+        </thead>
+        <tbody>
+            {% for o in orders %}
+            <tr>
+                <td>{{ o.id }}</td>
+                <td>{{ o.tracking_no }}</td>
+                <td>{{ item_map.get(o.item_id).name if o.item_id in item_map else o.item_id }}</td>
+                <td>{{ o.quantity }}</td>
+                <td>{{ o.total_amount }}</td>
+                <td>{{ o.shipment_date }}</td>
+                <td>{{ o.source }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
+

@@ -101,13 +101,13 @@
 							<td>
 								{% set cname = '' %}
 								{% for c in clients %}{% if c.id == o.client_id %}{% set cname = c.name %}{% endif %}{% endfor %}
-								<a href="/clients?limit=1&id={{ o.client_id }}" target="_blank">{{ cname[:40] }}</a>
+								<a href="/clients/{{ o.client_id }}" target="_blank">{{ cname[:40] }}</a>
 								{% if o.id in order_sources %}<div class="caption">{{ order_sources[o.id] }}</div>{% endif %}
 							</td>
 							<td>
 								{% set iname = '' %}
 								{% for it in items %}{% if it.id == o.item_id %}{% set iname = it.name %}{% endif %}{% endfor %}
-								<a href="/items?limit=1&id={{ o.item_id }}" target="_blank">{{ iname[:40] }}</a>
+								<a href="/items/table#{{ o.item_id }}" target="_blank">{{ iname[:40] }}</a>
 								{% if o.item_id in item_sources %}<div class="caption">{{ item_sources[o.item_id] }}</div>{% endif %}
 							</td>
 							<td>{{ o.quantity }}</td>

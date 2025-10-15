@@ -19,20 +19,21 @@
     <div class="toolbar">
         <a href="/dashboard">← Dashboard</a>
     </div>
-    <h2>Clients (limit {{ limit }})</h2>
+    <h2>Clients</h2>
     <table>
         <thead>
-            <tr><th>ID</th><th>Name</th><th>Phone</th><th>City</th><th>Height</th><th>Weight</th><th>Created</th></tr>
+            <tr><th>ID</th><th>Name</th><th>Phone</th><th>City</th><th>Height</th><th>Weight</th><th>Orders</th><th>Created</th></tr>
         </thead>
         <tbody>
             {% for c in rows %}
             <tr>
-                <td>{{ c.id }}</td>
-                <td>{{ c.name }}</td>
+                <td><a href="/clients/{{ c.id }}" target="_blank">{{ c.id }}</a></td>
+                <td><a href="/clients/{{ c.id }}" target="_blank">{{ c.name }}</a></td>
                 <td>{{ c.phone }}</td>
                 <td>{{ c.city }}</td>
                 <td>{{ c.height_cm }}</td>
                 <td>{{ c.weight_kg }}</td>
+                <td>{{ order_counts.get(c.id, 0) }}</td>
                 <td>{{ c.created_at }}</td>
             </tr>
             {% endfor %}
