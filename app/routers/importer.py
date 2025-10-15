@@ -21,25 +21,51 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BIZIM_DIR = PROJECT_ROOT / "bizimexcellerimiz"
 KARGO_DIR = PROJECT_ROOT / "kargocununexcelleri"
 def parse_item_details(text: str | None) -> tuple[str, int | None, int | None, list[str]]:
-	"""Extract base item name, height(cm), weight(kg), and extra notes from parentheses.
+	"""Extract base item name, height(cm), weight(kg), and extra notes.
 
-	Patterns handled:
-	- "NAME (180,75) (NOTE)" -> ("NAME", 180, 75, ["NOTE"]) 
-	- If first parentheses isn't two numbers, treat all parentheses as notes.
+	Handles nested parentheses like "(178,80(KENDİSİ))":
+	- First top-level parentheses: parse two numbers as height/weight if present.
+	- Any nested parentheses anywhere are treated as notes.
+	- Additional top-level parentheses after the first are also notes.
 	"""
 	if not text:
 		return "Genel Ürün", None, None, []
-	# collect parentheses content
-	parts = re.findall(r"\(([^()]*)\)", text)
-	# base name is text with parentheses removed
-	base = re.sub(r"\([^()]*\)", "", text).strip()
-	if not base:
-		base = text.strip()
+
+	def split_top_level(s: str) -> list[str]:
+		parts: list[str] = []
+		depth = 0
+		buf: list[str] = []
+		for ch in s:
+			if ch == '(':
+				if depth > 0:
+					buf.append(ch)
+				depth += 1
+				if depth == 1:
+					buf = []
+			elif ch == ')':
+				if depth > 1:
+					buf.append(ch)
+				depth -= 1
+				if depth == 0:
+					parts.append(''.join(buf).strip())
+			else:
+				if depth > 0:
+					buf.append(ch)
+		return parts
+
+	parts = split_top_level(text)
+	# base name is text with any parentheses removed
+	base = re.sub(r"\([^()]*\)", "", text)
+	while re.search(r"\([^()]*\)", base):  # in case of nested leftovers
+		base = re.sub(r"\([^()]*\)", "", base)
+	base = base.strip() or text.strip()
+
 	height: int | None = None
 	weight: int | None = None
 	notes: list[str] = []
+
 	if parts:
-		# try to parse first as height/weight
+		# check first top-level part for two numbers
 		nums = re.findall(r"\d{2,3}", parts[0])
 		if len(nums) >= 2:
 			try:
@@ -47,18 +73,32 @@ def parse_item_details(text: str | None) -> tuple[str, int | None, int | None, l
 				weight = int(nums[1])
 			except Exception:
 				pass
-			# remaining parentheses are notes
-			for p in parts[1:]:
-				n = p.strip()
-				if n:
-					notes.append(n)
-		else:
-			# none numeric, all are notes
-			for p in parts:
-				n = p.strip()
-				if n:
-					notes.append(n)
-	return base, height, weight, notes
+		# gather nested notes from the first part
+		for inner in re.findall(r"\(([^()]*)\)", parts[0]):
+			inner = inner.strip()
+			if inner:
+				notes.append(inner)
+		# remaining top-level parts are notes (and their nested contents)
+		for p in parts[1:]:
+			added_inner = False
+			for inner in re.findall(r"\(([^()]*)\)", p):
+				inner = inner.strip()
+				if inner:
+					notes.append(inner)
+					added_inner = True
+			p_clean = re.sub(r"\([^()]*\)", "", p).strip()
+			if p_clean and not added_inner:
+				notes.append(p_clean)
+
+	# de-duplicate notes while preserving order
+	seen = set()
+	unique_notes: list[str] = []
+	for n in notes:
+		if n not in seen:
+			seen.add(n)
+			unique_notes.append(n)
+
+	return base, height, weight, unique_notes
 
 
 

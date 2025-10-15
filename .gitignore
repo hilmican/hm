@@ -4,3 +4,4 @@ app/routers/__pycache__
 bizimexcellerimiz
 kargocununexcelleri
 app.db
+.DS_Store

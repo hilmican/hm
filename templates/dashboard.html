@@ -44,7 +44,7 @@
 				<h2>Clients (latest 20)</h2>
 				<table>
 					<thead>
-						<tr><th>ID</th><th>Name</th><th>Phone</th><th>City</th><th>Height</th><th>Weight</th><th>Created</th></tr>
+						<tr><th>ID</th><th>Name</th><th>Phone</th><th>City</th><th>Height</th><th>Weight</th><th>Source</th><th>Created</th></tr>
 					</thead>
 					<tbody>
 					{% for c in clients %}
@@ -55,6 +55,7 @@
 							<td>{{ c.city }}</td>
 							<td>{{ c.height_cm }}</td>
 							<td>{{ c.weight_kg }}</td>
+							<td>{% if c.id in client_sources %}{{ client_sources[c.id] }}{% endif %}</td>
 							<td>{{ c.created_at }}</td>
 						</tr>
 					{% endfor %}
@@ -97,12 +98,14 @@
 							<td>
 								{% set cname = '' %}
 								{% for c in clients %}{% if c.id == o.client_id %}{% set cname = c.name %}{% endif %}{% endfor %}
-								<a href="/clients?limit=1&id={{ o.client_id }}" target="_blank">{{ o.client_id }} - {{ cname[:40] }}</a>
+								<a href="/clients?limit=1&id={{ o.client_id }}" target="_blank">{{ cname[:40] }}</a>
+								{% if o.id in order_sources %}<div class="caption">{{ order_sources[o.id] }}</div>{% endif %}
 							</td>
 							<td>
 								{% set iname = '' %}
 								{% for it in items %}{% if it.id == o.item_id %}{% set iname = it.name %}{% endif %}{% endfor %}
-								<a href="/items?limit=1&id={{ o.item_id }}" target="_blank">{{ o.item_id }} - {{ iname[:40] }}</a>
+								<a href="/items?limit=1&id={{ o.item_id }}" target="_blank">{{ iname[:40] }}</a>
+								{% if o.item_id in item_sources %}<div class="caption">{{ item_sources[o.item_id] }}</div>{% endif %}
 							</td>
 							<td>{{ o.quantity }}</td>
 							<td>{{ o.total_amount }}</td>
