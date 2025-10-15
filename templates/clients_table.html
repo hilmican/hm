@@ -7,33 +7,68 @@
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
-        th { background: #fafafa; position: sticky; top: 0; }
-        .toolbar { margin-bottom: 12px; }
+        th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; }
+        tr:nth-child(even) { background: #fcfcfd; }
+        .toolbar { margin: 12px 0; display: flex; gap: 8px; align-items: center; }
+        .toolbar input { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; width: 280px; }
+        .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; }
         a { color: #2563eb; text-decoration: none; }
+        .muted { color: #6b7280; font-size: 12px; }
     </style>
     <script>
-        function q(k){ const u=new URL(location.href); return u.searchParams.get(k); }
+        function filterTable(table, q){
+            const rows = table.tBodies[0].rows; const s = q.trim().toLowerCase();
+            for (const r of rows){
+                const txt = r.textContent.toLowerCase();
+                r.style.display = s && txt.indexOf(s) === -1 ? 'none' : '';
+            }
+        }
+        function cmp(a,b,isNum){ if (isNum){ const na=parseFloat(a)||0, nb=parseFloat(b)||0; return na-nb; } return a.localeCompare(b,'tr'); }
+        function sortTable(table, idx, dir){
+            const rows = Array.from(table.tBodies[0].rows);
+            const isNum = table.tHead.rows[0].cells[idx].dataset.type === 'num';
+            rows.sort((r1,r2)=>{
+                const a = r1.cells[idx].dataset.sort || r1.cells[idx].textContent.trim();
+                const b = r2.cells[idx].dataset.sort || r2.cells[idx].textContent.trim();
+                return dir==='asc'?cmp(a,b,isNum):cmp(b,a,isNum);
+            });
+            for(const r of rows) table.tBodies[0].appendChild(r);
+        }
+        function attach(table){
+            const ths = table.tHead.rows[0].cells; let active=-1, dir='asc';
+            for (let i=0;i<ths.length;i++){
+                ths[i].addEventListener('click',()=>{ dir = (active===i && dir==='asc')?'desc':'asc'; active=i; sortTable(table,i,dir); decorate(ths,i,dir); });
+            }
+        }
+        function decorate(ths, active, dir){ for(let i=0;i<ths.length;i++){ ths[i].textContent = ths[i].textContent.replace(/[↑↓]\s*$/,''); if(i===active){ ths[i].textContent += dir==='asc'?' ↑':' ↓'; } } }
+        function init(){
+            const table = document.getElementById('clientsTbl'); attach(table);
+            const si = document.getElementById('search'); si.addEventListener('input',()=>filterTable(table, si.value));
+        }
+        document.addEventListener('DOMContentLoaded', init);
     </script>
     </head>
 <body>
     <div class="toolbar">
         <a href="/dashboard">← Dashboard</a>
+        <input id="search" type="search" placeholder="Search clients (name, phone, city, ...)" />
+        <span class="pill">{{ rows|length }} client(s)</span>
     </div>
     <h2>Clients</h2>
-    <table>
+    <table id="clientsTbl">
         <thead>
-            <tr><th>ID</th><th>Name</th><th>Phone</th><th>City</th><th>Height</th><th>Weight</th><th>Orders</th><th>Created</th></tr>
+            <tr><th data-type="num">ID</th><th>Name</th><th>Phone</th><th>City</th><th data-type="num">Height</th><th data-type="num">Weight</th><th data-type="num">Orders</th><th>Created</th></tr>
         </thead>
         <tbody>
             {% for c in rows %}
             <tr>
-                <td><a href="/clients/{{ c.id }}" target="_blank">{{ c.id }}</a></td>
+                <td data-sort="{{ c.id }}"><a href="/clients/{{ c.id }}" target="_blank">{{ c.id }}</a></td>
                 <td><a href="/clients/{{ c.id }}" target="_blank">{{ c.name }}</a></td>
                 <td>{{ c.phone }}</td>
                 <td>{{ c.city }}</td>
                 <td>{{ c.height_cm }}</td>
                 <td>{{ c.weight_kg }}</td>
-                <td>{{ order_counts.get(c.id, 0) }}</td>
+                <td data-sort="{{ order_counts.get(c.id, 0) }}">{{ order_counts.get(c.id, 0) }}</td>
                 <td>{{ c.created_at }}</td>
             </tr>
             {% endfor %}

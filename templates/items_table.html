@@ -7,17 +7,36 @@
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
-        th { background: #fafafa; position: sticky; top: 0; }
-        .toolbar { margin-bottom: 12px; }
+        th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; }
+        tr:nth-child(even) { background: #fcfcfd; }
+        .toolbar { margin: 12px 0; display: flex; gap: 8px; align-items: center; }
+        .toolbar input { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; width: 280px; }
+        .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; }
         a { color: #2563eb; text-decoration: none; }
     </style>
+    <script>
+        function filterTable(table, q){
+            const rows = table.tBodies[0].rows; const s = q.trim().toLowerCase();
+            for (const r of rows){ const txt = r.textContent.toLowerCase(); r.style.display = s && txt.indexOf(s) === -1 ? 'none' : ''; }
+        }
+        function sortTable(table, idx, dir){
+            const rows = Array.from(table.tBodies[0].rows);
+            rows.sort((r1,r2)=>{ const a=r1.cells[idx].textContent.trim(); const b=r2.cells[idx].textContent.trim(); return dir==='asc'?a.localeCompare(b,'tr'):b.localeCompare(a,'tr'); });
+            for(const r of rows) table.tBodies[0].appendChild(r);
+        }
+        function attach(table){ const ths=table.tHead.rows[0].cells; let active=-1, dir='asc'; for(let i=0;i<ths.length;i++){ ths[i].addEventListener('click',()=>{ dir=(active===i&&dir==='asc')?'desc':'asc'; active=i; sortTable(table,i,dir); }); } }
+        function init(){ const table=document.getElementById('itemsTbl'); attach(table); const si=document.getElementById('search'); si.addEventListener('input',()=>filterTable(table, si.value)); }
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
 </head>
 <body>
     <div class="toolbar">
         <a href="/dashboard">← Dashboard</a>
+        <input id="search" type="search" placeholder="Search items (name, sku)" />
+        <span class="pill">{{ rows|length }} item(s)</span>
     </div>
-    <h2>Items (limit {{ limit }})</h2>
-    <table>
+    <h2>Items</h2>
+    <table id="itemsTbl">
         <thead>
             <tr><th>ID</th><th>SKU</th><th>Name</th><th>Unit</th></tr>
         </thead>
