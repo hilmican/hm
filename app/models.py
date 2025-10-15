@@ -1,12 +1,7 @@
-from __future__ import annotations
-from typing import Optional, TYPE_CHECKING
-from datetime import datetime, date
+import datetime as dt
+from typing import Optional
 
-from sqlmodel import Field, SQLModel, Relationship
-
-# Forward references for type checking without runtime evaluation
-if TYPE_CHECKING:
-    from typing import List
+from sqlmodel import Field, SQLModel
 
 
 class Client(SQLModel, table=True):
@@ -18,12 +13,8 @@ class Client(SQLModel, table=True):
     address: Optional[str] = None
     city: Optional[str] = Field(default=None, index=True)
     unique_key: Optional[str] = Field(default=None, index=True, unique=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    # Relationships (optional - add if needed)
-    orders: List["Order"] = Relationship(back_populates="client")
-    payments: List["Payment"] = Relationship(back_populates="client")
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 
 class Item(SQLModel, table=True):
@@ -31,11 +22,8 @@ class Item(SQLModel, table=True):
     sku: str = Field(index=True, unique=True)
     name: str = Field(index=True)
     unit: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    # Relationships (optional)
-    orders: List["Order"] = Relationship(back_populates="item")
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 
 class Order(SQLModel, table=True):
@@ -46,15 +34,10 @@ class Order(SQLModel, table=True):
     quantity: Optional[int] = 1
     unit_price: Optional[float] = None
     total_amount: Optional[float] = None
-    shipment_date: Optional[date] = Field(default=None, index=True)
+    shipment_date: Optional[dt.date] = Field(default=None, index=True)
     status: Optional[str] = Field(default=None, index=True)
     notes: Optional[str] = None
     source: str = Field(index=True, description="bizim|kargo")
-    
-    # Relationships
-    client: Optional["Client"] = Relationship(back_populates="orders")
-    item: Optional["Item"] = Relationship(back_populates="orders")
-    payments: List["Payment"] = Relationship(back_populates="order")
 
 
 class Payment(SQLModel, table=True):
@@ -62,13 +45,10 @@ class Payment(SQLModel, table=True):
     client_id: int = Field(foreign_key="client.id")
     order_id: Optional[int] = Field(default=None, foreign_key="order.id")
     amount: float
-    date: Optional[date] = Field(default=None, index=True)
+    # avoid shadowing the field name 'date' with the type name; use dt.date explicitly
+    date: Optional[dt.date] = Field(default=None, index=True)
     method: Optional[str] = None
     reference: Optional[str] = None
-    
-    # Relationships
-    client: Optional["Client"] = Relationship(back_populates="payments")
-    order: Optional["Order"] = Relationship(back_populates="payments")
 
 
 class StockMovement(SQLModel, table=True):
@@ -77,19 +57,15 @@ class StockMovement(SQLModel, table=True):
     direction: str = Field(description="in|out")
     quantity: int
     related_order_id: Optional[int] = Field(default=None, foreign_key="order.id")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    # Relationships
-    item: Optional["Item"] = Relationship(back_populates="stock_movements")
-    order: Optional["Order"] = Relationship(back_populates="stock_movements")
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 
 class ImportRun(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(index=True, description="bizim|kargo")
     filename: str
-    started_at: datetime = Field(default_factory=datetime.utcnow)
-    completed_at: Optional[datetime] = None
+    started_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    completed_at: Optional[dt.datetime] = None
     row_count: int = 0
     created_clients: int = 0
     updated_clients: int = 0
@@ -98,9 +74,6 @@ class ImportRun(SQLModel, table=True):
     created_payments: int = 0
     unmatched_count: int = 0
     errors_json: Optional[str] = None
-    
-    # Relationship
-    rows: List["ImportRow"] = Relationship(back_populates="import_run")
 
 
 class ImportRow(SQLModel, table=True):
@@ -111,20 +84,8 @@ class ImportRow(SQLModel, table=True):
     mapped_json: str
     status: str = Field(index=True, description="created|updated|skipped|unmatched|error")
     message: Optional[str] = None
-    matched_client_id: Optional[int] = Field(
-        default=None, 
-        foreign_key="client.id"
-    )
-    matched_order_id: Optional[int] = Field(
-        default=None, 
-        foreign_key="order.id"
-    )
-    
-    # Relationships
-    import_run: Optional["ImportRun"] = Relationship(back_populates="rows")
-    client: Optional["Client"] = Relationship(sa_column=matched_client_id)
-    order: Optional["Order"] = Relationship(sa_column=matched_order_id)
-    reconcile_tasks: List["ReconcileTask"] = Relationship(back_populates="import_row")
+    matched_client_id: Optional[int] = Field(default=None, foreign_key="client.id")
+    matched_order_id: Optional[int] = Field(default=None, foreign_key="order.id")
 
 
 class ReconcileTask(SQLModel, table=True):
@@ -132,7 +93,4 @@ class ReconcileTask(SQLModel, table=True):
     import_row_id: int = Field(foreign_key="importrow.id")
     candidates_json: str
     chosen_id: Optional[int] = None
-    resolved_at: Optional[datetime] = None
-    
-    # Relationship
-    import_row: Optional["ImportRow"] = Relationship(back_populates="reconcile_tasks")
+    resolved_at: Optional[dt.datetime] = None
