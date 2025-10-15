@@ -28,7 +28,17 @@
 			<form method="post" action="/import/reset" style="display:inline" onsubmit="return confirm('Tüm veritabanı silinecek ve sıfırlanacak. Emin misiniz?');">
 				<button type="submit" style="margin-left:12px;background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Reset DB</button>
 			</form>
+			<form id="uploadForm" method="post" action="/import/upload" enctype="multipart/form-data" style="display:inline-block;margin-left:12px;">
+				<select name="source" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;">
+					<option value="bizim">bizim</option>
+					<option value="kargo">kargo</option>
+				</select>
+				<input type="file" name="file" accept=".xlsx" required style="margin-left:6px" />
+				<button type="submit" style="margin-left:6px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Upload</button>
+			</form>
 		</div>
+
+		<div id="uploadResult" class="caption"></div>
 		<div class="grid">
 			<div class="card">
 				<h2>Clients (latest 20)</h2>
@@ -117,5 +127,34 @@
 				<div class="caption">Open <a href="/payments" target="_blank">/payments</a> for full list.</div>
 			</div>
 		</div>
+
+		<script>
+		const form = document.getElementById('uploadForm');
+		const result = document.getElementById('uploadResult');
+		if (form) {
+			form.addEventListener('submit', async (e) => {
+				e.preventDefault();
+				const data = new FormData(form);
+				result.textContent = 'Uploading...';
+				try {
+					const res = await fetch('/import/upload', { method: 'POST', body: data });
+					if (!res.ok) throw new Error('Upload failed');
+					const json = await res.json();
+					result.textContent = `Uploaded ${json.filename} (${json.row_count} rows). Preview shown in console.`;
+					console.log('Preview sample', json.sample);
+					// Optionally auto-commit: send to /import/commit
+					if (confirm('Dosya yüklendi. İçe aktarılsın mı?')) {
+						const res2 = await fetch('/import/commit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: json.source, filename: json.filename })});
+						const j2 = await res2.json();
+						alert(`İçe aktarıldı. Clients: ${j2.created_clients}, Orders: ${j2.created_orders}, Items: ${j2.created_items}`);
+						location.reload();
+					}
+				} catch (err) {
+					console.error(err);
+					result.textContent = 'Upload error';
+				}
+			});
+		}
+		</script>
 	</body>
 </html>

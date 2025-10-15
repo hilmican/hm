@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from sqlmodel import select
 
 from ..db import get_session, reset_db
@@ -207,11 +207,56 @@ def commit_import(body: dict):
 				run.unmatched_count += 1
 
 		run.row_count = len(records)
-
-	return {"run_id": run.id, "created_orders": run.created_orders, "created_clients": run.created_clients, "created_items": run.created_items, "created_payments": run.created_payments, "unmatched": run.unmatched_count}
+		# snapshot response before leaving session context to avoid DetachedInstanceError
+		summary = {
+			"run_id": run.id or 0,
+			"created_orders": run.created_orders,
+			"created_clients": run.created_clients,
+			"created_items": run.created_items,
+			"created_payments": run.created_payments,
+			"unmatched": run.unmatched_count,
+		}
+		return summary
 
 
 @router.post("/reset")
 def reset_database():
 	reset_db()
 	return {"status": "ok"}
+
+
+@router.post("/upload")
+async def upload_excel(
+	source: str = Form(..., description="'bizim' or 'kargo'"),
+	file: UploadFile = File(...),
+):
+	if source not in ("bizim", "kargo"):
+		raise HTTPException(status_code=400, detail="source must be 'bizim' or 'kargo'")
+	folder = BIZIM_DIR if source == "bizim" else KARGO_DIR
+	folder.mkdir(parents=True, exist_ok=True)
+
+	filename = file.filename or "upload.xlsx"
+	# Ensure .xlsx extension
+	if not filename.lower().endswith(".xlsx"):
+		filename = f"{filename}.xlsx"
+	# Make filename unique if exists
+	dst = folder / filename
+	ctr = 1
+	while dst.exists():
+		stem = dst.stem
+		ext = dst.suffix
+		dst = folder / f"{stem}-{ctr}{ext}"
+		ctr += 1
+
+	content = await file.read()
+	dst.write_bytes(content)
+
+	# Return a quick preview as convenience
+	records = read_bizim_file(str(dst)) if source == "bizim" else read_kargo_file(str(dst))
+	return {
+		"status": "ok",
+		"source": source,
+		"filename": dst.name,
+		"row_count": len(records),
+		"sample": records[:5],
+	}
