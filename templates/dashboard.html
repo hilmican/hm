@@ -3,9 +3,119 @@
 	<head>
 		<meta charset="utf-8" />
 		<title>Dashboard</title>
+		<style>
+			body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+			h1 { margin-bottom: 12px; }
+			.grid { display: grid; grid-template-columns: 1fr; gap: 24px; }
+			@media (min-width: 1000px) { .grid { grid-template-columns: 1fr 1fr; } }
+			.card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+			.card h2 { margin: 0; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
+			table { width: 100%; border-collapse: collapse; }
+			th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+			th { background: #fafafa; position: sticky; top: 0; }
+			.caption { color: #6b7280; font-size: 12px; padding: 8px 16px; }
+			.toolbar { margin-bottom: 12px; }
+			.toolbar a { margin-right: 8px; color: #2563eb; text-decoration: none; }
+		</style>
 	</head>
 	<body>
 		<h1>Kargo Management Dashboard</h1>
-		<p>Coming soon.</p>
+		<div class="toolbar">
+			<a href="/clients" target="_blank">Clients API</a>
+			<a href="/items" target="_blank">Items API</a>
+			<a href="/orders" target="_blank">Orders API</a>
+			<a href="/payments" target="_blank">Payments API</a>
+			<form method="post" action="/import/reset" style="display:inline" onsubmit="return confirm('Tüm veritabanı silinecek ve sıfırlanacak. Emin misiniz?');">
+				<button type="submit" style="margin-left:12px;background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Reset DB</button>
+			</form>
+		</div>
+		<div class="grid">
+			<div class="card">
+				<h2>Clients (latest 20)</h2>
+				<table>
+					<thead>
+						<tr><th>ID</th><th>Name</th><th>Phone</th><th>City</th><th>Created</th></tr>
+					</thead>
+					<tbody>
+					{% for c in clients %}
+						<tr>
+							<td>{{ c.id }}</td>
+							<td>{{ c.name }}</td>
+							<td>{{ c.phone }}</td>
+							<td>{{ c.city }}</td>
+							<td>{{ c.created_at }}</td>
+						</tr>
+					{% endfor %}
+					</tbody>
+				</table>
+				<div class="caption">Open <a href="/clients" target="_blank">/clients</a> for full list.</div>
+			</div>
+
+			<div class="card">
+				<h2>Items (latest 20)</h2>
+				<table>
+					<thead>
+						<tr><th>ID</th><th>SKU</th><th>Name</th><th>Unit</th></tr>
+					</thead>
+					<tbody>
+					{% for it in items %}
+						<tr>
+							<td>{{ it.id }}</td>
+							<td>{{ it.sku }}</td>
+							<td>{{ it.name }}</td>
+							<td>{{ it.unit }}</td>
+						</tr>
+					{% endfor %}
+					</tbody>
+				</table>
+				<div class="caption">Open <a href="/items" target="_blank">/items</a> for full list.</div>
+			</div>
+
+			<div class="card">
+				<h2>Orders (latest 20)</h2>
+				<table>
+					<thead>
+						<tr><th>ID</th><th>Tracking</th><th>Client</th><th>Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Source</th></tr>
+					</thead>
+					<tbody>
+					{% for o in orders %}
+						<tr>
+							<td>{{ o.id }}</td>
+							<td>{{ o.tracking_no }}</td>
+							<td>{{ o.client_id }}</td>
+							<td>{{ o.item_id }}</td>
+							<td>{{ o.quantity }}</td>
+							<td>{{ o.total_amount }}</td>
+							<td>{{ o.shipment_date }}</td>
+							<td>{{ o.source }}</td>
+						</tr>
+					{% endfor %}
+					</tbody>
+				</table>
+				<div class="caption">Open <a href="/orders" target="_blank">/orders</a> for full list.</div>
+			</div>
+
+			<div class="card">
+				<h2>Payments (latest 20)</h2>
+				<table>
+					<thead>
+						<tr><th>ID</th><th>Client</th><th>Order</th><th>Amount</th><th>Date</th><th>Method</th></tr>
+					</thead>
+					<tbody>
+					{% for p in payments %}
+						<tr>
+							<td>{{ p.id }}</td>
+							<td>{{ p.client_id }}</td>
+							<td>{{ p.order_id }}</td>
+							<td>{{ p.amount }}</td>
+							<td>{{ p.date }}</td>
+							<td>{{ p.method }}</td>
+						</tr>
+					{% endfor %}
+					</tbody>
+				</table>
+				<div class="caption">Open <a href="/payments" target="_blank">/payments</a> for full list.</div>
+			</div>
+		</div>
 	</body>
 </html>

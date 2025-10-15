@@ -25,3 +25,11 @@ def get_session() -> Iterator[Session]:
 		raise
 	finally:
 		session.close()
+
+
+def reset_db() -> None:
+	"""Dangerous: delete SQLite file and recreate empty schema."""
+	engine.dispose()
+	if DB_PATH.exists():
+		DB_PATH.unlink()
+	SQLModel.metadata.create_all(engine)

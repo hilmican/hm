@@ -18,6 +18,7 @@ def list_clients(limit: int = Query(default=100, ge=1, le=1000)):
 					"id": c.id or 0,
 					"name": c.name,
 					"phone": c.phone,
+					"address": c.address,
 					"city": c.city,
 					"created_at": c.created_at.isoformat(),
 				}

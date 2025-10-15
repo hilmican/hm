@@ -4,13 +4,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from sqlmodel import select
 
-from ..db import get_session
+from ..db import get_session, reset_db
 from ..models import Client, Item, Order, Payment, ImportRun, ImportRow
 from ..services.importer.bizim import read_bizim_file
 from ..services.importer.kargo import read_kargo_file
 from ..services.matching import find_order_by_tracking, find_client_candidates
 from ..utils.hashing import compute_row_hash
-from ..utils.normalize import client_unique_key
+from ..utils.normalize import client_unique_key, normalize_phone, normalize_text
 from ..utils.slugify import slugify
 
 router = APIRouter(prefix="")
@@ -90,6 +90,27 @@ def commit_import(body: dict):
 		session.flush()
 
 		for idx, rec in enumerate(records):
+			# guard and normalize basic fields
+			rec_name = (rec.get("name") or "").strip()
+			rec_phone = normalize_phone(rec.get("phone"))
+			if rec_phone:
+				rec["phone"] = rec_phone
+			# skip rows that have neither a name nor a phone
+			if not (rec_name or rec_phone):
+				status = "skipped"
+				ir = ImportRow(
+					import_run_id=run.id or 0,
+					row_index=idx,
+					row_hash=compute_row_hash(rec),
+					mapped_json=str(rec),
+					status=status,  # type: ignore
+					message="empty name and phone",
+					matched_client_id=None,
+					matched_order_id=None,
+				)
+				session.add(ir)
+				run.unmatched_count += 0
+				continue
 			row_hash = compute_row_hash(rec)
 			status = "created"
 			message = None
@@ -104,7 +125,7 @@ def commit_import(body: dict):
 						client = session.exec(select(Client).where(Client.unique_key == uq)).first()
 					if not client:
 						client = Client(
-							name=rec.get("name") or "",
+							name=rec_name or "",
 							phone=rec.get("phone"),
 							address=rec.get("address"),
 							city=rec.get("city"),
@@ -188,3 +209,9 @@ def commit_import(body: dict):
 		run.row_count = len(records)
 
 	return {"run_id": run.id, "created_orders": run.created_orders, "created_clients": run.created_clients, "created_items": run.created_items, "created_payments": run.created_payments, "unmatched": run.unmatched_count}
+
+
+@router.post("/reset")
+def reset_database():
+	reset_db()
+	return {"status": "ok"}

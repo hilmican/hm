@@ -7,6 +7,7 @@ from ...utils.normalize import client_unique_key
 
 
 BIZIM_MAPPING = {
+	"alici adi soyadi": "name",
 	"alıcı": "name",
 	"alici": "name",
 	"alıcının adı": "name",
@@ -21,6 +22,7 @@ BIZIM_MAPPING = {
 	"açıklama": "item_name",
 	"adet": "quantity",
 	"birim fiyat": "unit_price",
+	"fiyat": "total_amount",
 	"tutar": "total_amount",
 	"tarih": "shipment_date",
 	"gönderim tarihi": "shipment_date",
