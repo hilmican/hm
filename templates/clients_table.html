@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Clients</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+        th { background: #fafafa; position: sticky; top: 0; }
+        .toolbar { margin-bottom: 12px; }
+        a { color: #2563eb; text-decoration: none; }
+    </style>
+    <script>
+        function q(k){ const u=new URL(location.href); return u.searchParams.get(k); }
+    </script>
+    </head>
+<body>
+    <div class="toolbar">
+        <a href="/dashboard">← Dashboard</a>
+    </div>
+    <h2>Clients (limit {{ limit }})</h2>
+    <table>
+        <thead>
+            <tr><th>ID</th><th>Name</th><th>Phone</th><th>City</th><th>Height</th><th>Weight</th><th>Created</th></tr>
+        </thead>
+        <tbody>
+            {% for c in rows %}
+            <tr>
+                <td>{{ c.id }}</td>
+                <td>{{ c.name }}</td>
+                <td>{{ c.phone }}</td>
+                <td>{{ c.city }}</td>
+                <td>{{ c.height_cm }}</td>
+                <td>{{ c.weight_kg }}</td>
+                <td>{{ c.created_at }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
+

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from sqlmodel import select
 
 from ..db import get_session
@@ -27,3 +27,14 @@ def list_orders(limit: int = Query(default=100, ge=1, le=1000)):
 				for o in rows
 			]
 		}
+
+
+@router.get("/table")
+def list_orders_table(request: Request, limit: int = Query(default=100, ge=1, le=2000)):
+	with get_session() as session:
+		rows = session.exec(select(Order).order_by(Order.id.desc()).limit(limit)).all()
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"orders_table.html",
+			{"request": request, "rows": rows, "limit": limit},
+		)
