@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Optional
 import re
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
@@ -281,15 +281,25 @@ def reset_database():
 @router.post("/upload")
 async def upload_excel(
 	source: str = Form(..., description="'bizim' or 'kargo'"),
-	files: list[UploadFile] = File(...),
+	files: Optional[List[UploadFile]] = File(None),
+	file: Optional[UploadFile] = File(None),
 ):
 	if source not in ("bizim", "kargo"):
 		raise HTTPException(status_code=400, detail="source must be 'bizim' or 'kargo'")
 	folder = BIZIM_DIR if source == "bizim" else KARGO_DIR
 	folder.mkdir(parents=True, exist_ok=True)
 
+	# unify inputs: accept either 'files' (multiple) or single 'file'
+	uploads: List[UploadFile] = []
+	if files:
+		uploads.extend(files)
+	if file:
+		uploads.append(file)
+	if not uploads:
+		raise HTTPException(status_code=400, detail="No files uploaded; send 'files' or 'file'")
+
 	saved: list[dict[str, Any]] = []
-	for file in files:
+	for file in uploads:
 		filename = file.filename or "upload.xlsx"
 		if not filename.lower().endswith(".xlsx"):
 			filename = f"{filename}.xlsx"
