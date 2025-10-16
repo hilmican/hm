@@ -98,13 +98,21 @@
 							<td>{{ o.id }}</td>
 							<td>{{ o.tracking_no }}</td>
 						<td>
-							{% set cname = client_map.get(o.client_id) if client_map else '' %}
-							<a href="/clients/{{ o.client_id }}">{{ (cname|string)[:40] }}</a>
+							{# Resolve client name via map, then fallback to clients list #}
+							{% set cname = client_map.get(o.client_id) if client_map else None %}
+							{% if not cname %}
+								{% for c in clients %}{% if c.id == o.client_id %}{% set cname = c.name %}{% endif %}{% endfor %}
+							{% endif %}
+							<a href="/clients/{{ o.client_id }}" target="_blank">{{ (cname or '')[:40] }}</a>
 						</td>
 						<td>
 							{% if o.item_id %}
-								{% set iname = item_map.get(o.item_id) if item_map else '' %}
-								<a href="/items/table#{{ o.item_id }}">{{ (iname|string)[:40] }}</a>
+								{# Resolve item name via map, then fallback to items list #}
+								{% set iname = item_map.get(o.item_id) if item_map else None %}
+								{% if not iname %}
+									{% for it in items %}{% if it.id == o.item_id %}{% set iname = it.name %}{% endif %}{% endfor %}
+								{% endif %}
+								<a href="/items/table#{{ o.item_id }}" target="_blank">{{ (iname or '')[:40] }}</a>
 							{% endif %}
 						</td>
 							<td>{{ o.quantity }}</td>
