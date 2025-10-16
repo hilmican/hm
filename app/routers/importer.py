@@ -154,9 +154,9 @@ def preview_import(body: dict):
 
 @router.post("/commit")
 def commit_import(body: dict):
-    source = body.get("source")
-    filename = body.get("filename")
-    data_date_raw = body.get("data_date")  # ISO YYYY-MM-DD string
+	source = body.get("source")
+	filename = body.get("filename")
+	data_date_raw = body.get("data_date")  # ISO YYYY-MM-DD string
 	if source not in ("bizim", "kargo") or not filename:
 		raise HTTPException(status_code=400, detail="source ('bizim'|'kargo') and filename are required")
 
@@ -165,18 +165,18 @@ def commit_import(body: dict):
 	if not file_path.exists():
 		raise HTTPException(status_code=404, detail="File not found")
 
-    records = read_bizim_file(str(file_path)) if source == "bizim" else read_kargo_file(str(file_path))
+	records = read_bizim_file(str(file_path)) if source == "bizim" else read_kargo_file(str(file_path))
 
-    with get_session() as session:
-        run = ImportRun(source=source, filename=filename)
-        # parse and set data_date on run if provided
-        if data_date_raw:
-            try:
-                # Import here to avoid adding a new top-level import
-                import datetime as _dt
-                run.data_date = _dt.date.fromisoformat(data_date_raw)
-            except Exception:
-                raise HTTPException(status_code=400, detail="Invalid data_date; expected YYYY-MM-DD")
+	with get_session() as session:
+		run = ImportRun(source=source, filename=filename)
+		# parse and set data_date on run if provided
+		if data_date_raw:
+			try:
+				# Import here to avoid adding a new top-level import
+				import datetime as _dt
+				run.data_date = _dt.date.fromisoformat(data_date_raw)
+			except Exception:
+				raise HTTPException(status_code=400, detail="Invalid data_date; expected YYYY-MM-DD")
 		session.add(run)
 		session.flush()
 
@@ -256,7 +256,7 @@ def commit_import(body: dict):
 					if extra_notes:
 						joined = ", ".join(extra_notes)
 						order_notes = f"{order_notes} | {joined}" if order_notes else joined
-                    order = Order(
+					order = Order(
 						tracking_no=rec.get("tracking_no"),
 						client_id=client.id,  # type: ignore
 						item_id=item.id,      # type: ignore
@@ -264,7 +264,7 @@ def commit_import(body: dict):
 						unit_price=rec.get("unit_price"),
 						total_amount=rec.get("total_amount"),
 						shipment_date=rec.get("shipment_date"),
-                        data_date=run.data_date,
+						data_date=run.data_date,
 						source="bizim",
 						notes=order_notes,
 					)
