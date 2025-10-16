@@ -98,19 +98,23 @@
 							<td>{{ o.id }}</td>
 							<td>{{ o.tracking_no }}</td>
 						<td>
-							{# Resolve client name via map, then fallback to clients list #}
+							{# Resolve client name via map; fallback uses namespace to persist from loop #}
 							{% set cname = client_map.get(o.client_id) if client_map else None %}
 							{% if not cname %}
-								{% for c in clients %}{% if c.id == o.client_id %}{% set cname = c.name %}{% endif %}{% endfor %}
+								{% set ns = namespace(name='') %}
+								{% for c in clients %}{% if c.id == o.client_id %}{% set ns.name = c.name %}{% endif %}{% endfor %}
+								{% set cname = ns.name %}
 							{% endif %}
 							<a href="/clients/{{ o.client_id }}" target="_blank">{{ (cname or '')[:40] }}</a>
 						</td>
 						<td>
 							{% if o.item_id %}
-								{# Resolve item name via map, then fallback to items list #}
+								{# Resolve item name via map; fallback uses namespace to persist from loop #}
 								{% set iname = item_map.get(o.item_id) if item_map else None %}
 								{% if not iname %}
-									{% for it in items %}{% if it.id == o.item_id %}{% set iname = it.name %}{% endif %}{% endfor %}
+									{% set ns2 = namespace(name='') %}
+									{% for it in items %}{% if it.id == o.item_id %}{% set ns2.name = it.name %}{% endif %}{% endfor %}
+									{% set iname = ns2.name %}
 								{% endif %}
 								<a href="/items/table#{{ o.item_id }}" target="_blank">{{ (iname or '')[:40] }}</a>
 							{% endif %}
