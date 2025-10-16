@@ -302,13 +302,13 @@ def commit_import(body: dict):
 							order.item_id = item.id  # type: ignore
 						# payments idempotent
 						if rec.get("payment_amount"):
-							pdate = rec.get("delivery_date") or rec.get("shipment_date")
+							pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
 							existing = session.exec(select(Payment).where(
 								Payment.order_id == order.id,
 								Payment.amount == (rec.get("payment_amount") or 0.0),
 								Payment.date == pdate,
 							)).first()
-							if not existing:
+							if not existing and (rec.get("payment_amount") or 0.0) > 0 and pdate is not None:
 								pmt = Payment(
 									client_id=order.client_id,
 									order_id=order.id,
@@ -357,13 +357,13 @@ def commit_import(body: dict):
 						matched_client_id = client.id
 						# payment for newly created order
 						if rec.get("payment_amount"):
-							pdate = rec.get("delivery_date") or rec.get("shipment_date")
+							pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
 							existing = session.exec(select(Payment).where(
 								Payment.order_id == order.id,
 								Payment.amount == (rec.get("payment_amount") or 0.0),
 								Payment.date == pdate,
 							)).first()
-							if not existing:
+							if not existing and (rec.get("payment_amount") or 0.0) > 0 and pdate is not None:
 								pmt = Payment(
 									client_id=order.client_id,
 									order_id=order.id,

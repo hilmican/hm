@@ -26,7 +26,7 @@ KARGO_MAPPING = {
 }
 
 
-def map_row(raw: dict[str, Any]) -> dict[str, Any]:
+def map_row(raw: dict[str, Any], row_values: list[Any] | None = None) -> dict[str, Any]:
 	mapped: dict[str, Any] = {}
 	for k, v in raw.items():
 		key = KARGO_MAPPING.get(k)
@@ -61,6 +61,14 @@ def map_row(raw: dict[str, Any]) -> dict[str, Any]:
 			if val in ("nakit", "pos"):
 				mapped["payment_method"] = "Nakit" if val == "nakit" else "Pos"
 				break
+	# also scan ordered row values if provided
+	if "payment_method" not in mapped and row_values:
+		for v in row_values:
+			if isinstance(v, str):
+				val = v.strip().lower()
+				if val in ("nakit", "pos"):
+					mapped["payment_method"] = "Nakit" if val == "nakit" else "Pos"
+					break
 
 	# collect notable notes
 	note_bits: list[str] = []
@@ -69,6 +77,26 @@ def map_row(raw: dict[str, Any]) -> dict[str, Any]:
 			note_bits.append(v.strip())
 	if note_bits:
 		mapped["notes"] = " | ".join(dict.fromkeys(note_bits))
+
+	# derive payment_amount heuristically if header not mapped
+	if mapped.get("payment_amount") is None and row_values:
+		# choose the last positive float BEFORE a cell containing 'tahsil'
+		floats_before = []
+		stop_idx = None
+		for idx, v in enumerate(row_values):
+			if isinstance(v, str) and "tahsil" in v.lower():
+				stop_idx = idx
+				break
+			fv = parse_float(v)
+			if fv is not None and fv > 0:
+				floats_before.append(fv)
+		if stop_idx is not None and floats_before:
+			candidate = floats_before[-1]
+			# if total present and candidate is greater, try earlier float
+			tot = mapped.get("total_amount")
+			if isinstance(tot, (int, float)) and candidate and candidate > float(tot) and len(floats_before) >= 2:
+				candidate = floats_before[-2]
+			mapped["payment_amount"] = candidate
 
 	# derive unit_price if possible
 	qty = mapped.get("quantity") or 0
@@ -79,10 +107,10 @@ def map_row(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def read_kargo_file(file_path: str) -> list[dict[str, Any]]:
-	headers, rows = read_sheet_rows(file_path)
-	records: list[dict[str, Any]] = []
-	for row in rows:
-		raw = row_to_dict(headers, row)
-		mapped = map_row(raw)
-		records.append(mapped)
-	return records
+    headers, rows = read_sheet_rows(file_path)
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        raw = row_to_dict(headers, row)
+        mapped = map_row(raw, row_values=row)
+        records.append(mapped)
+    return records
