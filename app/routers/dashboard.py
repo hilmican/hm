@@ -12,11 +12,13 @@ def dashboard(request: Request):
 	# pull small samples for quick display
 	with get_session() as session:
 		orders = session.exec(select(Order).order_by(Order.id.desc()).limit(20)).all()
-		# fetch only the related clients/items for shown orders
+		# fetch only the related clients/items for shown orders (no extra limits)
 		client_ids = sorted({o.client_id for o in orders if o.client_id})
 		item_ids = sorted({o.item_id for o in orders if o.item_id})
-		clients = session.exec(select(Client).where(Client.id.in_(client_ids)).order_by(Client.id.desc()).limit(20)).all() if client_ids else []
-		items = session.exec(select(Item).where(Item.id.in_(item_ids)).order_by(Item.id.desc()).limit(20)).all() if item_ids else []
+		clients = session.exec(select(Client).where(Client.id.in_(client_ids))).all() if client_ids else []
+		items = session.exec(select(Item).where(Item.id.in_(item_ids))).all() if item_ids else []
+		client_map = {c.id: c.name for c in clients if c.id is not None}
+		item_map = {it.id: it.name for it in items if it.id is not None}
 		payments = session.exec(select(Payment).order_by(Payment.id.desc()).limit(20)).all()
 
 		# Build source filename mappings using ImportRow -> ImportRun
@@ -52,6 +54,8 @@ def dashboard(request: Request):
 				"items": items,
 				"orders": orders,
 				"payments": payments,
+				"client_map": client_map,
+				"item_map": item_map,
 				"client_sources": client_sources,
 				"order_sources": order_sources,
 				"item_sources": item_sources,

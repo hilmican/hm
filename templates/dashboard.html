@@ -97,18 +97,18 @@
 						<tr>
 							<td>{{ o.id }}</td>
 							<td>{{ o.tracking_no }}</td>
-							<td>
-								{% set cname = '' %}
-								{% for c in clients %}{% if c.id == o.client_id %}{% set cname = c.name %}{% endif %}{% endfor %}
-								<a href="/clients/{{ o.client_id }}" target="_blank">{{ cname[:40] }}</a>
-								{% if o.id in order_sources %}<div class="caption">{{ order_sources[o.id] }}</div>{% endif %}
-							</td>
-							<td>
-								{% set iname = '' %}
-								{% for it in items %}{% if it.id == o.item_id %}{% set iname = it.name %}{% endif %}{% endfor %}
-								<a href="/items/table#{{ o.item_id }}" target="_blank">{{ iname[:40] }}</a>
+						<td>
+							{% set cname = client_map.get(o.client_id) if client_map else '' %}
+							<a href="/clients/{{ o.client_id }}">{{ cname[:40] }}</a>
+							{% if o.id in order_sources %}<div class="caption">{{ order_sources[o.id] }}</div>{% endif %}
+						</td>
+						<td>
+							{% if o.item_id %}
+								{% set iname = item_map.get(o.item_id) if item_map else '' %}
+								<a href="/items/table#{{ o.item_id }}">{{ iname[:40] }}</a>
 								{% if o.item_id in item_sources %}<div class="caption">{{ item_sources[o.item_id] }}</div>{% endif %}
-							</td>
+							{% endif %}
+						</td>
 							<td>{{ o.quantity }}</td>
 							<td>{{ o.total_amount }}</td>
 							<td>{{ o.shipment_date }}</td>
