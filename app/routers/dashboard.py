@@ -11,9 +11,12 @@ router = APIRouter()
 def dashboard(request: Request):
 	# pull small samples for quick display
 	with get_session() as session:
-		clients = session.exec(select(Client).order_by(Client.id.desc()).limit(20)).all()
-		items = session.exec(select(Item).order_by(Item.id.desc()).limit(20)).all()
 		orders = session.exec(select(Order).order_by(Order.id.desc()).limit(20)).all()
+		# fetch only the related clients/items for shown orders
+		client_ids = sorted({o.client_id for o in orders if o.client_id})
+		item_ids = sorted({o.item_id for o in orders if o.item_id})
+		clients = session.exec(select(Client).where(Client.id.in_(client_ids)).order_by(Client.id.desc()).limit(20)).all() if client_ids else []
+		items = session.exec(select(Item).where(Item.id.in_(item_ids)).order_by(Item.id.desc()).limit(20)).all() if item_ids else []
 		payments = session.exec(select(Payment).order_by(Payment.id.desc()).limit(20)).all()
 
 		# Build source filename mappings using ImportRow -> ImportRun

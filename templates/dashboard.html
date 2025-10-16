@@ -25,7 +25,6 @@
 			<a href="/clients/table" target="_blank">Clients Table</a>
 			<a href="/items" target="_blank">Items API</a>
 			<a href="/items/table" target="_blank">Items Table</a>
-			<a href="/orders" target="_blank">Orders API</a>
 			<a href="/orders/table" target="_blank">Orders Table</a>
 			<a href="/payments" target="_blank">Payments API</a>
 			<form method="post" action="/import/reset" style="display:inline" onsubmit="return confirm('Tüm veritabanı silinecek ve sıfırlanacak. Emin misiniz?');">
@@ -91,7 +90,7 @@
 				<h2>Orders (latest 20)</h2>
 				<table>
 					<thead>
-						<tr><th>ID</th><th>Tracking</th><th>Client</th><th>Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Source</th></tr>
+						<tr><th>ID</th><th>Tracking</th><th>Client</th><th>Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Data Date</th><th>Channel</th></tr>
 					</thead>
 					<tbody>
 					{% for o in orders %}
@@ -113,12 +112,13 @@
 							<td>{{ o.quantity }}</td>
 							<td>{{ o.total_amount }}</td>
 							<td>{{ o.shipment_date }}</td>
+							<td>{{ o.data_date }}</td>
 							<td>{{ o.source }}</td>
 						</tr>
 					{% endfor %}
 					</tbody>
 				</table>
-				<div class="caption">Open <a href="/orders" target="_blank">/orders</a> for full list.</div>
+				<div class="caption">Open <a href="/orders/table" target="_blank">/orders/table</a> for full list.</div>
 			</div>
 
 			<div class="card">
@@ -158,10 +158,17 @@
 					const json = await res.json();
 					console.log('Uploaded files preview', json.files);
 					result.textContent = `Uploaded ${json.files.length} file(s).`;
-					// Offer to commit each file sequentially
+					// Offer to commit each file sequentially with per-file date prompt
 					if (confirm('Dosyalar yüklendi. Hepsini içe aktarmak ister misiniz?')) {
 						for (const f of json.files) {
-							const res2 = await fetch('/import/commit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: json.source, filename: f.filename })});
+							let today = new Date();
+							const pad = (n)=> String(n).padStart(2,'0');
+							const defaultDate = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+							const input = prompt(`Data date for ${f.filename} (YYYY-MM-DD)`, defaultDate);
+							if (!input) { console.log('Skipped commit for', f.filename); continue; }
+							const body = { source: json.source, filename: f.filename, data_date: input };
+							const res2 = await fetch('/import/commit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)});
+							if (!res2.ok) { const t = await res2.text(); throw new Error(`Commit failed for ${f.filename}: ${t}`); }
 							const j2 = await res2.json();
 							console.log('Committed', f.filename, j2);
 						}

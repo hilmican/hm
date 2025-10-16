@@ -37,6 +37,7 @@ class Order(SQLModel, table=True):
     unit_price: Optional[float] = None
     total_amount: Optional[float] = None
     shipment_date: Optional[dt.date] = Field(default=None, index=True)
+    data_date: Optional[dt.date] = Field(default=None, index=True)
     status: Optional[str] = Field(default=None, index=True)
     notes: Optional[str] = None
     source: str = Field(index=True, description="bizim|kargo")
@@ -66,6 +67,7 @@ class ImportRun(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(index=True, description="bizim|kargo")
     filename: str
+    data_date: Optional[dt.date] = None
     started_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     completed_at: Optional[dt.datetime] = None
     row_count: int = 0
