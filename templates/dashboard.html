@@ -98,12 +98,12 @@
 							<td>{{ o.id }}</td>
 							<td>{{ o.tracking_no }}</td>
 						<td>
-							{% set cname = (client_map.get(o.client_id) if client_map else '') or o.client_id %}
+							{% set cname = client_map.get(o.client_id) if client_map else '' %}
 							<a href="/clients/{{ o.client_id }}">{{ (cname|string)[:40] }}</a>
 						</td>
 						<td>
 							{% if o.item_id %}
-								{% set iname = (item_map.get(o.item_id) if item_map else '') or o.item_id %}
+								{% set iname = item_map.get(o.item_id) if item_map else '' %}
 								<a href="/items/table#{{ o.item_id }}">{{ (iname|string)[:40] }}</a>
 							{% endif %}
 						</td>
