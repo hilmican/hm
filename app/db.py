@@ -26,6 +26,14 @@ def init_db() -> None:
 		if not column_exists("client", "weight_kg"):
 			conn.exec_driver_sql("ALTER TABLE client ADD COLUMN weight_kg INTEGER")
 
+		# Order.data_date (DATE)
+		if not column_exists("order", "data_date"):
+			conn.exec_driver_sql('ALTER TABLE "order" ADD COLUMN data_date DATE')
+
+		# ImportRun.data_date (DATE)
+		if not column_exists("importrun", "data_date"):
+			conn.exec_driver_sql("ALTER TABLE importrun ADD COLUMN data_date DATE")
+
 
 @contextmanager
 def get_session() -> Iterator[Session]:
