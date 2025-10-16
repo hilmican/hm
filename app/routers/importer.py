@@ -169,14 +169,22 @@ def commit_import(body: dict):
 
 	with get_session() as session:
 		run = ImportRun(source=source, filename=filename)
-		# parse and set data_date on run if provided
-		if data_date_raw:
+		# set data_date
+		if source == "bizim":
+			if data_date_raw:
+				try:
+					# Import here to avoid adding a new top-level import
+					import datetime as _dt
+					run.data_date = _dt.date.fromisoformat(data_date_raw)
+				except Exception:
+					raise HTTPException(status_code=400, detail="Invalid data_date; expected YYYY-MM-DD")
+		else:  # kargo -> derive from records' shipment_date
 			try:
-				# Import here to avoid adding a new top-level import
 				import datetime as _dt
-				run.data_date = _dt.date.fromisoformat(data_date_raw)
+				dates = [r.get("shipment_date") for r in records if r.get("shipment_date")]
+				run.data_date = max(dates) if dates else None
 			except Exception:
-				raise HTTPException(status_code=400, detail="Invalid data_date; expected YYYY-MM-DD")
+				pass
 		session.add(run)
 		session.flush()
 
@@ -278,20 +286,94 @@ def commit_import(body: dict):
 					if order:
 						matched_order_id = order.id
 						matched_client_id = order.client_id
+						# enrich order if missing data
+						if rec.get("total_amount") and not order.total_amount:
+							order.total_amount = rec.get("total_amount")
+						if rec.get("shipment_date") and not order.shipment_date:
+							order.shipment_date = rec.get("shipment_date")
+						if rec.get("item_name") and not order.item_id:
+							sku = slugify(rec.get("item_name"))
+							item = session.exec(select(Item).where(Item.sku == sku)).first()
+							if not item:
+								item = Item(sku=sku, name=rec.get("item_name") or "Genel Ürün")
+								session.add(item)
+								session.flush()
+								run.created_items += 1
+							order.item_id = item.id  # type: ignore
+						# payments idempotent
 						if rec.get("payment_amount"):
-							pmt = Payment(
-								client_id=order.client_id,
-								order_id=order.id,
-								amount=rec.get("payment_amount") or 0.0,
-								date=rec.get("shipment_date"),
-								method="kargo",
-								reference=rec.get("tracking_no"),
-							)
-							session.add(pmt)
-							run.created_payments += 1
+							pdate = rec.get("delivery_date") or rec.get("shipment_date")
+							existing = session.exec(select(Payment).where(
+								Payment.order_id == order.id,
+								Payment.amount == (rec.get("payment_amount") or 0.0),
+								Payment.date == pdate,
+							)).first()
+							if not existing:
+								pmt = Payment(
+									client_id=order.client_id,
+									order_id=order.id,
+									amount=rec.get("payment_amount") or 0.0,
+									date=pdate,
+									method=rec.get("payment_method") or "kargo",
+									reference=rec.get("tracking_no"),
+								)
+								session.add(pmt)
+								run.created_payments += 1
 					else:
-						status = "unmatched"
-						message = "no tracking match"
+						# create full entities
+						uq = client_unique_key(rec.get("name"), None)
+						client = None
+						if uq:
+							client = session.exec(select(Client).where(Client.unique_key == uq)).first()
+						if not client:
+							client = Client(name=rec.get("name") or "", unique_key=uq or None)
+							session.add(client)
+							session.flush()
+							run.created_clients += 1
+						sku = slugify(rec.get("item_name") or "Genel Ürün")
+						item = session.exec(select(Item).where(Item.sku == sku)).first()
+						if not item:
+							item = Item(sku=sku, name=rec.get("item_name") or "Genel Ürün")
+							session.add(item)
+							session.flush()
+							run.created_items += 1
+						order_notes = rec.get("notes") or None
+						order = Order(
+							tracking_no=rec.get("tracking_no"),
+							client_id=client.id,  # type: ignore
+							item_id=item.id,      # type: ignore
+							quantity=rec.get("quantity") or 1,
+							unit_price=rec.get("unit_price"),
+							total_amount=rec.get("total_amount"),
+							shipment_date=rec.get("shipment_date"),
+							data_date=run.data_date,
+							source="kargo",
+							notes=order_notes,
+						)
+						session.add(order)
+						session.flush()
+						run.created_orders += 1
+						matched_order_id = order.id
+						matched_client_id = client.id
+						# payment for newly created order
+						if rec.get("payment_amount"):
+							pdate = rec.get("delivery_date") or rec.get("shipment_date")
+							existing = session.exec(select(Payment).where(
+								Payment.order_id == order.id,
+								Payment.amount == (rec.get("payment_amount") or 0.0),
+								Payment.date == pdate,
+							)).first()
+							if not existing:
+								pmt = Payment(
+									client_id=order.client_id,
+									order_id=order.id,
+									amount=rec.get("payment_amount") or 0.0,
+									date=pdate,
+									method=rec.get("payment_method") or "kargo",
+									reference=rec.get("tracking_no"),
+								)
+								session.add(pmt)
+								run.created_payments += 1
 			except Exception as e:
 				status = "error"
 				message = str(e)

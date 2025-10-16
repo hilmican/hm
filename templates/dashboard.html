@@ -168,15 +168,18 @@
 					const json = await res.json();
 					console.log('Uploaded files preview', json.files);
 					result.textContent = `Uploaded ${json.files.length} file(s).`;
-					// Offer to commit each file sequentially with per-file date prompt
+					// Offer to commit each file sequentially (date prompt only for bizim)
 					if (confirm('Dosyalar yüklendi. Hepsini içe aktarmak ister misiniz?')) {
 						for (const f of json.files) {
-							let today = new Date();
-							const pad = (n)=> String(n).padStart(2,'0');
-							const defaultDate = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
-							const input = prompt(`Data date for ${f.filename} (YYYY-MM-DD)`, defaultDate);
-							if (!input) { console.log('Skipped commit for', f.filename); continue; }
-							const body = { source: json.source, filename: f.filename, data_date: input };
+							let body = { source: json.source, filename: f.filename };
+							if (json.source === 'bizim') {
+								let today = new Date();
+								const pad = (n)=> String(n).padStart(2,'0');
+								const defaultDate = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+								const input = prompt(`Data date for ${f.filename} (YYYY-MM-DD)`, defaultDate);
+								if (!input) { console.log('Skipped commit for', f.filename); continue; }
+								body.data_date = input;
+							}
 							const res2 = await fetch('/import/commit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)});
 							if (!res2.ok) { const t = await res2.text(); throw new Error(`Commit failed for ${f.filename}: ${t}`); }
 							const j2 = await res2.json();
