@@ -188,6 +188,12 @@ def commit_import(body: dict):
 		session.add(run)
 		session.flush()
 
+		# local (non-persisted) counters for detailed summary
+		enriched_orders_cnt = 0
+		payments_created_cnt = 0
+		payments_existing_cnt = 0
+		payments_skipped_zero_cnt = 0
+
 		for idx, rec in enumerate(records):
 			# guard and normalize basic fields
 			rec_name = (rec.get("name") or "").strip()
@@ -300,6 +306,7 @@ def commit_import(body: dict):
 								session.flush()
 								run.created_items += 1
 							order.item_id = item.id  # type: ignore
+						enriched_orders_cnt += 1
 						# payments idempotent
 						if rec.get("payment_amount"):
 							pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
@@ -319,6 +326,11 @@ def commit_import(body: dict):
 								)
 								session.add(pmt)
 								run.created_payments += 1
+								payments_created_cnt += 1
+							elif existing:
+								payments_existing_cnt += 1
+							else:
+								payments_skipped_zero_cnt += 1
 					else:
 						# create full entities
 						uq = client_unique_key(rec.get("name"), None)
@@ -374,6 +386,11 @@ def commit_import(body: dict):
 								)
 								session.add(pmt)
 								run.created_payments += 1
+								payments_created_cnt += 1
+							elif existing:
+								payments_existing_cnt += 1
+							else:
+								payments_skipped_zero_cnt += 1
 			except Exception as e:
 				status = "error"
 				message = str(e)
@@ -401,6 +418,9 @@ def commit_import(body: dict):
 			"created_items": run.created_items,
 			"created_payments": run.created_payments,
 			"unmatched": run.unmatched_count,
+			"enriched_orders": enriched_orders_cnt,
+			"payments_existing": payments_existing_cnt,
+			"payments_skipped_zero": payments_skipped_zero_cnt,
 		}
 		return summary
 
