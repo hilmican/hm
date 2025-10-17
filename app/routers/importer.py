@@ -152,6 +152,8 @@ def preview_import(body: dict):
 		if raw_rows:
 			print("[IMPORT DEBUG] first row raw:", raw_rows[0])
 			print("[IMPORT DEBUG] first row mapped:", records[0] if records else {})
+			# also log number of non-empty fields in first mapped row
+			print("[IMPORT DEBUG] first mapped keys:", [k for k,v in (records[0] or {}).items() if v not in (None, '', 0)])
 			print(f"[IMPORT DEBUG] total mapped records: {len(records)}")
 	except Exception as _e:
 		print("[IMPORT DEBUG] header probe failed:", _e)

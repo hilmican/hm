@@ -14,6 +14,7 @@ KARGO_MAPPING = {
 	"gonderi barkod no": "tracking_no",
 	"barkod no": "tracking_no",
 	"barkodno": "tracking_no",
+	"websipariskodu": "tracking_no",
 
 	# client name/address/city
 	"alıcı": "name",
@@ -24,6 +25,7 @@ KARGO_MAPPING = {
 	"musteri": "name",
 	"musteri adi": "name",
 	"musteri adı": "name",
+	"aliciunvan": "name",
 	"adres": "address",
 	"il": "city",
 	"şehir": "city",
@@ -54,6 +56,7 @@ KARGO_MAPPING = {
 	"tarih": "shipment_date",
 	"gonderi tarihi": "shipment_date",
 	"gonderi tarih": "shipment_date",
+	"teftarih": "shipment_date",
 	"teslim tarihi": "delivery_date",
 	"teslimat tarihi": "delivery_date",
 	"teslimtarihi": "delivery_date",
