@@ -27,9 +27,7 @@
 			<a href="/items/table" target="_blank">Items Table</a>
 			<a href="/orders/table" target="_blank">Orders Table</a>
 			<a href="/payments" target="_blank">Payments API</a>
-			<form method="post" action="/import/reset" style="display:inline" onsubmit="return confirm('Tüm veritabanı silinecek ve sıfırlanacak. Emin misiniz?');">
-				<button type="submit" style="margin-left:12px;background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Reset DB</button>
-			</form>
+			<button id="resetBtn" type="button" style="margin-left:12px;background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Reset DB</button>
 			<form id="uploadForm" method="post" action="/import/upload" enctype="multipart/form-data" style="display:inline-block;margin-left:12px;">
 				<select name="source" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;">
 					<option value="bizim">bizim</option>
@@ -157,6 +155,20 @@
 		<script>
 		const form = document.getElementById('uploadForm');
 		const result = document.getElementById('uploadResult');
+		const resetBtn = document.getElementById('resetBtn');
+		if (resetBtn) {
+			resetBtn.addEventListener('click', async () => {
+				if (!confirm('Tüm veritabanı silinecek ve sıfırlanacak. Emin misiniz?')) return;
+				try {
+					const r = await fetch('/import/reset', { method: 'POST' });
+					if (!r.ok) throw new Error('Reset failed');
+					alert('Veritabanı sıfırlandı.');
+					location.reload();
+				} catch (e) {
+					alert('Reset error');
+				}
+			});
+		}
 		if (form) {
 			form.addEventListener('submit', async (e) => {
 				e.preventDefault();
@@ -170,6 +182,7 @@
 					result.textContent = `Uploaded ${json.files.length} file(s).`;
 					// Offer to commit each file sequentially (date prompt only for bizim)
 					if (confirm('Dosyalar yüklendi. Hepsini içe aktarmak ister misiniz?')) {
+						const totals = { created_orders:0, created_clients:0, created_items:0, created_payments:0, unmatched:0, enriched_orders:0, payments_existing:0, payments_skipped_zero:0 };
 						for (const f of json.files) {
 							let body = { source: json.source, filename: f.filename };
 							if (json.source === 'bizim') {
@@ -184,8 +197,15 @@
 							if (!res2.ok) { const t = await res2.text(); throw new Error(`Commit failed for ${f.filename}: ${t}`); }
 							const j2 = await res2.json();
 							console.log('Committed', f.filename, j2);
+							for (const k of Object.keys(totals)) { totals[k] += (j2[k] || 0); }
 						}
-						alert('Tüm dosyalar içe aktarıldı.');
+						const msg = `İçe aktarma tamamlandı.\n`+
+							`Siparişler: +${totals.created_orders} (zenginleştirilen ${totals.enriched_orders})\n`+
+							`Müşteriler: +${totals.created_clients}\n`+
+							`Ürünler: +${totals.created_items}\n`+
+							`Ödemeler: +${totals.created_payments} (mevcut ${totals.payments_existing}, atlanan ${totals.payments_skipped_zero})\n`+
+							`Eşleşmeyen satırlar: ${totals.unmatched}`;
+						alert(msg);
 						location.reload();
 					}
 				} catch (err) {
