@@ -196,16 +196,18 @@
 							const res2 = await fetch('/import/commit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)});
 							if (!res2.ok) { const t = await res2.text(); throw new Error(`Commit failed for ${f.filename}: ${t}`); }
 							const j2 = await res2.json();
-							console.log('Committed', f.filename, j2);
+							console.group('Commit result for', f.filename);
+							console.log('Summary:', j2);
+							console.groupEnd();
 							for (const k of Object.keys(totals)) { totals[k] += (j2[k] || 0); }
 						}
-						const msg = `İçe aktarma tamamlandı.\n`+
-							`Siparişler: +${totals.created_orders} (zenginleştirilen ${totals.enriched_orders})\n`+
-							`Müşteriler: +${totals.created_clients}\n`+
-							`Ürünler: +${totals.created_items}\n`+
-							`Ödemeler: +${totals.created_payments} (mevcut ${totals.payments_existing}, atlanan ${totals.payments_skipped_zero})\n`+
-							`Eşleşmeyen satırlar: ${totals.unmatched}`;
-						alert(msg);
+						console.group('Aggregate totals');
+						console.log('Siparişler (created/enriched):', totals.created_orders, totals.enriched_orders);
+						console.log('Müşteriler created:', totals.created_clients);
+						console.log('Ürünler created:', totals.created_items);
+						console.log('Ödemeler (created/existing/skipped0):', totals.created_payments, totals.payments_existing, totals.payments_skipped_zero);
+						console.log('Eşleşmeyen satırlar:', totals.unmatched);
+						console.groupEnd();
 						location.reload();
 					}
 				} catch (err) {

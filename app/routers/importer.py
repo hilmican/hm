@@ -144,6 +144,17 @@ def preview_import(body: dict):
 		file_path = candidates[0]
 
 	records = read_bizim_file(str(file_path)) if source == "bizim" else read_kargo_file(str(file_path))
+	# DEBUG: echo headers and first few raw/mapped rows to server logs for troubleshooting
+	try:
+		from ..services.importer.common import read_sheet_rows
+		hdrs, raw_rows = read_sheet_rows(str(file_path))
+		print("[IMPORT DEBUG] headers:", hdrs)
+		if raw_rows:
+			print("[IMPORT DEBUG] first row raw:", raw_rows[0])
+			print("[IMPORT DEBUG] first row mapped:", records[0] if records else {})
+			print(f"[IMPORT DEBUG] total mapped records: {len(records)}")
+	except Exception as _e:
+		print("[IMPORT DEBUG] header probe failed:", _e)
 	return {
 		"source": source,
 		"filename": file_path.name,
@@ -223,6 +234,19 @@ def commit_import(body: dict):
 			matched_order_id = None
 
 			try:
+				# DEBUG: log each row minimal mapping state
+				if idx < 5 or (idx % 50 == 0):
+					print("[ROW DEBUG]", idx, {
+						"tracking_no": rec.get("tracking_no"),
+						"name": rec.get("name"),
+						"item_name": rec.get("item_name"),
+						"quantity": rec.get("quantity"),
+						"total_amount": rec.get("total_amount"),
+						"payment_amount": rec.get("payment_amount"),
+						"payment_method": rec.get("payment_method"),
+						"shipment_date": rec.get("shipment_date"),
+						"delivery_date": rec.get("delivery_date"),
+					})
 				if source == "bizim":
 					uq = client_unique_key(rec.get("name"), rec.get("phone"))
 					client = None
