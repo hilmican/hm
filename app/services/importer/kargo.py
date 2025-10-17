@@ -7,22 +7,57 @@ from .common import read_sheet_rows, row_to_dict, parse_date, parse_float, parse
 
 
 KARGO_MAPPING = {
+	# tracking
 	"takip no": "tracking_no",
 	"kargo takip no": "tracking_no",
+	"gonderi no": "tracking_no",
+	"gonderi barkod no": "tracking_no",
+	"barkod no": "tracking_no",
+	"barkodno": "tracking_no",
+
+	# client name/address/city
 	"alıcı": "name",
 	"alici": "name",
+	"alici adi": "name",
+	"alici adı": "name",
+	"aliciadi": "name",
+	"musteri": "name",
+	"musteri adi": "name",
+	"musteri adı": "name",
 	"adres": "address",
 	"il": "city",
 	"şehir": "city",
+
+	# item/product
 	"açıklama": "item_name",
 	"aciklama": "item_name",
 	"urun": "item_name",
 	"ürün": "item_name",
+	"urun adi": "item_name",
+	"urun adı": "item_name",
+	"urunadi": "item_name",
+
+	# quantities and amounts
 	"adet": "quantity",
 	"tutar": "total_amount",
-	"tarih": "shipment_date",
+	"fatura tutari": "total_amount",
+	"faturatutari": "total_amount",
 	"ödenen": "payment_amount",
 	"odenen": "payment_amount",
+	"odenen tutar": "payment_amount",
+	"odenen tutari": "payment_amount",
+
+	# dates
+	"tarih": "shipment_date",
+	"gonderi tarihi": "shipment_date",
+	"gonderi tarih": "shipment_date",
+	"teslim tarihi": "delivery_date",
+	"teslimat tarihi": "delivery_date",
+	"teslimtarihi": "delivery_date",
+
+	# payment method
+	"odeme tipi": "payment_method",
+	"odemetipi": "payment_method",
 }
 
 
@@ -36,6 +71,8 @@ def map_row(raw: dict[str, Any], row_values: list[Any] | None = None) -> dict[st
 	# types
 	if "shipment_date" in mapped:
 		mapped["shipment_date"] = parse_date(mapped.get("shipment_date"))
+	if "delivery_date" in mapped:
+		mapped["delivery_date"] = parse_date(mapped.get("delivery_date"))
 	if "quantity" in mapped:
 		mapped["quantity"] = parse_int(mapped.get("quantity")) or 1
 	if "total_amount" in mapped:
