@@ -56,13 +56,13 @@ def read_sheet_rows(file_path: str) -> tuple[list[str], list[list[Any]]]:
 	for i, row in enumerate(ws.iter_rows(values_only=True)):
 		cells = [c if c is not None else None for c in row]
 		if i == 0:
-            headers = [normalize_header(str(h)) if h is not None else "" for h in cells]
-            # DEBUG: print normalized headers
-            try:
-                print("[HEADER DEBUG] raw:", [str(h) if h is not None else '' for h in cells])
-                print("[HEADER DEBUG] normalized:", headers)
-            except Exception:
-                pass
+			headers = [normalize_header(str(h)) if h is not None else "" for h in cells]
+			# DEBUG: print normalized headers
+			try:
+				print("[HEADER DEBUG] raw:", [str(h) if h is not None else '' for h in cells])
+				print("[HEADER DEBUG] normalized:", headers)
+			except Exception:
+				pass
 			continue
 		rows.append(cells)
 	return headers, rows
