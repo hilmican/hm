@@ -36,12 +36,15 @@ KARGO_MAPPING = {
 	"urun adi": "item_name",
 	"urun adı": "item_name",
 	"urunadi": "item_name",
+	"faturabilgisi": "item_name",  # often contains textual status; use as notes if not product
 
 	# quantities and amounts
 	"adet": "quantity",
 	"tutar": "total_amount",
+	"faturabedeli": "total_amount",
 	"fatura tutari": "total_amount",
 	"faturatutari": "total_amount",
+	"tahsilattutari": "payment_amount",
 	"ödenen": "payment_amount",
 	"odenen": "payment_amount",
 	"odenen tutar": "payment_amount",
@@ -110,8 +113,10 @@ def map_row(raw: dict[str, Any], row_values: list[Any] | None = None) -> dict[st
 	# collect notable notes
 	note_bits: list[str] = []
 	for v in raw.values():
-		if isinstance(v, str) and ("Tahsil Edildi" in v or "ErkenOdemeKesintisi" in v):
-			note_bits.append(v.strip())
+		if isinstance(v, str):
+			vs = v.strip()
+			if ("Tahsil Edildi" in vs) or ("Tahsil" in vs) or ("ErkenOdemeKesintisi" in vs) or ("Erken Odeme" in vs) or ("Erken Ödeme" in vs):
+				note_bits.append(vs)
 	if note_bits:
 		mapped["notes"] = " | ".join(dict.fromkeys(note_bits))
 
