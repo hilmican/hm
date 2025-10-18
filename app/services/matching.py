@@ -31,3 +31,30 @@ def find_order_by_tracking(session, tracking_no: str | None) -> Order | None:
 	if not tracking_no:
 		return None
 	return session.exec(select(Order).where(Order.tracking_no == tracking_no)).first()
+
+
+def find_order_by_client_and_date(session, client_id: int | None, date_val) -> Order | None:
+    """Find an order for a client around a date, preferring source='bizim'.
+
+    Tolerance: ±1 day.
+    """
+    if not client_id or not date_val:
+        return None
+    # gather candidates within ±1 day
+    from datetime import timedelta
+    start = date_val - timedelta(days=1)
+    end = date_val + timedelta(days=1)
+    rows = session.exec(
+        select(Order).where(
+            Order.client_id == client_id,
+            Order.data_date >= start,
+            Order.data_date <= end,
+        )
+    ).all()
+    if not rows:
+        return None
+    # prefer bizim orders
+    bizim = [o for o in rows if (o.source or "") == "bizim"]
+    if bizim:
+        return bizim[0]
+    return rows[0]

@@ -21,6 +21,21 @@ def dashboard(request: Request):
 		item_map = {it.id: it.name for it in items if it.id is not None}
 		payments = session.exec(select(Payment).order_by(Payment.id.desc()).limit(20)).all()
 
+		# compute paid/unpaid flags for shown orders using net amounts
+		order_ids = [o.id for o in orders if o.id]
+		pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
+		paid_map: dict[int, float] = {}
+		for p in pays:
+			if p.order_id is None:
+				continue
+			paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.net_amount or 0.0)
+		status_map: dict[int, str] = {}
+		for o in orders:
+			oid = o.id or 0
+			total = float(o.total_amount or 0.0)
+			net = paid_map.get(oid, 0.0)
+			status_map[oid] = "paid" if (net > 0 and net >= total) else "unpaid"
+
 		# Build source filename mappings using ImportRow -> ImportRun
 		client_ids = [c.id for c in clients if c.id]
 		order_ids = [o.id for o in orders if o.id]
@@ -59,5 +74,6 @@ def dashboard(request: Request):
 				"client_sources": client_sources,
 				"order_sources": order_sources,
 				"item_sources": item_sources,
+				"status_map": status_map,
 			},
 		)

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, Request
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Order
+from ..models import Order, Payment
 
 router = APIRouter()
 
@@ -42,8 +42,22 @@ def list_orders_table(request: Request, limit: int = Query(default=100, ge=1, le
         items = session.exec(select(Item).where(Item.id.in_(item_ids))).all() if item_ids else []
         client_map = {c.id: c.name for c in clients if c.id is not None}
         item_map = {it.id: it.name for it in items if it.id is not None}
+        # compute paid/unpaid using net amounts
+        order_ids = [o.id for o in rows if o.id]
+        pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
+        paid_map: dict[int, float] = {}
+        for p in pays:
+            if p.order_id is None:
+                continue
+            paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.net_amount or 0.0)
+        status_map: dict[int, str] = {}
+        for o in rows:
+            oid = o.id or 0
+            total = float(o.total_amount or 0.0)
+            net = paid_map.get(oid, 0.0)
+            status_map[oid] = "paid" if (net > 0 and net >= total) else "unpaid"
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "orders_table.html",
-            {"request": request, "rows": rows, "limit": limit, "client_map": client_map, "item_map": item_map},
+            {"request": request, "rows": rows, "limit": limit, "client_map": client_map, "item_map": item_map, "status_map": status_map},
         )

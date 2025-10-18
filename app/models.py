@@ -12,6 +12,7 @@ class Client(SQLModel, table=True):
     tax_id: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = Field(default=None, index=True)
+    status: Optional[str] = Field(default=None, index=True, description="missing-bizim|missing-kargo|merged")
     height_cm: Optional[int] = Field(default=None, description="Client height in centimeters")
     weight_kg: Optional[int] = Field(default=None, description="Client weight in kilograms")
     unique_key: Optional[str] = Field(default=None, index=True, unique=True)
@@ -52,6 +53,13 @@ class Payment(SQLModel, table=True):
     date: Optional[dt.date] = Field(default=None, index=True)
     method: Optional[str] = None
     reference: Optional[str] = None
+    # fees and net amount (amount - sum(fees))
+    fee_komisyon: Optional[float] = Field(default=0.0)
+    fee_hizmet: Optional[float] = Field(default=0.0)
+    fee_kargo: Optional[float] = Field(default=0.0)
+    fee_iade: Optional[float] = Field(default=0.0)
+    fee_erken_odeme: Optional[float] = Field(default=0.0)
+    net_amount: Optional[float] = Field(default=0.0, index=True)
 
 
 class StockMovement(SQLModel, table=True):

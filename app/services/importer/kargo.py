@@ -52,6 +52,20 @@ KARGO_MAPPING = {
 	"odenen tutar": "payment_amount",
 	"odenen tutari": "payment_amount",
 
+	# fees (various labels)
+	"komisyon": "fee_komisyon",
+	"komisyon tutari": "fee_komisyon",
+	"hizmet": "fee_hizmet",
+	"hizmet bedeli": "fee_hizmet",
+	"kargo": "fee_kargo",
+	"kargo ucreti": "fee_kargo",
+	"iade": "fee_iade",
+	"iade tutari": "fee_iade",
+	"erken odeme": "fee_erken_odeme",
+	"erkenodeme": "fee_erken_odeme",
+	"erken odeme kesintisi": "fee_erken_odeme",
+	"erken odeme kesinti": "fee_erken_odeme",
+
 	# dates
 	"tarih": "shipment_date",
 	"gonderi tarihi": "shipment_date",
@@ -64,6 +78,9 @@ KARGO_MAPPING = {
 	# payment method
 	"odeme tipi": "payment_method",
 	"odemetipi": "payment_method",
+
+	# identifiers
+	"alicikodu": "alici_kodu",
 }
 
 
@@ -85,6 +102,10 @@ def map_row(raw: dict[str, Any], row_values: list[Any] | None = None) -> dict[st
 		mapped["total_amount"] = parse_float(mapped.get("total_amount"))
 	if "payment_amount" in mapped:
 		mapped["payment_amount"] = parse_float(mapped.get("payment_amount"))
+	# fees to floats
+	for fk in ("fee_komisyon","fee_hizmet","fee_kargo","fee_iade","fee_erken_odeme"):
+		if fk in mapped:
+			mapped[fk] = parse_float(mapped.get(fk)) or 0.0
 
 	# extract delivery_date from any textual field like: "7.10.2025 tarihinde ..."
 	delivery_date = None

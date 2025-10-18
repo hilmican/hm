@@ -10,6 +10,7 @@ from ..models import Client, Item, Order, Payment, ImportRun, ImportRow
 from ..services.importer.bizim import read_bizim_file
 from ..services.importer.kargo import read_kargo_file
 from ..services.matching import find_order_by_tracking, find_client_candidates
+from ..services.matching import find_order_by_client_and_date
 from ..utils.hashing import compute_row_hash
 from ..utils.normalize import client_unique_key, normalize_phone, normalize_text
 from ..utils.slugify import slugify
@@ -255,7 +256,7 @@ def commit_import(body: dict):
 					if uq:
 						client = session.exec(select(Client).where(Client.unique_key == uq)).first()
 					if not client:
-						client = Client(
+					client = Client(
 							name=rec_name or "",
 							phone=rec.get("phone"),
 							address=rec.get("address"),
@@ -265,6 +266,8 @@ def commit_import(body: dict):
 						session.add(client)
 						session.flush()
 						run.created_clients += 1
+					# Bizim created client initially missing kargo
+					client.status = client.status or "missing-kargo"
 					else:
 						updated = False
 						for f in ("phone", "address", "city"):
@@ -296,7 +299,7 @@ def commit_import(body: dict):
 					if extra_notes:
 						joined = ", ".join(extra_notes)
 						order_notes = f"{order_notes} | {joined}" if order_notes else joined
-					order = Order(
+				order = Order(
 						tracking_no=rec.get("tracking_no"),
 						client_id=client.id,  # type: ignore
 						item_id=item.id,      # type: ignore
@@ -311,10 +314,12 @@ def commit_import(body: dict):
 					session.add(order)
 					session.flush()
 					run.created_orders += 1
+				# Bizim order initially missing kargo
+				order.status = order.status or "missing-kargo"
 					matched_order_id = order.id
 
 				else:  # kargo
-					order = find_order_by_tracking(session, rec.get("tracking_no"))
+				order = find_order_by_tracking(session, rec.get("tracking_no"))
 					if order:
 						matched_order_id = order.id
 						matched_client_id = order.client_id
@@ -323,18 +328,23 @@ def commit_import(body: dict):
 							order.total_amount = rec.get("total_amount")
 						if rec.get("shipment_date") and not order.shipment_date:
 							order.shipment_date = rec.get("shipment_date")
-						if rec.get("item_name") and not order.item_id:
-							sku = slugify(rec.get("item_name"))
-							item = session.exec(select(Item).where(Item.sku == sku)).first()
-							if not item:
-								item = Item(sku=sku, name=rec.get("item_name") or "Genel Ürün")
-								session.add(item)
-								session.flush()
-								run.created_items += 1
+					# set data_date from TEFTarih if empty
+					if rec.get("shipment_date") and not order.data_date:
+						order.data_date = rec.get("shipment_date")
+					# append AliciKodu to notes if present
+					if rec.get("alici_kodu"):
+						cur = order.notes or None
+						ak = f"AliciKodu:{rec.get('alici_kodu')}"
+						order.notes = f"{cur} | {ak}" if cur else ak
+					# do not create items from kargo; only link if exists
+					if rec.get("item_name") and not order.item_id:
+						sku = slugify(rec.get("item_name"))
+						item = session.exec(select(Item).where(Item.sku == sku)).first()
+						if item:
 							order.item_id = item.id  # type: ignore
 						enriched_orders_cnt += 1
 						# payments idempotent
-						if rec.get("payment_amount"):
+					if rec.get("payment_amount"):
 							pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
 							existing = session.exec(select(Payment).where(
 								Payment.order_id == order.id,
@@ -342,14 +352,28 @@ def commit_import(body: dict):
 								Payment.date == pdate,
 							)).first()
 							if not existing and (rec.get("payment_amount") or 0.0) > 0 and pdate is not None:
-								pmt = Payment(
-									client_id=order.client_id,
-									order_id=order.id,
-									amount=rec.get("payment_amount") or 0.0,
-									date=pdate,
-									method=rec.get("payment_method") or "kargo",
-									reference=rec.get("tracking_no"),
-								)
+							# compute net and fees
+							amt = rec.get("payment_amount") or 0.0
+							fee_kom = rec.get("fee_komisyon") or 0.0
+							fee_hiz = rec.get("fee_hizmet") or 0.0
+							fee_kar = rec.get("fee_kargo") or 0.0
+							fee_iad = rec.get("fee_iade") or 0.0
+							fee_eok = rec.get("fee_erken_odeme") or 0.0
+							net = (amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok])
+							pmt = Payment(
+								client_id=order.client_id,
+								order_id=order.id,
+								amount=amt,
+								date=pdate,
+								method=rec.get("payment_method") or "kargo",
+								reference=rec.get("tracking_no"),
+								fee_komisyon=fee_kom,
+								fee_hizmet=fee_hiz,
+								fee_kargo=fee_kar,
+								fee_iade=fee_iad,
+								fee_erken_odeme=fee_eok,
+								net_amount=net,
+							)
 								session.add(pmt)
 								run.created_payments += 1
 								payments_created_cnt += 1
@@ -357,44 +381,68 @@ def commit_import(body: dict):
 								payments_existing_cnt += 1
 							else:
 								payments_skipped_zero_cnt += 1
+					# flip statuses if we have a bizim order
+					try:
+						from ..models import Client as _Client
+						if (order.source or "") == "bizim":
+							order.status = "merged"
+							cl = session.exec(select(_Client).where(_Client.id == order.client_id)).first()
+							if cl:
+								cl.status = "merged"
+					except Exception:
+						pass
 					else:
-						# create full entities
-						uq = client_unique_key(rec.get("name"), None)
+					# no direct order; resolve client then order by date, else create placeholder
+					uq = client_unique_key(rec.get("name"), rec.get("phone"))
 						client = None
 						if uq:
 							client = session.exec(select(Client).where(Client.unique_key == uq)).first()
 						if not client:
-							client = Client(name=rec.get("name") or "", unique_key=uq or None)
+						client = Client(
+							name=rec.get("name") or "",
+							phone=rec.get("phone"),
+							address=rec.get("address"),
+							city=rec.get("city"),
+							unique_key=uq or None,
+							status="missing-bizim",
+						)
 							session.add(client)
 							session.flush()
 							run.created_clients += 1
-						sku = slugify(rec.get("item_name") or "Genel Ürün")
-						item = session.exec(select(Item).where(Item.sku == sku)).first()
-						if not item:
-							item = Item(sku=sku, name=rec.get("item_name") or "Genel Ürün")
-							session.add(item)
-							session.flush()
-							run.created_items += 1
+					# backfill client fields if present
+					else:
+						updated = False
+						for f in ("phone","address","city"):
+							val = rec.get(f)
+							if val and not getattr(client, f):
+								setattr(client, f, val)
+								updated = True
+					# try find existing bizim order by client/date
+					order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"))
+					if not order:
 						order_notes = rec.get("notes") or None
+						if rec.get("alici_kodu"):
+							order_notes = f"{order_notes} | AliciKodu:{rec.get('alici_kodu')}" if order_notes else f"AliciKodu:{rec.get('alici_kodu')}"
 						order = Order(
 							tracking_no=rec.get("tracking_no"),
 							client_id=client.id,  # type: ignore
-							item_id=item.id,      # type: ignore
+							item_id=None,
 							quantity=rec.get("quantity") or 1,
 							unit_price=rec.get("unit_price"),
 							total_amount=rec.get("total_amount"),
 							shipment_date=rec.get("shipment_date"),
-							data_date=run.data_date,
+							data_date=rec.get("shipment_date") or run.data_date,
 							source="kargo",
 							notes=order_notes,
+							status="placeholder",
 						)
 						session.add(order)
 						session.flush()
 						run.created_orders += 1
 						matched_order_id = order.id
 						matched_client_id = client.id
-						# payment for newly created order
-						if rec.get("payment_amount"):
+					# payment for matched/created order
+					if rec.get("payment_amount"):
 							pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
 							existing = session.exec(select(Payment).where(
 								Payment.order_id == order.id,
@@ -402,14 +450,27 @@ def commit_import(body: dict):
 								Payment.date == pdate,
 							)).first()
 							if not existing and (rec.get("payment_amount") or 0.0) > 0 and pdate is not None:
-								pmt = Payment(
-									client_id=order.client_id,
-									order_id=order.id,
-									amount=rec.get("payment_amount") or 0.0,
-									date=pdate,
-									method=rec.get("payment_method") or "kargo",
-									reference=rec.get("tracking_no"),
-								)
+							amt = rec.get("payment_amount") or 0.0
+							fee_kom = rec.get("fee_komisyon") or 0.0
+							fee_hiz = rec.get("fee_hizmet") or 0.0
+							fee_kar = rec.get("fee_kargo") or 0.0
+							fee_iad = rec.get("fee_iade") or 0.0
+							fee_eok = rec.get("fee_erken_odeme") or 0.0
+							net = (amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok])
+							pmt = Payment(
+								client_id=order.client_id,
+								order_id=order.id,
+								amount=amt,
+								date=pdate,
+								method=rec.get("payment_method") or "kargo",
+								reference=rec.get("tracking_no"),
+								fee_komisyon=fee_kom,
+								fee_hizmet=fee_hiz,
+								fee_kargo=fee_kar,
+								fee_iade=fee_iad,
+								fee_erken_odeme=fee_eok,
+								net_amount=net,
+							)
 								session.add(pmt)
 								run.created_payments += 1
 								payments_created_cnt += 1

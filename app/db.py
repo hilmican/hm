@@ -34,6 +34,22 @@ def init_db() -> None:
 		if not column_exists("importrun", "data_date"):
 			conn.exec_driver_sql("ALTER TABLE importrun ADD COLUMN data_date DATE")
 
+			# Client.status
+			if not column_exists("client", "status"):
+				conn.exec_driver_sql("ALTER TABLE client ADD COLUMN status TEXT")
+
+			# Payment fee fields and net_amount
+			for col, coltype in [
+				("fee_komisyon", "REAL"),
+				("fee_hizmet", "REAL"),
+				("fee_kargo", "REAL"),
+				("fee_iade", "REAL"),
+				("fee_erken_odeme", "REAL"),
+				("net_amount", "REAL"),
+			]:
+				if not column_exists("payment", col):
+					conn.exec_driver_sql(f"ALTER TABLE payment ADD COLUMN {col} {coltype} DEFAULT 0")
+
 
 @contextmanager
 def get_session() -> Iterator[Session]:

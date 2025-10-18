@@ -13,6 +13,8 @@
         .toolbar input { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; width: 320px; }
         .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; }
         a { color: #2563eb; text-decoration: none; }
+        tr.paid { background: #eaffea; }
+        tr.unpaid { background: #fff9db; }
     </style>
     <script>
         function filterTable(table, q){
@@ -48,7 +50,8 @@
         </thead>
         <tbody>
             {% for o in rows %}
-            <tr>
+            {% set rowcls = status_map.get(o.id) if status_map else '' %}
+            <tr class="{{ rowcls }}">
                 <td>{{ o.id }}</td>
                 <td>{{ o.tracking_no }}</td>
                 <td>

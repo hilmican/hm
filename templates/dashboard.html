@@ -10,12 +10,14 @@
 			@media (min-width: 1000px) { .grid { grid-template-columns: 1fr 1fr; } }
 			.card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
 			.card h2 { margin: 0; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
-			table { width: 100%; border-collapse: collapse; }
+            table { width: 100%; border-collapse: collapse; }
 			th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
 			th { background: #fafafa; position: sticky; top: 0; }
 			.caption { color: #6b7280; font-size: 12px; padding: 8px 16px; }
 			.toolbar { margin-bottom: 12px; }
 			.toolbar a { margin-right: 8px; color: #2563eb; text-decoration: none; }
+            tr.paid { background: #eaffea; }
+            tr.unpaid { background: #fff9db; }
 		</style>
 	</head>
 	<body>
@@ -91,8 +93,9 @@
 						<tr><th>ID</th><th>Tracking</th><th>Client</th><th>Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Data Date</th><th>Channel</th></tr>
 					</thead>
 					<tbody>
-					{% for o in orders %}
-						<tr>
+                    {% for o in orders %}
+                        {% set rowcls = status_map.get(o.id) if status_map else '' %}
+                        <tr class="{{ rowcls }}">
 							<td>{{ o.id }}</td>
 							<td>{{ o.tracking_no }}</td>
 						<td>
@@ -121,7 +124,7 @@
 							<td>{{ o.total_amount }}</td>
 							<td>{{ o.shipment_date }}</td>
 							<td>{{ o.data_date }}</td>
-							<td>{{ o.source }}</td>
+                            <td>{{ o.source }}</td>
 						</tr>
 					{% endfor %}
 					</tbody>
