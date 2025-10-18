@@ -328,19 +328,21 @@ def commit_import(body: dict, request: Request):
 
 					# If a kargo placeholder exists for same client/date, upgrade it instead of creating new
 					existing_order = None
-					if rec.get("shipment_date"):
-						existing_order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"))
+					date_hint = rec.get("shipment_date") or run.data_date
+					if date_hint:
+						existing_order = find_order_by_client_and_date(session, client.id, date_hint)
 						try:
 							print("[MERGE DEBUG][bizim] date match try:", {
 								"client_id": client.id,
 								"name": rec.get("name"),
 								"shipment_date": rec.get("shipment_date"),
+								"data_date_hint": run.data_date,
 								"found_order": existing_order.id if existing_order else None,
 								"found_source": (existing_order.source if existing_order else None),
 							})
 						except Exception:
 							pass
-					else:
+					if not existing_order:
 						# fallback: upgrade most recent kargo placeholder for this client (bizim often lacks date)
 						existing_order = find_recent_placeholder_kargo_for_client(session, client.id)
 						try:
