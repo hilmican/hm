@@ -31,9 +31,9 @@ def list_orders(limit: int = Query(default=100, ge=1, le=1000)):
 
 
 @router.get("/table")
-def list_orders_table(request: Request, limit: int = Query(default=1000000, ge=1, le=1000000)):
+def list_orders_table(request: Request):
     with get_session() as session:
-        rows = session.exec(select(Order).order_by(Order.id.desc()).limit(limit)).all()
+        rows = session.exec(select(Order).order_by(Order.id.desc())).all()
         # build simple maps for names
         client_ids = sorted({o.client_id for o in rows if o.client_id})
         item_ids = sorted({o.item_id for o in rows if o.item_id})
@@ -59,5 +59,5 @@ def list_orders_table(request: Request, limit: int = Query(default=1000000, ge=1
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "orders_table.html",
-            {"request": request, "rows": rows, "limit": limit, "client_map": client_map, "item_map": item_map, "status_map": status_map},
+            {"request": request, "rows": rows, "client_map": client_map, "item_map": item_map, "status_map": status_map},
         )
