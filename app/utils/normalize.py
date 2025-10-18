@@ -58,9 +58,14 @@ def client_name_key(name: Any) -> str:
 
 
 def client_unique_key(name: Any, phone: Any) -> str:
+    """Primary client key based on normalized name only.
+
+    We intentionally ignore phone here to avoid creating duplicates when one
+    source lacks phone or has formatting differences. Phone can still be used
+    for secondary matching outside of the unique key.
+    """
     n = client_name_key(name)
-    ph = normalize_phone(phone)
-    return f"{n}|{ph}" if n or ph else ''
+    return n
 
 
 def legacy_client_unique_key(name: Any, phone: Any) -> str:
