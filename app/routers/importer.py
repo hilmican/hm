@@ -325,24 +325,42 @@ def commit_import(body: dict, request: Request):
 					if extra_notes:
 						joined = ", ".join(extra_notes)
 						order_notes = f"{order_notes} | {joined}" if order_notes else joined
-					order = Order(
-						tracking_no=rec.get("tracking_no"),
-						client_id=client.id,  # type: ignore
-						item_id=item.id,      # type: ignore
-						quantity=rec.get("quantity") or 1,
-						unit_price=rec.get("unit_price"),
-						total_amount=rec.get("total_amount"),
-						shipment_date=rec.get("shipment_date"),
-						data_date=run.data_date,
-						source="bizim",
-						notes=order_notes,
-					)
-					session.add(order)
-					session.flush()
-					run.created_orders += 1
-					# Bizim order initially missing kargo
-					order.status = order.status or "missing-kargo"
-					matched_order_id = order.id
+
+					# If a kargo placeholder exists for same client/date, upgrade it instead of creating new
+					existing_order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"))
+					if existing_order and (existing_order.source or "") == "kargo":
+						existing_order.item_id = item.id  # type: ignore
+						existing_order.quantity = rec.get("quantity") or existing_order.quantity or 1
+						existing_order.unit_price = rec.get("unit_price") or existing_order.unit_price
+						existing_order.total_amount = rec.get("total_amount") or existing_order.total_amount
+						existing_order.shipment_date = rec.get("shipment_date") or existing_order.shipment_date
+						existing_order.data_date = existing_order.data_date or run.data_date
+						existing_order.source = "bizim"
+						if order_notes:
+							cur = existing_order.notes or None
+							existing_order.notes = f"{cur} | {order_notes}" if cur else order_notes
+						# after bizim details, wait for kargo to merge
+						existing_order.status = existing_order.status or "missing-kargo"
+						matched_order_id = existing_order.id
+					else:
+						order = Order(
+							tracking_no=rec.get("tracking_no"),
+							client_id=client.id,  # type: ignore
+							item_id=item.id,      # type: ignore
+							quantity=rec.get("quantity") or 1,
+							unit_price=rec.get("unit_price"),
+							total_amount=rec.get("total_amount"),
+							shipment_date=rec.get("shipment_date"),
+							data_date=run.data_date,
+							source="bizim",
+							notes=order_notes,
+						)
+						session.add(order)
+						session.flush()
+						run.created_orders += 1
+						# Bizim order initially missing kargo
+						order.status = order.status or "missing-kargo"
+						matched_order_id = order.id
 
 				else:  # kargo
 					# hard guard: never treat any kargo field as item; move any residual item_name into notes
@@ -458,24 +476,51 @@ def commit_import(body: dict, request: Request):
 							order_notes = rec.get("notes") or None
 							if rec.get("alici_kodu"):
 								order_notes = f"{order_notes} | AliciKodu:{rec.get('alici_kodu')}" if order_notes else f"AliciKodu:{rec.get('alici_kodu')}"
-							order = Order(
-								tracking_no=rec.get("tracking_no"),
-								client_id=client.id,  # type: ignore
-								item_id=None,
-								quantity=rec.get("quantity") or 1,
-								unit_price=rec.get("unit_price"),
-								total_amount=rec.get("total_amount"),
-								shipment_date=rec.get("shipment_date"),
-								data_date=rec.get("shipment_date") or run.data_date,
-								source="kargo",
-								notes=order_notes,
-								status="placeholder",
-							)
-							session.add(order)
-							session.flush()
-							run.created_orders += 1
-							matched_order_id = order.id
-							matched_client_id = client.id
+						order = Order(
+							tracking_no=rec.get("tracking_no"),
+							client_id=client.id,  # type: ignore
+							item_id=None,
+							quantity=rec.get("quantity") or 1,
+							unit_price=rec.get("unit_price"),
+							total_amount=rec.get("total_amount"),
+							shipment_date=rec.get("shipment_date"),
+							data_date=rec.get("shipment_date") or run.data_date,
+							source="kargo",
+							notes=order_notes,
+							status="placeholder",
+						)
+						session.add(order)
+						session.flush()
+						run.created_orders += 1
+						matched_order_id = order.id
+						matched_client_id = client.id
+					else:
+						# We found an existing order by client/date (usually a bizim order); enrich it
+						matched_order_id = order.id
+						matched_client_id = client.id
+						if rec.get("total_amount") and not order.total_amount:
+							order.total_amount = rec.get("total_amount")
+						if rec.get("shipment_date") and not order.shipment_date:
+							order.shipment_date = rec.get("shipment_date")
+						if rec.get("shipment_date") and not order.data_date:
+							order.data_date = rec.get("shipment_date")
+						if rec.get("alici_kodu"):
+							cur = order.notes or None
+							ak = f"AliciKodu:{rec.get('alici_kodu')}"
+							order.notes = f"{cur} | {ak}" if cur else ak
+						if rec.get("notes"):
+							cur = order.notes or None
+							order.notes = f"{cur} | {rec.get('notes')}" if cur else rec.get("notes")
+						# flip statuses if we have a bizim order
+						try:
+							from ..models import Client as _Client
+							if (order.source or "") == "bizim":
+								order.status = "merged"
+								cl = session.exec(select(_Client).where(_Client.id == order.client_id)).first()
+								if cl:
+									cl.status = "merged"
+						except Exception:
+							pass
 						# payment for matched/created order
 						if rec.get("payment_amount"):
 							pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
