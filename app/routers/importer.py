@@ -11,7 +11,7 @@ from ..services.importer.bizim import read_bizim_file
 from ..services.importer.kargo import read_kargo_file
 from ..schemas import BizimRow, KargoRow, BIZIM_ALLOWED_KEYS, KARGO_ALLOWED_KEYS
 from ..services.matching import find_order_by_tracking, find_client_candidates
-from ..services.matching import find_order_by_client_and_date
+from ..services.matching import find_order_by_client_and_date, find_recent_placeholder_kargo_for_client
 from ..utils.hashing import compute_row_hash
 from ..utils.normalize import client_unique_key, legacy_client_unique_key, normalize_phone, normalize_text
 from ..utils.slugify import slugify
@@ -327,7 +327,12 @@ def commit_import(body: dict, request: Request):
 						order_notes = f"{order_notes} | {joined}" if order_notes else joined
 
 					# If a kargo placeholder exists for same client/date, upgrade it instead of creating new
-					existing_order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"))
+					existing_order = None
+					if rec.get("shipment_date"):
+						existing_order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"))
+					else:
+						# fallback: upgrade most recent kargo placeholder for this client (bizim often lacks date)
+						existing_order = find_recent_placeholder_kargo_for_client(session, client.id)
 					if existing_order and (existing_order.source or "") == "kargo":
 						existing_order.item_id = item.id  # type: ignore
 						existing_order.quantity = rec.get("quantity") or existing_order.quantity or 1
