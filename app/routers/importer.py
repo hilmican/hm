@@ -350,18 +350,18 @@ def commit_import(body: dict):
 							order.total_amount = rec.get("total_amount")
 						if rec.get("shipment_date") and not order.shipment_date:
 							order.shipment_date = rec.get("shipment_date")
-					# set data_date from TEFTarih if empty
-					if rec.get("shipment_date") and not order.data_date:
-						order.data_date = rec.get("shipment_date")
-					# append AliciKodu to notes if present
-					if rec.get("alici_kodu"):
-						cur = order.notes or None
-						ak = f"AliciKodu:{rec.get('alici_kodu')}"
-						order.notes = f"{cur} | {ak}" if cur else ak
-					# do not create or link items from kargo; treat descriptions as notes only
-					if rec.get("notes"):
-						cur = order.notes or None
-						order.notes = f"{cur} | {rec.get('notes')}" if cur else rec.get("notes")
+						# set data_date from TEFTarih if empty
+						if rec.get("shipment_date") and not order.data_date:
+							order.data_date = rec.get("shipment_date")
+						# append AliciKodu to notes if present
+						if rec.get("alici_kodu"):
+							cur = order.notes or None
+							ak = f"AliciKodu:{rec.get('alici_kodu')}"
+							order.notes = f"{cur} | {ak}" if cur else ak
+						# do not create or link items from kargo; treat descriptions as notes only
+						if rec.get("notes"):
+							cur = order.notes or None
+							order.notes = f"{cur} | {rec.get('notes')}" if cur else rec.get("notes")
 						enriched_orders_cnt += 1
 						# payments idempotent
 						if rec.get("payment_amount"):
@@ -401,68 +401,68 @@ def commit_import(body: dict):
 								payments_existing_cnt += 1
 							else:
 								payments_skipped_zero_cnt += 1
-					# flip statuses if we have a bizim order
-					try:
-						from ..models import Client as _Client
-						if (order.source or "") == "bizim":
-							order.status = "merged"
-							cl = session.exec(select(_Client).where(_Client.id == order.client_id)).first()
-							if cl:
-								cl.status = "merged"
-					except Exception:
-						pass
+						# flip statuses if we have a bizim order
+						try:
+							from ..models import Client as _Client
+							if (order.source or "") == "bizim":
+								order.status = "merged"
+								cl = session.exec(select(_Client).where(_Client.id == order.client_id)).first()
+								if cl:
+									cl.status = "merged"
+						except Exception:
+							pass
 					else:
-					# no direct order; resolve client then order by date, else create placeholder
-					uq = client_unique_key(rec.get("name"), rec.get("phone"))
+						# no direct order; resolve client then order by date, else create placeholder
+						uq = client_unique_key(rec.get("name"), rec.get("phone"))
 						client = None
 						if uq:
 							client = session.exec(select(Client).where(Client.unique_key == uq)).first()
 						if not client:
-						client = Client(
-							name=rec.get("name") or "",
-							phone=rec.get("phone"),
-							address=rec.get("address"),
-							city=rec.get("city"),
-							unique_key=uq or None,
-							status="missing-bizim",
-						)
+							client = Client(
+								name=rec.get("name") or "",
+								phone=rec.get("phone"),
+								address=rec.get("address"),
+								city=rec.get("city"),
+								unique_key=uq or None,
+								status="missing-bizim",
+							)
 							session.add(client)
 							session.flush()
 							run.created_clients += 1
-					# backfill client fields if present
-					else:
-						updated = False
-						for f in ("phone","address","city"):
-							val = rec.get(f)
-							if val and not getattr(client, f):
-								setattr(client, f, val)
-								updated = True
-					# try find existing bizim order by client/date
-					order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"))
-					if not order:
-						order_notes = rec.get("notes") or None
-						if rec.get("alici_kodu"):
-							order_notes = f"{order_notes} | AliciKodu:{rec.get('alici_kodu')}" if order_notes else f"AliciKodu:{rec.get('alici_kodu')}"
-						order = Order(
-							tracking_no=rec.get("tracking_no"),
-							client_id=client.id,  # type: ignore
-							item_id=None,
-							quantity=rec.get("quantity") or 1,
-							unit_price=rec.get("unit_price"),
-							total_amount=rec.get("total_amount"),
-							shipment_date=rec.get("shipment_date"),
-							data_date=rec.get("shipment_date") or run.data_date,
-							source="kargo",
-							notes=order_notes,
-							status="placeholder",
-						)
-						session.add(order)
-						session.flush()
-						run.created_orders += 1
-						matched_order_id = order.id
-						matched_client_id = client.id
-					# payment for matched/created order
-					if rec.get("payment_amount"):
+						else:
+							# backfill client fields if present
+							updated = False
+							for f in ("phone","address","city"):
+								val = rec.get(f)
+								if val and not getattr(client, f):
+									setattr(client, f, val)
+									updated = True
+						# try find existing bizim order by client/date
+						order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"))
+						if not order:
+							order_notes = rec.get("notes") or None
+							if rec.get("alici_kodu"):
+								order_notes = f"{order_notes} | AliciKodu:{rec.get('alici_kodu')}" if order_notes else f"AliciKodu:{rec.get('alici_kodu')}"
+							order = Order(
+								tracking_no=rec.get("tracking_no"),
+								client_id=client.id,  # type: ignore
+								item_id=None,
+								quantity=rec.get("quantity") or 1,
+								unit_price=rec.get("unit_price"),
+								total_amount=rec.get("total_amount"),
+								shipment_date=rec.get("shipment_date"),
+								data_date=rec.get("shipment_date") or run.data_date,
+								source="kargo",
+								notes=order_notes,
+								status="placeholder",
+							)
+							session.add(order)
+							session.flush()
+							run.created_orders += 1
+							matched_order_id = order.id
+							matched_client_id = client.id
+						# payment for matched/created order
+						if rec.get("payment_amount"):
 							pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
 							existing = session.exec(select(Payment).where(
 								Payment.order_id == order.id,
@@ -470,27 +470,27 @@ def commit_import(body: dict):
 								Payment.date == pdate,
 							)).first()
 							if not existing and (rec.get("payment_amount") or 0.0) > 0 and pdate is not None:
-							amt = rec.get("payment_amount") or 0.0
-							fee_kom = rec.get("fee_komisyon") or 0.0
-							fee_hiz = rec.get("fee_hizmet") or 0.0
-							fee_kar = rec.get("fee_kargo") or 0.0
-							fee_iad = rec.get("fee_iade") or 0.0
-							fee_eok = rec.get("fee_erken_odeme") or 0.0
-							net = (amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok])
-							pmt = Payment(
-								client_id=order.client_id,
-								order_id=order.id,
-								amount=amt,
-								date=pdate,
-								method=rec.get("payment_method") or "kargo",
-								reference=rec.get("tracking_no"),
-								fee_komisyon=fee_kom,
-								fee_hizmet=fee_hiz,
-								fee_kargo=fee_kar,
-								fee_iade=fee_iad,
-								fee_erken_odeme=fee_eok,
-								net_amount=net,
-							)
+								amt = rec.get("payment_amount") or 0.0
+								fee_kom = rec.get("fee_komisyon") or 0.0
+								fee_hiz = rec.get("fee_hizmet") or 0.0
+								fee_kar = rec.get("fee_kargo") or 0.0
+								fee_iad = rec.get("fee_iade") or 0.0
+								fee_eok = rec.get("fee_erken_odeme") or 0.0
+								net = (amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok])
+								pmt = Payment(
+									client_id=order.client_id,
+									order_id=order.id,
+									amount=amt,
+									date=pdate,
+									method=rec.get("payment_method") or "kargo",
+									reference=rec.get("tracking_no"),
+									fee_komisyon=fee_kom,
+									fee_hizmet=fee_hiz,
+									fee_kargo=fee_kar,
+									fee_iade=fee_iad,
+									fee_erken_odeme=fee_eok,
+									net_amount=net,
+								)
 								session.add(pmt)
 								run.created_payments += 1
 								payments_created_cnt += 1
