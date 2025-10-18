@@ -31,7 +31,7 @@ def list_orders(limit: int = Query(default=100, ge=1, le=1000)):
 
 
 @router.get("/table")
-def list_orders_table(request: Request, limit: int = Query(default=100, ge=1, le=2000)):
+def list_orders_table(request: Request, limit: int = Query(default=1000000, ge=1, le=1000000)):
     with get_session() as session:
         rows = session.exec(select(Order).order_by(Order.id.desc()).limit(limit)).all()
         # build simple maps for names

@@ -28,7 +28,7 @@ def list_payments(limit: int = Query(default=100, ge=1, le=1000)):
 
 
 @router.get("/table")
-def list_payments_table(request: Request, limit: int = Query(default=100, ge=1, le=2000)):
+def list_payments_table(request: Request, limit: int = Query(default=1000000, ge=1, le=1000000)):
 	with get_session() as session:
 		rows = session.exec(select(Payment).order_by(Payment.id.desc()).limit(limit)).all()
 		client_ids = sorted({p.client_id for p in rows if p.client_id})

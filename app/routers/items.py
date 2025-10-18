@@ -26,7 +26,7 @@ def list_items(limit: int = Query(default=100, ge=1, le=1000)):
 
 
 @router.get("/table")
-def list_items_table(request: Request, limit: int = Query(default=100, ge=1, le=2000)):
+def list_items_table(request: Request, limit: int = Query(default=1000000, ge=1, le=1000000)):
 	with get_session() as session:
 		rows = session.exec(select(Item).order_by(Item.id.desc()).limit(limit)).all()
 		templates = request.app.state.templates

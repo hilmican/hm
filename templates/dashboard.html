@@ -29,6 +29,7 @@
 			<a href="/items/table" target="_blank">Items Table</a>
 			<a href="/orders/table" target="_blank">Orders Table</a>
 			<a href="/payments" target="_blank">Payments API</a>
+			<button id="logoutBtn" type="button" style="margin-left:12px;background:#6b7280;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Logout</button>
 			<button id="resetBtn" type="button" style="margin-left:12px;background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Reset DB</button>
 			<form id="uploadForm" method="post" action="/import/upload" enctype="multipart/form-data" style="display:inline-block;margin-left:12px;">
 				<select name="source" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;">
@@ -178,6 +179,15 @@
 				} catch (e) {
 					alert('Reset error');
 				}
+			});
+		}
+		const logoutBtn = document.getElementById('logoutBtn');
+		if (logoutBtn) {
+			logoutBtn.addEventListener('click', async () => {
+				try {
+					await fetch('/auth/logout', { method: 'POST' });
+					location.href = '/auth/login';
+				} catch (e) { alert('Logout error'); }
 			});
 		}
 		if (form) {
