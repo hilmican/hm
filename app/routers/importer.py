@@ -476,24 +476,24 @@ def commit_import(body: dict, request: Request):
 							order_notes = rec.get("notes") or None
 							if rec.get("alici_kodu"):
 								order_notes = f"{order_notes} | AliciKodu:{rec.get('alici_kodu')}" if order_notes else f"AliciKodu:{rec.get('alici_kodu')}"
-						order = Order(
-							tracking_no=rec.get("tracking_no"),
-							client_id=client.id,  # type: ignore
-							item_id=None,
-							quantity=rec.get("quantity") or 1,
-							unit_price=rec.get("unit_price"),
-							total_amount=rec.get("total_amount"),
-							shipment_date=rec.get("shipment_date"),
-							data_date=rec.get("shipment_date") or run.data_date,
-							source="kargo",
-							notes=order_notes,
-							status="placeholder",
-						)
-						session.add(order)
-						session.flush()
-						run.created_orders += 1
-						matched_order_id = order.id
-						matched_client_id = client.id
+							order = Order(
+								tracking_no=rec.get("tracking_no"),
+								client_id=client.id,  # type: ignore
+								item_id=None,
+								quantity=rec.get("quantity") or 1,
+								unit_price=rec.get("unit_price"),
+								total_amount=rec.get("total_amount"),
+								shipment_date=rec.get("shipment_date"),
+								data_date=rec.get("shipment_date") or run.data_date,
+								source="kargo",
+								notes=order_notes,
+								status="placeholder",
+							)
+							session.add(order)
+							session.flush()
+							run.created_orders += 1
+							matched_order_id = order.id
+							matched_client_id = client.id
 					else:
 						# We found an existing order by client/date (usually a bizim order); enrich it
 						matched_order_id = order.id
