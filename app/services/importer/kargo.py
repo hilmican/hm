@@ -30,15 +30,15 @@ KARGO_MAPPING = {
 	"il": "city",
 	"şehir": "city",
 
-	# item/product
-	"açıklama": "item_name",
-	"aciklama": "item_name",
-	"urun": "item_name",
-	"ürün": "item_name",
-	"urun adi": "item_name",
-	"urun adı": "item_name",
-	"urunadi": "item_name",
-	"faturabilgisi": "item_name",  # often contains textual status; use as notes if not product
+	# textual notes (not items)
+	"açıklama": "notes",
+	"aciklama": "notes",
+	"urun": "notes",
+	"ürün": "notes",
+	"urun adi": "notes",
+	"urun adı": "notes",
+	"urunadi": "notes",
+	"faturabilgisi": "notes",
 
 	# quantities and amounts
 	"adet": "quantity",

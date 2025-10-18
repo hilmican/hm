@@ -336,12 +336,10 @@ def commit_import(body: dict):
 						cur = order.notes or None
 						ak = f"AliciKodu:{rec.get('alici_kodu')}"
 						order.notes = f"{cur} | {ak}" if cur else ak
-					# do not create items from kargo; only link if exists
-					if rec.get("item_name") and not order.item_id:
-						sku = slugify(rec.get("item_name"))
-						item = session.exec(select(Item).where(Item.sku == sku)).first()
-						if item:
-							order.item_id = item.id  # type: ignore
+					# do not create or link items from kargo; treat descriptions as notes only
+					if rec.get("notes"):
+						cur = order.notes or None
+						order.notes = f"{cur} | {rec.get('notes')}" if cur else rec.get("notes")
 						enriched_orders_cnt += 1
 						# payments idempotent
 					if rec.get("payment_amount"):
