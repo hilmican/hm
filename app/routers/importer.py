@@ -272,7 +272,7 @@ def commit_import(body: dict):
 					if uq:
 						client = session.exec(select(Client).where(Client.unique_key == uq)).first()
 					if not client:
-					client = Client(
+						client = Client(
 							name=rec_name or "",
 							phone=rec.get("phone"),
 							address=rec.get("address"),
@@ -282,8 +282,8 @@ def commit_import(body: dict):
 						session.add(client)
 						session.flush()
 						run.created_clients += 1
-					# Bizim created client initially missing kargo
-					client.status = client.status or "missing-kargo"
+						# Bizim created client initially missing kargo
+						client.status = client.status or "missing-kargo"
 					else:
 						updated = False
 						for f in ("phone", "address", "city"):
@@ -315,7 +315,7 @@ def commit_import(body: dict):
 					if extra_notes:
 						joined = ", ".join(extra_notes)
 						order_notes = f"{order_notes} | {joined}" if order_notes else joined
-				order = Order(
+					order = Order(
 						tracking_no=rec.get("tracking_no"),
 						client_id=client.id,  # type: ignore
 						item_id=item.id,      # type: ignore
@@ -330,8 +330,8 @@ def commit_import(body: dict):
 					session.add(order)
 					session.flush()
 					run.created_orders += 1
-				# Bizim order initially missing kargo
-				order.status = order.status or "missing-kargo"
+					# Bizim order initially missing kargo
+					order.status = order.status or "missing-kargo"
 					matched_order_id = order.id
 
 				else:  # kargo
@@ -341,7 +341,7 @@ def commit_import(body: dict):
 						if itm:
 							rec["notes"] = (f"{rec.get('notes')} | {itm}" if rec.get("notes") else itm)
 						rec.pop("item_name", None)
-				order = find_order_by_tracking(session, rec.get("tracking_no"))
+					order = find_order_by_tracking(session, rec.get("tracking_no"))
 					if order:
 						matched_order_id = order.id
 						matched_client_id = order.client_id
@@ -364,7 +364,7 @@ def commit_import(body: dict):
 						order.notes = f"{cur} | {rec.get('notes')}" if cur else rec.get("notes")
 						enriched_orders_cnt += 1
 						# payments idempotent
-					if rec.get("payment_amount"):
+						if rec.get("payment_amount"):
 							pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
 							existing = session.exec(select(Payment).where(
 								Payment.order_id == order.id,
@@ -372,28 +372,28 @@ def commit_import(body: dict):
 								Payment.date == pdate,
 							)).first()
 							if not existing and (rec.get("payment_amount") or 0.0) > 0 and pdate is not None:
-							# compute net and fees
-							amt = rec.get("payment_amount") or 0.0
-							fee_kom = rec.get("fee_komisyon") or 0.0
-							fee_hiz = rec.get("fee_hizmet") or 0.0
-							fee_kar = rec.get("fee_kargo") or 0.0
-							fee_iad = rec.get("fee_iade") or 0.0
-							fee_eok = rec.get("fee_erken_odeme") or 0.0
-							net = (amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok])
-							pmt = Payment(
-								client_id=order.client_id,
-								order_id=order.id,
-								amount=amt,
-								date=pdate,
-								method=rec.get("payment_method") or "kargo",
-								reference=rec.get("tracking_no"),
-								fee_komisyon=fee_kom,
-								fee_hizmet=fee_hiz,
-								fee_kargo=fee_kar,
-								fee_iade=fee_iad,
-								fee_erken_odeme=fee_eok,
-								net_amount=net,
-							)
+								# compute net and fees
+								amt = rec.get("payment_amount") or 0.0
+								fee_kom = rec.get("fee_komisyon") or 0.0
+								fee_hiz = rec.get("fee_hizmet") or 0.0
+								fee_kar = rec.get("fee_kargo") or 0.0
+								fee_iad = rec.get("fee_iade") or 0.0
+								fee_eok = rec.get("fee_erken_odeme") or 0.0
+								net = (amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok])
+								pmt = Payment(
+									client_id=order.client_id,
+									order_id=order.id,
+									amount=amt,
+									date=pdate,
+									method=rec.get("payment_method") or "kargo",
+									reference=rec.get("tracking_no"),
+									fee_komisyon=fee_kom,
+									fee_hizmet=fee_hiz,
+									fee_kargo=fee_kar,
+									fee_iade=fee_iad,
+									fee_erken_odeme=fee_eok,
+									net_amount=net,
+								)
 								session.add(pmt)
 								run.created_payments += 1
 								payments_created_cnt += 1
