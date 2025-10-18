@@ -9,3 +9,4 @@ python-multipart==0.0.9
 openpyxl==3.1.5
 rapidfuzz==3.9.7
 orjson==3.10.7
+itsdangerous==2.2.0

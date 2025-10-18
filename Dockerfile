@@ -1,9 +1,12 @@
-FROM python:3.10-slim
+FROM python:3.10-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
 	PYTHONUNBUFFERED=1
 
 WORKDIR /app
+
+# Minimal tooling (curl, sqlite, ping via busybox-extras)
+RUN apk add --no-cache curl sqlite busybox-extras
 
 # Copy requirements and install
 COPY requirements.txt ./
