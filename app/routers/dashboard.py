@@ -9,12 +9,13 @@ router = APIRouter()
 
 @router.get("/dashboard")
 def dashboard(request: Request):
-    # require login
-    uid = request.session.get("uid")
-    if not uid:
-        templates = request.app.state.templates
-        return templates.TemplateResponse("login.html", {"request": request, "error": None})
+	# require login
+	uid = request.session.get("uid")
+	if not uid:
+		templates = request.app.state.templates
+		return templates.TemplateResponse("login.html", {"request": request, "error": None})
 	# pull small samples for quick display
+	
 	with get_session() as session:
 		orders = session.exec(select(Order).order_by(Order.id.desc()).limit(20)).all()
 		# fetch only the related clients/items for shown orders (no extra limits)
