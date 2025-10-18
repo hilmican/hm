@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 import re
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from sqlmodel import select
 
 from ..db import get_session, reset_db
@@ -127,7 +127,9 @@ def list_runs():
 
 
 @router.post("/preview")
-def preview_import(body: dict):
+def preview_import(body: dict, request: Request):
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
 	source = body.get("source")
 	filename = body.get("filename")
 	if source not in ("bizim", "kargo"):
@@ -182,7 +184,9 @@ def preview_import(body: dict):
 
 
 @router.post("/commit")
-def commit_import(body: dict):
+def commit_import(body: dict, request: Request):
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
 	source = body.get("source")
 	filename = body.get("filename")
 	data_date_raw = body.get("data_date")  # ISO YYYY-MM-DD string
@@ -533,7 +537,9 @@ def commit_import(body: dict):
 
 
 @router.post("/reset")
-def reset_database():
+def reset_database(request: Request):
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
 	reset_db()
 	return {"status": "ok"}
 
@@ -543,7 +549,11 @@ async def upload_excel(
 	source: str = Form(..., description="'bizim' or 'kargo'"),
 	files: Optional[List[UploadFile]] = File(None),
 	file: Optional[UploadFile] = File(None),
+	request: Request = None,
 ):
+	# Starlette injects Request when declared as a parameter
+	if not request or not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
 	if source not in ("bizim", "kargo"):
 		raise HTTPException(status_code=400, detail="source must be 'bizim' or 'kargo'")
 	folder = BIZIM_DIR if source == "bizim" else KARGO_DIR

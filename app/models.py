@@ -106,3 +106,14 @@ class ReconcileTask(SQLModel, table=True):
     candidates_json: str
     chosen_id: Optional[int] = None
     resolved_at: Optional[dt.datetime] = None
+
+
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str = Field(index=True, unique=True)
+    password_hash: str
+    role: str = Field(default="admin", index=True)
+    failed_attempts: int = 0
+    locked_until: Optional[dt.datetime] = Field(default=None, index=True)
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)

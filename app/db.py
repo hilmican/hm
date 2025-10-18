@@ -34,6 +34,19 @@ def init_db() -> None:
 		if not column_exists("importrun", "data_date"):
 			conn.exec_driver_sql("ALTER TABLE importrun ADD COLUMN data_date DATE")
 
+		# User table and columns (created by metadata, but ensure columns exist for old DBs)
+		if not column_exists("user", "username"):
+			# create table if absent by invoking metadata create again (safe) then fallback columns
+			SQLModel.metadata.create_all(engine)
+		if not column_exists("user", "password_hash"):
+			conn.exec_driver_sql("ALTER TABLE user ADD COLUMN password_hash TEXT")
+		if not column_exists("user", "role"):
+			conn.exec_driver_sql("ALTER TABLE user ADD COLUMN role TEXT")
+		if not column_exists("user", "failed_attempts"):
+			conn.exec_driver_sql("ALTER TABLE user ADD COLUMN failed_attempts INTEGER DEFAULT 0")
+		if not column_exists("user", "locked_until"):
+			conn.exec_driver_sql("ALTER TABLE user ADD COLUMN locked_until DATETIME")
+
 			# Client.status
 			if not column_exists("client", "status"):
 				conn.exec_driver_sql("ALTER TABLE client ADD COLUMN status TEXT")

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from sqlmodel import select
 
 from ..db import get_session
@@ -9,6 +9,11 @@ router = APIRouter()
 
 @router.get("/dashboard")
 def dashboard(request: Request):
+    # require login
+    uid = request.session.get("uid")
+    if not uid:
+        templates = request.app.state.templates
+        return templates.TemplateResponse("login.html", {"request": request, "error": None})
 	# pull small samples for quick display
 	with get_session() as session:
 		orders = session.exec(select(Order).order_by(Order.id.desc()).limit(20)).all()
