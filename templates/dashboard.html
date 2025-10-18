@@ -129,7 +129,17 @@
 				<h2>Payments (latest 20)</h2>
 				<table>
 					<thead>
-						<tr><th>ID</th><th>Client</th><th>Order</th><th>Amount</th><th>Net</th><th>Date</th><th>Method</th></tr>
+						<tr>
+							<th>ID</th>
+							<th>Client</th>
+							<th>Order</th>
+							<th>Order Total</th>
+							<th>Paid Amount</th>
+							<th>Fees</th>
+							<th>Net</th>
+							<th>Date</th>
+							<th>Method</th>
+						</tr>
 					</thead>
 					<tbody>
 					{% for p in payments %}
@@ -145,7 +155,19 @@
 									<a href="/orders/table#{{ p.order_id }}">{{ onum }}</a>
 								{% endif %}
 							</td>
+							<td>{% if p.order_id %}{{ order_total_map.get(p.order_id, 0) }}{% else %}-{% endif %}</td>
 							<td>{{ p.amount }}</td>
+							<td>
+								{# show itemized fees #}
+								{% set fkom = p.fee_komisyon or 0 %}
+								{% set fhiz = p.fee_hizmet or 0 %}
+								{% set fkar = p.fee_kargo or 0 %}
+								{% set fiad = p.fee_iade or 0 %}
+								{% set feok = p.fee_erken_odeme or 0 %}
+								{% set fsum = (fkom + fhiz + fkar + fiad + feok) %}
+								{{ '%.2f'|format(fsum) }}
+								<span class="caption">(K:{{ '%.2f'|format(fkom) }}, H:{{ '%.2f'|format(fhiz) }}, KG:{{ '%.2f'|format(fkar) }}, I:{{ '%.2f'|format(fiad) }}, E:{{ '%.2f'|format(feok) }})</span>
+							</td>
 							<td>{{ p.net_amount }}</td>
 							<td>{{ p.date }}</td>
 							<td>{{ p.method }}</td>

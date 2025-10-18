@@ -37,8 +37,9 @@ def dashboard(request: Request):
 		item_map = {it.id: it.name for it in items if it.id is not None}
 		payments = session.exec(select(Payment).order_by(Payment.id.desc()).limit(20)).all()
 
-		# Build order_map from the loaded orders; extend it with any orders referenced by payments
+		# Build order maps from the loaded orders; extend with any orders referenced by payments
 		order_map: dict[int, str] = {o.id: o.tracking_no for o in orders if o.id is not None}
+		order_total_map: dict[int, float] = {o.id: float(o.total_amount or 0.0) for o in orders if o.id is not None}
 		p_client_ids = sorted({p.client_id for p in payments if p.client_id and p.client_id not in client_map})
 		p_order_ids = sorted({p.order_id for p in payments if p.order_id and p.order_id not in order_map})
 		if p_client_ids:
@@ -51,6 +52,7 @@ def dashboard(request: Request):
 			for eo in extra_orders:
 				if eo.id is not None:
 					order_map[eo.id] = eo.tracking_no
+					order_total_map[eo.id] = float(eo.total_amount or 0.0)
 
 		# compute paid/unpaid flags for shown orders using net amounts
 		order_ids = [o.id for o in orders if o.id]
@@ -107,6 +109,7 @@ def dashboard(request: Request):
 				"client_map": client_map,
 				"item_map": item_map,
 				"order_map": order_map,
+				"order_total_map": order_total_map,
 				"client_sources": client_sources,
 				"order_sources": order_sources,
 				"item_sources": item_sources,
