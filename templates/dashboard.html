@@ -142,8 +142,16 @@
 					{% for p in payments %}
 						<tr>
 							<td>{{ p.id }}</td>
-							<td>{{ p.client_id }}</td>
-							<td>{{ p.order_id }}</td>
+							<td>
+								{% set cname = client_map.get(p.client_id) if client_map else p.client_id %}
+								<a href="/clients/{{ p.client_id }}" target="_blank">{{ cname }}</a>
+							</td>
+							<td>
+								{% if p.order_id %}
+									{% set onum = order_map.get(p.order_id) if order_map else p.order_id %}
+									<a href="/orders/table#{{ p.order_id }}" target="_blank">{{ onum }}</a>
+								{% endif %}
+							</td>
 							<td>{{ p.amount }}</td>
 							<td>{{ p.date }}</td>
 							<td>{{ p.method }}</td>
