@@ -91,6 +91,12 @@ def map_row(raw: dict[str, Any], row_values: list[Any] | None = None) -> dict[st
 		if not key:
 			continue
 		mapped[key] = v
+    # strong guard: never emit item_name from kargo; convert to notes if present
+    if mapped.get("item_name"):
+        _txt = mapped.pop("item_name")
+        if _txt:
+            prev = mapped.get("notes")
+            mapped["notes"] = f"{prev} | {_txt}" if prev else _txt
 	# types
 	if "shipment_date" in mapped:
 		mapped["shipment_date"] = parse_date(mapped.get("shipment_date"))

@@ -9,6 +9,7 @@ from ..db import get_session, reset_db
 from ..models import Client, Item, Order, Payment, ImportRun, ImportRow
 from ..services.importer.bizim import read_bizim_file
 from ..services.importer.kargo import read_kargo_file
+from ..schemas import BizimRow, KargoRow, BIZIM_ALLOWED_KEYS, KARGO_ALLOWED_KEYS
 from ..services.matching import find_order_by_tracking, find_client_candidates
 from ..services.matching import find_order_by_client_and_date
 from ..utils.hashing import compute_row_hash
@@ -145,6 +146,20 @@ def preview_import(body: dict):
 		file_path = candidates[0]
 
 	records = read_bizim_file(str(file_path)) if source == "bizim" else read_kargo_file(str(file_path))
+	# enforce per-source whitelist and annotate record_type
+	filtered: list[dict] = []
+	allowed = BIZIM_ALLOWED_KEYS if source == "bizim" else KARGO_ALLOWED_KEYS
+	for r in records:
+		# attach record_type for debugging
+		r["record_type"] = source
+		# drop unknown keys
+		r2 = {k: v for k, v in r.items() if k in allowed}
+		# map any stray item_name for kargo to notes just in case
+		if source == "kargo" and r.get("item_name"):
+			val = r.get("item_name")
+			r2["notes"] = f"{r2.get('notes')} | {val}" if r2.get("notes") else val
+		filtered.append(r2)
+	records = filtered
 	# DEBUG: echo headers and first few raw/mapped rows to server logs for troubleshooting
 	try:
 		from ..services.importer.common import read_sheet_rows
@@ -242,7 +257,7 @@ def commit_import(body: dict):
 					print("[ROW DEBUG]", idx, {
 						"tracking_no": rec.get("tracking_no"),
 						"name": rec.get("name"),
-						"item_name": rec.get("item_name"),
+						"record_type": rec.get("record_type"),
 						"notes": rec.get("notes"),
 						"quantity": rec.get("quantity"),
 						"total_amount": rec.get("total_amount"),
