@@ -17,6 +17,16 @@ def dashboard(request: Request):
 	# pull small samples for quick display
 	
 	with get_session() as session:
+		# aggregates for header
+		all_orders = session.exec(select(Order)).all()
+		total_sales = sum(float(o.total_amount or 0.0) for o in all_orders)
+		all_payments = session.exec(select(Payment)).all()
+		total_collected = sum(float(p.net_amount or 0.0) for p in all_payments)
+		total_fees = 0.0
+		for p in all_payments:
+			total_fees += float((p.fee_komisyon or 0.0) + (p.fee_hizmet or 0.0) + (p.fee_kargo or 0.0) + (p.fee_iade or 0.0) + (p.fee_erken_odeme or 0.0))
+		total_to_collect = max(0.0, total_sales - total_collected)
+
 		orders = session.exec(select(Order).order_by(Order.id.desc()).limit(20)).all()
 		# fetch only the related clients/items for shown orders (no extra limits)
 		client_ids = sorted({o.client_id for o in orders if o.client_id})
@@ -86,6 +96,10 @@ def dashboard(request: Request):
 			"dashboard.html",
 			{
 				"request": request,
+				"total_sales": total_sales,
+				"total_collected": total_collected,
+				"total_to_collect": total_to_collect,
+				"total_fees": total_fees,
 				"clients": clients,
 				"items": items,
 				"orders": orders,

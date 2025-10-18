@@ -22,6 +22,20 @@
 	</head>
 	<body>
 		<h1>Kargo Management Dashboard</h1>
+		<div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 18px 0;">
+			<div class="card" style="padding:8px 12px;">
+				<strong>Toplam Satış:</strong> {{ '%.2f'|format(total_sales or 0) }}
+			</div>
+			<div class="card" style="padding:8px 12px;">
+				<strong>Toplanan:</strong> {{ '%.2f'|format(total_collected or 0) }}
+			</div>
+			<div class="card" style="padding:8px 12px;">
+				<strong>Alınacak:</strong> {{ '%.2f'|format(total_to_collect or 0) }}
+			</div>
+			<div class="card" style="padding:8px 12px;">
+				<strong>Toplam Kesintiler:</strong> {{ '%.2f'|format(total_fees or 0) }}
+			</div>
+		</div>
 		<div class="toolbar">
 			<a href="/clients" target="_blank">Clients API</a>
 			<a href="/clients/table" target="_blank">Clients Table</a>
@@ -43,6 +57,50 @@
 
 		<div id="uploadResult" class="caption"></div>
 		<div class="grid">
+			<div class="card">
+				<h2>Orders (latest 20)</h2>
+				<table>
+					<thead>
+						<tr><th>ID</th><th>Tracking</th><th>Client</th><th>Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Data Date</th><th>Channel</th></tr>
+					</thead>
+					<tbody>
+					{% for o in orders %}
+						{% set rowcls = status_map.get(o.id) if status_map else '' %}
+						<tr class="{{ rowcls }}">
+							<td>{{ o.id }}</td>
+							<td>{{ o.tracking_no }}</td>
+							<td>
+								{% set cname = client_map.get(o.client_id) if client_map else None %}
+								{% if not cname %}
+									{% set ns = namespace(name='') %}
+									{% for c in clients %}{% if c.id == o.client_id %}{% set ns.name = c.name %}{% endif %}{% endfor %}
+									{% set cname = ns.name %}
+								{% endif %}
+								<a href="/clients/{{ o.client_id }}">{{ (cname or '')[:40] }}</a>
+							</td>
+							<td>
+								{% if o.item_id %}
+									{% set iname = item_map.get(o.item_id) if item_map else None %}
+									{% if not iname %}
+										{% set ns2 = namespace(name='') %}
+										{% for it in items %}{% if it.id == o.item_id %}{% set ns2.name = it.name %}{% endif %}{% endfor %}
+										{% set iname = ns2.name %}
+									{% endif %}
+									<a href="/items/table#{{ o.item_id }}">{{ (iname or '')[:40] }}</a>
+								{% endif %}
+							</td>
+							<td>{{ o.quantity }}</td>
+							<td>{{ o.total_amount }}</td>
+							<td>{{ o.shipment_date }}</td>
+							<td>{{ o.data_date }}</td>
+							<td>{{ o.source }}</td>
+						</tr>
+					{% endfor %}
+					</tbody>
+				</table>
+				<div class="caption">Open <a href="/orders/table">/orders/table</a> for full list.</div>
+			</div>
+
 			<div class="card">
 				<h2>Clients (latest 20)</h2>
 				<table>
@@ -68,6 +126,37 @@
 			</div>
 
 			<div class="card">
+				<h2>Payments (latest 20)</h2>
+				<table>
+					<thead>
+						<tr><th>ID</th><th>Client</th><th>Order</th><th>Amount</th><th>Net</th><th>Date</th><th>Method</th></tr>
+					</thead>
+					<tbody>
+					{% for p in payments %}
+						<tr>
+							<td>{{ p.id }}</td>
+							<td>
+								{% set cname = client_map.get(p.client_id) if client_map else p.client_id %}
+								<a href="/clients/{{ p.client_id }}">{{ cname }}</a>
+							</td>
+							<td>
+								{% if p.order_id %}
+									{% set onum = order_map.get(p.order_id) if order_map else p.order_id %}
+									<a href="/orders/table#{{ p.order_id }}">{{ onum }}</a>
+								{% endif %}
+							</td>
+							<td>{{ p.amount }}</td>
+							<td>{{ p.net_amount }}</td>
+							<td>{{ p.date }}</td>
+							<td>{{ p.method }}</td>
+						</tr>
+					{% endfor %}
+					</tbody>
+				</table>
+				<div class="caption">Open <a href="/payments/table">/payments/table</a> for full list.</div>
+			</div>
+
+			<div class="card">
 				<h2>Items (latest 20)</h2>
 				<table>
 					<thead>
@@ -85,82 +174,6 @@
 					</tbody>
 				</table>
 				<div class="caption">Open <a href="/items/table">/items/table</a> for full list.</div>
-			</div>
-
-			<div class="card">
-				<h2>Orders (latest 20)</h2>
-				<table>
-					<thead>
-						<tr><th>ID</th><th>Tracking</th><th>Client</th><th>Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Data Date</th><th>Channel</th></tr>
-					</thead>
-					<tbody>
-                    {% for o in orders %}
-                        {% set rowcls = status_map.get(o.id) if status_map else '' %}
-                        <tr class="{{ rowcls }}">
-							<td>{{ o.id }}</td>
-							<td>{{ o.tracking_no }}</td>
-						<td>
-							{# Resolve client name via map; fallback uses namespace to persist from loop #}
-							{% set cname = client_map.get(o.client_id) if client_map else None %}
-							{% if not cname %}
-								{% set ns = namespace(name='') %}
-								{% for c in clients %}{% if c.id == o.client_id %}{% set ns.name = c.name %}{% endif %}{% endfor %}
-								{% set cname = ns.name %}
-							{% endif %}
-							<a href="/clients/{{ o.client_id }}" target="_blank">{{ (cname or '')[:40] }}</a>
-						</td>
-						<td>
-							{% if o.item_id %}
-								{# Resolve item name via map; fallback uses namespace to persist from loop #}
-								{% set iname = item_map.get(o.item_id) if item_map else None %}
-								{% if not iname %}
-									{% set ns2 = namespace(name='') %}
-									{% for it in items %}{% if it.id == o.item_id %}{% set ns2.name = it.name %}{% endif %}{% endfor %}
-									{% set iname = ns2.name %}
-								{% endif %}
-								<a href="/items/table#{{ o.item_id }}" target="_blank">{{ (iname or '')[:40] }}</a>
-							{% endif %}
-						</td>
-							<td>{{ o.quantity }}</td>
-							<td>{{ o.total_amount }}</td>
-							<td>{{ o.shipment_date }}</td>
-							<td>{{ o.data_date }}</td>
-                            <td>{{ o.source }}</td>
-						</tr>
-					{% endfor %}
-					</tbody>
-				</table>
-				<div class="caption">Open <a href="/orders/table">/orders/table</a> for full list.</div>
-			</div>
-
-			<div class="card">
-				<h2>Payments (latest 20)</h2>
-				<table>
-					<thead>
-						<tr><th>ID</th><th>Client</th><th>Order</th><th>Amount</th><th>Date</th><th>Method</th></tr>
-					</thead>
-					<tbody>
-					{% for p in payments %}
-						<tr>
-							<td>{{ p.id }}</td>
-							<td>
-								{% set cname = client_map.get(p.client_id) if client_map else p.client_id %}
-								<a href="/clients/{{ p.client_id }}" target="_blank">{{ cname }}</a>
-							</td>
-							<td>
-								{% if p.order_id %}
-									{% set onum = order_map.get(p.order_id) if order_map else p.order_id %}
-									<a href="/orders/table#{{ p.order_id }}" target="_blank">{{ onum }}</a>
-								{% endif %}
-							</td>
-							<td>{{ p.amount }}</td>
-							<td>{{ p.date }}</td>
-							<td>{{ p.method }}</td>
-						</tr>
-					{% endfor %}
-					</tbody>
-				</table>
-				<div class="caption">Open <a href="/payments/table">/payments/table</a> for full list.</div>
 			</div>
 		</div>
 

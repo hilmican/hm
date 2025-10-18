@@ -151,24 +151,11 @@ def map_row(raw: dict[str, Any], row_values: list[Any] | None = None) -> dict[st
 		mapped["notes"] = " | ".join(dict.fromkeys(note_bits))
 
 	# derive payment_amount heuristically if header not mapped
-	if mapped.get("payment_amount") is None and row_values:
-		# choose the last positive float BEFORE a cell containing 'tahsil'
-		floats_before = []
-		stop_idx = None
-		for idx, v in enumerate(row_values):
-			if isinstance(v, str) and "tahsil" in v.lower():
-				stop_idx = idx
-				break
-			fv = parse_float(v)
-			if fv is not None and fv > 0:
-				floats_before.append(fv)
-		if stop_idx is not None and floats_before:
-			candidate = floats_before[-1]
-			# if total present and candidate is greater, try earlier float
-			tot = mapped.get("total_amount")
-			if isinstance(tot, (int, float)) and candidate and candidate > float(tot) and len(floats_before) >= 2:
-				candidate = floats_before[-2]
-			mapped["payment_amount"] = candidate
+	if mapped.get("payment_amount") is None:
+		# Prefer collected total as payment amount if provided
+		tot = mapped.get("total_amount")
+		if isinstance(tot, (int, float)):
+			mapped["payment_amount"] = tot
 
 	# derive unit_price if possible
 	qty = mapped.get("quantity") or 0
