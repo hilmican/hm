@@ -37,8 +37,9 @@ def list_payments_table(request: Request, limit: int = Query(default=1000000, ge
 		orders = session.exec(select(Order).where(Order.id.in_(order_ids))).all() if order_ids else []
 		client_map = {c.id: c.name for c in clients if c.id is not None}
 		order_map = {o.id: o.tracking_no for o in orders if o.id is not None}
+		order_total_map = {o.id: float(o.total_amount or 0.0) for o in orders if o.id is not None}
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"payments_table.html",
-			{"request": request, "rows": rows, "client_map": client_map, "order_map": order_map, "limit": limit},
+			{"request": request, "rows": rows, "client_map": client_map, "order_map": order_map, "order_total_map": order_total_map, "limit": limit},
 		)

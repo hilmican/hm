@@ -155,7 +155,7 @@
 									<a href="/orders/table#{{ p.order_id }}">{{ onum }}</a>
 								{% endif %}
 							</td>
-							<td>{% if p.order_id %}{{ order_total_map.get(p.order_id, 0) }}{% else %}-{% endif %}</td>
+							<td>{% if p.order_id and order_total_map %}{{ order_total_map.get(p.order_id, 0) }}{% else %}-{% endif %}</td>
 							<td>{{ p.amount }}</td>
 							<td>
 								{# show itemized fees #}
