@@ -13,7 +13,7 @@ from ..schemas import BizimRow, KargoRow, BIZIM_ALLOWED_KEYS, KARGO_ALLOWED_KEYS
 from ..services.matching import find_order_by_tracking, find_client_candidates
 from ..services.matching import find_order_by_client_and_date
 from ..utils.hashing import compute_row_hash
-from ..utils.normalize import client_unique_key, normalize_phone, normalize_text
+from ..utils.normalize import client_unique_key, legacy_client_unique_key, normalize_phone, normalize_text
 from ..utils.slugify import slugify
 
 router = APIRouter(prefix="")
@@ -271,17 +271,20 @@ def commit_import(body: dict, request: Request):
 						"delivery_date": rec.get("delivery_date"),
 					})
 				if source == "bizim":
-					uq = client_unique_key(rec.get("name"), rec.get("phone"))
+					new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
+					old_uq = legacy_client_unique_key(rec.get("name"), rec.get("phone"))
 					client = None
-					if uq:
-						client = session.exec(select(Client).where(Client.unique_key == uq)).first()
+					if new_uq:
+						client = session.exec(select(Client).where(Client.unique_key == new_uq)).first()
+					if not client and old_uq:
+						client = session.exec(select(Client).where(Client.unique_key == old_uq)).first()
 					if not client:
 						client = Client(
 							name=rec_name or "",
 							phone=rec.get("phone"),
 							address=rec.get("address"),
 							city=rec.get("city"),
-							unique_key=uq or None,
+							unique_key=new_uq or None,
 						)
 						session.add(client)
 						session.flush()
@@ -289,6 +292,9 @@ def commit_import(body: dict, request: Request):
 						# Bizim created client initially missing kargo
 						client.status = client.status or "missing-kargo"
 					else:
+						# migrate legacy key to new format if needed
+						if new_uq and client.unique_key != new_uq:
+							client.unique_key = new_uq
 						updated = False
 						for f in ("phone", "address", "city"):
 							val = rec.get(f)
@@ -417,17 +423,20 @@ def commit_import(body: dict, request: Request):
 							pass
 					else:
 						# no direct order; resolve client then order by date, else create placeholder
-						uq = client_unique_key(rec.get("name"), rec.get("phone"))
+						new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
+						old_uq = legacy_client_unique_key(rec.get("name"), rec.get("phone"))
 						client = None
-						if uq:
-							client = session.exec(select(Client).where(Client.unique_key == uq)).first()
+						if new_uq:
+							client = session.exec(select(Client).where(Client.unique_key == new_uq)).first()
+						if not client and old_uq:
+							client = session.exec(select(Client).where(Client.unique_key == old_uq)).first()
 						if not client:
 							client = Client(
 								name=rec.get("name") or "",
 								phone=rec.get("phone"),
 								address=rec.get("address"),
 								city=rec.get("city"),
-								unique_key=uq or None,
+								unique_key=new_uq or None,
 								status="missing-bizim",
 							)
 							session.add(client)
@@ -435,6 +444,8 @@ def commit_import(body: dict, request: Request):
 							run.created_clients += 1
 						else:
 							# backfill client fields if present
+							if new_uq and client.unique_key != new_uq:
+								client.unique_key = new_uq
 							updated = False
 							for f in ("phone","address","city"):
 								val = rec.get(f)
