@@ -330,9 +330,28 @@ def commit_import(body: dict, request: Request):
 					existing_order = None
 					if rec.get("shipment_date"):
 						existing_order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"))
+						try:
+							print("[MERGE DEBUG][bizim] date match try:", {
+								"client_id": client.id,
+								"name": rec.get("name"),
+								"shipment_date": rec.get("shipment_date"),
+								"found_order": existing_order.id if existing_order else None,
+								"found_source": (existing_order.source if existing_order else None),
+							})
+						except Exception:
+							pass
 					else:
 						# fallback: upgrade most recent kargo placeholder for this client (bizim often lacks date)
 						existing_order = find_recent_placeholder_kargo_for_client(session, client.id)
+						try:
+							print("[MERGE DEBUG][bizim] no date; fallback recent placeholder:", {
+								"client_id": client.id,
+								"name": rec.get("name"),
+								"found_order": existing_order.id if existing_order else None,
+								"found_source": (existing_order.source if existing_order else None),
+							})
+						except Exception:
+							pass
 					if existing_order and (existing_order.source or "") == "kargo":
 						existing_order.item_id = item.id  # type: ignore
 						existing_order.quantity = rec.get("quantity") or existing_order.quantity or 1
@@ -347,6 +366,17 @@ def commit_import(body: dict, request: Request):
 						# after bizim details, wait for kargo to merge
 						existing_order.status = existing_order.status or "missing-kargo"
 						matched_order_id = existing_order.id
+						try:
+							print("[MERGE DEBUG][bizim] upgraded kargo placeholder -> bizim:", {
+								"order_id": existing_order.id,
+								"tracking_no": existing_order.tracking_no,
+								"client_id": existing_order.client_id,
+								"quantity": existing_order.quantity,
+								"unit_price": existing_order.unit_price,
+								"total_amount": existing_order.total_amount,
+							})
+						except Exception:
+							pass
 					else:
 						order = Order(
 							tracking_no=rec.get("tracking_no"),
@@ -363,6 +393,16 @@ def commit_import(body: dict, request: Request):
 						session.add(order)
 						session.flush()
 						run.created_orders += 1
+						try:
+							print("[MERGE DEBUG][bizim] created new bizim order:", {
+								"order_id": order.id,
+								"client_id": order.client_id,
+								"shipment_date": order.shipment_date,
+								"data_date": order.data_date,
+								"total_amount": order.total_amount,
+							})
+						except Exception:
+							pass
 						# Bizim order initially missing kargo
 						order.status = order.status or "missing-kargo"
 						matched_order_id = order.id
@@ -375,6 +415,13 @@ def commit_import(body: dict, request: Request):
 							rec["notes"] = (f"{rec.get('notes')} | {itm}" if rec.get("notes") else itm)
 						rec.pop("item_name", None)
 					order = find_order_by_tracking(session, rec.get("tracking_no"))
+					try:
+						print("[MERGE DEBUG][kargo] tracking lookup:", {
+							"tracking_no": rec.get("tracking_no"),
+							"found_order": order.id if order else None,
+						})
+					except Exception:
+						pass
 					if order:
 						matched_order_id = order.id
 						matched_client_id = order.client_id
@@ -477,6 +524,16 @@ def commit_import(body: dict, request: Request):
 									updated = True
 						# try find existing bizim order by client/date
 						order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"))
+						try:
+							print("[MERGE DEBUG][kargo] client/date lookup:", {
+								"client_id": client.id,
+								"name": rec.get("name"),
+								"shipment_date": rec.get("shipment_date"),
+								"found_order": order.id if order else None,
+								"found_source": (order.source if order else None),
+							})
+						except Exception:
+							pass
 						if order:
 							# enrich existing order (usually bizim)
 							matched_order_id = order.id
