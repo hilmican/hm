@@ -78,8 +78,59 @@ def get_session() -> Iterator[Session]:
 
 
 def reset_db() -> None:
-	"""Dangerous: delete SQLite file and recreate empty schema."""
-	engine.dispose()
-	if DB_PATH.exists():
-		DB_PATH.unlink()
-	SQLModel.metadata.create_all(engine)
+    """Reset DB but preserve users.
+
+    Backs up rows from the `user` table (if it exists), recreates the DB,
+    then restores the users to keep credentials intact.
+    """
+    # Backup existing users before dropping DB
+    existing_users = []
+    try:
+        from .models import User  # local import to avoid circulars at module import time
+        try:
+            from sqlmodel import Session as _Session, select as _select
+            with _Session(engine) as _sess:
+                try:
+                    rows = _sess.exec(_select(User)).all()
+                    for u in rows:
+                        existing_users.append({
+                            "id": u.id,
+                            "username": u.username,
+                            "password_hash": u.password_hash,
+                            "role": u.role,
+                            "failed_attempts": u.failed_attempts,
+                            "locked_until": u.locked_until,
+                            "created_at": u.created_at,
+                            "updated_at": u.updated_at,
+                        })
+                except Exception:
+                    # table may not exist; ignore
+                    pass
+        except Exception:
+            pass
+    except Exception:
+        # models import failed; proceed without backup
+        pass
+
+    engine.dispose()
+    if DB_PATH.exists():
+        DB_PATH.unlink()
+    SQLModel.metadata.create_all(engine)
+
+    # Restore users if any
+    if existing_users:
+        try:
+            from .models import User  # re-import after re-create
+            with Session(engine) as _sess:
+                for data in existing_users:
+                    try:
+                        _sess.add(User(**data))
+                    except Exception:
+                        # If explicit id insertion fails, drop id and retry
+                        data_no_id = dict(data)
+                        data_no_id.pop("id", None)
+                        _sess.add(User(**data_no_id))
+                _sess.commit()
+        except Exception:
+            # If restore fails, continue with empty users rather than aborting reset
+            pass
