@@ -243,6 +243,7 @@ def commit_import(body: dict):
 						"tracking_no": rec.get("tracking_no"),
 						"name": rec.get("name"),
 						"item_name": rec.get("item_name"),
+						"notes": rec.get("notes"),
 						"quantity": rec.get("quantity"),
 						"total_amount": rec.get("total_amount"),
 						"payment_amount": rec.get("payment_amount"),
@@ -319,6 +320,12 @@ def commit_import(body: dict):
 					matched_order_id = order.id
 
 				else:  # kargo
+					# hard guard: never treat any kargo field as item; move any residual item_name into notes
+					if rec.get("item_name"):
+						itm = str(rec.get("item_name") or "").strip()
+						if itm:
+							rec["notes"] = (f"{rec.get('notes')} | {itm}" if rec.get("notes") else itm)
+						rec.pop("item_name", None)
 				order = find_order_by_tracking(session, rec.get("tracking_no"))
 					if order:
 						matched_order_id = order.id
