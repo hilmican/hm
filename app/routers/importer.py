@@ -445,23 +445,19 @@ def commit_import(body: dict, request: Request):
 							cur = order.notes or None
 							order.notes = f"{cur} | {rec.get('notes')}" if cur else rec.get("notes")
 						enriched_orders_cnt += 1
-						# payments idempotent
-						if rec.get("payment_amount"):
-							pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
-							existing = session.exec(select(Payment).where(
-								Payment.order_id == order.id,
-								Payment.amount == (rec.get("payment_amount") or 0.0),
-								Payment.date == pdate,
-							)).first()
-							if not existing and (rec.get("payment_amount") or 0.0) > 0 and pdate is not None:
-								# compute net and fees
-								amt = rec.get("payment_amount") or 0.0
-								fee_kom = rec.get("fee_komisyon") or 0.0
-								fee_hiz = rec.get("fee_hizmet") or 0.0
-								fee_kar = rec.get("fee_kargo") or 0.0
-								fee_iad = rec.get("fee_iade") or 0.0
-								fee_eok = rec.get("fee_erken_odeme") or 0.0
-								net = (amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok])
+						# payments idempotent per order: create once, else update
+						amt_raw = rec.get("payment_amount")
+						pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
+						if (amt_raw or 0.0) > 0 and pdate is not None:
+							existing = session.exec(select(Payment).where(Payment.order_id == order.id)).first()
+							fee_kom = rec.get("fee_komisyon") or 0.0
+							fee_hiz = rec.get("fee_hizmet") or 0.0
+							fee_kar = rec.get("fee_kargo") or 0.0
+							fee_iad = rec.get("fee_iade") or 0.0
+							fee_eok = rec.get("fee_erken_odeme") or 0.0
+							amt = float(amt_raw or 0.0)
+							net = (amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok])
+							if not existing:
 								pmt = Payment(
 									client_id=order.client_id,
 									order_id=order.id,
@@ -479,10 +475,21 @@ def commit_import(body: dict, request: Request):
 								session.add(pmt)
 								run.created_payments += 1
 								payments_created_cnt += 1
-							elif existing:
-								payments_existing_cnt += 1
 							else:
-								payments_skipped_zero_cnt += 1
+								# update existing with latest numbers
+								existing.amount = amt
+								existing.date = pdate
+								existing.method = rec.get("payment_method") or existing.method
+								existing.reference = rec.get("tracking_no") or existing.reference
+								existing.fee_komisyon = fee_kom
+								existing.fee_hizmet = fee_hiz
+								existing.fee_kargo = fee_kar
+								existing.fee_iade = fee_iad
+								existing.fee_erken_odeme = fee_eok
+								existing.net_amount = net
+								payments_existing_cnt += 1
+						else:
+							payments_skipped_zero_cnt += 1
 						# flip statuses if we have a bizim order
 						try:
 							from ..models import Client as _Client
@@ -587,22 +594,19 @@ def commit_import(body: dict, request: Request):
 							matched_order_id = order.id
 							matched_client_id = client.id
 
-						# payment for matched/created order
-						if rec.get("payment_amount"):
-							pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
-							existing = session.exec(select(Payment).where(
-								Payment.order_id == order.id,
-								Payment.amount == (rec.get("payment_amount") or 0.0),
-								Payment.date == pdate,
-							)).first()
-							if not existing and (rec.get("payment_amount") or 0.0) > 0 and pdate is not None:
-								amt = rec.get("payment_amount") or 0.0
-								fee_kom = rec.get("fee_komisyon") or 0.0
-								fee_hiz = rec.get("fee_hizmet") or 0.0
-								fee_kar = rec.get("fee_kargo") or 0.0
-								fee_iad = rec.get("fee_iade") or 0.0
-								fee_eok = rec.get("fee_erken_odeme") or 0.0
-								net = (amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok])
+						# payment for matched/created order (create once, else update)
+						amt_raw = rec.get("payment_amount")
+						pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
+						if (amt_raw or 0.0) > 0 and pdate is not None:
+							existing = session.exec(select(Payment).where(Payment.order_id == order.id)).first()
+							fee_kom = rec.get("fee_komisyon") or 0.0
+							fee_hiz = rec.get("fee_hizmet") or 0.0
+							fee_kar = rec.get("fee_kargo") or 0.0
+							fee_iad = rec.get("fee_iade") or 0.0
+							fee_eok = rec.get("fee_erken_odeme") or 0.0
+							amt = float(amt_raw or 0.0)
+							net = (amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok])
+							if not existing:
 								pmt = Payment(
 									client_id=order.client_id,
 									order_id=order.id,
@@ -620,10 +624,20 @@ def commit_import(body: dict, request: Request):
 								session.add(pmt)
 								run.created_payments += 1
 								payments_created_cnt += 1
-							elif existing:
-								payments_existing_cnt += 1
 							else:
-								payments_skipped_zero_cnt += 1
+								existing.amount = amt
+								existing.date = pdate
+								existing.method = rec.get("payment_method") or existing.method
+								existing.reference = rec.get("tracking_no") or existing.reference
+								existing.fee_komisyon = fee_kom
+								existing.fee_hizmet = fee_hiz
+								existing.fee_kargo = fee_kar
+								existing.fee_iade = fee_iad
+								existing.fee_erken_odeme = fee_eok
+								existing.net_amount = net
+								payments_existing_cnt += 1
+						else:
+							payments_skipped_zero_cnt += 1
 			except Exception as e:
 				status = "error"
 				message = str(e)
