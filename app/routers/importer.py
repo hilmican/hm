@@ -445,11 +445,11 @@ def commit_import(body: dict, request: Request):
 							cur = order.notes or None
 							order.notes = f"{cur} | {rec.get('notes')}" if cur else rec.get("notes")
 						enriched_orders_cnt += 1
-						# payments idempotent per order: create once, else update
+						# payments idempotent per entry: merge by (order_id, date); allow multiple dates
 						amt_raw = rec.get("payment_amount")
 						pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
 						if (amt_raw or 0.0) > 0 and pdate is not None:
-							existing = session.exec(select(Payment).where(Payment.order_id == order.id)).first()
+							existing = session.exec(select(Payment).where(Payment.order_id == order.id, Payment.date == pdate)).first()
 							fee_kom = rec.get("fee_komisyon") or 0.0
 							fee_hiz = rec.get("fee_hizmet") or 0.0
 							fee_kar = rec.get("fee_kargo") or 0.0
@@ -476,17 +476,17 @@ def commit_import(body: dict, request: Request):
 								run.created_payments += 1
 								payments_created_cnt += 1
 							else:
-								# update existing with latest numbers
-								existing.amount = amt
-								existing.date = pdate
-								existing.method = rec.get("payment_method") or existing.method
-								existing.reference = rec.get("tracking_no") or existing.reference
-								existing.fee_komisyon = fee_kom
-								existing.fee_hizmet = fee_hiz
-								existing.fee_kargo = fee_kar
-								existing.fee_iade = fee_iad
-								existing.fee_erken_odeme = fee_eok
-								existing.net_amount = net
+								# if later file has bigger amount same date, upgrade existing
+								if amt > float(existing.amount or 0.0):
+									existing.amount = amt
+									existing.method = rec.get("payment_method") or existing.method
+									existing.reference = rec.get("tracking_no") or existing.reference
+									existing.fee_komisyon = fee_kom
+									existing.fee_hizmet = fee_hiz
+									existing.fee_kargo = fee_kar
+									existing.fee_iade = fee_iad
+									existing.fee_erken_odeme = fee_eok
+									existing.net_amount = net
 								payments_existing_cnt += 1
 						else:
 							payments_skipped_zero_cnt += 1
@@ -594,11 +594,11 @@ def commit_import(body: dict, request: Request):
 							matched_order_id = order.id
 							matched_client_id = client.id
 
-						# payment for matched/created order (create once, else update)
+						# payment for matched/created order (allow multiple dates; merge by date)
 						amt_raw = rec.get("payment_amount")
 						pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
 						if (amt_raw or 0.0) > 0 and pdate is not None:
-							existing = session.exec(select(Payment).where(Payment.order_id == order.id)).first()
+							existing = session.exec(select(Payment).where(Payment.order_id == order.id, Payment.date == pdate)).first()
 							fee_kom = rec.get("fee_komisyon") or 0.0
 							fee_hiz = rec.get("fee_hizmet") or 0.0
 							fee_kar = rec.get("fee_kargo") or 0.0
@@ -625,16 +625,16 @@ def commit_import(body: dict, request: Request):
 								run.created_payments += 1
 								payments_created_cnt += 1
 							else:
-								existing.amount = amt
-								existing.date = pdate
-								existing.method = rec.get("payment_method") or existing.method
-								existing.reference = rec.get("tracking_no") or existing.reference
-								existing.fee_komisyon = fee_kom
-								existing.fee_hizmet = fee_hiz
-								existing.fee_kargo = fee_kar
-								existing.fee_iade = fee_iad
-								existing.fee_erken_odeme = fee_eok
-								existing.net_amount = net
+								if amt > float(existing.amount or 0.0):
+									existing.amount = amt
+									existing.method = rec.get("payment_method") or existing.method
+									existing.reference = rec.get("tracking_no") or existing.reference
+									existing.fee_komisyon = fee_kom
+									existing.fee_hizmet = fee_hiz
+									existing.fee_kargo = fee_kar
+									existing.fee_iade = fee_iad
+									existing.fee_erken_odeme = fee_eok
+									existing.net_amount = net
 								payments_existing_cnt += 1
 						else:
 							payments_skipped_zero_cnt += 1
