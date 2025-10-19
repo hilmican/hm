@@ -46,7 +46,7 @@ KARGO_MAPPING = {
 	"faturabedeli": "fee_kargo",
 	"fatura tutari": "fee_kargo",
 	"faturatutari": "fee_kargo",
-	"tahsilattutari": "total_amount",
+	"tahsilattutari": "payment_amount",
 	"ödenen": "payment_amount",
 	"odenen": "payment_amount",
 	"odenen tutar": "payment_amount",
@@ -150,12 +150,7 @@ def map_row(raw: dict[str, Any], row_values: list[Any] | None = None) -> dict[st
 	if note_bits:
 		mapped["notes"] = " | ".join(dict.fromkeys(note_bits))
 
-	# derive payment_amount heuristically if header not mapped
-	if mapped.get("payment_amount") is None:
-		# Prefer collected total as payment amount if provided
-		tot = mapped.get("total_amount")
-		if isinstance(tot, (int, float)):
-			mapped["payment_amount"] = tot
+	# do not derive payment_amount from total_amount; rely solely on TahsilatTutari if present
 
 	# derive unit_price if possible
 	qty = mapped.get("quantity") or 0

@@ -54,24 +54,20 @@ def dashboard(request: Request):
 					order_map[eo.id] = eo.tracking_no
 					order_total_map[eo.id] = float(eo.total_amount or 0.0)
 
-		# compute paid/unpaid flags for shown orders
+		# compute paid/unpaid flags for shown orders using TahsilatTutari (Payment.amount)
 		order_ids = [o.id for o in orders if o.id]
 		pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
 		paid_map: dict[int, float] = {}
 		for p in pays:
 			if p.order_id is None:
 				continue
-			# Prefer gross amount; if missing, reconstruct gross from net + fees
-			gross_from_amount = float(p.amount or 0.0)
-			gross_from_components = float((p.net_amount or 0.0) + (p.fee_komisyon or 0.0) + (p.fee_hizmet or 0.0) + (p.fee_kargo or 0.0) + (p.fee_iade or 0.0) + (p.fee_erken_odeme or 0.0))
-			effective_gross = gross_from_amount if gross_from_amount > 0 else gross_from_components
-			paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + effective_gross
+			paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
 		status_map: dict[int, str] = {}
 		for o in orders:
 			oid = o.id or 0
 			total = float(o.total_amount or 0.0)
-			net = paid_map.get(oid, 0.0)
-			status_map[oid] = "paid" if (net > 0 and net >= total) else "unpaid"
+			paid = paid_map.get(oid, 0.0)
+			status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
 
 		# Build source filename mappings using ImportRow -> ImportRun
 		client_ids = [c.id for c in clients if c.id]

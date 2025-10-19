@@ -42,20 +42,20 @@ def list_orders_table(request: Request):
         items = session.exec(select(Item).where(Item.id.in_(item_ids))).all() if item_ids else []
         client_map = {c.id: c.name for c in clients if c.id is not None}
         item_map = {it.id: it.name for it in items if it.id is not None}
-        # compute paid/unpaid using net amounts
+        # compute paid/unpaid using TahsilatTutari (gross collected) amounts
         order_ids = [o.id for o in rows if o.id]
         pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
         paid_map: dict[int, float] = {}
         for p in pays:
             if p.order_id is None:
                 continue
-            paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.net_amount or 0.0)
+            paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
         status_map: dict[int, str] = {}
         for o in rows:
             oid = o.id or 0
             total = float(o.total_amount or 0.0)
-            net = paid_map.get(oid, 0.0)
-            status_map[oid] = "paid" if (net > 0 and net >= total) else "unpaid"
+            paid = paid_map.get(oid, 0.0)
+            status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "orders_table.html",
