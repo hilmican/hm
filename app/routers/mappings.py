@@ -48,11 +48,11 @@ def list_rules(limit: int = Query(default=500, ge=1, le=5000), pattern: str | No
 
 @router.get("/table")
 def rules_table(request: Request, limit: int = Query(default=1000, ge=1, le=5000), pattern: str | None = Query(default=None)):
-    with get_session() as session:
-        q = select(ItemMappingRule).order_by(ItemMappingRule.priority.desc(), ItemMappingRule.id.desc())
-        if pattern:
-            q = q.where(ItemMappingRule.source_pattern == pattern)
-        rules = session.exec(q.limit(limit)).all()
+	with get_session() as session:
+		q = select(ItemMappingRule).order_by(ItemMappingRule.priority.desc(), ItemMappingRule.id.desc())
+		if pattern:
+			q = q.where(ItemMappingRule.source_pattern == pattern)
+		rules = session.exec(q.limit(limit)).all()
 		result = []
 		for r in rules:
 			outs = session.exec(select(ItemMappingOutput).where(ItemMappingOutput.rule_id == r.id)).all()
@@ -60,7 +60,7 @@ def rules_table(request: Request, limit: int = Query(default=1000, ge=1, le=5000
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"mappings_table.html",
-            {"request": request, "rows": result},
+			{"request": request, "rows": result},
 		)
 
 
