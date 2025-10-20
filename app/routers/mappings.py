@@ -13,9 +13,12 @@ router = APIRouter(prefix="/mappings", tags=["mappings"])
 
 
 @router.get("/rules")
-def list_rules(limit: int = Query(default=500, ge=1, le=5000)):
+def list_rules(limit: int = Query(default=500, ge=1, le=5000), pattern: str | None = Query(default=None)):
 	with get_session() as session:
-		rules = session.exec(select(ItemMappingRule).order_by(ItemMappingRule.priority.desc(), ItemMappingRule.id.desc()).limit(limit)).all()
+		q = select(ItemMappingRule).order_by(ItemMappingRule.priority.desc(), ItemMappingRule.id.desc())
+		if pattern:
+			q = q.where(ItemMappingRule.source_pattern == pattern)
+		rules = session.exec(q.limit(limit)).all()
 		result = []
 		for r in rules:
 			outs = session.exec(select(ItemMappingOutput).where(ItemMappingOutput.rule_id == r.id)).all()

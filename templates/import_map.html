@@ -77,8 +77,8 @@
                     </div>
 
                     <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
-                        <button id="saveRule" type="button">Save Rule</button>
-                        <button id="saveNext" type="button" style="background:#10b981">Save & Next</button>
+                        <button id="saveRule" type="button" title="Saves a mapping rule for this pattern with the outputs listed below.">Save Rule</button>
+                        <button id="saveNext" type="button" style="background:#10b981" title="Saves the rule and jumps to the next unmatched pattern.">Save & Next</button>
                         <span id="saveMsg" class="muted"></span>
                     </div>
 
@@ -225,6 +225,19 @@
         const body = { source_pattern: pattern, match_mode: 'exact', priority: 100, outputs };
         const r = await fetch('/mappings/rules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
         if (!r.ok) throw new Error(await r.text());
+        // reload saved outputs into editor so navigating back preserves them
+        try {
+            const rs = await fetch(`/mappings/rules?pattern=${encodeURIComponent(pattern)}`);
+            if (rs.ok) {
+                const jr = await rs.json();
+                const rules = jr.rules||[];
+                if (rules.length) {
+                    const outs = rules[0].outputs||[];
+                    outsTbody.innerHTML = '';
+                    for (const o of outs) addOutputRow({ size:o.size, color:o.color, pack_type:o.pack_type, quantity:o.quantity, pair_multiplier:o.pair_multiplier, unit_price:o.unit_price });
+                }
+            }
+        } catch (e) {}
     }
 
     document.getElementById('saveRule').addEventListener('click', async ()=>{
