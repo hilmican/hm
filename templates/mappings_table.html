@@ -22,18 +22,28 @@
         <span class="pill">{{ rows|length }} rule(s)</span>
     </div>
     <h2>Mapping Rules</h2>
+    <div class="toolbar">
+        <input id="searchPat" type="text" placeholder="Search pattern..." style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;" />
+        <button id="applySearch" type="button">Search</button>
+    </div>
     <table>
         <thead>
-            <tr><th>ID</th><th>Pattern</th><th>Mode</th><th>Priority</th><th>Active</th><th>Outputs</th></tr>
+            <tr><th>ID</th><th>Pattern</th><th>Mode</th><th>Priority</th><th>Active</th><th>Outputs</th><th>Actions</th></tr>
         </thead>
         <tbody>
             {% for r, outs in rows %}
             <tr>
                 <td>{{ r.id }}</td>
-                <td><code>{{ r.source_pattern }}</code></td>
-                <td>{{ r.match_mode }}</td>
-                <td>{{ r.priority }}</td>
-                <td>{{ r.is_active }}</td>
+                <td><input data-id="{{ r.id }}" data-field="source_pattern" value="{{ r.source_pattern }}" style="width:220px" /></td>
+                <td>
+                    <select data-id="{{ r.id }}" data-field="match_mode">
+                        <option value="exact" {% if r.match_mode=='exact' %}selected{% endif %}>exact</option>
+                        <option value="icontains" {% if r.match_mode=='icontains' %}selected{% endif %}>icontains</option>
+                        <option value="regex" {% if r.match_mode=='regex' %}selected{% endif %}>regex</option>
+                    </select>
+                </td>
+                <td><input type="number" data-id="{{ r.id }}" data-field="priority" value="{{ r.priority }}" style="width:80px" /></td>
+                <td><input type="checkbox" data-id="{{ r.id }}" data-field="is_active" {% if r.is_active %}checked{% endif %} /></td>
                 <td>
                     <ul>
                         {% for o in outs %}
@@ -43,9 +53,64 @@
                         {% endfor %}
                     </ul>
                 </td>
+                <td>
+                    <button class="saveRule" data-id="{{ r.id }}">Save</button>
+                    <button class="editOutputs" data-id="{{ r.id }}">Edit outputs</button>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+
+    <script>
+    document.getElementById('applySearch').addEventListener('click', ()=>{
+        const v = document.getElementById('searchPat').value || '';
+        const q = v ? ('?pattern=' + encodeURIComponent(v)) : '';
+        location.href = '/mappings/table' + q;
+    });
+    for (const btn of document.querySelectorAll('.saveRule')){
+        btn.addEventListener('click', async (e)=>{
+            const id = e.target.getAttribute('data-id');
+            const root = e.target.closest('tr');
+            const body = {};
+            for (const el of root.querySelectorAll('[data-id][data-field]')){
+                const fld = el.getAttribute('data-field');
+                let val = el.type==='checkbox' ? el.checked : el.value;
+                if (el.type==='number') val = Number(val||0);
+                body[fld] = val;
+            }
+            try {
+                const r = await fetch('/mappings/rules/' + id, { method: 'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+                if (!r.ok) throw new Error(await r.text());
+                alert('Saved');
+            } catch (err) { alert('Save error'); }
+        });
+    }
+
+    for (const btn of document.querySelectorAll('.editOutputs')){
+        btn.addEventListener('click', async (e)=>{
+            const id = e.target.getAttribute('data-id');
+            try {
+                // fetch current rule to get existing outputs
+                const rs = await fetch('/mappings/rules?pattern=' + encodeURIComponent(e.target.closest('tr').querySelector('[data-field="source_pattern"]').value));
+                let outputs = [];
+                if (rs.ok) {
+                    const jr = await rs.json();
+                    const rules = jr.rules||[];
+                    if (rules.length) outputs = rules[0].outputs||[];
+                }
+                const tpl = '[\n  {"product_id": null, "item_id": null, "size": null, "color": null, "pack_type": null, "quantity": 1, "pair_multiplier": 1, "unit_price": null}\n]';
+                const text = prompt('Edit outputs as JSON array (product_id/item_id, size, color, pack_type, quantity, pair_multiplier, unit_price):', JSON.stringify(outputs.length?outputs:JSON.parse(tpl)));
+                if (!text) return;
+                let arr = [];
+                try { arr = JSON.parse(text); } catch (e) { alert('Invalid JSON'); return; }
+                const r = await fetch('/mappings/rules/' + id + '/outputs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(arr) });
+                if (!r.ok) throw new Error(await r.text());
+                alert('Outputs saved');
+                location.reload();
+            } catch (err) { alert('Edit outputs error'); }
+        });
+    }
+    </script>
 </body>
 </html>

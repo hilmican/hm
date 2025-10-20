@@ -26,9 +26,10 @@
 <body>
     <div class="toolbar">
         <a href="/dashboard" style="color:#2563eb;text-decoration:none">← Dashboard</a>
-        <span class="pill">{{ (unmatched_patterns or [])|length }} pattern(s) to map</span>
+        <span class="pill"><span id="unmatchedCount">{{ total_unmatched or 0 }}</span> row(s) unmatched</span>
         <span class="muted">Source: {{ source }}{% if filenames %}, Files: {{ ", ".join(filenames) }}{% else %}, File: {{ filename }}{% endif %}</span>
-        <button id="commitBtn" style="margin-left:auto">Commit Import</button>
+        <button id="rescanBtn" type="button">Re-scan</button>
+        <button id="commitBtn" style="margin-left:auto" disabled>Commit Import</button>
     </div>
 
     <div class="layout">
@@ -92,6 +93,25 @@
                 </div>
             </div>
         </div>
+        {% if filenames and filenames|length > 1 %}
+        <div class="card">
+            <h2>Per-file Dates</h2>
+            <div class="inner">
+                <table>
+                    <thead><tr><th>Filename</th><th>Data date (YYYY-MM-DD)</th></tr></thead>
+                    <tbody id="datesTbody">
+                        {% for fn in filenames %}
+                        <tr>
+                            <td>{{ fn }}</td>
+                            <td><input type="date" data-filename="{{ fn }}" /></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="muted">Each file will use its specific date during commit.</div>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <script>
@@ -99,6 +119,27 @@
     const source = {{ source | tojson }};
     const filename = {{ filename | tojson }};
     const filenames = {{ filenames | tojson if filenames else 'null' }};
+    const unmatchedCountEl = document.getElementById('unmatchedCount');
+    const commitBtn = document.getElementById('commitBtn');
+    const rescanBtn = document.getElementById('rescanBtn');
+    const datesTbody = document.getElementById('datesTbody');
+
+    function setCommitEnabled(enabled){
+        if (enabled) { commitBtn.removeAttribute('disabled'); }
+        else { commitBtn.setAttribute('disabled','disabled'); }
+    }
+    setCommitEnabled((Number(unmatchedCountEl?.textContent||'0')||0) === 0);
+    rescanBtn.addEventListener('click', async ()=>{
+        try {
+            const body = filenames && Array.isArray(filenames) ? { source, filenames, exclude_generic: false } : { source, filename, exclude_generic: false };
+            const r = await fetch('/import/preview-map', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+            if (r.ok) {
+                const j = await r.json();
+                if (unmatchedCountEl) unmatchedCountEl.textContent = String(j.total_unmatched||0);
+                setCommitEnabled((j.total_unmatched||0) === 0);
+            }
+        } catch (e) {}
+    });
 
     const patList = document.getElementById('patList');
     const editor = document.getElementById('editor');
@@ -258,11 +299,27 @@
     });
 
     document.getElementById('commitBtn').addEventListener('click', async ()=>{
-        // if multiple files: ask single date to apply to all (can enhance later per-file)
-        const data_date = prompt('Data date (YYYY-MM-DD)?');
-        if (!data_date) return;
+        if (commitBtn.hasAttribute('disabled')) { return; }
+        let body;
+        if (filenames && Array.isArray(filenames)) {
+            const map = {};
+            let missing = false;
+            if (datesTbody) {
+                for (const inp of datesTbody.querySelectorAll('input[type="date"][data-filename]')){
+                    const fn = inp.getAttribute('data-filename');
+                    const v = inp.value;
+                    if (!v) { missing = true; break; }
+                    map[fn] = v;
+                }
+            }
+            if (missing) { alert('Please fill all dates.'); return; }
+            body = { source, filenames, data_dates: map };
+        } else {
+            const data_date = prompt('Data date (YYYY-MM-DD)?');
+            if (!data_date) return;
+            body = { source, filename, data_date };
+        }
         try {
-            const body = filenames && Array.isArray(filenames) ? { source, filenames, data_date } : { source, filename, data_date };
             const r = await fetch('/import/commit', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
             if (!r.ok) throw new Error(await r.text());
             alert('Import committed.');

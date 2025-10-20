@@ -187,7 +187,7 @@ def preview_map(body: dict, request: Request):
 	source = body.get("source")
 	filename = body.get("filename")
 	filenames = body.get("filenames")  # optional list for multi-file aggregation
-	exclude_generic = bool(body.get("exclude_generic", True))
+	exclude_generic = bool(body.get("exclude_generic", False))
 	return_rows = bool(body.get("return_rows", False))
 	rows_limit = int(body.get("rows_limit", 1000))
 	if source != "bizim":
@@ -225,9 +225,8 @@ def preview_map(body: dict, request: Request):
 		except Exception:
 			outs, rule = [], None
 		if not outs:
-			# optionally ignore generic placeholder patterns
+			# optionally hide generic placeholder patterns from the list when excluded (still counted)
 			if exclude_generic and (base_name.strip().lower() in ("genel ürün", "genel urun")):
-				# still count as total_unmatched but do not expose as a pattern when excluded
 				if return_rows and len(unmatched_rows) < rows_limit:
 					unmatched_rows.append({
 						"row_index": len(unmatched_rows),
@@ -237,6 +236,7 @@ def preview_map(body: dict, request: Request):
 						"unit_price": rec.get("unit_price"),
 						"total_amount": rec.get("total_amount"),
 					})
+				# do not add to unmatched patterns list
 				continue
 			entry = unmatched.get(base_name)
 			if not entry:
@@ -314,6 +314,7 @@ def import_map(source: str, filename: str, request: Request):
 				"filename": file_list[0] if len(file_list) == 1 else None,
 				"filenames": file_list,
 				"unmatched_patterns": preview.get("unmatched_patterns") or [],
+				"total_unmatched": preview.get("total_unmatched") or 0,
 				"products": prod_rows,
 			},
 		)
@@ -329,6 +330,32 @@ def commit_import(body: dict, request: Request):
 	data_dates_map = body.get("data_dates") or {}  # optional per-filename map
 	if source not in ("bizim", "kargo"):
 		raise HTTPException(status_code=400, detail="source ('bizim'|'kargo') is required")
+
+	# Preflight mapping guard: block bizim commits when there are unmatched patterns (including generics)
+	if source == "bizim":
+		file_list_pf: list[str] = []
+		if filenames:
+			file_list_pf = [str(x) for x in (filenames if isinstance(filenames, list) else str(filenames).split(",")) if x]
+		elif filename:
+			file_list_pf = [str(filename)]
+		else:
+			raise HTTPException(status_code=400, detail="filename(s) required")
+		try:
+			preview = preview_map({"source": "bizim", "filenames": file_list_pf, "exclude_generic": False}, request)
+		except HTTPException:
+			raise
+		except Exception as _e:
+			preview = {"total_unmatched": 0, "unmatched_patterns": []}
+		if (preview.get("total_unmatched") or 0) > 0:
+			from urllib.parse import quote
+			joined = ",".join(file_list_pf)
+			raise HTTPException(status_code=400, detail={
+				"error": "unmatched_mappings",
+				"total_unmatched": preview.get("total_unmatched"),
+				"unmatched_patterns": (preview.get("unmatched_patterns") or [])[:50],
+				"filenames": file_list_pf,
+				"next": f"/import/map?source=bizim&filename={quote(joined)}",
+			})
 
 	# helper to process a single file name
 	def _commit_single(fn: str, dd_raw: str | None) -> dict:
@@ -903,11 +930,71 @@ def commit_import(body: dict, request: Request):
 
 
 @router.post("/reset")
-def reset_database(request: Request):
-	if not request.session.get("uid"):
-		raise HTTPException(status_code=401, detail="Unauthorized")
-	reset_db()
-	return {"status": "ok"}
+def reset_database(request: Request, preserve_mappings: bool = False):
+    if not request.session.get("uid"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not preserve_mappings:
+        reset_db()
+        return {"status": "ok"}
+    # preserve mappings: backup mapping rules/outputs, reset, then restore
+    from ..models import ItemMappingRule as _Rule, ItemMappingOutput as _Out
+    from sqlmodel import select as _select
+    rules_dump: list[dict] = []
+    with get_session() as session:
+        rules = session.exec(_select(_Rule)).all()
+        for r in rules:
+            outs = session.exec(_select(_Out).where(_Out.rule_id == r.id)).all()
+            rules_dump.append({
+                "rule": {
+                    "source_pattern": r.source_pattern,
+                    "match_mode": r.match_mode,
+                    "priority": r.priority,
+                    "notes": r.notes,
+                    "is_active": r.is_active,
+                },
+                "outs": [
+                    {
+                        "item_id": o.item_id,
+                        "product_id": o.product_id,
+                        "size": o.size,
+                        "color": o.color,
+                        "pack_type": o.pack_type,
+                        "pair_multiplier": o.pair_multiplier,
+                        "quantity": o.quantity,
+                        "unit_price": o.unit_price,
+                    }
+                    for o in outs
+                ],
+            })
+    # hard reset
+    reset_db()
+    # restore mappings
+    from ..models import ItemMappingRule as _R2, ItemMappingOutput as _O2
+    with get_session() as session:
+        for entry in rules_dump:
+            rdata = entry.get("rule") or {}
+            r = _R2(
+                source_pattern=rdata.get("source_pattern"),
+                match_mode=rdata.get("match_mode") or "exact",
+                priority=int(rdata.get("priority") or 0),
+                notes=rdata.get("notes"),
+                is_active=bool(rdata.get("is_active")),
+            )
+            session.add(r)
+            session.flush()
+            for o in (entry.get("outs") or []):
+                session.add(_O2(
+                    rule_id=r.id or 0,
+                    item_id=o.get("item_id"),
+                    product_id=o.get("product_id"),
+                    size=o.get("size"),
+                    color=o.get("color"),
+                    pack_type=o.get("pack_type"),
+                    pair_multiplier=o.get("pair_multiplier") or 1,
+                    quantity=o.get("quantity") or 1,
+                    unit_price=o.get("unit_price"),
+                ))
+    return {"status": "ok", "restored_rules": len(rules_dump)}
 
 
 @router.post("/upload")

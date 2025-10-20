@@ -47,9 +47,12 @@ def list_rules(limit: int = Query(default=500, ge=1, le=5000), pattern: str | No
 
 
 @router.get("/table")
-def rules_table(request: Request, limit: int = Query(default=1000, ge=1, le=5000)):
-	with get_session() as session:
-		rules = session.exec(select(ItemMappingRule).order_by(ItemMappingRule.priority.desc(), ItemMappingRule.id.desc()).limit(limit)).all()
+def rules_table(request: Request, limit: int = Query(default=1000, ge=1, le=5000), pattern: str | None = Query(default=None)):
+    with get_session() as session:
+        q = select(ItemMappingRule).order_by(ItemMappingRule.priority.desc(), ItemMappingRule.id.desc())
+        if pattern:
+            q = q.where(ItemMappingRule.source_pattern == pattern)
+        rules = session.exec(q.limit(limit)).all()
 		result = []
 		for r in rules:
 			outs = session.exec(select(ItemMappingOutput).where(ItemMappingOutput.rule_id == r.id)).all()
@@ -57,7 +60,7 @@ def rules_table(request: Request, limit: int = Query(default=1000, ge=1, le=5000
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"mappings_table.html",
-			{"request": request, "rows": result},
+            {"request": request, "rows": result},
 		)
 
 
@@ -118,5 +121,42 @@ def update_rule(rule_id: int, body: Dict[str, Any]):
 				)
 				session.add(o_rec)
 		return {"status": "ok"}
+
+
+@router.patch("/rules/{rule_id}")
+def patch_rule(rule_id: int, body: Dict[str, Any]):
+    with get_session() as session:
+        r = session.exec(select(ItemMappingRule).where(ItemMappingRule.id == rule_id)).first()
+        if not r:
+            raise HTTPException(status_code=404, detail="Rule not found")
+        for f in ("source_pattern", "match_mode", "priority", "is_active", "notes"):
+            if f in body:
+                setattr(r, f, body.get(f))
+        return {"status": "ok"}
+
+
+@router.put("/rules/{rule_id}/outputs")
+def replace_outputs(rule_id: int, outputs: List[Dict[str, Any]]):
+    with get_session() as session:
+        r = session.exec(select(ItemMappingRule).where(ItemMappingRule.id == rule_id)).first()
+        if not r:
+            raise HTTPException(status_code=404, detail="Rule not found")
+        outs = session.exec(select(ItemMappingOutput).where(ItemMappingOutput.rule_id == rule_id)).all()
+        for o in outs:
+            session.delete(o)
+        session.flush()
+        for out in (outputs or []):
+            session.add(ItemMappingOutput(
+                rule_id=rule_id,
+                item_id=out.get("item_id"),
+                product_id=out.get("product_id"),
+                size=out.get("size"),
+                color=out.get("color"),
+                pack_type=out.get("pack_type"),
+                pair_multiplier=out.get("pair_multiplier") or 1,
+                quantity=out.get("quantity") or 1,
+                unit_price=out.get("unit_price"),
+            ))
+        return {"status": "ok"}
 
 
