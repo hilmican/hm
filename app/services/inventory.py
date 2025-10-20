@@ -26,7 +26,7 @@ def compute_on_hand_for_items(session: Session, item_ids: Iterable[int]) -> Dict
 
 
 def get_stock_map(session: Session) -> Dict[int, int]:
-	ids = [it.id for it in session.exec(select(Item.id)).all() if it is not None]
+	ids = [it for it in session.exec(select(Item.id)).all() if it is not None]
 	return compute_on_hand_for_items(session, [i for i in ids if i is not None])
 
 
