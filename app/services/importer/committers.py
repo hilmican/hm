@@ -13,6 +13,7 @@ from ..matching import (
 )
 from ..matching import find_recent_placeholder_kargo_for_client
 from ..mapping import resolve_mapping, find_or_create_variant
+from ..inventory import adjust_stock
 
 
 def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[int], Optional[int]]:
@@ -214,6 +215,12 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
     # prefer pre-parsed base from router to avoid height/weight/notes noise
     base_name = str(rec.get("item_name_base") or item_name_raw).strip()
     outputs, _matched_rule = resolve_mapping(session, base_name)
+    try:
+        if idx := rec.get("__row_index__") is not None:  # optional if set by caller
+            pass
+        print(f"[MAP DEBUG] base='{base_name}' -> outputs={len(outputs)}")
+    except Exception:
+        pass
     created_items: List[tuple[Item, int]] = []
     if outputs:
         for out in outputs:
@@ -332,9 +339,9 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             if matched_order_id is not None and it.id is not None:
                 oi = OrderItem(order_id=matched_order_id, item_id=it.id, quantity=total_qty)
                 session.add(oi)
-            # stock movement
-            mv = StockMovement(item_id=it.id, direction="out", quantity=total_qty, related_order_id=matched_order_id)
-            session.add(mv)
+            # stock movement: decrement canonical item only
+            if it.id is not None:
+                adjust_stock(session, item_id=it.id, delta=-total_qty, related_order_id=matched_order_id)
     except Exception:
         pass
 

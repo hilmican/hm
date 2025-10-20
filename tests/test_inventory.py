@@ -38,10 +38,28 @@ def test_mapping_rule_exact(tmp_path):
 		assert len(outs) == 1
 
 
+# New: parentheses in source should be stripped before matching
+def test_mapping_normalizes_parentheses(tmp_path):
+    from app.db import engine
+    from app.services.mapping import resolve_mapping
+    with Session(engine) as s:
+        r = ItemMappingRule(source_pattern="XL-DERI TRENCH TEK", match_mode="exact", priority=10, is_active=True)
+        s.add(r)
+        s.flush()
+        out = ItemMappingOutput(rule_id=r.id or 0, quantity=1)
+        s.add(out)
+        s.commit()
+        outs, rule = resolve_mapping(s, "XL-DERI TRENCH TEK(165,80)")
+        assert rule is not None
+        assert len(outs) == 1
+
+
+# New: Bizim row bundle creates two order items and decrements stock
 def test_bizim_package_mapping_creates_order_items(tmp_path):
 	from sqlmodel import select
 	from app.db import engine
 	from app.services.importer.committers import process_bizim_row
+	from app.services.inventory import compute_on_hand_for_items
 	with Session(engine) as s:
 		# create a package rule that yields two different outputs and a duplicate
 		r = ItemMappingRule(source_pattern="HILMI OZEL PAKET", match_mode="exact", priority=50, is_active=True)
@@ -72,5 +90,10 @@ def test_bizim_package_mapping_creates_order_items(tmp_path):
 		assert len(rows) == 2
 		qsum = sum(r.quantity for r in rows)
 		assert qsum == 3
+		# verify stock movements aggregate to -3 across created items
+		item_ids = [row.item_id for row in rows]
+		stock = compute_on_hand_for_items(s, item_ids)
+		total = sum(stock.get(i or 0, 0) for i in item_ids)
+		assert total == -3
 
 

@@ -69,5 +69,12 @@ def read_bizim_file(file_path: str) -> list[dict[str, Any]]:
 				continue
 		except Exception:
 			pass
+		# attach original item_name if present for debugging/notes downstream
+		try:
+			orig = raw.get("ürün") or raw.get("urun")
+			if orig:
+				mapped.setdefault("item_name_raw", str(orig).strip())
+		except Exception:
+			pass
 		records.append(mapped)
 	return records
