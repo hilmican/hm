@@ -561,7 +561,37 @@ def commit_import(body: dict, request: Request):
 								})
 							except Exception:
 								pass
-						if not existing_order:
+			# If there is an order around the date window, upgrade it (usually a kargo placeholder)
+			if existing_order:
+				chosen_item_id = (created_items_local[0][0].id if created_items_local else None)
+				# upgrade placeholder or existing order with bizim details
+				if (existing_order.source or "") == "kargo":
+					existing_order.item_id = chosen_item_id  # type: ignore
+				existing_order.quantity = rec.get("quantity") or existing_order.quantity or 1
+				existing_order.unit_price = rec.get("unit_price") or existing_order.unit_price
+				existing_order.total_amount = rec.get("total_amount") or existing_order.total_amount
+				existing_order.shipment_date = rec.get("shipment_date") or existing_order.shipment_date
+				existing_order.data_date = existing_order.data_date or run.data_date
+				existing_order.source = "bizim"
+				if order_notes:
+					cur = existing_order.notes or None
+					existing_order.notes = f"{cur} | {order_notes}" if cur else order_notes
+				# after merging both sources, mark merged
+				existing_order.status = "merged"
+				matched_order_id = existing_order.id
+				try:
+					print("[MERGE DEBUG][bizim] upgraded existing order via date match:", {
+						"order_id": existing_order.id,
+						"tracking_no": existing_order.tracking_no,
+						"client_id": existing_order.client_id,
+						"quantity": existing_order.quantity,
+						"unit_price": existing_order.unit_price,
+						"total_amount": existing_order.total_amount,
+					})
+				except Exception:
+					pass
+			else:
+				if not existing_order:
 							# fallback: upgrade most recent kargo placeholder for this client (bizim often lacks date)
 							existing_order = find_recent_placeholder_kargo_for_client(session, client.id)
 							try:
@@ -587,8 +617,8 @@ def commit_import(body: dict, request: Request):
 								if order_notes:
 									cur = existing_order.notes or None
 									existing_order.notes = f"{cur} | {order_notes}" if cur else order_notes
-								# after bizim details, wait for kargo to merge
-								existing_order.status = existing_order.status or "missing-kargo"
+						# after merging both sources, mark merged
+						existing_order.status = "merged"
 								matched_order_id = existing_order.id
 								try:
 									print("[MERGE DEBUG][bizim] upgraded kargo placeholder -> bizim:", {

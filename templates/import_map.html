@@ -132,8 +132,7 @@
         if (enabled) { commitBtn.removeAttribute('disabled'); }
         else { commitBtn.setAttribute('disabled','disabled'); }
     }
-    setCommitEnabled((Number(unmatchedCountEl?.textContent||'0')||0) === 0);
-    rescanBtn.addEventListener('click', async ()=>{
+    async function refreshPreviewCount(){
         try {
             const body = filenames && Array.isArray(filenames) ? { source, filenames, exclude_generic: false } : { source, filename, exclude_generic: false };
             const r = await fetch('/import/preview-map', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
@@ -141,9 +140,13 @@
                 const j = await r.json();
                 if (unmatchedCountEl) unmatchedCountEl.textContent = String(j.total_unmatched||0);
                 setCommitEnabled((j.total_unmatched||0) === 0);
+                return j;
             }
         } catch (e) {}
-    });
+        return null;
+    }
+    setCommitEnabled((Number(unmatchedCountEl?.textContent||'0')||0) === 0);
+    rescanBtn.addEventListener('click', refreshPreviewCount);
 
     const patList = document.getElementById('patList');
     const editor = document.getElementById('editor');
@@ -290,12 +293,12 @@
 
     document.getElementById('saveRule').addEventListener('click', async ()=>{
         saveMsg.textContent = 'Saving...';
-        try { await saveRuleCore(); saveMsg.textContent = 'Saved.'; }
+        try { await saveRuleCore(); saveMsg.textContent = 'Saved.'; await refreshPreviewCount(); }
         catch (e) { saveMsg.textContent = 'Save error'; }
     });
     document.getElementById('saveNext').addEventListener('click', async ()=>{
         saveMsg.textContent = 'Saving...';
-        try { await saveRuleCore(); saveMsg.textContent = 'Saved.'; }
+        try { await saveRuleCore(); saveMsg.textContent = 'Saved.'; await refreshPreviewCount(); }
         catch (e) { saveMsg.textContent = 'Save error'; return; }
         // move to next pattern
         const cur = patInp.value;
@@ -317,7 +320,6 @@
     });
 
     document.getElementById('commitBtn').addEventListener('click', async ()=>{
-        if (commitBtn.hasAttribute('disabled')) { return; }
         let body;
         if (filenames && Array.isArray(filenames)) {
             const map = {};
@@ -339,7 +341,20 @@
         }
         try {
             const r = await fetch('/import/commit', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-            if (!r.ok) throw new Error(await r.text());
+            if (!r.ok) {
+                let txt = await r.text();
+                try {
+                    const j = JSON.parse(txt);
+                    if (j && j.detail && j.detail.error === 'unmatched_mappings' && j.detail.next) {
+                        if (confirm(`${j.detail.total_unmatched} eşleşmeyen ürün var. Haritalandırma sayfasına dönmek ister misiniz?`)) {
+                            location.href = j.detail.next;
+                            return;
+                        }
+                    }
+                } catch (_) { /* not json */ }
+                alert(`Commit error: ${txt}`);
+                return;
+            }
             alert('Import committed.');
             location.href = '/dashboard';
         } catch (e) { alert('Commit error'); }
