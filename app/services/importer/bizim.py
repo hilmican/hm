@@ -58,5 +58,12 @@ def read_bizim_file(file_path: str) -> list[dict[str, Any]]:
 	for row in rows:
 		raw = row_to_dict(headers, row)
 		mapped = map_row(raw)
+		# Skip effectively empty rows (common with formatted blank lines in Excel)
+		try:
+			meaningful_keys = ("name","phone","address","city","item_name","quantity","unit_price","total_amount","shipment_date","tracking_no")
+			if not any(((mapped.get(k) is not None) and (str(mapped.get(k)).strip() != "")) for k in meaningful_keys):
+				continue
+		except Exception:
+			pass
 		records.append(mapped)
 	return records
