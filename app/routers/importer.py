@@ -591,7 +591,6 @@ def commit_import(body: dict, request: Request):
 				except Exception:
 					pass
 			else:
-				if not existing_order:
 							# fallback: upgrade most recent kargo placeholder for this client (bizim often lacks date)
 							existing_order = find_recent_placeholder_kargo_for_client(session, client.id)
 							try:
