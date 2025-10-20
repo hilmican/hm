@@ -210,11 +210,20 @@ def preview_map(body: dict, request: Request):
 		if not outs:
 			entry = unmatched.get(base_name)
 			if not entry:
-				entry = {"pattern": base_name, "count": 0, "samples": []}
+				entry = {"pattern": base_name, "count": 0, "samples": [], "suggested_price": None}
 				unmatched[base_name] = entry
 			entry["count"] += 1
 			if len(entry["samples"]) < 3:
 				entry["samples"].append(item_name_raw)
+			# try suggest a unit price from row
+			try:
+				amt = rec.get("unit_price") if rec.get("unit_price") is not None else rec.get("total_amount")
+				qty = rec.get("quantity") or 1
+				if amt is not None and (entry.get("suggested_price") is None):
+					sp = float(amt) / float(qty or 1)
+					entry["suggested_price"] = round(sp, 2)
+			except Exception:
+				pass
 	return {
 		"filename": file_path.name,
 		"unmatched_patterns": sorted(unmatched.values(), key=lambda x: x["count"], reverse=True),

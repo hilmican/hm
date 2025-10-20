@@ -37,10 +37,10 @@
             <div class="inner">
                 <ul id="patList">
                     {% for p in unmatched_patterns %}
-                    <li data-pattern="{{ p.pattern }}">
+                    <li data-pattern="{{ p.pattern }}" data-suggested-price="{{ p.suggested_price or '' }}">
                         <div style="display:flex;justify-content:space-between;align-items:center">
                             <span>{{ p.pattern }}</span>
-                            <span class="pill">{{ p.count }}</span>
+                            <span class="pill" title="Occurrence count in uploaded file">{{ p.count }}</span>
                         </div>
                         {% if p.samples %}<div class="muted">Samples: {{ ", ".join(p.samples) }}</div>{% endif %}
                     </li>
@@ -73,6 +73,7 @@
                             <tbody id="outs"></tbody>
                         </table>
                         <button id="addOut" type="button" style="margin-top:6px">Add Output</button>
+                        <div id="priceHint" class="muted" style="margin-top:6px"></div>
                     </div>
 
                     <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
@@ -166,6 +167,20 @@
         outsTbody.innerHTML = '';
         addOutputRow(guessFromPattern(pat));
         if (productSel.value) loadInventory(productSel.value);
+        // price hint and prefill from suggested price
+        try {
+            const li = [...patList.querySelectorAll('li[data-pattern]')].find(x=>x.getAttribute('data-pattern')===pat);
+            const hintEl = document.getElementById('priceHint');
+            const valStr = li ? li.getAttribute('data-suggested-price') : null;
+            const val = valStr ? Number(valStr) : NaN;
+            if (!isNaN(val) && val > 0) {
+                hintEl.textContent = `Suggested price: ${val}`;
+                const priceInput = outsTbody.querySelector('tr td:nth-child(6) input');
+                if (priceInput && !priceInput.value) priceInput.value = String(val);
+            } else {
+                hintEl.textContent = '';
+            }
+        } catch (e) {}
     }
 
     patList.addEventListener('click', (e)=>{
