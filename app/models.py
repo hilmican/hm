@@ -52,6 +52,14 @@ class Order(SQLModel, table=True):
     source: str = Field(index=True, description="bizim|kargo")
 
 
+class OrderItem(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    order_id: int = Field(foreign_key="order.id", index=True)
+    item_id: int = Field(foreign_key="item.id", index=True)
+    quantity: int = 1
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
 class Payment(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     client_id: int = Field(foreign_key="client.id")

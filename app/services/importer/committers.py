@@ -4,7 +4,7 @@ from typing import Tuple, Optional, List
 
 from sqlmodel import select
 
-from ...models import Client, Order, Payment, Item, Product, StockMovement
+from ...models import Client, Order, Payment, Item, Product, StockMovement, OrderItem
 from ...utils.normalize import client_unique_key, legacy_client_unique_key
 from ...utils.slugify import slugify
 from ..matching import (
@@ -209,7 +209,7 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             run.updated_clients += 1
     matched_client_id = client.id
 
-    # item mapping
+    # item mapping via package rule for the entire base name
     item_name_raw = rec.get("item_name") or "Genel Ürün"
     base_name = str(item_name_raw).strip()
     outputs, _matched_rule = resolve_mapping(session, base_name)
@@ -239,9 +239,12 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                     pair_multiplier=out.pair_multiplier or 1,
                 )
             if it:
+                # Optionally update price from mapping output; do not use for accounting
+                if out.unit_price is not None:
+                    it.price = out.unit_price
                 created_items.append((it, int(out.quantity or 1)))
     else:
-        # fallback generic item
+        # fallback generic item; mark as unmatched later
         sku = slugify(base_name)
         item = session.exec(select(Item).where(Item.sku == sku)).first()
         if not item:
@@ -267,6 +270,14 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
         existing_order.data_date = existing_order.data_date or run.data_date
         existing_order.source = "bizim"
         existing_order.status = "merged"
+        # ensure original name is preserved in notes
+        if item_name_raw:
+            cur = existing_order.notes or None
+            if cur:
+                if item_name_raw not in cur:
+                    existing_order.notes = f"{cur} | {item_name_raw}"
+            else:
+                existing_order.notes = item_name_raw
         matched_order_id = existing_order.id
     else:
         # fallback to recent kargo placeholder
@@ -294,25 +305,42 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 shipment_date=rec.get("shipment_date"),
                 data_date=run.data_date,
                 source="bizim",
-                notes=rec.get("notes") or None,
+                notes=(rec.get("notes") or None),
             )
+            # append original string to order notes
+            if item_name_raw:
+                if order.notes:
+                    if item_name_raw not in order.notes:
+                        order.notes = f"{order.notes} | {item_name_raw}"
+                else:
+                    order.notes = item_name_raw
             session.add(order)
             session.flush()
             run.created_orders += 1
             matched_order_id = order.id
 
-    # stock movements for mapped variants
+    # create order items and stock movements based on mapping outputs
     try:
         qty_base = int(rec.get("quantity") or 1)
         for it, out_qty_each in created_items:
             multiplier = int(it.pair_multiplier or 1)
             total_qty = qty_base * int(out_qty_each or 1) * multiplier
-            if total_qty > 0:
-                mv = StockMovement(item_id=it.id, direction="out", quantity=total_qty, related_order_id=matched_order_id)
-                session.add(mv)
+            if total_qty <= 0:
+                continue
+            # create order item
+            if matched_order_id is not None and it.id is not None:
+                oi = OrderItem(order_id=matched_order_id, item_id=it.id, quantity=total_qty)
+                session.add(oi)
+            # stock movement
+            mv = StockMovement(item_id=it.id, direction="out", quantity=total_qty, related_order_id=matched_order_id)
+            session.add(mv)
     except Exception:
         pass
 
+    # mark unmatched if there was no mapping rule
+    if not outputs:
+        status = "unmatched"
+        message = f"No mapping rule for '{base_name}'"
     return status, message, matched_client_id, matched_order_id
 
 

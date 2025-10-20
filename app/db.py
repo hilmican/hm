@@ -34,6 +34,28 @@ def init_db() -> None:
 		if not column_exists("importrun", "data_date"):
 			conn.exec_driver_sql("ALTER TABLE importrun ADD COLUMN data_date DATE")
 
+		# OrderItem table (lightweight create-if-missing for SQLite)
+		# Detect by presence of a known column on the table name
+		try:
+			rows = conn.exec_driver_sql("PRAGMA table_info('orderitem')").fetchall()
+			orderitem_exists = any(rows)
+		except Exception:
+			orderitem_exists = False
+		if not orderitem_exists:
+			conn.exec_driver_sql(
+				"""
+				CREATE TABLE IF NOT EXISTS orderitem (
+					id INTEGER PRIMARY KEY,
+					order_id INTEGER,
+					item_id INTEGER,
+					quantity INTEGER DEFAULT 1,
+					created_at DATETIME,
+					FOREIGN KEY(order_id) REFERENCES "order"(id),
+					FOREIGN KEY(item_id) REFERENCES item(id)
+				)
+				"""
+			)
+
 		# Inventory/Variant fields on item
 		if not column_exists("item", "product_id"):
 			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN product_id INTEGER")
