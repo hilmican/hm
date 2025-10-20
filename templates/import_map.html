@@ -27,7 +27,7 @@
     <div class="toolbar">
         <a href="/dashboard" style="color:#2563eb;text-decoration:none">← Dashboard</a>
         <span class="pill">{{ (unmatched_patterns or [])|length }} pattern(s) to map</span>
-        <span class="muted">Source: {{ source }}, File: {{ filename }}</span>
+        <span class="muted">Source: {{ source }}{% if filenames %}, Files: {{ ", ".join(filenames) }}{% else %}, File: {{ filename }}{% endif %}</span>
         <button id="commitBtn" style="margin-left:auto">Commit Import</button>
     </div>
 
@@ -98,6 +98,7 @@
     const products = {{ products | tojson if products else '[]' }};
     const source = {{ source | tojson }};
     const filename = {{ filename | tojson }};
+    const filenames = {{ filenames | tojson if filenames else 'null' }};
 
     const patList = document.getElementById('patList');
     const editor = document.getElementById('editor');
@@ -257,10 +258,12 @@
     });
 
     document.getElementById('commitBtn').addEventListener('click', async ()=>{
+        // if multiple files: ask single date to apply to all (can enhance later per-file)
         const data_date = prompt('Data date (YYYY-MM-DD)?');
         if (!data_date) return;
         try {
-            const r = await fetch('/import/commit', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source, filename, data_date })});
+            const body = filenames && Array.isArray(filenames) ? { source, filenames, data_date } : { source, filename, data_date };
+            const r = await fetch('/import/commit', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
             if (!r.ok) throw new Error(await r.text());
             alert('Import committed.');
             location.href = '/dashboard';
