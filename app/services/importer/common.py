@@ -7,6 +7,16 @@ from openpyxl import load_workbook
 
 from ...utils.normalize import normalize_text
 
+# re-export for convenience
+__all__ = [
+	"read_sheet_rows",
+	"row_to_dict",
+	"parse_date",
+	"parse_float",
+	"parse_int",
+	"normalize_header",
+]
+
 
 def normalize_header(h: str) -> str:
 	return normalize_text(h)
@@ -37,6 +47,9 @@ def parse_int(value: Any) -> int | None:
 def parse_date(value: Any) -> date | None:
 	if value is None:
 		return None
+	# normalize datetime to date
+	if isinstance(value, datetime):
+		return value.date()
 	if isinstance(value, date):
 		return value
 	s = str(value).strip()
