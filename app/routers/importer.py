@@ -616,7 +616,7 @@ def commit_import(body: dict, request: Request):
 						except Exception:
 							pass
 
-					else:  # kargo
+					if source != "bizim":  # kargo
 						# hard guard: never treat any kargo field as item; move any residual item_name into notes
 						if rec.get("item_name"):
 							itm = str(rec.get("item_name") or "").strip()
