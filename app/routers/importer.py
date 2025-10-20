@@ -540,37 +540,20 @@ def commit_import(body: dict, request: Request):
 							status = "unmatched"
 							message = f"No mapping rule for '{base_name}'"
 
-					order_notes = rec.get("notes") or None
-					if extra_notes:
-						joined = ", ".join(extra_notes)
-						order_notes = f"{order_notes} | {joined}" if order_notes else joined
+						# Bizim-specific: merge/create order and stock movements
+						order_notes = rec.get("notes") or None
+						if extra_notes:
+							joined = ", ".join(extra_notes)
+							order_notes = f"{order_notes} | {joined}" if order_notes else joined
 
-					# Attempt to merge with an existing order for this client using date proximity
-					existing_order = None
-					date_hint = rec.get("shipment_date") or run.data_date
-					if date_hint:
-						existing_order = find_order_by_client_and_date(session, client.id, date_hint)
-					# Merge priority: upgrade existing order if found, else fallback to recent kargo placeholder, else create
-					if existing_order:
-						chosen_item_id = (created_items_local[0][0].id if created_items_local else None)
-						if (existing_order.source or "") == "kargo":
-							existing_order.item_id = chosen_item_id  # type: ignore
-						existing_order.quantity = rec.get("quantity") or existing_order.quantity or 1
-						existing_order.unit_price = rec.get("unit_price") or existing_order.unit_price
-						existing_order.total_amount = rec.get("total_amount") or existing_order.total_amount
-						existing_order.shipment_date = rec.get("shipment_date") or existing_order.shipment_date
-						existing_order.data_date = existing_order.data_date or run.data_date
-						existing_order.source = "bizim"
-						if order_notes:
-							cur = existing_order.notes or None
-							existing_order.notes = f"{cur} | {order_notes}" if cur else order_notes
-						existing_order.status = "merged"
-						matched_order_id = existing_order.id
-					else:
-						# fallback to most recent kargo placeholder
-						existing_order = find_recent_placeholder_kargo_for_client(session, client.id)
-						chosen_item_id = (created_items_local[0][0].id if created_items_local else (item.id if 'item' in locals() and item else None))  # type: ignore
+						# Attempt to merge with an existing order for this client using date proximity
+						existing_order = None
+						date_hint = rec.get("shipment_date") or run.data_date
+						if date_hint:
+							existing_order = find_order_by_client_and_date(session, client.id, date_hint)
+						# Merge priority: upgrade existing order if found, else fallback to recent kargo placeholder, else create
 						if existing_order:
+							chosen_item_id = (created_items_local[0][0].id if created_items_local else None)
 							if (existing_order.source or "") == "kargo":
 								existing_order.item_id = chosen_item_id  # type: ignore
 							existing_order.quantity = rec.get("quantity") or existing_order.quantity or 1
@@ -585,38 +568,56 @@ def commit_import(body: dict, request: Request):
 							existing_order.status = "merged"
 							matched_order_id = existing_order.id
 						else:
-							# create a new bizim order
-							order = Order(
-								tracking_no=rec.get("tracking_no"),
-								client_id=client.id,  # type: ignore
-								item_id=chosen_item_id,      # type: ignore
-								quantity=rec.get("quantity") or 1,
-								unit_price=rec.get("unit_price"),
-								total_amount=rec.get("total_amount"),
-								shipment_date=rec.get("shipment_date"),
-								data_date=run.data_date,
-								source="bizim",
-								notes=order_notes,
-							)
-							session.add(order)
-							session.flush()
-							run.created_orders += 1
-							matched_order_id = order.id
+							# fallback to most recent kargo placeholder
+							existing_order = find_recent_placeholder_kargo_for_client(session, client.id)
+							chosen_item_id = (created_items_local[0][0].id if created_items_local else (item.id if 'item' in locals() and item else None))  # type: ignore
+							if existing_order:
+								if (existing_order.source or "") == "kargo":
+									existing_order.item_id = chosen_item_id  # type: ignore
+								existing_order.quantity = rec.get("quantity") or existing_order.quantity or 1
+								existing_order.unit_price = rec.get("unit_price") or existing_order.unit_price
+								existing_order.total_amount = rec.get("total_amount") or existing_order.total_amount
+								existing_order.shipment_date = rec.get("shipment_date") or existing_order.shipment_date
+								existing_order.data_date = existing_order.data_date or run.data_date
+								existing_order.source = "bizim"
+								if order_notes:
+									cur = existing_order.notes or None
+									existing_order.notes = f"{cur} | {order_notes}" if cur else order_notes
+								existing_order.status = "merged"
+								matched_order_id = existing_order.id
+							else:
+								# create a new bizim order
+								order = Order(
+									tracking_no=rec.get("tracking_no"),
+									client_id=client.id,  # type: ignore
+									item_id=chosen_item_id,      # type: ignore
+									quantity=rec.get("quantity") or 1,
+									unit_price=rec.get("unit_price"),
+									total_amount=rec.get("total_amount"),
+									shipment_date=rec.get("shipment_date"),
+									data_date=run.data_date,
+									source="bizim",
+									notes=order_notes,
+								)
+								session.add(order)
+								session.flush()
+								run.created_orders += 1
+								matched_order_id = order.id
 
-						# Create stock movements (out) for mapped variants (only when mapping matched)
-						try:
-							qty_base = int(rec.get("quantity") or 1)
-							if outputs and created_items_local:
-								for it, out_qty_each, _price in created_items_local:
-									multiplier = int(it.pair_multiplier or 1)
-									total_qty = qty_base * int(out_qty_each or 1) * multiplier
-									if total_qty > 0:
-										mv = StockMovement(item_id=it.id, direction="out", quantity=total_qty, related_order_id=matched_order_id)
-										session.add(mv)
-						except Exception:
-							pass
+							# Create stock movements (out) for mapped variants (only when mapping matched)
+							try:
+								qty_base = int(rec.get("quantity") or 1)
+								if outputs and created_items_local:
+									for it, out_qty_each, _price in created_items_local:
+										multiplier = int(it.pair_multiplier or 1)
+										total_qty = qty_base * int(out_qty_each or 1) * multiplier
+										if total_qty > 0:
+											mv = StockMovement(item_id=it.id, direction="out", quantity=total_qty, related_order_id=matched_order_id)
+											session.add(mv)
+							except Exception:
+								pass
 
-					if source != "bizim":  # kargo
+				else:  # kargo
 						# hard guard: never treat any kargo field as item; move any residual item_name into notes
 						if rec.get("item_name"):
 							itm = str(rec.get("item_name") or "").strip()
