@@ -72,9 +72,9 @@
                     </div>
 
                     <div style="margin-top:10px;">
-                        <label>Outputs (size, color, pack, qty, pair mult, price)</label>
+                        <label>Outputs (product, size, color, pack, qty, pair mult, price)</label>
                         <table>
-                            <thead><tr><th>Size</th><th>Color</th><th>Pack</th><th>Qty</th><th>Pair</th><th>Price</th><th></th></tr></thead>
+                            <thead><tr><th>Product</th><th>Size</th><th>Color</th><th>Pack</th><th>Qty</th><th>Pair</th><th>Price</th><th></th></tr></thead>
                             <tbody id="outs"></tbody>
                         </table>
                         <button id="addOut" type="button" style="margin-top:6px">Add Output</button>
@@ -171,7 +171,15 @@
 
     function addOutputRow(pref){
         const tr = document.createElement('tr');
+        // determine default product for the row: use provided, else current selector, else first product
+        const defPid = (pref && pref.product_id) ? Number(pref.product_id) : (Number(productSel?.value||0)|| (products[0]?.id||''));
+        let prodOpts = '<option value=""></option>';
+        for (const p of products){
+            const sel = Number(p.id) === Number(defPid) ? 'selected' : '';
+            prodOpts += `<option value="${p.id}" ${sel}>${p.name}</option>`;
+        }
         tr.innerHTML = `
+            <td><select class="prodSel">${prodOpts}</select></td>
             <td><input type="text" placeholder="Size" value="${pref?.size||''}"/></td>
             <td><input type="text" placeholder="Color" value="${pref?.color||''}"/></td>
             <td>
@@ -226,7 +234,7 @@
             const val = valStr ? Number(valStr) : NaN;
             if (!isNaN(val) && val > 0) {
                 hintEl.textContent = `Suggested price: ${val}`;
-                const priceInput = outsTbody.querySelector('tr td:nth-child(6) input');
+                const priceInput = outsTbody.querySelector('tr td:nth-child(7) input');
                 if (priceInput && !priceInput.value) priceInput.value = String(val);
             } else {
                 hintEl.textContent = '';
@@ -260,16 +268,16 @@
 
     async function saveRuleCore(){
         const pattern = patInp.value;
-        const productId = Number(productSel.value || 0) || null;
         const outputs = [];
         for (const tr of outsTbody.querySelectorAll('tr')){
             const tds = tr.querySelectorAll('td');
-            const size = tds[0].querySelector('input').value || null;
-            const color = tds[1].querySelector('input').value || null;
-            const pack_type = tds[2].querySelector('select').value || null;
-            const qty = Number(tds[3].querySelector('input').value || 1);
-            const pair = Number(tds[4].querySelector('input').value || 1);
-            const priceVal = tds[5].querySelector('input').value;
+            const productId = Number(tds[0].querySelector('select').value || 0) || null;
+            const size = tds[1].querySelector('input').value || null;
+            const color = tds[2].querySelector('input').value || null;
+            const pack_type = tds[3].querySelector('select').value || null;
+            const qty = Number(tds[4].querySelector('input').value || 1);
+            const pair = Number(tds[5].querySelector('input').value || 1);
+            const priceVal = tds[6].querySelector('input').value;
             const unit_price = priceVal ? Number(priceVal) : null;
             outputs.push({ product_id: productId, size, color, pack_type, quantity: qty, pair_multiplier: pair, unit_price });
         }
@@ -285,7 +293,7 @@
                 if (rules.length) {
                     const outs = rules[0].outputs||[];
                     outsTbody.innerHTML = '';
-                    for (const o of outs) addOutputRow({ size:o.size, color:o.color, pack_type:o.pack_type, quantity:o.quantity, pair_multiplier:o.pair_multiplier, unit_price:o.unit_price });
+                    for (const o of outs) addOutputRow({ product_id:o.product_id, size:o.size, color:o.color, pack_type:o.pack_type, quantity:o.quantity, pair_multiplier:o.pair_multiplier, unit_price:o.unit_price });
                 }
             }
         } catch (e) {}
