@@ -943,11 +943,24 @@ def reset_database(request: Request, preserve_mappings: bool = False):
     if not preserve_mappings:
         reset_db()
         return {"status": "ok"}
-    # preserve mappings: backup mapping rules/outputs, reset, then restore
-    from ..models import ItemMappingRule as _Rule, ItemMappingOutput as _Out
+    # preserve mappings: backup products + mapping rules/outputs, reset, then restore
+    from ..models import ItemMappingRule as _Rule, ItemMappingOutput as _Out, Product as _Prod
     from sqlmodel import select as _select
     rules_dump: list[dict] = []
+    products_dump: list[dict] = []
     with get_session() as session:
+        # backup all products (keep ids to satisfy mapping outputs product_id)
+        prods = session.exec(_select(_Prod)).all()
+        for p in prods:
+            products_dump.append({
+                "id": p.id,
+                "name": p.name,
+                "slug": p.slug,
+                "default_unit": p.default_unit,
+                "default_price": p.default_price,
+                "created_at": p.created_at,
+                "updated_at": p.updated_at,
+            })
         rules = session.exec(_select(_Rule)).all()
         for r in rules:
             outs = session.exec(_select(_Out).where(_Out.rule_id == r.id)).all()
@@ -975,9 +988,21 @@ def reset_database(request: Request, preserve_mappings: bool = False):
             })
     # hard reset
     reset_db()
-    # restore mappings
-    from ..models import ItemMappingRule as _R2, ItemMappingOutput as _O2
+    # restore products, then mappings
+    from ..models import ItemMappingRule as _R2, ItemMappingOutput as _O2, Product as _P2
     with get_session() as session:
+        # restore products first
+        for data in products_dump:
+            try:
+                session.add(_P2(**data))
+            except Exception:
+                # fallback by slug if explicit id insertion fails
+                slug = data.get("slug")
+                existing = session.exec(_select(_P2).where(_P2.slug == slug)).first()
+                if not existing:
+                    nd = dict(data)
+                    nd.pop("id", None)
+                    session.add(_P2(**nd))
         for entry in rules_dump:
             rdata = entry.get("rule") or {}
             r = _R2(
