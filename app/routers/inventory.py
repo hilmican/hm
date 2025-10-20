@@ -23,8 +23,18 @@ def product_attributes(product_id: int = Query(...)):
         color_rows = session.exec(
             select(Item.color).where(Item.product_id == product_id, Item.color != None).distinct()
         ).all()
-        sizes = sorted({r[0] for r in size_rows if r and r[0]})
-        colors = sorted({r[0] for r in color_rows if r and r[0]})
+        # SQLModel may return scalars for single-column selects; avoid indexing into strings
+        def _extract(rows):
+            vals = []
+            for r in rows:
+                v = r
+                if isinstance(r, (list, tuple)):
+                    v = r[0]
+                if v:
+                    vals.append(v)
+            return sorted(set(vals))
+        sizes = _extract(size_rows)
+        colors = _extract(color_rows)
         return {"sizes": sizes, "colors": colors}
 
 @router.get("/stock")
