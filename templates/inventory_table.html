@@ -39,9 +39,29 @@
     <div class="card" style="padding:12px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:14px;">
         <h3 style="margin:0 0 8px 0; font-size:15px;">Seri Stok Ekle</h3>
         <form id="seriesForm" onsubmit="return false;" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-            <input id="productId" type="number" placeholder="Product ID" min="1" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:120px;" />
-            <input id="sizes" type="text" placeholder="Sizes (e.g. S,M,L,XL,XXL)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:240px;" />
-            <input id="colors" type="text" placeholder="Colors (optional, e.g. Siyah,Lacivert)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:260px;" />
+            <select id="productId" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:220px;">
+                <option value="">Product</option>
+            </select>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <select id="sizes" multiple size="4" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:200px;"></select>
+                    <button id="selectAllSizes" type="button" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9fafb; cursor:pointer;">Tümü</button>
+                </div>
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <input id="customSize" type="text" placeholder="Yeni beden ekle (örn. S)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:160px;" />
+                    <button id="addSize" type="button" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9fafb; cursor:pointer;">Ekle</button>
+                </div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <select id="colors" multiple size="4" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:200px;"></select>
+                    <button id="selectAllColors" type="button" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9fafb; cursor:pointer;">Tümü</button>
+                </div>
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <input id="customColor" type="text" placeholder="Yeni renk ekle (örn. Siyah)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:160px;" />
+                    <button id="addColor" type="button" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9fafb; cursor:pointer;">Ekle</button>
+                </div>
+            </div>
             <input id="qty" type="number" min="1" value="1" placeholder="Qty/variant" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:120px;" />
             <select id="pack" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px;">
                 <option value="">Pack</option>
@@ -79,12 +99,45 @@
 <script>
 const btn = document.getElementById('seriesBtn');
 const msg = document.getElementById('seriesMsg');
+
+async function loadProducts(){
+    try {
+        const r = await fetch('/products?limit=500');
+        if (!r.ok) return;
+        const j = await r.json();
+        const sel = document.getElementById('productId');
+        sel.innerHTML = '<option value="">Product</option>' + (j.products||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+    } catch {}
+}
+async function loadAttributes(pid){
+    try {
+        const r = await fetch(`/inventory/attributes?product_id=${pid}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        const fill = (elId, arr)=>{ const el=document.getElementById(elId); el.innerHTML = (arr||[]).map(v=>`<option value="${v}">${v}</option>`).join(''); };
+        fill('sizes', j.sizes || []);
+        fill('colors', j.colors || []);
+    } catch {}
+}
+function selectAll(elId){ const el=document.getElementById(elId); for(const o of el.options) o.selected = true; }
+function addCustom(elId, inputId){ const el=document.getElementById(elId); const v=(document.getElementById(inputId).value||'').trim(); if(!v) return; if(![...el.options].some(o=>o.value===v)){ const opt = new Option(v, v, true, true); el.add(opt); } document.getElementById(inputId).value=''; }
+const getSelected = id => Array.from(document.getElementById(id).selectedOptions || []).map(o=>o.value);
+
+document.addEventListener('DOMContentLoaded', ()=>{
+    loadProducts();
+    const prodSel = document.getElementById('productId');
+    if (prodSel) prodSel.addEventListener('change', e=>{ const pid=e.target.value; if(pid) loadAttributes(pid); });
+    const sas = document.getElementById('selectAllSizes'); if (sas) sas.addEventListener('click', ()=>selectAll('sizes'));
+    const sac = document.getElementById('selectAllColors'); if (sac) sac.addEventListener('click', ()=>selectAll('colors'));
+    const asz = document.getElementById('addSize'); if (asz) asz.addEventListener('click', ()=>addCustom('sizes','customSize'));
+    const acl = document.getElementById('addColor'); if (acl) acl.addEventListener('click', ()=>addCustom('colors','customColor'));
+});
+
 if (btn) {
     btn.addEventListener('click', async () => {
         const pid = Number(document.getElementById('productId').value || 0);
-        const sizes = (document.getElementById('sizes').value || '').split(',').map(s=>s.trim()).filter(Boolean);
-        const colorsRaw = (document.getElementById('colors').value || '').trim();
-        const colors = colorsRaw ? colorsRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
+        const sizes = getSelected('sizes');
+        const colors = getSelected('colors'); // empty means default no-color will be used server-side
         const qty = Number(document.getElementById('qty').value || 0);
         const pack = document.getElementById('pack').value || null;
         const mult = Number(document.getElementById('pairMult').value || 1);

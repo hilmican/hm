@@ -13,6 +13,20 @@ from ..services.inventory import get_stock_map
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
 
+@router.get("/attributes")
+def product_attributes(product_id: int = Query(...)):
+    with get_session() as session:
+        # distinct sizes for the given product (exclude nulls/empty)
+        size_rows = session.exec(
+            select(Item.size).where(Item.product_id == product_id, Item.size != None).distinct()
+        ).all()
+        color_rows = session.exec(
+            select(Item.color).where(Item.product_id == product_id, Item.color != None).distinct()
+        ).all()
+        sizes = sorted({r[0] for r in size_rows if r and r[0]})
+        colors = sorted({r[0] for r in color_rows if r and r[0]})
+        return {"sizes": sizes, "colors": colors}
+
 @router.get("/stock")
 def list_stock(product_id: Optional[int] = Query(default=None), size: Optional[str] = Query(default=None), color: Optional[str] = Query(default=None), limit: int = Query(default=1000, ge=1, le=10000)):
 	with get_session() as session:
