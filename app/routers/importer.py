@@ -219,15 +219,16 @@ def preview_map(body: dict, request: Request):
 		for idx, rec in enumerate(recs):
 			item_name_raw = rec.get("item_name") or "Genel Ürün"
 			base_name, _h, _w, _notes = parse_item_details(item_name_raw)
-		outs, rule = None, None
-		try:
-			with get_session() as session:
-				outs, rule = resolve_mapping(session, base_name)
-		except Exception:
-			outs, rule = [], None
+			outs, rule = None, None
+			try:
+				with get_session() as session:
+					outs, rule = resolve_mapping(session, base_name)
+			except Exception:
+				outs, rule = [], None
 			if not outs:
-			# optionally hide generic placeholder patterns from the list when excluded (still counted)
-				if exclude_generic and (base_name.strip().lower() in ("genel ürün", "genel urun")):
+				# optionally hide generic placeholder patterns from the list when excluded (still counted)
+				lower_base = base_name.strip().lower()
+				if exclude_generic and (lower_base in ("genel ürün", "genel urun")):
 					if return_rows and len(unmatched_rows) < rows_limit and ((not pattern_filter) or (pattern_filter == base_name)):
 						unmatched_rows.append({
 							"filename": fn,
@@ -242,35 +243,35 @@ def preview_map(body: dict, request: Request):
 						})
 					# do not add to unmatched patterns list
 					continue
-			entry = unmatched.get(base_name)
-			if not entry:
-				entry = {"pattern": base_name, "count": 0, "samples": [], "suggested_price": None}
-				unmatched[base_name] = entry
-			entry["count"] += 1
-			if len(entry["samples"]) < 3:
-				entry["samples"].append(item_name_raw)
-			# try suggest a unit price from row
-			try:
-				amt = rec.get("unit_price") if rec.get("unit_price") is not None else rec.get("total_amount")
-				qty = rec.get("quantity") or 1
-				if amt is not None and (entry.get("suggested_price") is None):
-					sp = float(amt) / float(qty or 1)
-					entry["suggested_price"] = round(sp, 2)
-			except Exception:
-				pass
-			# capture row details if requested
-			if return_rows and len(unmatched_rows) < rows_limit and ((not pattern_filter) or (pattern_filter == base_name)):
-				unmatched_rows.append({
-					"filename": fn,
-					"row_index": idx,
-					"item_name": item_name_raw,
-					"base": base_name,
-					"quantity": rec.get("quantity"),
-					"unit_price": rec.get("unit_price"),
-					"total_amount": rec.get("total_amount"),
-					"name": rec.get("name"),
-					"phone": rec.get("phone"),
-				})
+				entry = unmatched.get(base_name)
+				if not entry:
+					entry = {"pattern": base_name, "count": 0, "samples": [], "suggested_price": None}
+					unmatched[base_name] = entry
+				entry["count"] += 1
+				if len(entry["samples"]) < 3:
+					entry["samples"].append(item_name_raw)
+				# try suggest a unit price from row
+				try:
+					amt = rec.get("unit_price") if rec.get("unit_price") is not None else rec.get("total_amount")
+					qty = rec.get("quantity") or 1
+					if amt is not None and (entry.get("suggested_price") is None):
+						sp = float(amt) / float(qty or 1)
+						entry["suggested_price"] = round(sp, 2)
+				except Exception:
+					pass
+				# capture row details if requested
+				if return_rows and len(unmatched_rows) < rows_limit and ((not pattern_filter) or (pattern_filter == base_name)):
+					unmatched_rows.append({
+						"filename": fn,
+						"row_index": idx,
+						"item_name": item_name_raw,
+						"base": base_name,
+						"quantity": rec.get("quantity"),
+						"unit_price": rec.get("unit_price"),
+						"total_amount": rec.get("total_amount"),
+						"name": rec.get("name"),
+						"phone": rec.get("phone"),
+					})
 	return {
 		"filename": file_list[0] if len(file_list) == 1 else None,
 		"filenames": file_list,
