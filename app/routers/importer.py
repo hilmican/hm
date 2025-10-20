@@ -903,24 +903,6 @@ def commit_import(body: dict, request: Request):
 	if not filename:
 		raise HTTPException(status_code=400, detail="filename is required for single commit")
 	return _commit_single(filename, data_date_raw)
-		# set data_date
-		if source == "bizim":
-			if data_date_raw:
-				try:
-					# Import here to avoid adding a new top-level import
-					import datetime as _dt
-					run.data_date = _dt.date.fromisoformat(data_date_raw)
-				except Exception:
-					raise HTTPException(status_code=400, detail="Invalid data_date; expected YYYY-MM-DD")
-		else:  # kargo -> derive from records' shipment_date
-			try:
-				import datetime as _dt
-				dates = [r.get("shipment_date") for r in records if r.get("shipment_date")]
-				run.data_date = max(dates) if dates else None
-			except Exception:
-				pass
-		session.add(run)
-		session.flush()
 
 		# local (non-persisted) counters for detailed summary
 		enriched_orders_cnt = 0
