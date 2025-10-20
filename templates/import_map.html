@@ -321,7 +321,8 @@
 
     document.getElementById('commitBtn').addEventListener('click', async ()=>{
         let body;
-        if (filenames && Array.isArray(filenames)) {
+        // If multiple files, require per-file dates; if single file, prompt for one date
+        if (filenames && Array.isArray(filenames) && filenames.length > 1) {
             const map = {};
             let missing = false;
             if (datesTbody) {
@@ -337,7 +338,9 @@
         } else {
             const data_date = prompt('Data date (YYYY-MM-DD)?');
             if (!data_date) return;
-            body = { source, filename, data_date };
+            // Prefer explicit single filename if available, otherwise fall back to list[0]
+            const single = (typeof filename === 'string' && filename) ? filename : (Array.isArray(filenames) && filenames.length ? filenames[0] : null);
+            body = single ? { source, filename: single, data_date } : { source, filename, data_date };
         }
         try {
             const r = await fetch('/import/commit', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
