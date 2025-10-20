@@ -229,7 +229,15 @@ def import_map(source: str, filename: str, request: Request):
 	if source != "bizim":
 		raise HTTPException(status_code=400, detail="Only 'bizim' supported for mapping wizard")
 	folder = BIZIM_DIR
-	file_path = folder / filename
+	# support special 'last' filename: pick the most recent .xlsx in bizim folder
+	if filename == "last":
+		candidates = sorted(folder.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+		if not candidates:
+			raise HTTPException(status_code=404, detail="No .xlsx files found")
+		file_path = candidates[0]
+		filename = file_path.name
+	else:
+		file_path = folder / filename
 	if not file_path.exists():
 		raise HTTPException(status_code=404, detail="File not found")
 	# aggregate unmatched via preview_map logic
