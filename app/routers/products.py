@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Form
 from sqlmodel import select
 
 from ..db import get_session
@@ -31,7 +31,11 @@ def list_products(limit: int = Query(default=500, ge=1, le=5000)):
 
 
 @router.post("")
-def create_product(name: str, default_unit: str = "adet", default_price: float | None = None):
+def create_product(
+	name: str = Form(...),
+	default_unit: str = Form("adet"),
+	default_price: float | None = Form(None),
+):
 	if not name:
 		raise HTTPException(status_code=400, detail="name required")
 	with get_session() as session:
