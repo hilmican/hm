@@ -295,6 +295,11 @@ def import_map(source: str, filename: str, request: Request):
 		if not candidates:
 			raise HTTPException(status_code=404, detail="No .xlsx files found")
 		file_list = [candidates[0].name]
+	elif filename == "all":
+		candidates = sorted(folder.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+		if not candidates:
+			raise HTTPException(status_code=404, detail="No .xlsx files found")
+		file_list = [c.name for c in candidates]
 	else:
 		parts = [p for p in str(filename).split(",") if p.strip()]
 		file_list = parts if parts else []
