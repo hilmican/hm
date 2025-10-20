@@ -483,66 +483,15 @@ def commit_import(body: dict, request: Request):
 						matched_client_id = client.id
 
 						item_name_raw = rec.get("item_name") or "Genel Ürün"
-					base_name, height_cm, weight_kg, extra_notes = parse_item_details(item_name_raw)
+						base_name, height_cm, weight_kg, extra_notes = parse_item_details(item_name_raw)
 						# update client with parsed metrics if present
 						if height_cm is not None:
 							client.height_cm = client.height_cm or height_cm
 						if weight_kg is not None:
 							client.weight_kg = client.weight_kg or weight_kg
-					# pass base name explicitly for mapping; keep original for notes
-					rec["item_name_base"] = base_name
-						# Resolve mapping to variant(s)
-						from ..services.mapping import resolve_mapping, find_or_create_variant
-						outputs, matched_rule = resolve_mapping(session, base_name)
-						# Pair items with per-output quantities and price overrides
-						created_items_local: list[tuple[Item, int, float | None]] = []
-						if outputs:
-							# Ensure product/variant exists for each output
-							for out in outputs:
-								it: Item | None = None
-								if out.item_id:
-									it = session.exec(select(Item).where(Item.id == out.item_id)).first()
-								else:
-									prod: Product | None = None
-									if out.product_id:
-										prod = session.exec(select(Product).where(Product.id == out.product_id)).first()
-									if not prod and out.product_id:
-										continue
-									if prod is None:
-										# fallback create/find product by base name
-										pslug = slugify(base_name)
-										prod = session.exec(select(Product).where(Product.slug == pslug)).first()
-										if not prod:
-											prod = Product(name=base_name, slug=pslug)
-											session.add(prod)
-											session.flush()
-									it = find_or_create_variant(
-										session,
-										product=prod,  # type: ignore
-										size=out.size,
-										color=out.color,
-										pack_type=out.pack_type,
-										pair_multiplier=out.pair_multiplier or 1,
-									)
-							if it:
-								if out.unit_price is not None:
-									it.price = out.unit_price
-								created_items_local.append((it, int(out.quantity or 1), out.unit_price))
-						else:
-							# fallback: single generic item by base name, but mark row unmatched; do NOT create stock movements
-							item_name = base_name
-							sku = slugify(item_name)
-							item = session.exec(select(Item).where(Item.sku == sku)).first()
-							if not item:
-								item = Item(sku=sku, name=item_name)
-								session.add(item)
-								session.flush()
-								run.created_items += 1
-							created_items_local.append((item, 1, None))
-							status = "unmatched"
-							message = f"No mapping rule for '{base_name}'"
-
-						# Bizim branch
+						# pass base name explicitly for mapping; keep original for notes
+						rec["item_name_base"] = base_name
+						# Bizim branch: delegate mapping/stock to committer
 						status, message, matched_client_id, matched_order_id = process_bizim_row(session, run, rec)
 
 					# Kargo branch extracted into service function
