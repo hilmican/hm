@@ -903,42 +903,6 @@ def commit_import(body: dict, request: Request):
 	if not filename:
 		raise HTTPException(status_code=400, detail="filename is required for single commit")
 	return _commit_single(filename, data_date_raw)
-
-		# local (non-persisted) counters for detailed summary
-		enriched_orders_cnt = 0
-		payments_created_cnt = 0
-		payments_existing_cnt = 0
-		payments_skipped_zero_cnt = 0
-
-		for idx, rec in enumerate(records):
-			# guard and normalize basic fields
-			rec_name = (rec.get("name") or "").strip()
-			rec_phone = normalize_phone(rec.get("phone"))
-			if rec_phone:
-				rec["phone"] = rec_phone
-			# skip rows that have neither a name nor a phone
-			if not (rec_name or rec_phone):
-				status = "skipped"
-				ir = ImportRow(
-					import_run_id=run.id or 0,
-					row_index=idx,
-					row_hash=compute_row_hash(rec),
-					mapped_json=str(rec),
-					status=status,  # type: ignore
-					message="empty name and phone",
-					matched_client_id=None,
-					matched_order_id=None,
-				)
-				session.add(ir)
-				run.unmatched_count += 0
-				continue
-			row_hash = compute_row_hash(rec)
-			status = "created"
-			message = None
-			matched_client_id = None
-			matched_order_id = None
-
-			try:
 				# DEBUG: log each row minimal mapping state
 				if idx < 5 or (idx % 50 == 0):
 					print("[ROW DEBUG]", idx, {
