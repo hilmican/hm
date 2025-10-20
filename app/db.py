@@ -34,6 +34,22 @@ def init_db() -> None:
 		if not column_exists("importrun", "data_date"):
 			conn.exec_driver_sql("ALTER TABLE importrun ADD COLUMN data_date DATE")
 
+		# Inventory/Variant fields on item
+		if not column_exists("item", "product_id"):
+			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN product_id INTEGER")
+		if not column_exists("item", "size"):
+			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN size TEXT")
+		if not column_exists("item", "color"):
+			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN color TEXT")
+		if not column_exists("item", "pack_type"):
+			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN pack_type TEXT")
+		if not column_exists("item", "pair_multiplier"):
+			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN pair_multiplier INTEGER DEFAULT 1")
+		if not column_exists("item", "price"):
+			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN price REAL")
+		if not column_exists("item", "status"):
+			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN status TEXT")
+
 		# User table and columns (created by metadata, but ensure columns exist for old DBs)
 		if not column_exists("user", "username"):
 			# create table if absent by invoking metadata create again (safe) then fallback columns

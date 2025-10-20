@@ -25,6 +25,14 @@ class Item(SQLModel, table=True):
     sku: str = Field(index=True, unique=True)
     name: str = Field(index=True)
     unit: Optional[str] = None
+    # variant fields
+    product_id: Optional[int] = Field(default=None, foreign_key="product.id", index=True)
+    size: Optional[str] = Field(default=None, index=True)
+    color: Optional[str] = Field(default=None, index=True)
+    pack_type: Optional[str] = Field(default=None, index=True, description="tek|cift|other")
+    pair_multiplier: Optional[int] = Field(default=1)
+    price: Optional[float] = None
+    status: Optional[str] = Field(default=None, index=True, description="active|inactive")
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
@@ -71,6 +79,16 @@ class StockMovement(SQLModel, table=True):
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 
+class Product(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)
+    slug: str = Field(index=True, unique=True)
+    default_unit: Optional[str] = Field(default="adet")
+    default_price: Optional[float] = None
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
 class ImportRun(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(index=True, description="bizim|kargo")
@@ -98,6 +116,31 @@ class ImportRow(SQLModel, table=True):
     message: Optional[str] = None
     matched_client_id: Optional[int] = Field(default=None, foreign_key="client.id")
     matched_order_id: Optional[int] = Field(default=None, foreign_key="order.id")
+
+
+class ItemMappingRule(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    source_pattern: str = Field(index=True)
+    match_mode: str = Field(default="exact", index=True, description="exact|icontains|regex")
+    priority: int = Field(default=0, index=True)
+    notes: Optional[str] = None
+    is_active: bool = Field(default=True, index=True)
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
+class ItemMappingOutput(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rule_id: int = Field(foreign_key="itemmappingrule.id", index=True)
+    # Either directly reference an item, or define variant attributes under a product
+    item_id: Optional[int] = Field(default=None, foreign_key="item.id", index=True)
+    product_id: Optional[int] = Field(default=None, foreign_key="product.id", index=True)
+    size: Optional[str] = Field(default=None)
+    color: Optional[str] = Field(default=None)
+    pack_type: Optional[str] = Field(default=None, description="tek|cift|other")
+    pair_multiplier: Optional[int] = Field(default=1)
+    quantity: int = 1
+    unit_price: Optional[float] = None
 
 
 class ReconcileTask(SQLModel, table=True):

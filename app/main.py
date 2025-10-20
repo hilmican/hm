@@ -5,6 +5,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .db import init_db
 from .routers import dashboard, importer, clients, items, orders, payments, reconcile, auth
+from .routers import inventory, mappings
 
 
 def create_app() -> FastAPI:
@@ -31,6 +32,8 @@ def create_app() -> FastAPI:
 	app.include_router(items.router, prefix="/items", tags=["items"]) 
 	app.include_router(orders.router, prefix="/orders", tags=["orders"]) 
 	app.include_router(payments.router, prefix="/payments", tags=["payments"]) 
+	app.include_router(inventory.router)
+	app.include_router(mappings.router)
 
 	return app
 

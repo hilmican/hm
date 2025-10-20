@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from sqlmodel import select
+
+from ..db import get_session
+from ..models import Item, Product, StockMovement
+from ..services.inventory import get_stock_map
+
+
+router = APIRouter(prefix="/inventory", tags=["inventory"])
+
+
+@router.get("/stock")
+def list_stock(product_id: Optional[int] = Query(default=None), size: Optional[str] = Query(default=None), color: Optional[str] = Query(default=None), limit: int = Query(default=1000, ge=1, le=10000)):
+	with get_session() as session:
+		q = select(Item).order_by(Item.id.desc())
+		if product_id:
+			q = q.where(Item.product_id == product_id)
+		if size:
+			q = q.where(Item.size == size)
+		if color:
+			q = q.where(Item.color == color)
+		rows = session.exec(q.limit(limit)).all()
+		stock_map = get_stock_map(session)
+		return {
+			"items": [
+				{
+					"id": it.id or 0,
+					"sku": it.sku,
+					"name": it.name,
+					"product_id": it.product_id,
+					"size": it.size,
+					"color": it.color,
+					"pack_type": it.pack_type,
+					"price": it.price,
+					"on_hand": stock_map.get(it.id or 0, 0),
+				}
+				for it in rows
+			]
+		}
+
+
+@router.get("/table")
+def stock_table(request: Request, product_id: Optional[int] = Query(default=None), size: Optional[str] = Query(default=None), color: Optional[str] = Query(default=None), limit: int = Query(default=10000, ge=1, le=100000)):
+	with get_session() as session:
+		q = select(Item).order_by(Item.id.desc())
+		if product_id:
+			q = q.where(Item.product_id == product_id)
+		if size:
+			q = q.where(Item.size == size)
+		if color:
+			q = q.where(Item.color == color)
+		rows = session.exec(q.limit(limit)).all()
+		stock_map = get_stock_map(session)
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"inventory_table.html",
+			{"request": request, "rows": rows, "stock_map": stock_map, "limit": limit},
+		)
+
+
+@router.post("/movements")
+def create_movement(body: Dict[str, Any]):
+	item_id = body.get("item_id")
+	direction = body.get("direction")
+	quantity = body.get("quantity")
+	if item_id is None or direction not in ("in", "out") or not isinstance(quantity, int) or quantity <= 0:
+		raise HTTPException(status_code=400, detail="item_id, direction in|out, quantity>0 required")
+	with get_session() as session:
+		it = session.exec(select(Item).where(Item.id == item_id)).first()
+		if not it:
+			raise HTTPException(status_code=404, detail="Item not found")
+		mv = StockMovement(item_id=item_id, direction=direction, quantity=quantity)
+		session.add(mv)
+		return {"status": "ok", "movement_id": mv.id or 0}
+
+
+@router.post("/series")
+def series_add(body: Dict[str, Any]):
+	product_id = body.get("product_id")
+	sizes: List[str] = body.get("sizes") or []
+	colors: List[str] = body.get("colors") or [None]  # type: ignore
+	quantity_per_variant: int = body.get("quantity_per_variant") or 0
+	pack_type: Optional[str] = body.get("pack_type")
+	pair_multiplier: int = body.get("pair_multiplier") or 1
+	price = body.get("price")
+	if not product_id or quantity_per_variant <= 0 or not sizes:
+		raise HTTPException(status_code=400, detail="product_id, sizes[], quantity_per_variant>0 required")
+	with get_session() as session:
+		prod = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not prod:
+			raise HTTPException(status_code=404, detail="Product not found")
+		from ..services.mapping import find_or_create_variant
+		created: List[int] = []
+		for sz in sizes:
+			for col in colors:
+				it = find_or_create_variant(session, product=prod, size=sz, color=col, pack_type=pack_type, pair_multiplier=pair_multiplier)
+				if price is not None:
+					it.price = price
+				mv = StockMovement(item_id=it.id, direction="in", quantity=quantity_per_variant)
+				session.add(mv)
+				created.append(it.id or 0)
+		return {"status": "ok", "created_item_ids": created}
+
+

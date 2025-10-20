@@ -32,13 +32,13 @@
 <body>
     <div class="toolbar">
         <a href="/dashboard">← Dashboard</a>
-        <input id="search" type="search" placeholder="Search items (name, sku)" />
+        <input id="search" type="search" placeholder="Search items (name, sku, size, color)" />
         <span class="pill">{{ rows|length }} item(s)</span>
     </div>
     <h2>Items</h2>
     <table id="itemsTbl">
         <thead>
-            <tr><th>ID</th><th>SKU</th><th>Name</th><th>Unit</th></tr>
+            <tr><th>ID</th><th>SKU</th><th>Name</th><th>Product</th><th>Size</th><th>Color</th><th>Pack</th><th>Price</th><th>On-hand</th><th>Unit</th></tr>
         </thead>
         <tbody>
             {% for it in rows %}
@@ -46,6 +46,12 @@
                 <td>{{ it.id }}</td>
                 <td>{{ it.sku }}</td>
                 <td>{{ it.name }}</td>
+                <td>{{ it.product_id }}</td>
+                <td>{{ it.size }}</td>
+                <td>{{ it.color }}</td>
+                <td>{{ it.pack_type }}</td>
+                <td>{{ it.price }}</td>
+                <td>{{ stock_map.get(it.id, 0) }}</td>
                 <td>{{ it.unit }}</td>
             </tr>
             {% endfor %}

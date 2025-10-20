@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request, HTTPException
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Client, Item, Order, Payment, ImportRow, ImportRun
+from ..models import Client, Item, Order, Payment, ImportRow, ImportRun, StockMovement
 
 router = APIRouter()
 
@@ -93,6 +93,16 @@ def dashboard(request: Request):
 			if o.item_id and o.id and o.id in order_sources:
 				item_sources[o.item_id] = order_sources[o.id]
 
+		# Unmatched mapping count (recent) and low-stock variants
+		unmatched = session.exec(select(ImportRow).where(ImportRow.status == "unmatched").order_by(ImportRow.id.desc()).limit(50)).all()
+		low_stock = session.exec(select(Item).order_by(Item.id.asc()).limit(200)).all()
+		# naive compute on-hand for first 200; could be optimized
+		from ..services.inventory import compute_on_hand_for_items
+		stock_map = compute_on_hand_for_items(session, [it.id for it in low_stock if it.id])
+		low_stock_pairs = [(it, stock_map.get(it.id or 0, 0)) for it in low_stock]
+		low_stock_pairs.sort(key=lambda t: t[1])
+		low_stock_pairs = [p for p in low_stock_pairs if p[1] <= 5][:10]
+
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"dashboard.html",
@@ -114,5 +124,7 @@ def dashboard(request: Request):
 				"order_sources": order_sources,
 				"item_sources": item_sources,
 				"status_map": status_map,
+				"unmatched_count": len(unmatched),
+				"low_stock": low_stock_pairs,
 			},
 		)

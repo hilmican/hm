@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Inventory</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+        th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; }
+        tr:nth-child(even) { background: #fcfcfd; }
+        .toolbar { margin: 12px 0; display: flex; gap: 8px; align-items: center; }
+        .toolbar input { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; width: 280px; }
+        .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; }
+        a { color: #2563eb; text-decoration: none; }
+    </style>
+    <script>
+        function filterTable(table, q){
+            const rows = table.tBodies[0].rows; const s = q.trim().toLowerCase();
+            for (const r of rows){ const txt = r.textContent.toLowerCase(); r.style.display = s && txt.indexOf(s) === -1 ? 'none' : ''; }
+        }
+        function sortTable(table, idx, dir){
+            const rows = Array.from(table.tBodies[0].rows);
+            rows.sort((r1,r2)=>{ const a=r1.cells[idx].textContent.trim(); const b=r2.cells[idx].textContent.trim(); return dir==='asc'?a.localeCompare(b,'tr'):b.localeCompare(a,'tr'); });
+            for(const r of rows) table.tBodies[0].appendChild(r);
+        }
+        function attach(table){ const ths=table.tHead.rows[0].cells; let active=-1, dir='asc'; for(let i=0;i<ths.length;i++){ ths[i].addEventListener('click',()=>{ dir=(active===i&&dir==='asc')?'desc':'asc'; active=i; sortTable(table,i,dir); }); } }
+        function init(){ const table=document.getElementById('invTbl'); attach(table); const si=document.getElementById('search'); si.addEventListener('input',()=>filterTable(table, si.value)); }
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</head>
+<body>
+    <div class="toolbar">
+        <a href="/dashboard">← Dashboard</a>
+        <a href="/items/table" target="_blank">Items</a>
+        <input id="search" type="search" placeholder="Search inventory (name, sku, size, color)" />
+        <span class="pill">{{ rows|length }} variant(s)</span>
+    </div>
+    <div class="card" style="padding:12px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:14px;">
+        <h3 style="margin:0 0 8px 0; font-size:15px;">Seri Stok Ekle</h3>
+        <form id="seriesForm" onsubmit="return false;" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <input id="productId" type="number" placeholder="Product ID" min="1" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:120px;" />
+            <input id="sizes" type="text" placeholder="Sizes (e.g. S,M,L,XL,XXL)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:240px;" />
+            <input id="colors" type="text" placeholder="Colors (optional, e.g. Siyah,Lacivert)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:260px;" />
+            <input id="qty" type="number" min="1" value="1" placeholder="Qty/variant" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:120px;" />
+            <select id="pack" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px;">
+                <option value="">Pack</option>
+                <option value="tek">tek</option>
+                <option value="cift">cift</option>
+            </select>
+            <input id="pairMult" type="number" min="1" value="1" placeholder="Pair mult" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:120px;" />
+            <input id="price" type="number" step="0.01" placeholder="Price (optional)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:140px;" />
+            <button id="seriesBtn" type="button" style="background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Ekle</button>
+            <span id="seriesMsg" class="pill" style="display:none"></span>
+        </form>
+    </div>
+    <h2>Inventory</h2>
+    <table id="invTbl">
+        <thead>
+            <tr><th>ID</th><th>SKU</th><th>Name</th><th>Product</th><th>Size</th><th>Color</th><th>Pack</th><th>Price</th><th>On-hand</th></tr>
+        </thead>
+        <tbody>
+            {% for it in rows %}
+            <tr>
+                <td>{{ it.id }}</td>
+                <td>{{ it.sku }}</td>
+                <td>{{ it.name }}</td>
+                <td>{{ it.product_id }}</td>
+                <td>{{ it.size }}</td>
+                <td>{{ it.color }}</td>
+                <td>{{ it.pack_type }}</td>
+                <td>{{ it.price }}</td>
+                <td>{{ stock_map.get(it.id, 0) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+<script>
+const btn = document.getElementById('seriesBtn');
+const msg = document.getElementById('seriesMsg');
+if (btn) {
+    btn.addEventListener('click', async () => {
+        const pid = Number(document.getElementById('productId').value || 0);
+        const sizes = (document.getElementById('sizes').value || '').split(',').map(s=>s.trim()).filter(Boolean);
+        const colorsRaw = (document.getElementById('colors').value || '').trim();
+        const colors = colorsRaw ? colorsRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
+        const qty = Number(document.getElementById('qty').value || 0);
+        const pack = document.getElementById('pack').value || null;
+        const mult = Number(document.getElementById('pairMult').value || 1);
+        const priceVal = document.getElementById('price').value;
+        const price = priceVal ? Number(priceVal) : null;
+        if (!pid || !sizes.length || qty <= 0) { alert('product_id, sizes ve qty gereklidir'); return; }
+        const body = { product_id: pid, sizes, colors, quantity_per_variant: qty, pack_type: pack, pair_multiplier: mult, price };
+        try {
+            const r = await fetch('/inventory/series', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+            if (!r.ok) throw new Error(await r.text());
+            const j = await r.json();
+            msg.style.display = 'inline-block';
+            msg.textContent = `Eklendi: ${j.created_item_ids.length} variant`;
+            setTimeout(()=> location.reload(), 600);
+        } catch (e) {
+            alert('Seri ekle hatası');
+        }
+    });
+}
+</script>
+</html>

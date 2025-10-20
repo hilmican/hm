@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Mappings</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; vertical-align: top; }
+        th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; }
+        tr:nth-child(even) { background: #fcfcfd; }
+        .toolbar { margin: 12px 0; display: flex; gap: 8px; align-items: center; }
+        .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; }
+        code { background: #f6f7fb; padding: 2px 4px; border-radius: 4px; }
+        ul { margin: 4px 0 0 16px; }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <a href="/dashboard">← Dashboard</a>
+        <a href="/inventory/table" target="_blank">Inventory</a>
+        <span class="pill">{{ rows|length }} rule(s)</span>
+    </div>
+    <h2>Mapping Rules</h2>
+    <table>
+        <thead>
+            <tr><th>ID</th><th>Pattern</th><th>Mode</th><th>Priority</th><th>Active</th><th>Outputs</th></tr>
+        </thead>
+        <tbody>
+            {% for r, outs in rows %}
+            <tr>
+                <td>{{ r.id }}</td>
+                <td><code>{{ r.source_pattern }}</code></td>
+                <td>{{ r.match_mode }}</td>
+                <td>{{ r.priority }}</td>
+                <td>{{ r.is_active }}</td>
+                <td>
+                    <ul>
+                        {% for o in outs %}
+                        <li>
+                            item_id={{ o.item_id }}, product_id={{ o.product_id }}, size={{ o.size }}, color={{ o.color }}, pack={{ o.pack_type }}, pair_mult={{ o.pair_multiplier }}, qty={{ o.quantity }}, price={{ o.unit_price }}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

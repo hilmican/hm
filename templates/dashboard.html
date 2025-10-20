@@ -35,6 +35,9 @@
 			<div class="card" style="padding:8px 12px;">
 				<strong>Toplam Kesintiler:</strong> {{ '%.2f'|format(total_fees or 0) }}
 			</div>
+			<div class="card" style="padding:8px 12px;">
+				<strong>Eşleşmeyen Ürün Satırları:</strong> {{ unmatched_count or 0 }}
+			</div>
 		</div>
 		<div class="toolbar">
 			<a href="/clients" target="_blank">Clients API</a>
@@ -42,6 +45,9 @@
 			<a href="/items" target="_blank">Items API</a>
 			<a href="/items/table" target="_blank">Items Table</a>
 			<a href="/orders/table" target="_blank">Orders Table</a>
+			<a href="/items/table" target="_blank">Items Table</a>
+			<a href="/inventory/table" target="_blank">Inventory Table</a>
+			<a href="/mappings/table" target="_blank">Mappings</a>
 			<a href="/payments" target="_blank">Payments API</a>
 			<button id="logoutBtn" type="button" style="margin-left:12px;background:#6b7280;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Logout</button>
 			<button id="resetBtn" type="button" style="margin-left:12px;background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Reset DB</button>
@@ -99,6 +105,25 @@
 					</tbody>
 				</table>
 				<div class="caption">Open <a href="/orders/table">/orders/table</a> for full list.</div>
+			</div>
+
+			<div class="card">
+				<h2>Low Stock (<=5)</h2>
+				<table>
+					<thead>
+						<tr><th>ID</th><th>SKU</th><th>Name</th><th>On-hand</th></tr>
+					</thead>
+					<tbody>
+					{% for it, qty in low_stock %}
+						<tr>
+							<td>{{ it.id }}</td>
+							<td>{{ it.sku }}</td>
+							<td>{{ it.name }}</td>
+							<td>{{ qty }}</td>
+						</tr>
+					{% endfor %}
+					</tbody>
+				</table>
 			</div>
 
 			<div class="card">
