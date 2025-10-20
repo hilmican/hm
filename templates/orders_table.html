@@ -56,12 +56,12 @@
                 <td>{{ o.tracking_no }}</td>
                 <td>
                     {% set cname = client_map.get(o.client_id) if client_map else o.client_id %}
-                    <a href="/clients/{{ o.client_id }}" target="_blank">{{ cname }}</a>
+                    <a href="/clients/{{ o.client_id }}">{{ cname }}</a>
                 </td>
                 <td>
                     {% if o.item_id %}
                         {% set iname = item_map.get(o.item_id) if item_map else o.item_id %}
-                        <a href="/items/table#{{ o.item_id }}" target="_blank">{{ iname }}</a>
+                        <a href="/items/table#{{ o.item_id }}">{{ iname }}</a>
                     {% endif %}
                 </td>
                 <td>{{ o.quantity }}</td>

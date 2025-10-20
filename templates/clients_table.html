@@ -62,8 +62,8 @@
         <tbody>
             {% for c in rows %}
             <tr>
-                <td data-sort="{{ c.id }}"><a href="/clients/{{ c.id }}" target="_blank">{{ c.id }}</a></td>
-                <td><a href="/clients/{{ c.id }}" target="_blank">{{ c.name }}</a></td>
+                <td data-sort="{{ c.id }}"><a href="/clients/{{ c.id }}">{{ c.id }}</a></td>
+                <td><a href="/clients/{{ c.id }}">{{ c.name }}</a></td>
                 <td>{{ c.phone }}</td>
                 <td>{{ c.city }}</td>
                 <td>{{ c.height_cm }}</td>
