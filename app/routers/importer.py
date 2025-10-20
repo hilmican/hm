@@ -189,6 +189,9 @@ def preview_map(body: dict, request: Request):
 		raise HTTPException(status_code=401, detail="Unauthorized")
 	source = body.get("source")
 	filename = body.get("filename")
+	exclude_generic = bool(body.get("exclude_generic", True))
+	return_rows = bool(body.get("return_rows", False))
+	rows_limit = int(body.get("rows_limit", 1000))
 	if source != "bizim" or not filename:
 		raise HTTPException(status_code=400, detail="source must be 'bizim' and filename required")
 	folder = BIZIM_DIR
@@ -198,6 +201,7 @@ def preview_map(body: dict, request: Request):
 	records = read_bizim_file(str(file_path))
 	from ..services.mapping import resolve_mapping
 	unmatched: dict[str, dict] = {}
+	unmatched_rows: list[dict] = []
 	for rec in records:
 		item_name_raw = rec.get("item_name") or "Genel Ürün"
 		base_name, _h, _w, _notes = parse_item_details(item_name_raw)
@@ -208,6 +212,19 @@ def preview_map(body: dict, request: Request):
 		except Exception:
 			outs, rule = [], None
 		if not outs:
+			# optionally ignore generic placeholder patterns
+			if exclude_generic and (base_name.strip().lower() in ("genel ürün", "genel urun")):
+				# still count as total_unmatched but do not expose as a pattern when excluded
+				if return_rows and len(unmatched_rows) < rows_limit:
+					unmatched_rows.append({
+						"row_index": len(unmatched_rows),
+						"item_name": item_name_raw,
+						"base": base_name,
+						"quantity": rec.get("quantity"),
+						"unit_price": rec.get("unit_price"),
+						"total_amount": rec.get("total_amount"),
+					})
+				continue
 			entry = unmatched.get(base_name)
 			if not entry:
 				entry = {"pattern": base_name, "count": 0, "samples": [], "suggested_price": None}
@@ -224,10 +241,22 @@ def preview_map(body: dict, request: Request):
 					entry["suggested_price"] = round(sp, 2)
 			except Exception:
 				pass
+			# capture row details if requested
+			if return_rows and len(unmatched_rows) < rows_limit:
+				unmatched_rows.append({
+					"row_index": len(unmatched_rows),
+					"item_name": item_name_raw,
+					"base": base_name,
+					"quantity": rec.get("quantity"),
+					"unit_price": rec.get("unit_price"),
+					"total_amount": rec.get("total_amount"),
+				})
 	return {
 		"filename": file_path.name,
 		"unmatched_patterns": sorted(unmatched.values(), key=lambda x: x["count"], reverse=True),
 		"total_unmatched": sum(v["count"] for v in unmatched.values()),
+		"unmatched_rows": unmatched_rows if return_rows else None,
+		"rows_returned": len(unmatched_rows) if return_rows else 0,
 	}
 
 
