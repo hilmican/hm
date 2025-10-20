@@ -903,7 +903,6 @@ def commit_import(body: dict, request: Request):
 	if not filename:
 		raise HTTPException(status_code=400, detail="filename is required for single commit")
 	return _commit_single(filename, data_date_raw)
-		run = ImportRun(source=source, filename=filename)
 		# set data_date
 		if source == "bizim":
 			if data_date_raw:
