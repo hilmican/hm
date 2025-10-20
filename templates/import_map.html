@@ -36,6 +36,10 @@
         <div class="card">
             <h2>Unmatched Patterns</h2>
             <div class="inner">
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                    <input id="investigatePat" type="text" placeholder="Pattern to investigate (optional)" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;flex:1" />
+                    <button id="investigateBtn" type="button">Investigate</button>
+                </div>
                 <ul id="patList">
                     {% for p in unmatched_patterns %}
                     <li data-pattern="{{ p.pattern }}" data-suggested-price="{{ p.suggested_price or '' }}">
@@ -149,6 +153,8 @@
     const outsTbody = document.getElementById('outs');
     const invTbody = document.getElementById('inv');
     const saveMsg = document.getElementById('saveMsg');
+    const investigateBtn = document.getElementById('investigateBtn');
+    const investigatePat = document.getElementById('investigatePat');
 
     function refillProducts(selectedId){
         productSel.innerHTML = '';
@@ -296,6 +302,18 @@
         const lis = [...patList.querySelectorAll('li[data-pattern]')];
         const idx = lis.findIndex(li=>li.getAttribute('data-pattern')===cur);
         if (idx>=0 && idx+1<lis.length){ openPattern(lis[idx+1].getAttribute('data-pattern')); }
+    });
+
+    investigateBtn?.addEventListener('click', async ()=>{
+        try {
+            const pat = (investigatePat && investigatePat.value) || (document.querySelector('#patList li[data-pattern]')?.getAttribute('data-pattern')) || '';
+            const body = filenames && Array.isArray(filenames) ? { source, filenames, exclude_generic: false, return_rows: true, rows_limit: 200, pattern: pat } : { source, filename, exclude_generic: false, return_rows: true, rows_limit: 200, pattern: pat };
+            const r = await fetch('/import/preview-map', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+            if (!r.ok) { alert('Investigate error'); return; }
+            const j = await r.json();
+            const list = (j.unmatched_rows||[]).map(row=>`• ${row.base} | ${row.item_name||''} | ${row.name||''} | ${row.phone||''} | qty:${row.quantity||''} | total:${row.total_amount||''} | file:${row.filename} #${row.row_index}`).join('\n');
+            alert(list || 'No rows found for this pattern.');
+        } catch (e) { alert('Investigate error'); }
     });
 
     document.getElementById('commitBtn').addEventListener('click', async ()=>{

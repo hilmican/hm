@@ -203,41 +203,45 @@ def preview_map(body: dict, request: Request):
 		file_list = parts if len(parts) > 1 else [filename]
 	else:
 		raise HTTPException(status_code=400, detail="filename or filenames required")
-	# read and aggregate records from all files
-	all_records: list[dict] = []
+	# pre-read files list for per-file iteration
+	file_records: list[tuple[str, list[dict]]]=[]
 	for fn in file_list:
 		file_path = folder / fn
 		if not file_path.exists():
 			raise HTTPException(status_code=404, detail=f"File not found: {fn}")
 		recs = read_bizim_file(str(file_path))
-		all_records.extend(recs)
-	records = all_records
+		file_records.append((fn, recs))
 	from ..services.mapping import resolve_mapping
 	unmatched: dict[str, dict] = {}
 	unmatched_rows: list[dict] = []
-	for rec in records:
-		item_name_raw = rec.get("item_name") or "Genel Ürün"
-		base_name, _h, _w, _notes = parse_item_details(item_name_raw)
+	pattern_filter = body.get("pattern")
+	for fn, recs in file_records:
+		for idx, rec in enumerate(recs):
+			item_name_raw = rec.get("item_name") or "Genel Ürün"
+			base_name, _h, _w, _notes = parse_item_details(item_name_raw)
 		outs, rule = None, None
 		try:
 			with get_session() as session:
 				outs, rule = resolve_mapping(session, base_name)
 		except Exception:
 			outs, rule = [], None
-		if not outs:
+			if not outs:
 			# optionally hide generic placeholder patterns from the list when excluded (still counted)
-			if exclude_generic and (base_name.strip().lower() in ("genel ürün", "genel urun")):
-				if return_rows and len(unmatched_rows) < rows_limit:
-					unmatched_rows.append({
-						"row_index": len(unmatched_rows),
-						"item_name": item_name_raw,
-						"base": base_name,
-						"quantity": rec.get("quantity"),
-						"unit_price": rec.get("unit_price"),
-						"total_amount": rec.get("total_amount"),
-					})
-				# do not add to unmatched patterns list
-				continue
+				if exclude_generic and (base_name.strip().lower() in ("genel ürün", "genel urun")):
+					if return_rows and len(unmatched_rows) < rows_limit and ((not pattern_filter) or (pattern_filter == base_name)):
+						unmatched_rows.append({
+							"filename": fn,
+							"row_index": idx,
+							"item_name": item_name_raw,
+							"base": base_name,
+							"quantity": rec.get("quantity"),
+							"unit_price": rec.get("unit_price"),
+							"total_amount": rec.get("total_amount"),
+							"name": rec.get("name"),
+							"phone": rec.get("phone"),
+						})
+					# do not add to unmatched patterns list
+					continue
 			entry = unmatched.get(base_name)
 			if not entry:
 				entry = {"pattern": base_name, "count": 0, "samples": [], "suggested_price": None}
@@ -255,14 +259,17 @@ def preview_map(body: dict, request: Request):
 			except Exception:
 				pass
 			# capture row details if requested
-			if return_rows and len(unmatched_rows) < rows_limit:
+			if return_rows and len(unmatched_rows) < rows_limit and ((not pattern_filter) or (pattern_filter == base_name)):
 				unmatched_rows.append({
-					"row_index": len(unmatched_rows),
+					"filename": fn,
+					"row_index": idx,
 					"item_name": item_name_raw,
 					"base": base_name,
 					"quantity": rec.get("quantity"),
 					"unit_price": rec.get("unit_price"),
 					"total_amount": rec.get("total_amount"),
+					"name": rec.get("name"),
+					"phone": rec.get("phone"),
 				})
 	return {
 		"filename": file_list[0] if len(file_list) == 1 else None,
