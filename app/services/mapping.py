@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 
 from ..models import Item, Product, ItemMappingRule, ItemMappingOutput
 from ..utils.slugify import slugify
+from ..utils.normalize import strip_parenthetical_suffix
 
 
 class MappingResult(Tuple[List[Dict[str, Any]], Optional[str]]):
@@ -55,7 +56,8 @@ def resolve_mapping(session: Session, text: Optional[str]) -> Tuple[List[ItemMap
 	"""
 	if not text:
 		return [], None
-	raw = text.strip()
+    # normalize: strip a trailing parenthetical like "(175,75)" before matching
+    raw = strip_parenthetical_suffix(text).strip()
 	if not raw:
 		return [], None
 
@@ -65,7 +67,7 @@ def resolve_mapping(session: Session, text: Optional[str]) -> Tuple[List[ItemMap
 	for rule in rules:
 		pat = rule.source_pattern or ""
 		matched = False
-		if rule.match_mode == "exact":
+        if rule.match_mode == "exact":
 			matched = (raw == pat) or (slugify(raw) == slugify(pat))
 		elif rule.match_mode == "icontains":
 			matched = pat.lower() in raw.lower()

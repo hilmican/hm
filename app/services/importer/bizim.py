@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from .common import read_sheet_rows, row_to_dict, parse_date, parse_float, parse_int, normalize_header
-from ...utils.normalize import client_unique_key
+from ...utils.normalize import client_unique_key, strip_parenthetical_suffix
 
 
 BIZIM_MAPPING = {
@@ -37,7 +37,11 @@ def map_row(raw: dict[str, Any]) -> dict[str, Any]:
 		key = BIZIM_MAPPING.get(k)
 		if not key:
 			continue
-		mapped[key] = v
+		# Normalize the ÜRÜN cell by stripping trailing parentheses (e.g., sizes/heights)
+		if key == "item_name" and isinstance(v, str):
+			mapped[key] = strip_parenthetical_suffix(v)
+		else:
+			mapped[key] = v
 	# types
 	if "shipment_date" in mapped:
 		mapped["shipment_date"] = parse_date(mapped.get("shipment_date"))

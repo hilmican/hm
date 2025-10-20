@@ -30,6 +30,16 @@ def normalize_phone(p: Any) -> str:
         return ''
 
 
+# Strip a single trailing parenthetical group at the end of the string.
+def strip_parenthetical_suffix(text: Any) -> str:
+    if text is None:
+        return ''
+    s = str(text).strip()
+    # remove whitespace + one trailing ( ... ) group, if present
+    s = re.sub(r"\s*\([^)]*\)\s*$", "", s)
+    return s.strip()
+
+
 # Turkish-specific transliteration map to ASCII
 TURKISH_MAP = str.maketrans({
     'ı': 'i', 'İ': 'i', 'ş': 's', 'Ş': 's', 'ğ': 'g', 'Ğ': 'g',
