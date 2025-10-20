@@ -1,0 +1,245 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Mapping Wizard</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        .layout { display: grid; grid-template-columns: 340px 1fr; gap: 16px; }
+        .card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+        .card h2 { margin: 0; padding: 10px 12px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
+        .card .inner { padding: 12px; }
+        ul { list-style: none; padding: 0; margin: 0; }
+        li { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+        li:hover { background: #fafafa; }
+        label { font-size: 12px; color: #6b7280; display:block; margin-top: 8px; }
+        input, select { padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; width: 100%; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+        th { background: #fafafa; }
+        .toolbar { display:flex; gap:8px; align-items:center; margin-bottom: 10px; }
+        .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; }
+        button { background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer }
+        .muted { color: #6b7280; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <a href="/dashboard" style="color:#2563eb;text-decoration:none">← Dashboard</a>
+        <span class="pill">{{ (unmatched_patterns or [])|length }} pattern(s) to map</span>
+        <span class="muted">Source: {{ source }}, File: {{ filename }}</span>
+        <button id="commitBtn" style="margin-left:auto">Commit Import</button>
+    </div>
+
+    <div class="layout">
+        <div class="card">
+            <h2>Unmatched Patterns</h2>
+            <div class="inner">
+                <ul id="patList">
+                    {% for p in unmatched_patterns %}
+                    <li data-pattern="{{ p.pattern }}">
+                        <div style="display:flex;justify-content:space-between;align-items:center">
+                            <span>{{ p.pattern }}</span>
+                            <span class="pill">{{ p.count }}</span>
+                        </div>
+                        {% if p.samples %}<div class="muted">Samples: {{ ", ".join(p.samples) }}</div>{% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Editor</h2>
+            <div class="inner">
+                <div id="editorEmpty" class="muted">Select a pattern to configure mapping.</div>
+                <div id="editor" style="display:none">
+                    <label>Pattern</label>
+                    <input id="pat" type="text" readonly />
+
+                    <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-top:8px;">
+                        <div>
+                            <label>Product</label>
+                            <select id="product"></select>
+                        </div>
+                        <div>
+                            <button id="newProdBtn" type="button">New Product</button>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:10px;">
+                        <label>Outputs (size, color, pack, qty, pair mult, price)</label>
+                        <table>
+                            <thead><tr><th>Size</th><th>Color</th><th>Pack</th><th>Qty</th><th>Pair</th><th>Price</th><th></th></tr></thead>
+                            <tbody id="outs"></tbody>
+                        </table>
+                        <button id="addOut" type="button" style="margin-top:6px">Add Output</button>
+                    </div>
+
+                    <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+                        <button id="saveRule" type="button">Save Rule</button>
+                        <button id="saveNext" type="button" style="background:#10b981">Save & Next</button>
+                        <span id="saveMsg" class="muted"></span>
+                    </div>
+
+                    <div style="margin-top:14px;">
+                        <label>Inventory (selected product)</label>
+                        <table>
+                            <thead><tr><th>Variant</th><th>On-hand</th></tr></thead>
+                            <tbody id="inv"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const products = {{ products | tojson if products else '[]' }};
+    const source = {{ source | tojson }};
+    const filename = {{ filename | tojson }};
+
+    const patList = document.getElementById('patList');
+    const editor = document.getElementById('editor');
+    const editorEmpty = document.getElementById('editorEmpty');
+    const patInp = document.getElementById('pat');
+    const productSel = document.getElementById('product');
+    const outsTbody = document.getElementById('outs');
+    const invTbody = document.getElementById('inv');
+    const saveMsg = document.getElementById('saveMsg');
+
+    function refillProducts(selectedId){
+        productSel.innerHTML = '';
+        for (const p of products){
+            const opt = document.createElement('option');
+            opt.value = p.id; opt.textContent = p.name;
+            if (selectedId && Number(selectedId) === Number(p.id)) opt.selected = true;
+            productSel.appendChild(opt);
+        }
+    }
+
+    function addOutputRow(pref){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="text" placeholder="Size" value="${pref?.size||''}"/></td>
+            <td><input type="text" placeholder="Color" value="${pref?.color||''}"/></td>
+            <td>
+                <select><option value=""></option><option value="tek" ${pref?.pack_type==='tek'?'selected':''}>tek</option><option value="cift" ${pref?.pack_type==='cift'?'selected':''}>cift</option></select>
+            </td>
+            <td><input type="number" min="1" value="${pref?.quantity||1}"/></td>
+            <td><input type="number" min="1" value="${pref?.pair_multiplier||1}"/></td>
+            <td><input type="number" step="0.01" value="${pref?.unit_price||''}"/></td>
+            <td><button type="button" class="rm">X</button></td>
+        `;
+        tr.querySelector('.rm').addEventListener('click', ()=> tr.remove());
+        outsTbody.appendChild(tr);
+    }
+
+    function guessFromPattern(txt){
+        txt = txt || '';
+        const up = txt.toUpperCase();
+        const sizeTokens = ['XS','S','M','L','XL','XXL','30','31','32','33','34','35','36','38','40','42'];
+        const colorTokens = ['SİYAH','SIYAH','LACİVERT','LACIVERT','KREM','AÇIK GRİ','ACIK GRI','GRİ','GRI','BEYAZ'];
+        let size = ''; for (const t of sizeTokens){ if (up.includes(t)) { size = t; break; } }
+        let color = ''; for (const t of colorTokens){ if (up.includes(t)) { color = t; break; } }
+        let pack_type = up.includes('ÇİFT')||up.includes('CIFT')?'cift':(up.includes('TEK')?'tek':'');
+        return { size, color, pack_type, quantity: 1, pair_multiplier: pack_type==='cift'?2:1 };
+    }
+
+    function loadInventory(productId){
+        invTbody.innerHTML = '';
+        if (!productId) return;
+        fetch(`/inventory/stock?product_id=${productId}`)
+          .then(r=>r.json()).then(j=>{
+            for (const it of (j.items||[])){
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${it.name}</td><td>${it.on_hand}</td>`;
+                invTbody.appendChild(tr);
+            }
+          }).catch(()=>{});
+    }
+
+    function openPattern(pat){
+        editorEmpty.style.display = 'none';
+        editor.style.display = '';
+        patInp.value = pat;
+        refillProducts();
+        outsTbody.innerHTML = '';
+        addOutputRow(guessFromPattern(pat));
+        if (productSel.value) loadInventory(productSel.value);
+    }
+
+    patList.addEventListener('click', (e)=>{
+        const li = e.target.closest('li[data-pattern]');
+        if (!li) return;
+        openPattern(li.getAttribute('data-pattern'));
+    });
+
+    document.getElementById('addOut').addEventListener('click', ()=> addOutputRow({quantity:1,pair_multiplier:1}));
+    productSel.addEventListener('change', ()=> loadInventory(productSel.value));
+
+    document.getElementById('newProdBtn').addEventListener('click', async ()=>{
+        const name = prompt('Yeni ürün adı?');
+        if (!name) return;
+        const fd = new FormData();
+        fd.append('name', name);
+        fd.append('default_unit', 'adet');
+        try {
+            const r = await fetch('/products', { method:'POST', body: fd });
+            if (!r.ok) throw new Error(await r.text());
+            const j = await r.json();
+            products.unshift({ id: j.id, name: j.name });
+            refillProducts(j.id);
+        } catch (e) { alert('Ürün oluşturma hatası'); }
+    });
+
+    async function saveRuleCore(){
+        const pattern = patInp.value;
+        const productId = Number(productSel.value || 0) || null;
+        const outputs = [];
+        for (const tr of outsTbody.querySelectorAll('tr')){
+            const tds = tr.querySelectorAll('td');
+            const size = tds[0].querySelector('input').value || null;
+            const color = tds[1].querySelector('input').value || null;
+            const pack_type = tds[2].querySelector('select').value || null;
+            const qty = Number(tds[3].querySelector('input').value || 1);
+            const pair = Number(tds[4].querySelector('input').value || 1);
+            const priceVal = tds[5].querySelector('input').value;
+            const unit_price = priceVal ? Number(priceVal) : null;
+            outputs.push({ product_id: productId, size, color, pack_type, quantity: qty, pair_multiplier: pair, unit_price });
+        }
+        const body = { source_pattern: pattern, match_mode: 'exact', priority: 100, outputs };
+        const r = await fetch('/mappings/rules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        if (!r.ok) throw new Error(await r.text());
+    }
+
+    document.getElementById('saveRule').addEventListener('click', async ()=>{
+        saveMsg.textContent = 'Saving...';
+        try { await saveRuleCore(); saveMsg.textContent = 'Saved.'; }
+        catch (e) { saveMsg.textContent = 'Save error'; }
+    });
+    document.getElementById('saveNext').addEventListener('click', async ()=>{
+        saveMsg.textContent = 'Saving...';
+        try { await saveRuleCore(); saveMsg.textContent = 'Saved.'; }
+        catch (e) { saveMsg.textContent = 'Save error'; return; }
+        // move to next pattern
+        const cur = patInp.value;
+        const lis = [...patList.querySelectorAll('li[data-pattern]')];
+        const idx = lis.findIndex(li=>li.getAttribute('data-pattern')===cur);
+        if (idx>=0 && idx+1<lis.length){ openPattern(lis[idx+1].getAttribute('data-pattern')); }
+    });
+
+    document.getElementById('commitBtn').addEventListener('click', async ()=>{
+        const data_date = prompt('Data date (YYYY-MM-DD)?');
+        if (!data_date) return;
+        try {
+            const r = await fetch('/import/commit', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source, filename, data_date })});
+            if (!r.ok) throw new Error(await r.text());
+            alert('Import committed.');
+            location.href = '/dashboard';
+        } catch (e) { alert('Commit error'); }
+    });
+    </script>
+</body>
+</html>
+
+

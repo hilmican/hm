@@ -183,6 +183,74 @@ def preview_import(body: dict, request: Request):
 	}
 
 
+@router.post("/preview-map")
+def preview_map(body: dict, request: Request):
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	source = body.get("source")
+	filename = body.get("filename")
+	if source != "bizim" or not filename:
+		raise HTTPException(status_code=400, detail="source must be 'bizim' and filename required")
+	folder = BIZIM_DIR
+	file_path = folder / filename
+	if not file_path.exists():
+		raise HTTPException(status_code=404, detail="File not found")
+	records = read_bizim_file(str(file_path))
+	from ..services.mapping import resolve_mapping
+	unmatched: dict[str, dict] = {}
+	for rec in records:
+		item_name_raw = rec.get("item_name") or "Genel Ürün"
+		base_name, _h, _w, _notes = parse_item_details(item_name_raw)
+		outs, rule = None, None
+		try:
+			with get_session() as session:
+				outs, rule = resolve_mapping(session, base_name)
+		except Exception:
+			outs, rule = [], None
+		if not outs:
+			entry = unmatched.get(base_name)
+			if not entry:
+				entry = {"pattern": base_name, "count": 0, "samples": []}
+				unmatched[base_name] = entry
+			entry["count"] += 1
+			if len(entry["samples"]) < 3:
+				entry["samples"].append(item_name_raw)
+	return {
+		"filename": file_path.name,
+		"unmatched_patterns": sorted(unmatched.values(), key=lambda x: x["count"], reverse=True),
+		"total_unmatched": sum(v["count"] for v in unmatched.values()),
+	}
+
+
+@router.get("/map")
+def import_map(source: str, filename: str, request: Request):
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	if source != "bizim":
+		raise HTTPException(status_code=400, detail="Only 'bizim' supported for mapping wizard")
+	folder = BIZIM_DIR
+	file_path = folder / filename
+	if not file_path.exists():
+		raise HTTPException(status_code=404, detail="File not found")
+	# aggregate unmatched via preview_map logic
+	preview = preview_map({"source": source, "filename": filename}, request)
+	# products list for picker
+	from ..models import Product as _Product
+	with get_session() as session:
+		products = session.exec(select(_Product).order_by(_Product.name.asc()).limit(1000)).all()
+		prod_rows = [{"id": p.id, "name": p.name} for p in products]
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"import_map.html",
+			{
+				"request": request,
+				"source": source,
+				"filename": filename,
+				"unmatched_patterns": preview.get("unmatched_patterns") or [],
+				"products": prod_rows,
+			},
+		)
+
 @router.post("/commit")
 def commit_import(body: dict, request: Request):
 	if not request.session.get("uid"):

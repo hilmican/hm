@@ -55,10 +55,18 @@ def stock_table(request: Request, product_id: Optional[int] = Query(default=None
 			q = q.where(Item.color == color)
 		rows = session.exec(q.limit(limit)).all()
 		stock_map = get_stock_map(session)
+		# Build product_id -> name map for display
+		pids = sorted({it.product_id for it in rows if it.product_id})
+		pmap = {}
+		if pids:
+			prows = session.exec(select(Product).where(Product.id.in_(pids))).all()
+			for p in prows:
+				if p.id is not None:
+					pmap[p.id] = p.name
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"inventory_table.html",
-			{"request": request, "rows": rows, "stock_map": stock_map, "limit": limit},
+			{"request": request, "rows": rows, "stock_map": stock_map, "product_map": pmap, "limit": limit},
 		)
 
 

@@ -65,7 +65,7 @@
                 <td>{{ it.id }}</td>
                 <td>{{ it.sku }}</td>
                 <td>{{ it.name }}</td>
-                <td>{{ it.product_id }}</td>
+                <td>{% if it.product_id %}{{ product_map.get(it.product_id, it.product_id) }}{% else %}-{% endif %}</td>
                 <td>{{ it.size }}</td>
                 <td>{{ it.color }}</td>
                 <td>{{ it.pack_type }}</td>
