@@ -511,60 +511,63 @@ def commit_import(body: dict, request: Request):
 						except Exception:
 							pass
 						chosen_item_id = (created_items_local[0][0].id if created_items_local else (item.id if 'item' in locals() and item else None))  # type: ignore
-						if existing_order and (existing_order.source or "") == "kargo":
-							existing_order.item_id = chosen_item_id  # type: ignore
-						existing_order.quantity = rec.get("quantity") or existing_order.quantity or 1
-						existing_order.unit_price = rec.get("unit_price") or existing_order.unit_price
-						existing_order.total_amount = rec.get("total_amount") or existing_order.total_amount
-						existing_order.shipment_date = rec.get("shipment_date") or existing_order.shipment_date
-						existing_order.data_date = existing_order.data_date or run.data_date
-						existing_order.source = "bizim"
-						if order_notes:
-							cur = existing_order.notes or None
-							existing_order.notes = f"{cur} | {order_notes}" if cur else order_notes
-						# after bizim details, wait for kargo to merge
-						existing_order.status = existing_order.status or "missing-kargo"
-						matched_order_id = existing_order.id
-						try:
-							print("[MERGE DEBUG][bizim] upgraded kargo placeholder -> bizim:", {
-								"order_id": existing_order.id,
-								"tracking_no": existing_order.tracking_no,
-								"client_id": existing_order.client_id,
-								"quantity": existing_order.quantity,
-								"unit_price": existing_order.unit_price,
-								"total_amount": existing_order.total_amount,
-							})
-						except Exception:
-							pass
+						if existing_order:
+							# upgrade placeholder kargo order
+							if (existing_order.source or "") == "kargo":
+								existing_order.item_id = chosen_item_id  # type: ignore
+							existing_order.quantity = rec.get("quantity") or existing_order.quantity or 1
+							existing_order.unit_price = rec.get("unit_price") or existing_order.unit_price
+							existing_order.total_amount = rec.get("total_amount") or existing_order.total_amount
+							existing_order.shipment_date = rec.get("shipment_date") or existing_order.shipment_date
+							existing_order.data_date = existing_order.data_date or run.data_date
+							existing_order.source = "bizim"
+							if order_notes:
+								cur = existing_order.notes or None
+								existing_order.notes = f"{cur} | {order_notes}" if cur else order_notes
+							# after bizim details, wait for kargo to merge
+							existing_order.status = existing_order.status or "missing-kargo"
+							matched_order_id = existing_order.id
+							try:
+								print("[MERGE DEBUG][bizim] upgraded kargo placeholder -> bizim:", {
+									"order_id": existing_order.id,
+									"tracking_no": existing_order.tracking_no,
+									"client_id": existing_order.client_id,
+									"quantity": existing_order.quantity,
+									"unit_price": existing_order.unit_price,
+									"total_amount": existing_order.total_amount,
+								})
+							except Exception:
+								pass
 						else:
+							# create a new bizim order
 							order = Order(
-							tracking_no=rec.get("tracking_no"),
-							client_id=client.id,  # type: ignore
+								tracking_no=rec.get("tracking_no"),
+								client_id=client.id,  # type: ignore
 								item_id=chosen_item_id,      # type: ignore
-							quantity=rec.get("quantity") or 1,
-							unit_price=rec.get("unit_price"),
-							total_amount=rec.get("total_amount"),
-							shipment_date=rec.get("shipment_date"),
-							data_date=run.data_date,
-							source="bizim",
-							notes=order_notes,
-						)
-						session.add(order)
-						session.flush()
-						run.created_orders += 1
-						try:
-							print("[MERGE DEBUG][bizim] created new bizim order:", {
-								"order_id": order.id,
-								"client_id": order.client_id,
-								"shipment_date": order.shipment_date,
-								"data_date": order.data_date,
-								"total_amount": order.total_amount,
-							})
-						except Exception:
-							pass
+								quantity=rec.get("quantity") or 1,
+								unit_price=rec.get("unit_price"),
+								total_amount=rec.get("total_amount"),
+								shipment_date=rec.get("shipment_date"),
+								data_date=run.data_date,
+								source="bizim",
+								notes=order_notes,
+							)
+							session.add(order)
+							session.flush()
+							run.created_orders += 1
+							try:
+								print("[MERGE DEBUG][bizim] created new bizim order:", {
+									"order_id": order.id,
+									"client_id": order.client_id,
+									"shipment_date": order.shipment_date,
+									"data_date": order.data_date,
+									"total_amount": order.total_amount,
+								})
+							except Exception:
+								pass
 							# Bizim order initially missing kargo
 							order.status = order.status or "missing-kargo"
-						matched_order_id = order.id
+							matched_order_id = order.id
 
 						# Create stock movements (out) for mapped variants (only when mapping matched)
 						try:
@@ -839,6 +842,11 @@ def commit_import(body: dict, request: Request):
 			"payments_existing": payments_existing_cnt,
 			"payments_skipped_zero": payments_skipped_zero_cnt,
 		}
+		# Log summary for debugging/observability of imports
+		try:
+			print("[IMPORT COMMIT] summary:", summary)
+		except Exception:
+			pass
 		return summary
 
 
