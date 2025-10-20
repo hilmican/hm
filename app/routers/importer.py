@@ -483,12 +483,14 @@ def commit_import(body: dict, request: Request):
 						matched_client_id = client.id
 
 						item_name_raw = rec.get("item_name") or "Genel Ürün"
-						base_name, height_cm, weight_kg, extra_notes = parse_item_details(item_name_raw)
+					base_name, height_cm, weight_kg, extra_notes = parse_item_details(item_name_raw)
 						# update client with parsed metrics if present
 						if height_cm is not None:
 							client.height_cm = client.height_cm or height_cm
 						if weight_kg is not None:
 							client.weight_kg = client.weight_kg or weight_kg
+					# pass base name explicitly for mapping; keep original for notes
+					rec["item_name_base"] = base_name
 						# Resolve mapping to variant(s)
 						from ..services.mapping import resolve_mapping, find_or_create_variant
 						outputs, matched_rule = resolve_mapping(session, base_name)
@@ -540,7 +542,7 @@ def commit_import(body: dict, request: Request):
 							status = "unmatched"
 							message = f"No mapping rule for '{base_name}'"
 
-						# Bizim branch extracted into service function
+						# Bizim branch
 						status, message, matched_client_id, matched_order_id = process_bizim_row(session, run, rec)
 
 					# Kargo branch extracted into service function

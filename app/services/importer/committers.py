@@ -211,7 +211,8 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
 
     # item mapping via package rule for the entire base name
     item_name_raw = rec.get("item_name") or "Genel Ürün"
-    base_name = str(item_name_raw).strip()
+    # prefer pre-parsed base from router to avoid height/weight/notes noise
+    base_name = str(rec.get("item_name_base") or item_name_raw).strip()
     outputs, _matched_rule = resolve_mapping(session, base_name)
     created_items: List[tuple[Item, int]] = []
     if outputs:
