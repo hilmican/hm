@@ -8,9 +8,11 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from ..db import get_session
 from ..models import Message
+import logging
 
 
 router = APIRouter()
+_log = logging.getLogger("instagram.webhook")
 
 
 @router.get("/webhooks/instagram")
@@ -20,6 +22,18 @@ async def verify_subscription(request: Request):
 	verify_token = params.get("hub.verify_token")
 	challenge = params.get("hub.challenge", "")
 	expected = os.getenv("IG_WEBHOOK_VERIFY_TOKEN", "")
+	# minimal debug without leaking full secrets
+	try:
+		_log.info(
+			"IG verify: mode=%s recv_len=%d recv_sfx=%s expected_len=%d expected_sfx=%s",
+			mode,
+			len(verify_token or ""),
+			(verify_token[-4:] if verify_token else None),
+			len(expected or ""),
+			(expected[-4:] if expected else None),
+		)
+	except Exception:
+		pass
 	if mode == "subscribe" and verify_token and verify_token == expected:
 		return Response(content=str(challenge), media_type="text/plain")
 	raise HTTPException(status_code=403, detail="Verification failed")
