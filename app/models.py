@@ -32,6 +32,7 @@ class Item(SQLModel, table=True):
     pack_type: Optional[str] = Field(default=None, index=True, description="tek|cift|other")
     pair_multiplier: Optional[int] = Field(default=1)
     price: Optional[float] = None
+    cost: Optional[float] = None
     status: Optional[str] = Field(default=None, index=True, description="active|inactive")
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)

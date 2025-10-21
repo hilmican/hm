@@ -60,6 +60,7 @@ def list_stock(product_id: Optional[int] = Query(default=None), size: Optional[s
 					"color": it.color,
 					"pack_type": it.pack_type,
 					"price": it.price,
+					"cost": it.cost,
 					"on_hand": stock_map.get(it.id or 0, 0),
 				}
 				for it in rows
@@ -119,6 +120,7 @@ def series_add(body: Dict[str, Any]):
 	pack_type: Optional[str] = body.get("pack_type")
 	pair_multiplier: int = body.get("pair_multiplier") or 1
 	price = body.get("price")
+	cost = body.get("cost")
 	if not product_id or quantity_per_variant <= 0 or not sizes:
 		raise HTTPException(status_code=400, detail="product_id, sizes[], quantity_per_variant>0 required")
 	with get_session() as session:
@@ -132,6 +134,8 @@ def series_add(body: Dict[str, Any]):
 				it = find_or_create_variant(session, product=prod, size=sz, color=col, pack_type=pack_type, pair_multiplier=pair_multiplier)
 				if price is not None:
 					it.price = price
+				if cost is not None:
+					it.cost = cost
 				mv = StockMovement(item_id=it.id, direction="in", quantity=quantity_per_variant)
 				session.add(mv)
 				created.append(it.id or 0)

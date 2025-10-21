@@ -69,6 +69,8 @@ def init_db() -> None:
 			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN pair_multiplier INTEGER DEFAULT 1")
 		if not column_exists("item", "price"):
 			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN price REAL")
+		if not column_exists("item", "cost"):
+			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN cost REAL")
 		if not column_exists("item", "status"):
 			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN status TEXT")
 

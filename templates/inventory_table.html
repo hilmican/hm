@@ -70,6 +70,7 @@
             </select>
             <input id="pairMult" type="number" min="1" value="1" placeholder="Pair mult" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:120px;" />
             <input id="price" type="number" step="0.01" placeholder="Price (optional)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:140px;" />
+            <input id="cost" type="number" step="0.01" placeholder="Cost (optional)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; width:140px;" />
             <button id="seriesBtn" type="button" style="background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Ekle</button>
             <span id="seriesMsg" class="pill" style="display:none"></span>
         </form>
@@ -143,8 +144,10 @@ if (btn) {
         const mult = Number(document.getElementById('pairMult').value || 1);
         const priceVal = document.getElementById('price').value;
         const price = priceVal ? Number(priceVal) : null;
+        const costVal = document.getElementById('cost').value;
+        const cost = costVal ? Number(costVal) : null;
         if (!pid || !sizes.length || qty <= 0) { alert('product_id, sizes ve qty gereklidir'); return; }
-        const body = { product_id: pid, sizes, colors, quantity_per_variant: qty, pack_type: pack, pair_multiplier: mult, price };
+        const body = { product_id: pid, sizes, colors, quantity_per_variant: qty, pack_type: pack, pair_multiplier: mult, price, cost };
         try {
             const r = await fetch('/inventory/series', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
             if (!r.ok) throw new Error(await r.text());
