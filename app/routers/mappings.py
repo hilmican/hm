@@ -76,7 +76,7 @@ def create_rule(body: Dict[str, Any]):
 		session.add(r)
 		session.flush()
 		for out in outputs:
-                o_rec = ItemMappingOutput(
+			o_rec = ItemMappingOutput(
 				rule_id=r.id or 0,
 				item_id=out.get("item_id"),
 				product_id=out.get("product_id"),
@@ -105,7 +105,7 @@ def update_rule(rule_id: int, body: Dict[str, Any]):
 				session.delete(o)
 			session.flush()
 			for out in (body.get("outputs") or []):
-                o_rec = ItemMappingOutput(
+				o_rec = ItemMappingOutput(
 					rule_id=r.id or 0,
 					item_id=out.get("item_id"),
 					product_id=out.get("product_id"),
