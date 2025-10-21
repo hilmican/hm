@@ -11,4 +11,6 @@ services:
       - ./data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
+      - IG_WEBHOOK_VERIFY_TOKEN=MHG_UYHS_IG_WEBHOOK_VERIFY_TOKEN_NANA
+      - IG_APP_SECRET=9264d4f5304837e07b27ed267c8d2f21
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8388"]

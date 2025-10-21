@@ -170,3 +170,15 @@ class User(SQLModel, table=True):
     locked_until: Optional[dt.datetime] = Field(default=None, index=True)
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
+class Message(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ig_sender_id: Optional[str] = Field(default=None, index=True)
+    ig_recipient_id: Optional[str] = Field(default=None, index=True)
+    ig_message_id: Optional[str] = Field(default=None, index=True, unique=True)
+    text: Optional[str] = None
+    attachments_json: Optional[str] = None
+    timestamp_ms: Optional[int] = Field(default=None, index=True)
+    raw_json: Optional[str] = None
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
