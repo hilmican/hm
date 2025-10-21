@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Payments</title>
+    <title>Odemeler</title>
     <style>
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
         table { width: 100%; border-collapse: collapse; }
@@ -41,19 +41,19 @@
         <input id="search" type="search" placeholder="Odeme ara (musteri, siparis, yontem)" />
         <span class="pill">{{ rows|length }} odeme</span>
     </div>
-    <h2>Payments</h2>
+    <h2>Odemeler</h2>
     <table id="paymentsTbl">
         <thead>
             <tr>
                 <th>ID</th>
-                <th>Client</th>
-                <th>Order</th>
-                <th>Order Total</th>
-                <th>Paid Amount</th>
-                <th>Fees</th>
+                <th>Musteri</th>
+                <th>Siparis</th>
+                <th>Siparis Toplam</th>
+                <th>Odenen</th>
+                <th>Kesintiler</th>
                 <th>Net</th>
-                <th>Date</th>
-                <th>Method</th>
+                <th>Tarih</th>
+                <th>Yontem</th>
             </tr>
         </thead>
         <tbody>

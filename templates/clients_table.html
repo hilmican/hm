@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Clients</title>
+    <title>Musteriler</title>
     <style>
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
         table { width: 100%; border-collapse: collapse; }
@@ -54,10 +54,10 @@
         <input id="search" type="search" placeholder="Musteri ara (ad, telefon, sehir, ...)" />
         <span class="pill">{{ rows|length }} musteri</span>
     </div>
-    <h2>Clients</h2>
+    <h2>Musteriler</h2>
     <table id="clientsTbl">
         <thead>
-            <tr><th data-type="num">ID</th><th>Name</th><th>Phone</th><th>City</th><th data-type="num">Height</th><th data-type="num">Weight</th><th data-type="num">Orders</th><th>Created</th></tr>
+            <tr><th data-type="num">ID</th><th>Ad</th><th>Telefon</th><th>Sehir</th><th data-type="num">Boy</th><th data-type="num">Kilo</th><th data-type="num">Siparis</th><th>Olusturulma</th></tr>
         </thead>
         <tbody>
             {% for c in rows %}

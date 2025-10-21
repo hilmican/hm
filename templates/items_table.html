@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Items</title>
+    <title>Varyantlar</title>
     <style>
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
         table { width: 100%; border-collapse: collapse; }
@@ -35,10 +35,10 @@
         <input id="search" type="search" placeholder="Urun ara (ad, sku, beden, renk)" />
         <span class="pill">{{ rows|length }} urun</span>
     </div>
-    <h2>Items</h2>
+    <h2>Varyantlar</h2>
     <table id="itemsTbl">
         <thead>
-            <tr><th>ID</th><th>SKU</th><th>Name</th><th>Product</th><th>Size</th><th>Color</th><th>Pack</th><th>Price</th><th>On-hand</th><th>Unit</th></tr>
+            <tr><th>ID</th><th>SKU</th><th>Ad</th><th>Urun</th><th>Beden</th><th>Renk</th><th>Paket</th><th>Fiyat</th><th>Stok</th><th>Birim</th></tr>
         </thead>
         <tbody>
             {% for it in rows %}
