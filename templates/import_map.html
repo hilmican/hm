@@ -37,8 +37,8 @@
             <h2>Unmatched Patterns</h2>
             <div class="inner">
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-                    <input id="investigatePat" type="text" placeholder="Pattern to investigate (optional)" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;flex:1" />
-                    <button id="investigateBtn" type="button">Investigate</button>
+                    <input id="investigatePat" type="text" placeholder="Arastirilacak pattern (opsiyonel)" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;flex:1" />
+                    <button id="investigateBtn" type="button">Arastir</button>
                 </div>
                 <ul id="patList">
                     {% for p in unmatched_patterns %}
@@ -56,28 +56,28 @@
         <div class="card">
             <h2>Editor</h2>
             <div class="inner">
-                <div id="editorEmpty" class="muted">Select a pattern to configure mapping.</div>
+                <div id="editorEmpty" class="muted">Mapping icin bir pattern secin.</div>
                 <div id="editor" style="display:none">
                     <label>Pattern</label>
                     <input id="pat" type="text" readonly />
 
                     <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-top:8px;">
                         <div>
-                            <label>Product</label>
+                            <label>Urun</label>
                             <select id="product"></select>
                         </div>
                         <div>
-                            <button id="newProdBtn" type="button">New Product</button>
+                            <button id="newProdBtn" type="button">Yeni Urun</button>
                         </div>
                     </div>
 
                     <div style="margin-top:10px;">
-                        <label>Outputs (product, size, color, pack, qty, pair mult, price)</label>
+                        <label>Ciktilar (urun, beden, renk, paket, adet, cift carpani, fiyat)</label>
                         <table>
                             <thead><tr><th>Product</th><th>Size</th><th>Color</th><th>Pack</th><th>Qty</th><th>Pair</th><th>Price</th><th></th></tr></thead>
                             <tbody id="outs"></tbody>
                         </table>
-                        <button id="addOut" type="button" style="margin-top:6px">Add Output</button>
+                        <button id="addOut" type="button" style="margin-top:6px">Cikti Ekle</button>
                         <div id="priceHint" class="muted" style="margin-top:6px"></div>
                     </div>
 
@@ -88,7 +88,7 @@
                     </div>
 
                     <div style="margin-top:14px;">
-                        <label>Inventory (selected product)</label>
+                        <label>Stok (secili urun)</label>
                         <table>
                             <thead><tr><th>Variant</th><th>On-hand</th></tr></thead>
                             <tbody id="inv"></tbody>
@@ -99,10 +99,10 @@
         </div>
         {% if filenames and filenames|length > 1 %}
         <div class="card">
-            <h2>Per-file Dates</h2>
+            <h2>Dosya Bazli Tarihler</h2>
             <div class="inner">
                 <table>
-                    <thead><tr><th>Filename</th><th>Data date (YYYY-MM-DD)</th></tr></thead>
+                    <thead><tr><th>Dosya</th><th>Data tarihi (YYYY-MM-DD)</th></tr></thead>
                     <tbody id="datesTbody">
                         {% for fn in filenames %}
                         <tr>
@@ -252,7 +252,7 @@
     productSel.addEventListener('change', ()=> loadInventory(productSel.value));
 
     document.getElementById('newProdBtn').addEventListener('click', async ()=>{
-        const name = prompt('Yeni ürün adı?');
+        const name = prompt('Yeni urun adi?');
         if (!name) return;
         const fd = new FormData();
         fd.append('name', name);

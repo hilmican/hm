@@ -24,20 +24,20 @@
 		<h1>Kargo Management Dashboard</h1>
 		<div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 18px 0;">
 			<div class="card" style="padding:8px 12px;">
-				<strong>Toplam Satış:</strong> {{ '%.2f'|format(total_sales or 0) }}
+				<strong>Toplam Satis:</strong> {{ '%.2f'|format(total_sales or 0) }}
 			</div>
 			<div class="card" style="padding:8px 12px;">
 				<strong>Toplanan:</strong> {{ '%.2f'|format(total_collected or 0) }}
 			</div>
 			<div class="card" style="padding:8px 12px;">
-				<strong>Alınacak:</strong> {{ '%.2f'|format(total_to_collect or 0) }}
+				<strong>Alinacak:</strong> {{ '%.2f'|format(total_to_collect or 0) }}
 			</div>
 			<div class="card" style="padding:8px 12px;">
 				<strong>Toplam Kesintiler:</strong> {{ '%.2f'|format(total_fees or 0) }}
 			</div>
 			<div class="card" style="padding:8px 12px;">
-				<strong>Eşleşmeyen Ürün Satırları:</strong> {{ unmatched_count or 0 }}
-				<a href="/import/map?source=bizim&filename=last" style="margin-left:8px">Haritalandır</a>
+				<strong>Eslesmeyen Urun Satirlari:</strong> {{ unmatched_count or 0 }}
+				<a href="/import/map?source=bizim&filename=last" style="margin-left:8px">Haritalandir</a>
 			</div>
 		</div>
 		<div class="toolbar">
@@ -235,12 +235,12 @@
 		const resetBtn = document.getElementById('resetBtn');
 		if (resetBtn) {
 			resetBtn.addEventListener('click', async () => {
-				if (!confirm('Tüm veritabanı silinecek ve sıfırlanacak. Emin misiniz?')) return;
+				if (!confirm('Tum veritabani silinecek ve sifirlanacak. Emin misiniz?')) return;
 				try {
                     const keep = document.getElementById('preserveMappings');
                     const r = await fetch('/import/reset?preserve_mappings=' + (keep && keep.checked ? '1' : '0'), { method: 'POST' });
 					if (!r.ok) throw new Error('Reset failed');
-					alert('Veritabanı sıfırlandı.');
+					alert('Veritabani sifirlandi.');
 					location.reload();
 				} catch (e) {
 					alert('Reset error');
@@ -274,8 +274,8 @@
                             const pm = await fetch('/import/preview-map', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source: 'bizim', filenames: fnames, exclude_generic: false }) });
                             if (pm.ok) {
                                 const j = await pm.json();
-                                if ((j.total_unmatched||0) > 0) {
-                                    if (confirm(`${j.total_unmatched} eşleşmeyen ürün bulundu. Haritalandırma ekranına gitmek ister misiniz?`)) {
+								if ((j.total_unmatched||0) > 0) {
+									if (confirm(`${j.total_unmatched} eslesmeyen urun bulundu. Haritalandirma ekranina gitmek ister misiniz?`)) {
                                         const joined = fnames.map(encodeURIComponent).join(',');
                                         location.href = `/import/map?source=bizim&filename=${joined}`;
                                         return;
@@ -286,7 +286,7 @@
                     }
 
 					// Offer to commit each file sequentially (date prompt only for bizim)
-					if (confirm('Dosyalar yüklendi. Hepsini içe aktarmak ister misiniz?')) {
+					if (confirm('Dosyalar yuklendi. Hepsini ice aktarmak ister misiniz?')) {
 						const totals = { created_orders:0, created_clients:0, created_items:0, created_payments:0, unmatched:0, enriched_orders:0, payments_existing:0, payments_skipped_zero:0 };
 						for (const f of json.files) {
 							let body = { source: json.source, filename: f.filename };
@@ -307,11 +307,11 @@
 							for (const k of Object.keys(totals)) { totals[k] += (j2[k] || 0); }
 						}
 						console.group('Aggregate totals');
-						console.log('Siparişler (created/enriched):', totals.created_orders, totals.enriched_orders);
-						console.log('Müşteriler created:', totals.created_clients);
-						console.log('Ürünler created:', totals.created_items);
-						console.log('Ödemeler (created/existing/skipped0):', totals.created_payments, totals.payments_existing, totals.payments_skipped_zero);
-						console.log('Eşleşmeyen satırlar:', totals.unmatched);
+						console.log('Siparisler (created/enriched):', totals.created_orders, totals.enriched_orders);
+						console.log('Musteriler created:', totals.created_clients);
+						console.log('Urunler created:', totals.created_items);
+						console.log('Odemeler (created/existing/skipped0):', totals.created_payments, totals.payments_existing, totals.payments_skipped_zero);
+						console.log('Eslesmeyen satirlar:', totals.unmatched);
 						console.groupEnd();
 						location.reload();
 					}

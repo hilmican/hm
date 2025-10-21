@@ -33,32 +33,32 @@
     <div class="toolbar">
         <a href="/dashboard">← Dashboard</a>
         <a href="/items/table">Items</a>
-        <input id="search" type="search" placeholder="Search inventory (name, sku, size, color)" />
-        <span class="pill">{{ rows|length }} variant(s)</span>
+        <input id="search" type="search" placeholder="Stokta ara (ad, sku, beden, renk)" />
+        <span class="pill">{{ rows|length }} variant</span>
     </div>
     <div class="card" style="padding:12px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:14px;">
         <h3 style="margin:0 0 8px 0; font-size:15px;">Seri Stok Ekle</h3>
         <form id="seriesForm" onsubmit="return false;" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
             <select id="productId" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:220px;">
-                <option value="">Product</option>
+                <option value="">Urun</option>
             </select>
             <div style="display:flex; flex-direction:column; gap:6px;">
                 <div style="display:flex; gap:6px; align-items:center;">
                     <select id="sizes" multiple size="4" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:200px;"></select>
-                    <button id="selectAllSizes" type="button" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9fafb; cursor:pointer;">Tümü</button>
+                    <button id="selectAllSizes" type="button" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9fafb; cursor:pointer;">Tumu</button>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
-                    <input id="customSize" type="text" placeholder="Yeni beden ekle (örn. S)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:160px;" />
+                    <input id="customSize" type="text" placeholder="Yeni beden ekle (orn. S)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:160px;" />
                     <button id="addSize" type="button" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9fafb; cursor:pointer;">Ekle</button>
                 </div>
             </div>
             <div style="display:flex; flex-direction:column; gap:6px;">
                 <div style="display:flex; gap:6px; align-items:center;">
                     <select id="colors" multiple size="4" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:200px;"></select>
-                    <button id="selectAllColors" type="button" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9fafb; cursor:pointer;">Tümü</button>
+                    <button id="selectAllColors" type="button" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9fafb; cursor:pointer;">Tumu</button>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
-                    <input id="customColor" type="text" placeholder="Yeni renk ekle (örn. Siyah)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:160px;" />
+                    <input id="customColor" type="text" placeholder="Yeni renk ekle (orn. Siyah)" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:160px;" />
                     <button id="addColor" type="button" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; background:#f9fafb; cursor:pointer;">Ekle</button>
                 </div>
             </div>
