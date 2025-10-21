@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Instagram Inbox</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .toolbar { display:flex; gap:8px; margin-bottom:12px; }
+      .conv { border:1px solid #e5e7eb; border-radius:8px; padding:12px; margin-bottom:8px; }
+      .meta { color:#6b7280; font-size:12px; }
+      a { color:#2563eb; text-decoration:none; }
+      button { background:#2563eb; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; }
+    </style>
+  </head>
+  <body>
+    <h1>Instagram Inbox</h1>
+    <div class="toolbar">
+      <button id="refresh">Refresh</button>
+      <a href="/dashboard">Back to Dashboard</a>
+    </div>
+    <div id="list">
+      {% for m in conversations %}
+        <div class="conv">
+          <div><a href="/ig/inbox/{{ m.conversation_id }}">Conversation {{ m.conversation_id }}</a></div>
+          <div class="meta">{{ m.timestamp_ms }} · {{ (m.text or '')[:120] }}</div>
+        </div>
+      {% endfor %}
+      {% if not conversations %}
+        <div class="meta">No conversations cached yet. Click Refresh to sync.</div>
+      {% endif %}
+    </div>
+    <script>
+      const btn = document.getElementById('refresh');
+      btn?.addEventListener('click', async () => {
+        btn.disabled = true; btn.textContent = 'Refreshing...';
+        try {
+          const r = await fetch('/ig/inbox/refresh', { method: 'POST' });
+          if (!r.ok) throw new Error('refresh failed');
+          location.reload();
+        } catch (e) { alert('Refresh error'); }
+      });
+    </script>
+  </body>
+</html>
+

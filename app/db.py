@@ -112,6 +112,20 @@ def init_db() -> None:
 				if not column_exists("payment", col):
 					conn.exec_driver_sql(f"ALTER TABLE payment ADD COLUMN {col} {coltype} DEFAULT 0")
 
+		# Message table lightweight migrations
+		try:
+			rows = conn.exec_driver_sql("PRAGMA table_info('message')").fetchall()
+			message_exists = any(rows)
+		except Exception:
+			message_exists = False
+		if message_exists:
+			if not column_exists("message", "conversation_id"):
+				conn.exec_driver_sql("ALTER TABLE message ADD COLUMN conversation_id TEXT")
+			if not column_exists("message", "direction"):
+				conn.exec_driver_sql("ALTER TABLE message ADD COLUMN direction TEXT")
+			if not column_exists("message", "sender_username"):
+				conn.exec_driver_sql("ALTER TABLE message ADD COLUMN sender_username TEXT")
+
 
 @contextmanager
 def get_session() -> Iterator[Session]:

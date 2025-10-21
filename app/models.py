@@ -181,4 +181,7 @@ class Message(SQLModel, table=True):
     attachments_json: Optional[str] = None
     timestamp_ms: Optional[int] = Field(default=None, index=True)
     raw_json: Optional[str] = None
+    conversation_id: Optional[str] = Field(default=None, index=True)
+    direction: Optional[str] = Field(default=None, index=True, description="in|out")
+    sender_username: Optional[str] = Field(default=None, index=True)
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
