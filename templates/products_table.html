@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Products</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+        th { background: #fafafa; position: sticky; top: 0; }
+        .toolbar { margin: 12px 0; display: flex; gap: 8px; align-items: center; }
+        input, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; }
+        a { color: #2563eb; text-decoration: none; }
+        .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; }
+        button { padding: 6px 10px; border-radius: 6px; border: 1px solid #ddd; background: #f9fafb; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <a href="/dashboard">← Dashboard</a>
+        <span class="pill">{{ rows|length }} product(s)</span>
+    </div>
+    <div class="card" style="padding:12px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:14px;">
+        <h3 style="margin:0 0 8px 0; font-size:15px;">Create Product</h3>
+        <form id="createForm" onsubmit="return false;" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <input name="name" placeholder="Name" required />
+            <input name="default_unit" placeholder="Unit" value="adet" />
+            <input name="default_price" type="number" step="0.01" placeholder="Default price" />
+            <button type="submit" style="background:#2563eb;color:#fff;border:none;">Create</button>
+        </form>
+    </div>
+    <h2>Products</h2>
+    <table id="prodTbl">
+        <thead>
+            <tr><th>ID</th><th>Name</th><th>Slug</th><th>Unit</th><th>Default Price</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+            {% for p in rows %}
+            <tr data-id="{{ p.id }}">
+                <td>{{ p.id }}</td>
+                <td><input data-field="name" value="{{ p.name }}" /></td>
+                <td>{{ p.slug }}</td>
+                <td><input data-field="default_unit" value="{{ p.default_unit }}" /></td>
+                <td><input data-field="default_price" type="number" step="0.01" value="{{ p.default_price }}" /></td>
+                <td>
+                    <button class="saveBtn" style="background:#10b981;color:#fff;border:none;">Save</button>
+                    <button class="delBtn" style="background:#ef4444;color:#fff;border:none;">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+<script>
+const form = document.getElementById('createForm');
+if (form) {
+  form.addEventListener('submit', async () => {
+    const data = new FormData(form);
+    try {
+      const r = await fetch('/products', { method:'POST', body: data });
+      if (!r.ok) throw new Error(await r.text());
+      location.reload();
+    } catch(e) { alert('Create failed'); }
+  });
+}
+
+for (const btn of document.querySelectorAll('.saveBtn')) {
+  btn.addEventListener('click', async (e) => {
+    const tr = e.target.closest('tr');
+    const id = tr.getAttribute('data-id');
+    const body = {};
+    for (const inp of tr.querySelectorAll('input[data-field]')) {
+      const k = inp.getAttribute('data-field');
+      let v = inp.value;
+      if (k === 'default_price' && v !== '') v = Number(v);
+      body[k] = v;
+    }
+    try {
+      const r = await fetch(`/products/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      if (!r.ok) throw new Error(await r.text());
+      location.reload();
+    } catch (e) { alert('Save failed'); }
+  });
+}
+for (const btn of document.querySelectorAll('.delBtn')) {
+  btn.addEventListener('click', async (e) => {
+    const tr = e.target.closest('tr');
+    const id = tr.getAttribute('data-id');
+    if (!confirm('Delete this product? Items referencing it will block deletion.')) return;
+    try {
+      const r = await fetch(`/products/${id}`, { method:'DELETE' });
+      if (!r.ok) throw new Error(await r.text());
+      location.reload();
+    } catch (e) { alert('Delete failed'); }
+  });
+}
+</script>
+</html>
+
+
