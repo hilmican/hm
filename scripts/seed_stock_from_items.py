@@ -14,17 +14,13 @@ SIZE_TOKENS = ["S","M","L","XL","XXL","XS","XXXL","3XL","4XL","30","31","32","33
 PACK_KEYWORDS = {"TEK": ("tek", 1), "ÇİFT": ("cift", 2), "CIFT": ("cift", 2), "CIFt": ("cift", 2)}
 
 
-def guess_attributes(name: str) -> tuple[str, Optional[str], Optional[str], Optional[str]]:
+def guess_attributes(name: str) -> tuple[str, Optional[str], Optional[str]]:
 	base = name
 	size = None
 	color = None
-	pack = None
 	# basic heuristics
 	up = name.upper()
-	for k, (p, mult) in PACK_KEYWORDS.items():
-		if k in up:
-			pack = p
-			break
+    # ignore pack keywords in qty-only model; we still strip them from base
 	for tok in SIZE_TOKENS:
 		if re.search(rf"\b{re.escape(tok)}\b", up):
 			size = tok
@@ -40,17 +36,17 @@ def guess_attributes(name: str) -> tuple[str, Optional[str], Optional[str], Opti
 		rem = re.sub(rf"\b{re.escape(size)}\b", "", rem)
 	if color:
 		rem = rem.replace(color.upper(), "")
-	for k in PACK_KEYWORDS.keys():
-		rem = rem.replace(k, "")
+    for k in PACK_KEYWORDS.keys():
+        rem = rem.replace(k, "")
 	base = re.sub(r"\s+", " ", rem).strip().title()
-	return base or name, size, color, pack
+    return base or name, size, color
 
 
 def main() -> None:
 	with get_session() as session:
 		rows = session.exec(select(Item).order_by(Item.id.asc())).all()
 		for it in rows:
-			base, size, color, pack = guess_attributes(it.name or it.sku)
+            base, size, color = guess_attributes(it.name or it.sku)
 			pslug = slugify(base)
 			prod = session.exec(select(Product).where(Product.slug == pslug)).first()
 			if not prod:
@@ -63,8 +59,7 @@ def main() -> None:
 				it.size = size
 			if color and not it.color:
 				it.color = color
-			if pack and not it.pack_type:
-				it.pack_type = pack
+            # pack_type no longer used
 			# create an exact mapping rule for this original name -> this item
 			existing_rule = session.exec(select(ItemMappingRule).where(ItemMappingRule.source_pattern == it.name, ItemMappingRule.match_mode == "exact")).first()
 			if not existing_rule:

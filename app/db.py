@@ -72,10 +72,7 @@ def init_db() -> None:
 			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN size TEXT")
 		if not column_exists("item", "color"):
 			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN color TEXT")
-		if not column_exists("item", "pack_type"):
-			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN pack_type TEXT")
-		if not column_exists("item", "pair_multiplier"):
-			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN pair_multiplier INTEGER DEFAULT 1")
+		# stop creating pack_type/pair_multiplier for new DBs; legacy columns remain if present
 		if not column_exists("item", "price"):
 			conn.exec_driver_sql("ALTER TABLE item ADD COLUMN price REAL")
 		if not column_exists("item", "cost"):

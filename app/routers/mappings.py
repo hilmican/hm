@@ -35,8 +35,7 @@ def list_rules(limit: int = Query(default=500, ge=1, le=5000), pattern: str | No
 						"product_id": o.product_id,
 						"size": o.size,
 						"color": o.color,
-						"pack_type": o.pack_type,
-						"pair_multiplier": o.pair_multiplier,
+                        # pack/pair removed
 						"quantity": o.quantity,
 						"unit_price": o.unit_price,
 					}
@@ -77,14 +76,12 @@ def create_rule(body: Dict[str, Any]):
 		session.add(r)
 		session.flush()
 		for out in outputs:
-			o_rec = ItemMappingOutput(
+                o_rec = ItemMappingOutput(
 				rule_id=r.id or 0,
 				item_id=out.get("item_id"),
 				product_id=out.get("product_id"),
 				size=out.get("size"),
 				color=out.get("color"),
-				pack_type=out.get("pack_type"),
-				pair_multiplier=out.get("pair_multiplier") or 1,
 				quantity=out.get("quantity") or 1,
 				unit_price=out.get("unit_price"),
 			)
@@ -108,14 +105,12 @@ def update_rule(rule_id: int, body: Dict[str, Any]):
 				session.delete(o)
 			session.flush()
 			for out in (body.get("outputs") or []):
-				o_rec = ItemMappingOutput(
+                o_rec = ItemMappingOutput(
 					rule_id=r.id or 0,
 					item_id=out.get("item_id"),
 					product_id=out.get("product_id"),
 					size=out.get("size"),
 					color=out.get("color"),
-					pack_type=out.get("pack_type"),
-					pair_multiplier=out.get("pair_multiplier") or 1,
 					quantity=out.get("quantity") or 1,
 					unit_price=out.get("unit_price"),
 				)
@@ -152,8 +147,6 @@ def replace_outputs(rule_id: int, outputs: List[Dict[str, Any]]):
                 product_id=out.get("product_id"),
                 size=out.get("size"),
                 color=out.get("color"),
-                pack_type=out.get("pack_type"),
-                pair_multiplier=out.get("pair_multiplier") or 1,
                 quantity=out.get("quantity") or 1,
                 unit_price=out.get("unit_price"),
             ))

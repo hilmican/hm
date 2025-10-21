@@ -623,8 +623,6 @@ def reset_database(request: Request, preserve_mappings: bool = False):
                         "product_id": o.product_id,
                         "size": o.size,
                         "color": o.color,
-                        "pack_type": o.pack_type,
-                        "pair_multiplier": o.pair_multiplier,
                         "quantity": o.quantity,
                         "unit_price": o.unit_price,
                     }
@@ -666,8 +664,6 @@ def reset_database(request: Request, preserve_mappings: bool = False):
                     product_id=o.get("product_id"),
                     size=o.get("size"),
                     color=o.get("color"),
-                    pack_type=o.get("pack_type"),
-                    pair_multiplier=o.get("pair_multiplier") or 1,
                     quantity=o.get("quantity") or 1,
                     unit_price=o.get("unit_price"),
                 ))

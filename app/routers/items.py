@@ -25,7 +25,6 @@ def list_items(limit: int = Query(default=100, ge=1, le=1000)):
 					"product_id": it.product_id,
 					"size": it.size,
 					"color": it.color,
-					"pack_type": it.pack_type,
 					"price": it.price,
 					"cost": it.cost,
 					"on_hand": stock_map.get(it.id or 0, 0),
@@ -61,7 +60,6 @@ def list_variants(limit: int = Query(default=1000, ge=1, le=10000)):
 					"product_id": it.product_id,
 					"size": it.size,
 					"color": it.color,
-					"pack_type": it.pack_type,
 					"price": it.price,
 					"on_hand": stock_map.get(it.id or 0, 0),
 				}

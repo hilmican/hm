@@ -32,7 +32,7 @@ def get_stock_map(session: Session) -> Dict[int, int]:
 
 
 
-def get_or_create_item(session: Session, *, product_id: int, size: Optional[str] = None, color: Optional[str] = None, pack_type: Optional[str] = None, pair_multiplier: Optional[int] = None) -> Item:
+def get_or_create_item(session: Session, *, product_id: int, size: Optional[str] = None, color: Optional[str] = None) -> Item:
     """Return a canonical variant Item by product + attributes; create if missing.
 
     This delegates to the same SKU construction logic used by mapping.find_or_create_variant
@@ -46,8 +46,6 @@ def get_or_create_item(session: Session, *, product_id: int, size: Optional[str]
         product=prod,  # type: ignore
         size=size,
         color=color,
-        pack_type=pack_type,
-        pair_multiplier=pair_multiplier or 1,
     )
 
 

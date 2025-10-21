@@ -72,9 +72,9 @@
                     </div>
 
                     <div style="margin-top:10px;">
-                        <label>Ciktilar (urun, beden, renk, paket, adet, cift carpani, fiyat)</label>
+                        <label>Ciktilar (urun, beden, renk, adet, fiyat)</label>
                         <table>
-                            <thead><tr><th>Product</th><th>Size</th><th>Color</th><th>Pack</th><th>Qty</th><th>Pair</th><th>Price</th><th></th></tr></thead>
+                            <thead><tr><th>Product</th><th>Size</th><th>Color</th><th>Qty</th><th>Price</th><th></th></tr></thead>
                             <tbody id="outs"></tbody>
                         </table>
                         <button id="addOut" type="button" style="margin-top:6px">Cikti Ekle</button>
@@ -182,11 +182,7 @@
             <td><select class="prodSel">${prodOpts}</select></td>
             <td><input type="text" placeholder="Size" value="${pref?.size||''}"/></td>
             <td><input type="text" placeholder="Color" value="${pref?.color||''}"/></td>
-            <td>
-                <select><option value=""></option><option value="tek" ${pref?.pack_type==='tek'?'selected':''}>tek</option><option value="cift" ${pref?.pack_type==='cift'?'selected':''}>cift</option></select>
-            </td>
             <td><input type="number" min="1" value="${pref?.quantity||1}"/></td>
-            <td><input type="number" min="1" value="${pref?.pair_multiplier||1}"/></td>
             <td><input type="number" step="0.01" value="${pref?.unit_price||''}"/></td>
             <td><button type="button" class="rm">X</button></td>
         `;
@@ -201,8 +197,8 @@
         const colorTokens = ['SİYAH','SIYAH','LACİVERT','LACIVERT','KREM','AÇIK GRİ','ACIK GRI','GRİ','GRI','BEYAZ'];
         let size = ''; for (const t of sizeTokens){ if (up.includes(t)) { size = t; break; } }
         let color = ''; for (const t of colorTokens){ if (up.includes(t)) { color = t; break; } }
-        let pack_type = up.includes('ÇİFT')||up.includes('CIFT')?'cift':(up.includes('TEK')?'tek':'');
-        return { size, color, pack_type, quantity: 1, pair_multiplier: pack_type==='cift'?2:1 };
+        const isCift = up.includes('ÇİFT')||up.includes('CIFT');
+        return { size, color, quantity: isCift ? 2 : 1 };
     }
 
     function loadInventory(productId){
@@ -234,7 +230,7 @@
             const val = valStr ? Number(valStr) : NaN;
             if (!isNaN(val) && val > 0) {
                 hintEl.textContent = `Suggested price: ${val}`;
-                const priceInput = outsTbody.querySelector('tr td:nth-child(7) input');
+                const priceInput = outsTbody.querySelector('tr td:nth-child(5) input');
                 if (priceInput && !priceInput.value) priceInput.value = String(val);
             } else {
                 hintEl.textContent = '';
@@ -248,7 +244,7 @@
         openPattern(li.getAttribute('data-pattern'));
     });
 
-    document.getElementById('addOut').addEventListener('click', ()=> addOutputRow({quantity:1,pair_multiplier:1}));
+    document.getElementById('addOut').addEventListener('click', ()=> addOutputRow({quantity:1}));
     productSel.addEventListener('change', ()=> loadInventory(productSel.value));
 
     document.getElementById('newProdBtn').addEventListener('click', async ()=>{
@@ -274,12 +270,10 @@
             const productId = Number(tds[0].querySelector('select').value || 0) || null;
             const size = tds[1].querySelector('input').value || null;
             const color = tds[2].querySelector('input').value || null;
-            const pack_type = tds[3].querySelector('select').value || null;
-            const qty = Number(tds[4].querySelector('input').value || 1);
-            const pair = Number(tds[5].querySelector('input').value || 1);
-            const priceVal = tds[6].querySelector('input').value;
+            const qty = Number(tds[3].querySelector('input').value || 1);
+            const priceVal = tds[4].querySelector('input').value;
             const unit_price = priceVal ? Number(priceVal) : null;
-            outputs.push({ product_id: productId, size, color, pack_type, quantity: qty, pair_multiplier: pair, unit_price });
+            outputs.push({ product_id: productId, size, color, quantity: qty, unit_price });
         }
         const body = { source_pattern: pattern, match_mode: 'exact', priority: 100, outputs };
         const r = await fetch('/mappings/rules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -293,7 +287,7 @@
                 if (rules.length) {
                     const outs = rules[0].outputs||[];
                     outsTbody.innerHTML = '';
-                    for (const o of outs) addOutputRow({ product_id:o.product_id, size:o.size, color:o.color, pack_type:o.pack_type, quantity:o.quantity, pair_multiplier:o.pair_multiplier, unit_price:o.unit_price });
+                    for (const o of outs) addOutputRow({ product_id:o.product_id, size:o.size, color:o.color, quantity:o.quantity, unit_price:o.unit_price });
                 }
             }
         } catch (e) {}

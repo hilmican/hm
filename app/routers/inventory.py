@@ -58,7 +58,6 @@ def list_stock(product_id: Optional[int] = Query(default=None), size: Optional[s
 					"product_id": it.product_id,
 					"size": it.size,
 					"color": it.color,
-					"pack_type": it.pack_type,
 					"price": it.price,
 					"cost": it.cost,
 					"on_hand": stock_map.get(it.id or 0, 0),
@@ -117,8 +116,6 @@ def series_add(body: Dict[str, Any]):
 	sizes: List[str] = body.get("sizes") or []
 	colors: List[str] = body.get("colors") or [None]  # type: ignore
 	quantity_per_variant: int = body.get("quantity_per_variant") or 0
-	pack_type: Optional[str] = body.get("pack_type")
-	pair_multiplier: int = body.get("pair_multiplier") or 1
 	price = body.get("price")
 	cost = body.get("cost")
 	if not product_id or quantity_per_variant <= 0 or not sizes:
@@ -131,7 +128,7 @@ def series_add(body: Dict[str, Any]):
 		created: List[int] = []
 		for sz in sizes:
 			for col in colors:
-				it = find_or_create_variant(session, product=prod, size=sz, color=col, pack_type=pack_type, pair_multiplier=pair_multiplier)
+				it = find_or_create_variant(session, product=prod, size=sz, color=col)
 				if price is not None:
 					it.price = price
 				if cost is not None:

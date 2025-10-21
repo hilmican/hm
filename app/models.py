@@ -29,8 +29,6 @@ class Item(SQLModel, table=True):
     product_id: Optional[int] = Field(default=None, foreign_key="product.id", index=True)
     size: Optional[str] = Field(default=None, index=True)
     color: Optional[str] = Field(default=None, index=True)
-    pack_type: Optional[str] = Field(default=None, index=True, description="tek|cift|other")
-    pair_multiplier: Optional[int] = Field(default=1)
     price: Optional[float] = None
     cost: Optional[float] = None
     status: Optional[str] = Field(default=None, index=True, description="active|inactive")
@@ -147,8 +145,6 @@ class ItemMappingOutput(SQLModel, table=True):
     product_id: Optional[int] = Field(default=None, foreign_key="product.id", index=True)
     size: Optional[str] = Field(default=None)
     color: Optional[str] = Field(default=None)
-    pack_type: Optional[str] = Field(default=None, description="tek|cift|other")
-    pair_multiplier: Optional[int] = Field(default=1)
     quantity: int = 1
     unit_price: Optional[float] = None
 

@@ -243,8 +243,6 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                     product=prod,  # type: ignore
                     size=out.size,
                     color=out.color,
-                    pack_type=out.pack_type,
-                    pair_multiplier=out.pair_multiplier or 1,
                 )
             if it:
                 # Optionally update price from mapping output; do not use for accounting
@@ -343,8 +341,7 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
     try:
         qty_base = int(rec.get("quantity") or 1)
         for it, out_qty_each in created_items:
-            multiplier = int(it.pair_multiplier or 1)
-            total_qty = qty_base * int(out_qty_each or 1) * multiplier
+            total_qty = qty_base * int(out_qty_each or 1)
             if total_qty <= 0:
                 continue
             # create order item

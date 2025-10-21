@@ -48,7 +48,7 @@
                     <ul>
                         {% for o in outs %}
                         <li>
-                            item_id={{ o.item_id }}, product_id={{ o.product_id }}, size={{ o.size }}, color={{ o.color }}, pack={{ o.pack_type }}, pair_mult={{ o.pair_multiplier }}, qty={{ o.quantity }}, price={{ o.unit_price }}
+                            item_id={{ o.item_id }}, product_id={{ o.product_id }}, size={{ o.size }}, color={{ o.color }}, qty={{ o.quantity }}, price={{ o.unit_price }}
                         </li>
                         {% endfor %}
                     </ul>
@@ -99,8 +99,8 @@
                     const rules = jr.rules||[];
                     if (rules.length) outputs = rules[0].outputs||[];
                 }
-                const tpl = '[\n  {"product_id": null, "item_id": null, "size": null, "color": null, "pack_type": null, "quantity": 1, "pair_multiplier": 1, "unit_price": null}\n]';
-                const text = prompt('Edit outputs as JSON array (product_id/item_id, size, color, pack_type, quantity, pair_multiplier, unit_price):', JSON.stringify(outputs.length?outputs:JSON.parse(tpl)));
+                const tpl = '[\n  {"product_id": null, "item_id": null, "size": null, "color": null, "quantity": 1, "unit_price": null}\n]';
+                const text = prompt('Edit outputs as JSON array (product_id/item_id, size, color, quantity, unit_price):', JSON.stringify(outputs.length?outputs:JSON.parse(tpl)));
                 if (!text) return;
                 let arr = [];
                 try { arr = JSON.parse(text); } catch (e) { alert('Invalid JSON'); return; }

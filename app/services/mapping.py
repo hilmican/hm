@@ -14,40 +14,34 @@ class MappingResult(Tuple[List[Dict[str, Any]], Optional[str]]):
 	pass
 
 
-def find_or_create_variant(session: Session, *, product: Product, size: Optional[str], color: Optional[str], pack_type: Optional[str], pair_multiplier: Optional[int]) -> Item:
-	sku_parts = [product.slug]
-	if size:
-		sku_parts.append(slugify(size))
-	if color:
-		sku_parts.append(slugify(color))
-	if pack_type:
-		sku_parts.append(slugify(pack_type))
-	sku = "-".join([p for p in sku_parts if p]) or product.slug
+def find_or_create_variant(session: Session, *, product: Product, size: Optional[str], color: Optional[str]) -> Item:
+    sku_parts = [product.slug]
+    if size:
+        sku_parts.append(slugify(size))
+    if color:
+        sku_parts.append(slugify(color))
+    sku = "-".join([p for p in sku_parts if p]) or product.slug
 
-	item = session.exec(select(Item).where(Item.sku == sku)).first()
-	if item:
-		return item
+    item = session.exec(select(Item).where(Item.sku == sku)).first()
+    if item:
+        return item
 
-	name_parts = [product.name]
-	if size:
-		name_parts.append(size)
-	if color:
-		name_parts.append(color)
-	if pack_type:
-		name_parts.append(pack_type.upper())
-	item = Item(
-		sku=sku,
-		name=" - ".join([p for p in name_parts if p]),
-		product_id=product.id,
-		size=size,
-		color=color,
-		pack_type=pack_type,
-		pair_multiplier=pair_multiplier or 1,
-		unit=product.default_unit or "adet",
-	)
-	session.add(item)
-	session.flush()
-	return item
+    name_parts = [product.name]
+    if size:
+        name_parts.append(size)
+    if color:
+        name_parts.append(color)
+    item = Item(
+        sku=sku,
+        name=" - ".join([p for p in name_parts if p]),
+        product_id=product.id,
+        size=size,
+        color=color,
+        unit=product.default_unit or "adet",
+    )
+    session.add(item)
+    session.flush()
+    return item
 
 
 def resolve_mapping(session: Session, text: Optional[str]) -> Tuple[List[ItemMappingOutput], Optional[ItemMappingRule]]:
