@@ -1,5 +1,7 @@
 import os
 import datetime as dt
+import asyncio
+import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -29,9 +31,18 @@ def _get_base_token_and_id() -> tuple[str, str, bool]:
 
 
 async def _get(client: httpx.AsyncClient, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    r = await client.get(url, params=params, timeout=20)
-    r.raise_for_status()
-    return r.json()
+    """GET with small retry/backoff to handle transient DNS/egress hiccups."""
+    last_err: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            r = await client.get(url, params=params, timeout=20)
+            r.raise_for_status()
+            return r.json()
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            last_err = e
+            # brief backoff: 0.5s, 1s
+            await asyncio.sleep(0.5 * (attempt + 1))
+    raise RuntimeError(f"Graph API request failed: {type(last_err).__name__}: {last_err}")
 
 
 async def fetch_conversations(limit: int = 25) -> List[Dict[str, Any]]:
