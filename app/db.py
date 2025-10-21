@@ -29,6 +29,15 @@ def init_db() -> None:
 		# Order.data_date (DATE)
 		if not column_exists("order", "data_date"):
 			conn.exec_driver_sql('ALTER TABLE "order" ADD COLUMN data_date DATE')
+		# Order.total_cost (REAL)
+		if not column_exists("order", "total_cost"):
+			conn.exec_driver_sql('ALTER TABLE "order" ADD COLUMN total_cost REAL')
+
+		# ImportRow.row_hash index for dedup/idempotency (best-effort)
+		try:
+			conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_importrow_row_hash ON importrow(row_hash)")
+		except Exception:
+			pass
 
 		# ImportRun.data_date (DATE)
 		if not column_exists("importrun", "data_date"):

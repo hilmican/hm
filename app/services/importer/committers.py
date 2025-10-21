@@ -342,6 +342,21 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             # stock movement: decrement canonical item only
             if it.id is not None:
                 adjust_stock(session, item_id=it.id, delta=-total_qty, related_order_id=matched_order_id)
+        # after creating order items, compute total_cost on the order
+        if matched_order_id is not None:
+            from sqlmodel import select as _select
+            from ...models import OrderItem as _OI, Item as _Item, Order as _Order
+            oitems = session.exec(_select(_OI).where(_OI.order_id == matched_order_id)).all()
+            total_cost = 0.0
+            for oi in oitems:
+                it_cost = 0.0
+                if oi.item_id is not None:
+                    it_obj = session.exec(_select(_Item).where(_Item.id == oi.item_id)).first()
+                    it_cost = float(it_obj.cost or 0.0) if it_obj else 0.0
+                total_cost += float(oi.quantity or 0) * it_cost
+            order_obj = session.exec(_select(_Order).where(_Order.id == matched_order_id)).first()
+            if order_obj:
+                order_obj.total_cost = round(total_cost, 2)
     except Exception:
         pass
 

@@ -46,7 +46,7 @@
     <h2>Orders</h2>
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th>Tracking</th><th>Client</th><th>Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Data Date</th><th>Channel</th></tr>
+            <tr><th>ID</th><th>Tracking</th><th>Client</th><th>Item</th><th>Qty</th><th>Total</th><th>Cost</th><th>Ship Date</th><th>Data Date</th><th>Channel</th></tr>
         </thead>
         <tbody>
             {% for o in rows %}
@@ -66,6 +66,7 @@
                 </td>
                 <td>{{ o.quantity }}</td>
                 <td>{{ o.total_amount }}</td>
+                <td>{{ o.total_cost }}</td>
                 <td>{{ o.shipment_date }}</td>
                 <td>{{ o.data_date }}</td>
                 <td>{{ o.source }}</td>

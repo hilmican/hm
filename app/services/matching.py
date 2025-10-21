@@ -37,13 +37,13 @@ def find_order_by_tracking(session, tracking_no: str | None) -> Order | None:
 def find_order_by_client_and_date(session, client_id: int | None, date_val) -> Order | None:
     """Find an order for a client around a date, preferring source='bizim'.
 
-    Matches if either data_date OR shipment_date falls within ±1 day.
+    Matches if either data_date OR shipment_date falls within ±7 days.
     """
     if not client_id or not date_val:
         return None
     from datetime import timedelta
-    start = date_val - timedelta(days=1)
-    end = date_val + timedelta(days=1)
+    start = date_val - timedelta(days=7)
+    end = date_val + timedelta(days=7)
     rows = session.exec(
         select(Order).where(
             and_(

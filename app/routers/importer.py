@@ -427,6 +427,22 @@ def commit_import(body: dict, request: Request):
 					run.unmatched_count += 0
 					continue
 				row_hash = compute_row_hash(rec)
+				# idempotency: skip duplicate rows by row_hash
+				existing_ir = session.exec(select(ImportRow).where(ImportRow.row_hash == row_hash)).first()
+				if existing_ir:
+					ir = ImportRow(
+						import_run_id=run.id or 0,
+						row_index=idx,
+						row_hash=row_hash,
+						mapped_json=str(rec),
+						status="skipped",  # type: ignore
+						message="duplicate row",
+						matched_client_id=existing_ir.matched_client_id,
+						matched_order_id=existing_ir.matched_order_id,
+					)
+					session.add(ir)
+					run.unmatched_count += 0
+					continue
 				status = "created"
 				message = None
 				matched_client_id = None

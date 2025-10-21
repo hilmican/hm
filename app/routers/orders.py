@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, Request
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Order, Payment
+from ..models import Order, Payment, OrderItem, Item
 
 router = APIRouter()
 
@@ -21,6 +21,7 @@ def list_orders(limit: int = Query(default=100, ge=1, le=1000)):
 					"item_id": o.item_id,
 					"quantity": o.quantity,
 					"total_amount": o.total_amount,
+					"total_cost": o.total_cost,
 					"shipment_date": o.shipment_date.isoformat() if o.shipment_date else None,
                     "data_date": o.data_date.isoformat() if o.data_date else None,
 					"source": o.source,
@@ -61,3 +62,23 @@ def list_orders_table(request: Request):
             "orders_table.html",
             {"request": request, "rows": rows, "client_map": client_map, "item_map": item_map, "status_map": status_map},
         )
+
+
+@router.post("/recalc-costs")
+def recalc_costs():
+    with get_session() as session:
+        rows = session.exec(select(Order)).all()
+        from sqlmodel import select as _select
+        updated = 0
+        for o in rows:
+            if not o.id:
+                continue
+            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
+            total_cost = 0.0
+            for oi in oitems:
+                it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
+                total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
+            if o.total_cost != round(total_cost, 2):
+                o.total_cost = round(total_cost, 2)
+                updated += 1
+        return {"status": "ok", "orders_updated": updated}
