@@ -267,8 +267,13 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
     date_hint = rec.get("shipment_date") or run.data_date
     if date_hint:
         existing_order = find_order_by_client_and_date(session, client.id, date_hint)
+    chosen_item_id = created_items[0][0].id if created_items else None
+    can_merge_into_existing = False
     if existing_order:
-        chosen_item_id = created_items[0][0].id if created_items else None
+        # Only merge a Bizim row into an existing order if that order is a kargo placeholder
+        can_merge_into_existing = ((existing_order.source or "") == "kargo") or ((existing_order.status or "") == "placeholder")
+
+    if existing_order and can_merge_into_existing:
         if (existing_order.source or "") == "kargo":
             existing_order.item_id = chosen_item_id  # type: ignore
         existing_order.quantity = rec.get("quantity") or existing_order.quantity or 1
@@ -288,20 +293,27 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 existing_order.notes = item_name_raw
         matched_order_id = existing_order.id
     else:
-        # fallback to recent kargo placeholder
-        existing_order = find_recent_placeholder_kargo_for_client(session, client.id)
-        chosen_item_id = created_items[0][0].id if created_items else None
-        if existing_order:
-            if (existing_order.source or "") == "kargo":
-                existing_order.item_id = chosen_item_id  # type: ignore
-            existing_order.quantity = rec.get("quantity") or existing_order.quantity or 1
-            existing_order.unit_price = rec.get("unit_price") or existing_order.unit_price
-            existing_order.total_amount = rec.get("total_amount") or existing_order.total_amount
-            existing_order.shipment_date = rec.get("shipment_date") or existing_order.shipment_date
-            existing_order.data_date = existing_order.data_date or run.data_date
-            existing_order.source = "bizim"
-            existing_order.status = "merged"
-            matched_order_id = existing_order.id
+        # If we couldn't merge into an existing kargo placeholder, try the most recent placeholder; otherwise create a NEW Bizim order
+        placeholder = find_recent_placeholder_kargo_for_client(session, client.id)
+        if placeholder and (((placeholder.source or "") == "kargo") or ((placeholder.status or "") == "placeholder")):
+            if (placeholder.source or "") == "kargo":
+                placeholder.item_id = chosen_item_id  # type: ignore
+            placeholder.quantity = rec.get("quantity") or placeholder.quantity or 1
+            placeholder.unit_price = rec.get("unit_price") or placeholder.unit_price
+            placeholder.total_amount = rec.get("total_amount") or placeholder.total_amount
+            placeholder.shipment_date = rec.get("shipment_date") or placeholder.shipment_date
+            placeholder.data_date = placeholder.data_date or run.data_date
+            placeholder.source = "bizim"
+            placeholder.status = "merged"
+            # ensure original name preserved
+            if item_name_raw:
+                cur = placeholder.notes or None
+                if cur:
+                    if item_name_raw not in cur:
+                        placeholder.notes = f"{cur} | {item_name_raw}"
+                else:
+                    placeholder.notes = item_name_raw
+            matched_order_id = placeholder.id
         else:
             order = Order(
                 tracking_no=rec.get("tracking_no"),
