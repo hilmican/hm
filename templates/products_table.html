@@ -18,21 +18,21 @@
 <body>
     <div class="toolbar">
         <a href="/dashboard">← Dashboard</a>
-        <span class="pill">{{ rows|length }} product(s)</span>
+        <span class="pill">{{ rows|length }} urun</span>
     </div>
     <div class="card" style="padding:12px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:14px;">
-        <h3 style="margin:0 0 8px 0; font-size:15px;">Create Product</h3>
+        <h3 style="margin:0 0 8px 0; font-size:15px;">Urun Olustur</h3>
         <form id="createForm" onsubmit="return false;" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-            <input name="name" placeholder="Name" required />
-            <input name="default_unit" placeholder="Unit" value="adet" />
-            <input name="default_price" type="number" step="0.01" placeholder="Default price" />
-            <button type="submit" style="background:#2563eb;color:#fff;border:none;">Create</button>
+            <input name="name" placeholder="Ad" required />
+            <input name="default_unit" placeholder="Birim" value="adet" />
+            <input name="default_price" type="number" step="0.01" placeholder="Varsayilan fiyat" />
+            <button type="submit" style="background:#2563eb;color:#fff;border:none;">Olustur</button>
         </form>
     </div>
-    <h2>Products</h2>
+    <h2>Urunler</h2>
     <table id="prodTbl">
         <thead>
-            <tr><th>ID</th><th>Name</th><th>Slug</th><th>Unit</th><th>Default Price</th><th>Actions</th></tr>
+            <tr><th>ID</th><th>Ad</th><th>Slug</th><th>Birim</th><th>Varsayilan Fiyat</th><th>Islemler</th></tr>
         </thead>
         <tbody>
             {% for p in rows %}
@@ -43,8 +43,8 @@
                 <td><input data-field="default_unit" value="{{ p.default_unit }}" /></td>
                 <td><input data-field="default_price" type="number" step="0.01" value="{{ p.default_price }}" /></td>
                 <td>
-                    <button class="saveBtn" style="background:#10b981;color:#fff;border:none;">Save</button>
-                    <button class="delBtn" style="background:#ef4444;color:#fff;border:none;">Delete</button>
+                    <button class="saveBtn" style="background:#10b981;color:#fff;border:none;">Kaydet</button>
+                    <button class="delBtn" style="background:#ef4444;color:#fff;border:none;">Sil</button>
                 </td>
             </tr>
             {% endfor %}
