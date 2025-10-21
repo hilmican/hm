@@ -7,6 +7,7 @@ from .db import init_db
 from .routers import dashboard, importer, clients, items, orders, payments, reconcile, auth
 from .routers import inventory, mappings, products
 from .routers import instagram
+from .routers import legal
 
 
 def create_app() -> FastAPI:
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
 	app.include_router(mappings.router)
 	app.include_router(products.router)
 	app.include_router(instagram.router)
+	app.include_router(legal.router)
 
 	return app
 
