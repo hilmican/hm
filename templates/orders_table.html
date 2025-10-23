@@ -46,7 +46,7 @@
     <h2>Siparisler</h2>
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th>Takip</th><th>Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>Kanali</th></tr>
+            <tr><th>ID</th><th>Takip</th><th>Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>Kanali</th></tr>
         </thead>
         <tbody>
             {% for o in rows %}
@@ -67,6 +67,7 @@
                 <td>{{ o.quantity }}</td>
                 <td>{{ o.total_amount }}</td>
                 <td>{{ o.total_cost }}</td>
+                <td>{{ (shipping_map.get(o.id) if shipping_map else 0) | default(0) }}</td>
                 <td>{{ o.shipment_date }}</td>
                 <td>{{ o.data_date }}</td>
                 <td>{{ o.source }}</td>

@@ -47,10 +47,12 @@ def list_orders_table(request: Request):
         order_ids = [o.id for o in rows if o.id]
         pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
         paid_map: dict[int, float] = {}
+        shipping_map: dict[int, float] = {}
         for p in pays:
             if p.order_id is None:
                 continue
             paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
+            shipping_map[p.order_id] = shipping_map.get(p.order_id, 0.0) + float(p.fee_kargo or 0.0)
         status_map: dict[int, str] = {}
         for o in rows:
             oid = o.id or 0
@@ -60,7 +62,7 @@ def list_orders_table(request: Request):
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "orders_table.html",
-            {"request": request, "rows": rows, "client_map": client_map, "item_map": item_map, "status_map": status_map},
+            {"request": request, "rows": rows, "client_map": client_map, "item_map": item_map, "status_map": status_map, "shipping_map": shipping_map},
         )
 
 
