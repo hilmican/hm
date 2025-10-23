@@ -1,0 +1,214 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Daily Report</title>
+        <style>
+            body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+            h1 { margin-bottom: 12px; }
+            .nav { display:flex; gap:8px; flex-wrap:wrap; padding:8px; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; }
+            .nav a { padding:6px 10px; border-radius:6px; color:#1f2937; text-decoration:none; border:1px solid transparent; }
+            .nav a:hover { background:#eef2ff; border-color:#c7d2fe; color:#1d4ed8; }
+            .nav a.active { background:#e0e7ff; border-color:#c7d2fe; color:#1d4ed8; }
+            .toolbar { display:flex; gap:12px; align-items:flex-end; margin:14px 0; flex-wrap:wrap; }
+            .card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+            .card h2 { margin: 0; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
+            .kpis { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; }
+            @media (min-width: 1000px) { .kpis { grid-template-columns: repeat(4, minmax(0,1fr)); } }
+            .kpi { padding:10px 12px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; }
+            .kpi .label { font-size:12px; color:#6b7280; }
+            .kpi .value { font-size:18px; font-weight:600; margin-top:4px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+            th { background: #fafafa; position: sticky; top: 0; }
+            .grid { display:grid; grid-template-columns: 1fr; gap:18px; }
+            @media (min-width: 1200px) { .grid { grid-template-columns: 1fr 1fr; } }
+            .caption { color:#6b7280; font-size:12px; padding:8px 0; }
+            .btn { background:#2563eb; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer }
+            input[type=date], select { padding:6px 8px; border:1px solid #ddd; border-radius:6px; }
+            .radio { display:flex; gap:8px; align-items:center; }
+        </style>
+    </head>
+    <body>
+        <h1>Daily Report</h1>
+        <div class="nav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/clients/table">Clients</a>
+            <a href="/items/table">Items</a>
+            <a href="/products/table">Products</a>
+            <a href="/orders/table">Orders</a>
+            <a href="/inventory/table">Inventory</a>
+            <a class="active" href="/reports/daily">Daily Report</a>
+        </div>
+
+        <form class="toolbar" method="get" action="/reports/daily">
+            <div>
+                <label style="display:block;font-size:12px;color:#374151">Start</label>
+                <input type="date" name="start" value="{{ start }}" />
+            </div>
+            <div>
+                <label style="display:block;font-size:12px;color:#374151">End</label>
+                <input type="date" name="end" value="{{ end }}" />
+            </div>
+            <div>
+                <label style="display:block;font-size:12px;color:#374151">Date field</label>
+                <div class="radio">
+                    <label><input type="radio" name="date_field" value="shipment" {% if date_field=='shipment' %}checked{% endif %}/> shipment_date</label>
+                    <label><input type="radio" name="date_field" value="data" {% if date_field=='data' %}checked{% endif %}/> data_date</label>
+                </div>
+            </div>
+            <div>
+                <button class="btn" type="submit">Apply</button>
+            </div>
+        </form>
+
+        <div class="kpis">
+            <div class="kpi"><div class="label">Total Sales</div><div class="value">{{ '%.2f'|format(total_sales or 0) }}</div></div>
+            <div class="kpi"><div class="label">Orders</div><div class="value">{{ order_count or 0 }}</div></div>
+            <div class="kpi"><div class="label">Total Quantity</div><div class="value">{{ total_quantity or 0 }}</div></div>
+            <div class="kpi"><div class="label">Avg Order Value</div><div class="value">{{ '%.2f'|format(aov or 0) }}</div></div>
+            <div class="kpi"><div class="label">Avg Sell Price</div><div class="value">{{ '%.2f'|format(asp or 0) }}</div></div>
+            <div class="kpi"><div class="label">Total Cost</div><div class="value">{{ '%.2f'|format(total_cost or 0) }}</div></div>
+            <div class="kpi"><div class="label">Gross Profit</div><div class="value">{{ '%.2f'|format(gross_profit or 0) }}</div></div>
+            <div class="kpi"><div class="label">Gross Margin</div><div class="value">{{ '%.1f'|format((gross_margin or 0)*100) }}%</div></div>
+            <div class="kpi"><div class="label">Gross Collected</div><div class="value">{{ '%.2f'|format(gross_collected or 0) }}</div></div>
+            <div class="kpi"><div class="label">Net Collected</div><div class="value">{{ '%.2f'|format(net_collected or 0) }}</div></div>
+            <div class="kpi"><div class="label">Total Fees</div><div class="value">{{ '%.2f'|format(total_fees or 0) }}</div></div>
+            <div class="kpi"><div class="label">Collection Ratio</div><div class="value">{{ '%.1f'|format((collection_ratio or 0)*100) }}%</div></div>
+            <div class="kpi"><div class="label">Outstanding (for period orders)</div><div class="value">{{ '%.2f'|format(outstanding or 0) }}</div></div>
+        </div>
+
+        <div class="grid" style="margin-top:16px;">
+            <div class="card">
+                <h2>Orders by Channel</h2>
+                <table>
+                    <thead>
+                        <tr><th>Source</th><th>Count</th><th>Sales</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for src, vals in by_channel.items() %}
+                        <tr>
+                            <td>{{ src }}</td>
+                            <td>{{ vals.count|int }}</td>
+                            <td>{{ '%.2f'|format(vals.sales or 0) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>Payments (in period)</h2>
+                <table>
+                    <thead>
+                        <tr><th>Komisyon</th><th>Hizmet</th><th>Kargo</th><th>Iade</th><th>Erken Odeme</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ '%.2f'|format(fee_breakdown.komisyon or 0) }}</td>
+                            <td>{{ '%.2f'|format(fee_breakdown.hizmet or 0) }}</td>
+                            <td>{{ '%.2f'|format(fee_breakdown.kargo or 0) }}</td>
+                            <td>{{ '%.2f'|format(fee_breakdown.iade or 0) }}</td>
+                            <td>{{ '%.2f'|format(fee_breakdown.erken_odeme or 0) }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="caption">Gross: {{ '%.2f'|format(gross_collected or 0) }}, Net: {{ '%.2f'|format(net_collected or 0) }}, Fees: {{ '%.2f'|format(total_fees or 0) }}</div>
+            </div>
+
+            <div class="card">
+                <h2>Top Items by Revenue</h2>
+                <table>
+                    <thead>
+                        <tr><th>ID</th><th>SKU</th><th>Name</th><th>Revenue</th><th>Qty</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for it in top_items_by_revenue %}
+                        <tr>
+                            <td>{{ it.item_id }}</td>
+                            <td>{{ it.sku }}</td>
+                            <td>{{ it.name }}</td>
+                            <td>{{ '%.2f'|format(it.revenue or 0) }}</td>
+                            <td>{{ it.quantity|int }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>Top Items by Quantity</h2>
+                <table>
+                    <thead>
+                        <tr><th>ID</th><th>SKU</th><th>Name</th><th>Qty</th><th>Revenue</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for it in top_items_by_quantity %}
+                        <tr>
+                            <td>{{ it.item_id }}</td>
+                            <td>{{ it.sku }}</td>
+                            <td>{{ it.name }}</td>
+                            <td>{{ it.quantity|int }}</td>
+                            <td>{{ '%.2f'|format(it.revenue or 0) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>Top Clients by Revenue</h2>
+                <table>
+                    <thead>
+                        <tr><th>ID</th><th>Name</th><th>Phone</th><th>Revenue</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for c in top_clients %}
+                        <tr>
+                            <td>{{ c.client_id }}</td>
+                            <td>{{ c.name }}</td>
+                            <td>{{ c.phone }}</td>
+                            <td>{{ '%.2f'|format(c.revenue or 0) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>Import Runs (in period)</h2>
+                <table>
+                    <thead>
+                        <tr><th>Source</th><th>Filename</th><th>Data Date</th><th>Rows</th><th>Created (C/I/O/P)</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for r in recent_imports %}
+                        <tr>
+                            <td>{{ r.source }}</td>
+                            <td>{{ r.filename }}</td>
+                            <td>{{ r.data_date }}</td>
+                            <td>{{ r.row_count }}</td>
+                            <td>{{ r.created_clients }}/{{ r.created_items }}/{{ r.created_orders }}/{{ r.created_payments }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="caption">Total runs: {{ imports_total }}, Rows: {{ imports_row_count }}, Created C/I/O/P: {{ imports_created.clients }}/{{ imports_created.items }}/{{ imports_created.orders }}/{{ imports_created.payments }}</div>
+            </div>
+
+            <div class="card">
+                <h2>Stock Movements (in period)</h2>
+                <table>
+                    <thead>
+                        <tr><th>In Qty</th><th>Out Qty</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>{{ qty_in|int }}</td><td>{{ qty_out|int }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </body>
+    </html>
+
+

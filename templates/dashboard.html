@@ -15,7 +15,9 @@
 			th { background: #fafafa; position: sticky; top: 0; }
 			.caption { color: #6b7280; font-size: 12px; padding: 8px 16px; }
 			.toolbar { margin-bottom: 12px; }
-			.toolbar a { margin-right: 8px; color: #2563eb; text-decoration: none; }
+			.toolbar .nav { display:flex; gap:8px; flex-wrap:wrap; padding:8px; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; }
+			.toolbar .nav a { padding:6px 10px; border-radius:6px; color:#1f2937; text-decoration:none; border:1px solid transparent; }
+			.toolbar .nav a:hover { background:#eef2ff; border-color:#c7d2fe; color:#1d4ed8; }
             tr.paid { background: #eaffea; }
             tr.unpaid { background: #fff9db; }
 		</style>
@@ -41,19 +43,19 @@
 			</div>
 		</div>
 		<div class="toolbar">
-			<a href="/clients">Musteriler API</a>
-			<a href="/clients/table">Musteri Tablosu</a>
-			<a href="/items">Varyantlar API</a>
-			<a href="/items/table">Varyantlar Tablosu</a>
-			<a href="/products/table">Urunler Tablosu</a>
-			<a href="/orders/table">Siparis Tablosu</a>
-			<a href="/items/table">Varyantlar Tablosu</a>
-			<a href="/inventory/table">Stok Tablosu</a>
-			<a href="/mappings/table">Haritalandirma</a>
-			<a href="/payments">Odemeler API</a>
-			<a href="/ig/inbox">Instagram Inbox</a>
+			<div class="nav">
+				<a href="/clients/table">Musteriler</a>
+				<a href="/items/table">Varyantlar</a>
+				<a href="/products/table">Urunler</a>
+				<a href="/orders/table">Siparisler</a>
+				<a href="/inventory/table">Stok</a>
+				<a href="/mappings/table">Haritalandirma</a>
+				<a href="/payments">Odemeler</a>
+				<a href="/ig/inbox">Instagram</a>
+				<a href="/reports/daily">Gunluk Rapor</a>
+			</div>
 			<button id="logoutBtn" type="button" style="margin-left:12px;background:#6b7280;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Logout</button>
-            <button id="resetBtn" type="button" style="margin-left:12px;background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Reset DB</button>
+			<button id="resetBtn" type="button" style="margin-left:12px;background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Reset DB</button>
 			<label style="margin-left:8px;font-size:12px;color:#374151;display:flex;align-items:center;gap:4px">
 				<input type="checkbox" id="preserveMappings" /> Preserve products & mappings
 			</label>
