@@ -66,7 +66,7 @@
                 </td>
                 <td>{{ o.quantity }}</td>
                 <td>{{ o.total_amount }}</td>
-                <td>{{ o.total_cost }}</td>
+                <td>{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
                 <td>{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
                 <td>{{ o.shipment_date }}</td>
                 <td>{{ o.data_date }}</td>

@@ -3,6 +3,7 @@ from sqlmodel import select
 
 from ..db import get_session
 from ..models import Order, Payment, OrderItem, Item
+from ..services.shipping import compute_shipping_fee
 
 router = APIRouter()
 
@@ -47,22 +48,39 @@ def list_orders_table(request: Request):
         order_ids = [o.id for o in rows if o.id]
         pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
         paid_map: dict[int, float] = {}
+        # shipping_map based on Order.total_amount for all orders (display only)
         shipping_map: dict[int, float] = {}
         for p in pays:
             if p.order_id is None:
                 continue
             paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
-            shipping_map[p.order_id] = shipping_map.get(p.order_id, 0.0) + float(p.fee_kargo or 0.0)
+        # Recalculate shipping fee for ALL orders from their toplam (total_amount)
+        for o in rows:
+            oid = o.id or 0
+            amt = float(o.total_amount or 0.0)
+            shipping_map[oid] = compute_shipping_fee(amt) if amt > 0 else 0.0
         status_map: dict[int, str] = {}
         for o in rows:
             oid = o.id or 0
             total = float(o.total_amount or 0.0)
             paid = paid_map.get(oid, 0.0)
             status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
+        # Derive cost per order from OrderItem * Item.cost to ensure correctness for display
+        from sqlmodel import select as _select
+        cost_map: dict[int, float] = {}
+        for o in rows:
+            if not o.id:
+                continue
+            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
+            total_cost = 0.0
+            for oi in oitems:
+                it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
+                total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
+            cost_map[o.id] = round(total_cost, 2)
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "orders_table.html",
-            {"request": request, "rows": rows, "client_map": client_map, "item_map": item_map, "status_map": status_map, "shipping_map": shipping_map},
+            {"request": request, "rows": rows, "client_map": client_map, "item_map": item_map, "status_map": status_map, "shipping_map": shipping_map, "cost_map": cost_map},
         )
 
 
