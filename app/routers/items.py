@@ -76,3 +76,13 @@ def update_price(item_id: int, price: float):
 			raise HTTPException(status_code=404, detail="Item not found")
 		it.price = price
 		return {"status": "ok", "item_id": it.id, "price": it.price}
+
+
+@router.put("/{item_id}/cost")
+def update_cost(item_id: int, cost: float):
+	with get_session() as session:
+		it = session.exec(select(Item).where(Item.id == item_id)).first()
+		if not it:
+			raise HTTPException(status_code=404, detail="Item not found")
+		it.cost = cost
+		return {"status": "ok", "item_id": it.id, "cost": it.cost}
