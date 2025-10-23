@@ -2,8 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 
 from sqlmodel import Session, select
+
+# Ensure project root is importable when running as a script
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+	sys.path.insert(0, str(ROOT))
 
 from app.db import engine
 from app.models import Payment
