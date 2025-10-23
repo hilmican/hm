@@ -14,6 +14,7 @@ from ..matching import (
 from ..matching import find_recent_placeholder_kargo_for_client
 from ..mapping import resolve_mapping, find_or_create_variant
 from ..inventory import adjust_stock
+from ..shipping import compute_shipping_fee
 
 
 def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[int], Optional[int]]:
@@ -134,11 +135,13 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
         existing = session.exec(select(Payment).where(Payment.order_id == order.id, Payment.date == pdate)).first()
         fee_kom = rec.get("fee_komisyon") or 0.0
         fee_hiz = rec.get("fee_hizmet") or 0.0
-        fee_kar = rec.get("fee_kargo") or 0.0
+        # Ignore any fee_kargo coming from Excel and compute deterministically
+        # based on TahsilatTutari (payment amount)
         fee_iad = rec.get("fee_iade") or 0.0
         fee_eok = rec.get("fee_erken_odeme") or 0.0
         amt = float(amt_raw or 0.0)
-        net = (amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok])
+        fee_kar = compute_shipping_fee(amt)
+        net = round((amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok]), 2)
         if not existing:
             pmt = Payment(
                 client_id=order.client_id,
