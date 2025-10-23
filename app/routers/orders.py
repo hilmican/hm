@@ -54,34 +54,65 @@ def list_orders_table(request: Request):
             if p.order_id is None:
                 continue
             paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
-        # Recalculate shipping fee for ALL orders from their toplam (total_amount)
+        # Use stored shipping_fee if present; else compute from toplam and show base for zero
         for o in rows:
             oid = o.id or 0
-            amt = float(o.total_amount or 0.0)
-            shipping_map[oid] = compute_shipping_fee(amt) if amt > 0 else 0.0
+            if o.shipping_fee is not None:
+                shipping_map[oid] = float(o.shipping_fee or 0.0)
+            else:
+                amt = float(o.total_amount or 0.0)
+                shipping_map[oid] = compute_shipping_fee(amt)
         status_map: dict[int, str] = {}
         for o in rows:
             oid = o.id or 0
             total = float(o.total_amount or 0.0)
             paid = paid_map.get(oid, 0.0)
             status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
-        # Derive cost per order from OrderItem * Item.cost to ensure correctness for display
+        # Use stored total_cost; if missing, compute on the fly for display
         from sqlmodel import select as _select
         cost_map: dict[int, float] = {}
         for o in rows:
-            if not o.id:
-                continue
-            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
-            total_cost = 0.0
-            for oi in oitems:
-                it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
-                total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
-            cost_map[o.id] = round(total_cost, 2)
+            if o.total_cost is not None:
+                cost_map[o.id or 0] = float(o.total_cost or 0.0)
+            else:
+                if not o.id:
+                    continue
+                oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
+                total_cost = 0.0
+                for oi in oitems:
+                    it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
+                    total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
+                cost_map[o.id] = round(total_cost, 2)
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "orders_table.html",
-            {"request": request, "rows": rows, "client_map": client_map, "item_map": item_map, "status_map": status_map, "shipping_map": shipping_map, "cost_map": cost_map},
+            {"request": request, "rows": rows, "client_map": client_map, "item_map": item_map, "status_map": status_map, "shipping_map": shipping_map, "cost_map": cost_map,
+            "sum_qty": sum(int(o.quantity or 0) for o in rows),
+            "sum_total": sum(float(o.total_amount or 0.0) for o in rows),
+            "sum_cost": sum(float(cost_map.get(o.id or 0, 0.0)) for o in rows),
+            "sum_shipping": sum(float(shipping_map.get(o.id or 0, 0.0)) for o in rows)},
         )
+
+
+@router.post("/recalc-financials")
+def recalc_financials():
+    with get_session() as session:
+        from sqlmodel import select as _select
+        rows = session.exec(select(Order)).all()
+        updated = 0
+        for o in rows:
+            # shipping from toplam; zero totals => base only
+            amt = float(o.total_amount or 0.0)
+            o.shipping_fee = compute_shipping_fee(amt)
+            # cost from order items * item.cost
+            total_cost = 0.0
+            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == (o.id or 0))).all()
+            for oi in oitems:
+                it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
+                total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
+            o.total_cost = round(total_cost, 2)
+            updated += 1
+        return {"status": "ok", "orders_updated": updated}
 
 
 @router.post("/recalc-costs")

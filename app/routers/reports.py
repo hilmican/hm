@@ -6,6 +6,7 @@ from sqlmodel import select
 
 from ..db import get_session
 from ..models import Order, Payment, Item, Client, ImportRun, StockMovement
+from ..services.shipping import compute_shipping_fee
 
 
 router = APIRouter()
@@ -89,7 +90,11 @@ def daily_report(
 		net_collected = sum(float(p.net_amount or 0.0) for p in payments)
 		fee_kom = sum(float(p.fee_komisyon or 0.0) for p in payments)
 		fee_hiz = sum(float(p.fee_hizmet or 0.0) for p in payments)
-		fee_kar = sum(float(p.fee_kargo or 0.0) for p in payments)
+		# Shipping fee for KPIs: prefer stored per-order shipping fee; fallback to computed by toplam
+		order_shipping_map = {}
+		for o in orders:
+			order_shipping_map[o.id or 0] = float((o.shipping_fee if o.shipping_fee is not None else compute_shipping_fee(float(o.total_amount or 0.0))) or 0.0)
+		fee_kar = sum(order_shipping_map.get(o.id or 0, 0.0) for o in orders)
 		fee_iad = sum(float(p.fee_iade or 0.0) for p in payments)
 		fee_eok = sum(float(p.fee_erken_odeme or 0.0) for p in payments)
 		total_fees = fee_kom + fee_hiz + fee_kar + fee_iad + fee_eok

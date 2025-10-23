@@ -19,6 +19,9 @@ def compute_shipping_fee(amount: float) -> float:
 	"""
 	base = 89.0
 	a = float(amount or 0.0)
+	# Zero or negative totals still incur base fee only
+	if a <= 0:
+		return round(base, 2)
 	if a <= 500:
 		frac = 17.81
 	elif a <= 1000:

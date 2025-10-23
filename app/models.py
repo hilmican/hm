@@ -45,6 +45,7 @@ class Order(SQLModel, table=True):
     unit_price: Optional[float] = None
     total_amount: Optional[float] = None
     total_cost: Optional[float] = Field(default=None, index=True)
+    shipping_fee: Optional[float] = Field(default=None, index=True)
     shipment_date: Optional[dt.date] = Field(default=None, index=True)
     data_date: Optional[dt.date] = Field(default=None, index=True)
     status: Optional[str] = Field(default=None, index=True)

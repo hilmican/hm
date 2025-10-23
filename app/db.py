@@ -33,6 +33,10 @@ def init_db() -> None:
 		if not column_exists("order", "total_cost"):
 			conn.exec_driver_sql('ALTER TABLE "order" ADD COLUMN total_cost REAL')
 
+		# Order.shipping_fee (REAL)
+		if not column_exists("order", "shipping_fee"):
+			conn.exec_driver_sql('ALTER TABLE "order" ADD COLUMN shipping_fee REAL')
+
 		# ImportRow.row_hash index for dedup/idempotency (best-effort)
 		try:
 			conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_importrow_row_hash ON importrow(row_hash)")
