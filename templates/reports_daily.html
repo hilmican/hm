@@ -207,6 +207,46 @@
                     </tbody>
                 </table>
             </div>
+            
+            <div class="card">
+                <h2>Orders (filtered)</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Tracking</th>
+                            <th>Client</th>
+                            <th>Item</th>
+                            <th>Qty</th>
+                            <th>Total</th>
+                            <th>Shipment Date</th>
+                            <th>Data Date</th>
+                            <th>Source</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for o in orders %}
+                        <tr>
+                            <td>{{ o.id }}</td>
+                            <td>{{ o.tracking_no }}</td>
+                            <td>{{ client_map.get(o.client_id).name if o.client_id in client_map else o.client_id }}</td>
+                            <td>
+                                {% if o.item_id and o.item_id in item_map %}
+                                    {{ item_map.get(o.item_id).sku }} - {{ item_map.get(o.item_id).name }}
+                                {% else %}
+                                    {{ o.item_id }}
+                                {% endif %}
+                            </td>
+                            <td>{{ o.quantity or 0 }}</td>
+                            <td>{{ '%.2f'|format(o.total_amount or 0) }}</td>
+                            <td>{{ o.shipment_date }}</td>
+                            <td>{{ o.data_date }}</td>
+                            <td>{{ o.source }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </body>
     </html>
