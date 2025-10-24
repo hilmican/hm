@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 from sqlmodel import select
+from sqlalchemy import or_, and_
 
 from ..db import get_session
 from ..models import Order, Payment, Item, Client, ImportRun, StockMovement
@@ -27,7 +28,7 @@ def daily_report(
 	request: Request,
 	start: Optional[str] = Query(default=None),
 	end: Optional[str] = Query(default=None),
-	date_field: str = Query(default="shipment", regex="^(shipment|data)$"),
+	date_field: str = Query(default="shipment", regex="^(shipment|data|both)$"),
 ):
 	# default to last 7 days inclusive
 	today = dt.date.today()
@@ -38,15 +39,32 @@ def daily_report(
 		start_date, end_date = end_date, start_date
 
 	with get_session() as session:
-		# Select orders by chosen date field
-		date_col = Order.shipment_date if date_field == "shipment" else Order.data_date
-		orders = session.exec(
-			select(Order)
-			.where(date_col.is_not(None))
-			.where(date_col >= start_date)
-			.where(date_col <= end_date)
-			.order_by(Order.id.desc())
-		).all()
+		# Select orders based on date filter mode
+		if date_field == "both":
+			orders = session.exec(
+				select(Order)
+				.where(
+					or_(
+						and_(Order.shipment_date.is_not(None), Order.shipment_date >= start_date, Order.shipment_date <= end_date),
+						and_(Order.data_date.is_not(None), Order.data_date >= start_date, Order.data_date <= end_date),
+					)
+				)
+				.order_by(Order.id.desc())
+			).all()
+		else:
+			# If chosen date is missing, fall back to the other date (covers zero-price or incomplete rows)
+			date_col = Order.shipment_date if date_field == "shipment" else Order.data_date
+			alt_date_col = Order.data_date if date_field == "shipment" else Order.shipment_date
+			orders = session.exec(
+				select(Order)
+				.where(
+					or_(
+						and_(date_col.is_not(None), date_col >= start_date, date_col <= end_date),
+						and_(date_col.is_(None), alt_date_col.is_not(None), alt_date_col >= start_date, alt_date_col <= end_date),
+					)
+				)
+				.order_by(Order.id.desc())
+			).all()
 
 		order_count = len(orders)
 		total_quantity = sum(int(o.quantity or 0) for o in orders)
