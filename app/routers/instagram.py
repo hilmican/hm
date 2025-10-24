@@ -53,14 +53,33 @@ def _validate_signature(raw_body: bytes, signature: Optional[str]) -> None:
 async def receive_events(request: Request):
 	# Read raw body to compute HMAC
 	body = await request.body()
-	_validate_signature(body, request.headers.get("X-Hub-Signature-256") or request.headers.get("x-hub-signature-256"))
+	signature = request.headers.get("X-Hub-Signature-256") or request.headers.get("x-hub-signature-256")
+	# lightweight arrival log (no secrets)
+	try:
+		_log.info(
+			"IG webhook POST: sig_len=%d sig_sfx=%s body_len=%d",
+			len(signature or ""),
+			(signature[-6:] if signature else None),
+			len(body or b""),
+		)
+	except Exception:
+		pass
+	_validate_signature(body, signature)
 
 	try:
 		payload: Dict[str, Any] = json.loads(body.decode("utf-8"))
 	except Exception:
+		try:
+			_log.warning("IG webhook POST: invalid JSON, body_len=%d", len(body or b""))
+		except Exception:
+			pass
 		raise HTTPException(status_code=400, detail="Invalid JSON")
 
 	if payload.get("object") != "instagram":
+		try:
+			_log.info("IG webhook POST: ignored object=%s", payload.get("object"))
+		except Exception:
+			pass
 		return {"status": "ignored"}
 
 	entries: List[Dict[str, Any]] = payload.get("entry", [])
@@ -85,6 +104,21 @@ async def receive_events(request: Request):
 				text = message_obj.get("text")
 				attachments = message_obj.get("attachments")
 				timestamp_ms = event.get("timestamp")
+				# log a concise preview of the received message (no secrets, truncated)
+				try:
+					att_count = len(attachments) if isinstance(attachments, list) else (1 if attachments else 0)
+					preview = (text or "").replace("\n", " ").replace("\r", " ")[:200]
+					_log.info(
+						"IG msg recv: from=%s to=%s mid_sfx=%s ts=%s text='%s' att=%d",
+						(str(sender_id)[-4:] if sender_id else None),
+						(str(recipient_id)[-4:] if recipient_id else None),
+						(str(mid)[-6:] if mid else None),
+						str(timestamp_ms),
+						preview,
+						att_count,
+					)
+				except Exception:
+					pass
 				row = Message(
 					ig_sender_id=str(sender_id) if sender_id is not None else None,
 					ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
@@ -97,6 +131,10 @@ async def receive_events(request: Request):
 				session.add(row)
 				persisted += 1
 
+	try:
+		_log.info("IG webhook POST: processed entries=%d saved=%d", len(entries), persisted)
+	except Exception:
+		pass
 	return {"status": "ok", "saved": persisted}
 
 

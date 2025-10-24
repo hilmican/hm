@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Request, Form, HTTPException
+import logging
 import os
 import hmac
 import hashlib
@@ -16,6 +17,7 @@ from ..utils.hashing import hash_password, verify_password
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+_log = logging.getLogger("meta.auth")
 
 
 def is_locked(user: User) -> bool:
@@ -76,6 +78,19 @@ def ig_business_login_callback(request: Request):
     # Meta will redirect here with ?code=...&state=...
     # We simply acknowledge for now since we only receive messages.
     params = dict(request.query_params)
+    try:
+        # basic arrival log, avoid leaking full codes
+        code = params.get("code")
+        state = params.get("state")
+        _log.info(
+            "Meta callback: code_len=%s code_sfx=%s state_len=%s state_sfx=%s",
+            (len(code) if code else 0),
+            (code[-4:] if code else None),
+            (len(state) if state else 0),
+            (state[-4:] if state else None),
+        )
+    except Exception:
+        pass
     return {"status": "ok", "received": params}
 
 
