@@ -33,16 +33,28 @@ def _get_base_token_and_id() -> tuple[str, str, bool]:
 async def _get(client: httpx.AsyncClient, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
     """GET with small retry/backoff to handle transient DNS/egress hiccups."""
     last_err: Optional[Exception] = None
+    last_body: Optional[str] = None
     for attempt in range(3):
         try:
             r = await client.get(url, params=params, timeout=20)
             r.raise_for_status()
             return r.json()
-        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+        except httpx.HTTPStatusError as e:
             last_err = e
-            # brief backoff: 0.5s, 1s
+            try:
+                last_body = e.response.text
+            except Exception:
+                last_body = None
             await asyncio.sleep(0.5 * (attempt + 1))
-    raise RuntimeError(f"Graph API request failed: {type(last_err).__name__}: {last_err}")
+        except httpx.RequestError as e:
+            last_err = e
+            await asyncio.sleep(0.5 * (attempt + 1))
+    detail = f"{type(last_err).__name__}: {last_err}"
+    if last_body:
+        # include a short snippet of the body for diagnostics
+        snippet = last_body[:300].replace("\n", " ")
+        detail = f"{detail}; body={snippet}"
+    raise RuntimeError(f"Graph API request failed: {detail}")
 
 
 async def fetch_conversations(limit: int = 25) -> List[Dict[str, Any]]:
@@ -51,8 +63,8 @@ async def fetch_conversations(limit: int = 25) -> List[Dict[str, Any]]:
     fields = "id,updated_time,participants,unread_count"
     path = f"/{entity_id}/conversations"
     params = {"access_token": token, "limit": limit, "fields": fields}
-    if is_page:
-        params["platform"] = "instagram"
+    # Explicitly set platform for Instagram; some accounts require this even with IG User ID
+    params["platform"] = "instagram"
     async with httpx.AsyncClient() as client:
         data = await _get(client, base + path, params)
         return data.get("data", [])
