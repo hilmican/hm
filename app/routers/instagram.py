@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from ..db import get_session
 from ..models import Message
 from ..services.instagram_api import _get_base_token_and_id
+from .ig import notify_new_message
 import logging
 
 
@@ -143,6 +144,16 @@ async def receive_events(request: Request):
 				)
 				session.add(row)
 				persisted += 1
+				# fire websocket event for live UI update (best effort)
+				try:
+					await notify_new_message({
+						"type": "ig_message",
+						"conversation_id": conversation_id,
+						"timestamp_ms": int(timestamp_ms) if isinstance(timestamp_ms, (int, float, str)) and str(timestamp_ms).isdigit() else None,
+						"text": (text or "")[:200],
+					})
+				except Exception:
+					pass
 
 	try:
 		_log.info("IG webhook POST: processed entries=%d saved=%d", len(entries), persisted)

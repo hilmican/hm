@@ -36,9 +36,26 @@
         try {
           const r = await fetch('/ig/inbox/refresh', { method: 'POST' });
           if (!r.ok) throw new Error('refresh failed');
+          const js = await r.json();
+          if (js.status !== 'ok') console.warn('Refresh error', js);
           location.reload();
         } catch (e) { alert('Refresh error'); }
       });
+
+      // Live updates via WebSocket
+      try {
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        const ws = new WebSocket(`${proto}://${location.host}/ig/ws`);
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (data && data.type === 'ig_message') {
+              // simple strategy: reload to reflect new message
+              location.reload();
+            }
+          } catch {}
+        };
+      } catch {}
     </script>
   </body>
 </html>

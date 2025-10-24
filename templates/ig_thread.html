@@ -44,6 +44,19 @@
           location.reload();
         } catch (e) { alert('Refresh error'); }
       });
+      // Live updates via WebSocket: reload when new message arrives for this conversation
+      try {
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        const ws = new WebSocket(`${proto}://${location.host}/ig/ws`);
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (data && data.type === 'ig_message' && data.conversation_id === 'dm:{{ conversation_id }}') {
+              location.reload();
+            }
+          } catch {}
+        };
+      } catch {}
     </script>
   </body>
 </html>
