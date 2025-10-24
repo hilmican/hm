@@ -21,7 +21,10 @@
     <div id="list">
       {% for m in conversations %}
         <div class="conv">
-          <div><a href="/ig/inbox/{{ m.conversation_id }}">Conversation {{ m.conversation_id }}</a></div>
+          <div>
+            <a href="/ig/inbox/{{ m.conversation_id }}">Conversation {{ m.conversation_id }}</a>
+            {% if m.sender_username %}<span class="meta"> · @{{ m.sender_username }}</span>{% endif %}
+          </div>
           <div class="meta">{{ m.timestamp_ms }} · {{ (m.text or '')[:120] }}</div>
         </div>
       {% endfor %}
@@ -43,19 +46,30 @@
       });
 
       // Live updates via WebSocket
-      try {
-        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-        const ws = new WebSocket(`${proto}://${location.host}/ig/ws`);
-        ws.onmessage = (ev) => {
-          try {
-            const data = JSON.parse(ev.data);
-            if (data && data.type === 'ig_message') {
-              // simple strategy: reload to reflect new message
-              location.reload();
-            }
-          } catch {}
-        };
-      } catch {}
+      let wsConnected = false;
+      const startWS = () => {
+        try {
+          const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+          const ws = new WebSocket(`${proto}://${location.host}/ig/ws`);
+          ws.onopen = () => { wsConnected = true; };
+          ws.onclose = () => { wsConnected = false; };
+          ws.onerror = () => { wsConnected = false; };
+          ws.onmessage = (ev) => {
+            try {
+              const data = JSON.parse(ev.data);
+              if (data && data.type === 'ig_message') {
+                location.reload();
+              }
+            } catch {}
+          };
+        } catch { wsConnected = false; }
+      };
+      startWS();
+      // Poll fallback every 15s if sockets fail
+      setInterval(async () => {
+        if (wsConnected) return;
+        try { await fetch('/ig/inbox/refresh', { method: 'POST' }); location.reload(); } catch {}
+      }, 15000);
     </script>
   </body>
 </html>

@@ -25,7 +25,10 @@
       {% for m in messages %}
         <div class="msg {{ m.direction or 'in' }}">
           <div class="bubble">
-            <div>{{ m.text or '' }}</div>
+            <div>
+              {% if m.sender_username %}<span class="meta">@{{ m.sender_username }}</span><br/>{% endif %}
+              {{ m.text or '' }}
+            </div>
             <div class="meta">{{ m.timestamp_ms }}</div>
           </div>
         </div>
@@ -45,18 +48,30 @@
         } catch (e) { alert('Refresh error'); }
       });
       // Live updates via WebSocket: reload when new message arrives for this conversation
-      try {
-        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-        const ws = new WebSocket(`${proto}://${location.host}/ig/ws`);
-        ws.onmessage = (ev) => {
-          try {
-            const data = JSON.parse(ev.data);
-            if (data && data.type === 'ig_message' && data.conversation_id === 'dm:{{ conversation_id }}') {
-              location.reload();
-            }
-          } catch {}
-        };
-      } catch {}
+      let wsConnected = false;
+      const startWS = () => {
+        try {
+          const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+          const ws = new WebSocket(`${proto}://${location.host}/ig/ws`);
+          ws.onopen = () => { wsConnected = true; };
+          ws.onclose = () => { wsConnected = false; };
+          ws.onerror = () => { wsConnected = false; };
+          ws.onmessage = (ev) => {
+            try {
+              const data = JSON.parse(ev.data);
+              if (data && data.type === 'ig_message' && data.conversation_id === 'dm:{{ conversation_id }}') {
+                location.reload();
+              }
+            } catch {}
+          };
+        } catch { wsConnected = false; }
+      };
+      startWS();
+      // Poll fallback every 15s if sockets fail
+      setInterval(async () => {
+        if (wsConnected) return;
+        try { await fetch(location.pathname + '/refresh', { method: 'POST' }); location.reload(); } catch {}
+      }, 15000);
     </script>
   </body>
 </html>

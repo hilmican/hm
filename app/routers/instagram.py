@@ -106,6 +106,12 @@ async def receive_events(request: Request):
 				text = message_obj.get("text")
 				attachments = message_obj.get("attachments")
 				timestamp_ms = event.get("timestamp")
+				# optional username if webhook provides it (best-effort)
+				sender_username = None
+				try:
+					sender_username = (event.get("sender") or {}).get("username") or (message_obj.get("from") or {}).get("username")
+				except Exception:
+					pass
 				# determine direction and a stable conversation id using our owner id
 				try:
 					_, owner_id, _ = _get_base_token_and_id()
@@ -141,6 +147,7 @@ async def receive_events(request: Request):
 					raw_json=json.dumps(event, ensure_ascii=False),
 					conversation_id=conversation_id,
 					direction=direction,
+					sender_username=sender_username,
 				)
 				session.add(row)
 				persisted += 1
