@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request
+import logging
 from sqlmodel import select
 
 from ..db import get_session
@@ -7,6 +8,7 @@ from ..services.instagram_api import sync_latest_conversations
 
 
 router = APIRouter(prefix="/ig", tags=["instagram"])
+_log = logging.getLogger("instagram.inbox")
 
 
 @router.get("/inbox")
@@ -28,8 +30,20 @@ def inbox(request: Request, limit: int = 25):
 
 @router.post("/inbox/refresh")
 async def refresh_inbox(limit: int = 25):
-    saved = await sync_latest_conversations(limit=limit)
-    return {"status": "ok", "saved": saved}
+    try:
+        saved = await sync_latest_conversations(limit=limit)
+        try:
+            _log.info("Inbox refresh: saved=%d", saved)
+        except Exception:
+            pass
+        return {"status": "ok", "saved": saved}
+    except Exception as e:
+        try:
+            _log.exception("Inbox refresh failed: %s", e)
+        except Exception:
+            pass
+        # Return 200 so the frontend doesn't alert; page will reload regardless
+        return {"status": "error", "error": str(e)}
 
 
 @router.get("/inbox/{conversation_id}")

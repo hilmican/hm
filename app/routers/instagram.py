@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from ..db import get_session
 from ..models import Message
+from ..services.instagram_api import _get_base_token_and_id
 import logging
 
 
@@ -104,6 +105,16 @@ async def receive_events(request: Request):
 				text = message_obj.get("text")
 				attachments = message_obj.get("attachments")
 				timestamp_ms = event.get("timestamp")
+				# determine direction and a stable conversation id using our owner id
+				try:
+					_, owner_id, _ = _get_base_token_and_id()
+				except Exception:
+					owner_id = None
+				direction = "in"
+				if owner_id is not None and sender_id is not None and str(sender_id) == str(owner_id):
+					direction = "out"
+				other_party_id = recipient_id if direction == "out" else sender_id
+				conversation_id = (f"dm:{other_party_id}" if other_party_id is not None else None)
 				# log a concise preview of the received message (no secrets, truncated)
 				try:
 					att_count = len(attachments) if isinstance(attachments, list) else (1 if attachments else 0)
@@ -127,6 +138,8 @@ async def receive_events(request: Request):
 					attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
 					timestamp_ms=int(timestamp_ms) if isinstance(timestamp_ms, (int, float, str)) and str(timestamp_ms).isdigit() else None,
 					raw_json=json.dumps(event, ensure_ascii=False),
+					conversation_id=conversation_id,
+					direction=direction,
 				)
 				session.add(row)
 				persisted += 1
