@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
+from sqlmodel import select
+from sqlalchemy.exc import IntegrityError
 
 from ..db import get_session
 from ..models import Message
@@ -102,6 +104,12 @@ async def receive_events(request: Request):
 				message_obj = event.get("message") or {}
 				if not message_obj:
 					continue
+                # skip echoes/deleted to avoid duplicates
+                try:
+                    if message_obj.get("is_echo") or message_obj.get("is_deleted"):
+                        continue
+                except Exception:
+                    pass
 				sender_id = (event.get("sender") or {}).get("id")
 				recipient_id = (event.get("recipient") or {}).get("id")
 				mid = message_obj.get("mid") or message_obj.get("id")
@@ -161,6 +169,14 @@ async def receive_events(request: Request):
 				except Exception:
 					pass
 
+				# skip if already saved (idempotent on ig_message_id)
+				try:
+					exists = session.exec(select(Message).where(Message.ig_message_id == str(mid))).first()
+					if exists:
+						continue
+				except Exception:
+					pass
+
 				row = Message(
 					ig_sender_id=str(sender_id) if sender_id is not None else None,
 					ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
@@ -177,8 +193,15 @@ async def receive_events(request: Request):
 					ad_title=ad_title,
 					referral_json=referral_json,
 				)
-				session.add(row)
-				persisted += 1
+				try:
+					session.add(row)
+					persisted += 1
+				except IntegrityError:
+					# concurrent duplicate; ignore
+					try:
+						session.rollback()
+					except Exception:
+						pass
 				# fire websocket event for live UI update (best effort)
 				try:
 					await notify_new_message({
