@@ -12,6 +12,8 @@ from sqlmodel import select
 from sqlalchemy.exc import IntegrityError
 
 from ..db import get_session
+from sqlalchemy import text
+from ..services.queue import enqueue
 from ..models import Message
 from ..services.instagram_api import _get_base_token_and_id, fetch_user_username, GRAPH_VERSION, _get as graph_get
 import httpx
@@ -99,131 +101,43 @@ async def receive_events(request: Request):
 			pass
 		return {"status": "ignored"}
 
+	# Insert raw_event once and enqueue ingestion. Idempotent on uniq_hash of full payload.
 	entries: List[Dict[str, Any]] = payload.get("entry", [])
-	persisted = 0
+	saved_raw = 0
+	uniq_hash = hashlib.sha256(body).hexdigest()
 	with get_session() as session:
 		for entry in entries:
-			messaging_events: List[Dict[str, Any]] = entry.get("messaging") or []
-			# Some deliveries may nest inside 'changes' → 'value' → 'messaging'
-			if not messaging_events and entry.get("changes"):
-				for change in entry.get("changes", []):
-					val = change.get("value") or {}
-					if isinstance(val, dict) and val.get("messaging"):
-						messaging_events.extend(val.get("messaging", []))
-
-			for event in messaging_events:
-				message_obj = event.get("message") or {}
-				if not message_obj:
-					continue
-				# skip echoes/deleted to avoid duplicates
-				try:
-					if message_obj.get("is_echo") or message_obj.get("is_deleted"):
-						continue
-				except Exception:
-					pass
-				sender_id = (event.get("sender") or {}).get("id")
-				recipient_id = (event.get("recipient") or {}).get("id")
-				mid = message_obj.get("mid") or message_obj.get("id")
-				text = message_obj.get("text")
-				attachments = message_obj.get("attachments")
-				timestamp_ms = event.get("timestamp")
-				# optional username if webhook provides it (best-effort). Avoid remote calls here.
-				sender_username = None
-				try:
-					sender_username = (event.get("sender") or {}).get("username") or (message_obj.get("from") or {}).get("username")
-				except Exception:
-					pass
-				# determine direction and a stable conversation id using our owner id
-				try:
-					_, owner_id, _ = _get_base_token_and_id()
-				except Exception:
-					owner_id = None
-				direction = "in"
-				if owner_id is not None and sender_id is not None and str(sender_id) == str(owner_id):
-					direction = "out"
-				other_party_id = recipient_id if direction == "out" else sender_id
-				conversation_id = (f"dm:{other_party_id}" if other_party_id is not None else None)
-				# log a concise preview of the received message (no secrets, truncated)
-				try:
-					att_count = len(attachments) if isinstance(attachments, list) else (1 if attachments else 0)
-					preview = (text or "").replace("\n", " ").replace("\r", " ")[:200]
-					_log.info(
-						"IG msg recv: from=%s to=%s mid_sfx=%s ts=%s text='%s' att=%d",
-						(str(sender_id)[-4:] if sender_id else None),
-						(str(recipient_id)[-4:] if recipient_id else None),
-						(str(mid)[-6:] if mid else None),
-						str(timestamp_ms),
-						preview,
-						att_count,
+			entry_id = str(entry.get("id")) if entry.get("id") is not None else ""
+			try:
+				session.exec(
+					text(
+						"""
+						INSERT OR IGNORE INTO raw_events(object, entry_id, payload, sig256, uniq_hash)
+						VALUES (:object, :entry_id, :payload, :sig256, :uniq_hash)
+						"""
 					)
-				except Exception:
-					pass
-				# parse referral/ad metadata if present
-				ad_id = None
-				ad_link = None
-				ad_title = None
-				referral_json = None
-				try:
-					ref = event.get("referral") or {}
-					if not ref and isinstance(event.get("change"), dict):
-						ref = (event.get("change") or {}).get("value", {}).get("referral") or {}
-					if ref:
-						ad_id = ref.get("ad_id") or ref.get("adgroup_id") or ref.get("campaign_id")
-						ad_link = ref.get("ad_link") or ref.get("source_url") or ref.get("link")
-						ad_title = ref.get("ad_title") or ref.get("type")
-						referral_json = json.dumps(ref, ensure_ascii=False)
-				except Exception:
-					pass
-
-				# skip if already saved (idempotent on ig_message_id)
-				try:
-					exists = session.exec(select(Message).where(Message.ig_message_id == str(mid))).first()
-					if exists:
-						continue
-				except Exception:
-					pass
-
-				row = Message(
-					ig_sender_id=str(sender_id) if sender_id is not None else None,
-					ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
-					ig_message_id=str(mid) if mid is not None else None,
-					text=text,
-					attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
-					timestamp_ms=int(timestamp_ms) if isinstance(timestamp_ms, (int, float, str)) and str(timestamp_ms).isdigit() else None,
-					raw_json=json.dumps(event, ensure_ascii=False),
-					conversation_id=conversation_id,
-					direction=direction,
-					sender_username=sender_username,
-					ad_id=ad_id,
-					ad_link=ad_link,
-					ad_title=ad_title,
-					referral_json=referral_json,
+				).params(
+					object=str(payload.get("object") or "instagram"),
+					entry_id=entry_id,
+					payload=body.decode("utf-8"),
+					sig256=signature or "",
+					uniq_hash=uniq_hash,
 				)
-				try:
-					session.add(row)
-					persisted += 1
-				except IntegrityError:
-					# concurrent duplicate; ignore
+				row = session.exec(text("SELECT id FROM raw_events WHERE uniq_hash = :h")).params(h=uniq_hash).first()
+				if row:
+					saved_raw += 1
 					try:
-						session.rollback()
+						enqueue("ingest", key=str(row.id), payload={"raw_event_id": int(row.id)})
 					except Exception:
 						pass
-				# fire websocket event for live UI update (best effort)
-				try:
-					await notify_new_message({
-						"type": "ig_message",
-						"conversation_id": conversation_id,
-						"timestamp_ms": int(timestamp_ms) if isinstance(timestamp_ms, (int, float, str)) and str(timestamp_ms).isdigit() else None,
-						"text": (text or "")[:200],
-					})
-				except Exception:
-					pass
-
+			except Exception:
+				# ignore duplicates or insert errors to keep webhook fast
+				pass
 	try:
-		_log.info("IG webhook POST: processed entries=%d saved=%d", len(entries), persisted)
+		_log.info("IG webhook POST: enqueued ingest for entries=%d raw_saved=%d", len(entries), saved_raw)
 	except Exception:
 		pass
-	return {"status": "ok", "saved": persisted}
+	return {"status": "ok", "raw_saved": saved_raw}
 
 
 @router.get("/ig/media/{ig_message_id}/{idx}")

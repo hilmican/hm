@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from fastapi import WebSocket, WebSocketDisconnect
 import logging
 from sqlmodel import select
@@ -8,6 +8,8 @@ from ..models import Message
 from sqlmodel import select
 from ..services.instagram_api import sync_latest_conversations
 import json
+from pathlib import Path
+from fastapi.responses import FileResponse
 
 
 router = APIRouter(prefix="/ig", tags=["instagram"])
@@ -118,7 +120,7 @@ def thread(request: Request, conversation_id: str):
                 if mm.sender_username:
                     other_label = f"@{mm.sender_username}"
                     break
-        # Build attachment indices so template can render images
+        # Build attachment indices so template can render images (fallback: legacy attachments_json)
         att_map = {}
         for mm in msgs:
             if not mm.attachments_json:
@@ -134,8 +136,48 @@ def thread(request: Request, conversation_id: str):
                     att_map[mm.ig_message_id or ""] = list(range(len(items)))
             except Exception:
                 pass
+        # New: Build local attachment id map from attachments table
+        att_ids_map = {}
+        try:
+            # Map message.id -> ig_message_id
+            msgid_to_mid = {}
+            msg_ids = []
+            for mm in msgs:
+                if mm.id:
+                    msg_ids.append(mm.id)
+                    msgid_to_mid[int(mm.id)] = mm.ig_message_id or ""
+            if msg_ids:
+                # Build a parameterized IN clause
+                placeholders = ",".join([":p" + str(i) for i in range(len(msg_ids))])
+                from sqlalchemy import text as _text
+                params = {("p" + str(i)): int(msg_ids[i]) for i in range(len(msg_ids))}
+                rows = session.exec(_text(f"SELECT id, message_id, position FROM attachments WHERE message_id IN ({placeholders}) ORDER BY position ASC")).params(**params).all()
+                for r in rows:
+                    att_id = r.id if hasattr(r, "id") else r[0]
+                    m_id = r.message_id if hasattr(r, "message_id") else r[1]
+                    pos = r.position if hasattr(r, "position") else r[2]
+                    mid = msgid_to_mid.get(int(m_id)) or ""
+                    if mid:
+                        att_ids_map.setdefault(mid, []).append(int(att_id))
+        except Exception:
+            att_ids_map = {}
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label, "att_map": att_map})
+        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label, "att_map": att_map, "att_ids_map": att_ids_map})
+
+
+@router.get("/media/local/{attachment_id}")
+def serve_media_local(attachment_id: int):
+    # Stream from local FS using attachments.storage_path
+    from sqlalchemy import text
+    with get_session() as session:
+        row = session.exec(text("SELECT storage_path, mime FROM attachments WHERE id=:id")).params(id=attachment_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+        storage_path = row.storage_path if hasattr(row, "storage_path") else row[0]
+        mime = row.mime if hasattr(row, "mime") else (row[1] if len(row) > 1 else None)
+        if not storage_path or not Path(storage_path).exists():
+            raise HTTPException(status_code=404, detail="File not found")
+        return FileResponse(storage_path, media_type=(mime or "application/octet-stream"))
 
 
 @router.post("/inbox/{conversation_id}/refresh")

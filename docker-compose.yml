@@ -4,6 +4,7 @@ services:
     container_name: hm-kargo
     ports:
       - "8388:8388"
+    command: ["sh", "scripts/run.sh"]
     volumes:
       - ./:/app
       - ./bizimexcellerimiz:/app/bizimexcellerimiz
@@ -13,4 +14,52 @@ services:
       - PYTHONUNBUFFERED=1
       - IG_WEBHOOK_VERIFY_TOKEN=MHG_UYHS_IG_WEBHOOK_VERIFY_TOKEN_NANA
       - IG_APP_SECRET=9264d4f5304837e07b27ed267c8d2f21
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8388"]
+      - REDIS_URL=redis://redis:6379/0
+      - MEDIA_ROOT=/app/data/media
+      - THUMBS_ROOT=/app/data/thumbs
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: hm-redis
+    ports:
+      - "6379:6379"
+
+  worker_ingest:
+    build: .
+    container_name: hm-worker-ingest
+    command: ["python", "scripts/worker_ingest.py"]
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./:/app
+      - ./data:/app/data
+    depends_on:
+      - redis
+
+  worker_enrich:
+    build: .
+    container_name: hm-worker-enrich
+    command: ["python", "scripts/worker_enrich.py"]
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./:/app
+      - ./data:/app/data
+    depends_on:
+      - redis
+
+  worker_media:
+    build: .
+    container_name: hm-worker-media
+    command: ["python", "scripts/worker_media.py"]
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MEDIA_ROOT=/app/data/media
+      - THUMBS_ROOT=/app/data/thumbs
+    volumes:
+      - ./:/app
+      - ./data:/app/data
+    depends_on:
+      - redis

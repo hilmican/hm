@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hm-redis
+  namespace: hm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hm-redis
+  template:
+    metadata:
+      labels:
+        app: hm-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+              name: redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hm-redis
+  namespace: hm
+spec:
+  selector:
+    app: hm-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+      protocol: TCP

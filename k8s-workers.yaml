@@ -1,0 +1,143 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hm-worker-ingest
+  namespace: hm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hm-worker-ingest
+  template:
+    metadata:
+      labels:
+        app: hm-worker-ingest
+    spec:
+      volumes:
+        - name: app-root
+          persistentVolumeClaim:
+            claimName: hm-app-root
+      initContainers:
+        - name: seed-app
+          image: mediatriple/hm:0.4
+          command: ["/bin/sh","-c"]
+          args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
+          volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
+      containers:
+        - name: worker
+          image: mediatriple/hm:0.4
+          command: ["python","scripts/worker_ingest.py"]
+          env:
+            - name: REDIS_URL
+              value: redis://hm-redis.hm.svc.cluster.local:6379/0
+            - name: MEDIA_ROOT
+              value: /app/data/media
+            - name: THUMBS_ROOT
+              value: /app/data/thumbs
+            - name: IG_APP_SECRET
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_APP_SECRET } }
+            - name: IG_WEBHOOK_VERIFY_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_WEBHOOK_VERIFY_TOKEN } }
+            - name: IG_USER_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_USER_ID } }
+            - name: IG_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
+            - name: IG_GRAPH_API_VERSION
+              value: v21.0
+          volumeMounts: [ { name: app-root, mountPath: /app } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hm-worker-enrich
+  namespace: hm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hm-worker-enrich
+  template:
+    metadata:
+      labels:
+        app: hm-worker-enrich
+    spec:
+      volumes:
+        - name: app-root
+          persistentVolumeClaim:
+            claimName: hm-app-root
+      initContainers:
+        - name: seed-app
+          image: mediatriple/hm:0.4
+          command: ["/bin/sh","-c"]
+          args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
+          volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
+      containers:
+        - name: worker
+          image: mediatriple/hm:0.4
+          command: ["python","scripts/worker_enrich.py"]
+          env:
+            - name: REDIS_URL
+              value: redis://hm-redis.hm.svc.cluster.local:6379/0
+            - name: MEDIA_ROOT
+              value: /app/data/media
+            - name: THUMBS_ROOT
+              value: /app/data/thumbs
+            - name: IG_APP_SECRET
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_APP_SECRET } }
+            - name: IG_WEBHOOK_VERIFY_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_WEBHOOK_VERIFY_TOKEN } }
+            - name: IG_USER_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_USER_ID } }
+            - name: IG_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
+            - name: IG_GRAPH_API_VERSION
+              value: v21.0
+          volumeMounts: [ { name: app-root, mountPath: /app } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hm-worker-media
+  namespace: hm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hm-worker-media
+  template:
+    metadata:
+      labels:
+        app: hm-worker-media
+    spec:
+      volumes:
+        - name: app-root
+          persistentVolumeClaim:
+            claimName: hm-app-root
+      initContainers:
+        - name: seed-app
+          image: mediatriple/hm:0.4
+          command: ["/bin/sh","-c"]
+          args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
+          volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
+      containers:
+        - name: worker
+          image: mediatriple/hm:0.4
+          command: ["python","scripts/worker_media.py"]
+          env:
+            - name: REDIS_URL
+              value: redis://hm-redis.hm.svc.cluster.local:6379/0
+            - name: MEDIA_ROOT
+              value: /app/data/media
+            - name: THUMBS_ROOT
+              value: /app/data/thumbs
+            - name: IG_APP_SECRET
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_APP_SECRET } }
+            - name: IG_WEBHOOK_VERIFY_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_WEBHOOK_VERIFY_TOKEN } }
+            - name: IG_USER_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_USER_ID } }
+            - name: IG_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
+            - name: IG_GRAPH_API_VERSION
+              value: v21.0
+          volumeMounts: [ { name: app-root, mountPath: /app } ]

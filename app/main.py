@@ -27,6 +27,14 @@ def create_app() -> FastAPI:
 	@app.on_event("startup")
 	def _startup() -> None:
 		init_db()
+		# Ensure media directories exist when app boots
+		try:
+			import os as _os
+			from pathlib import Path as _Path
+			_Path(_os.getenv("MEDIA_ROOT", "data/media")).mkdir(parents=True, exist_ok=True)
+			_Path(_os.getenv("THUMBS_ROOT", "data/thumbs")).mkdir(parents=True, exist_ok=True)
+		except Exception:
+			pass
 
 	app.include_router(dashboard.router)
 	app.include_router(auth.router)

@@ -136,6 +136,107 @@ def init_db() -> None:
 			if not column_exists("message", "referral_json"):
 				conn.exec_driver_sql("ALTER TABLE message ADD COLUMN referral_json TEXT")
 
+		# Instagram ingestion tables (create-if-missing)
+		# raw_events archive for auditing and replay
+		conn.exec_driver_sql(
+			"""
+			CREATE TABLE IF NOT EXISTS raw_events (
+				id INTEGER PRIMARY KEY,
+				received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				object TEXT NOT NULL,
+				entry_id TEXT NOT NULL,
+				payload TEXT NOT NULL,
+				sig256 TEXT NOT NULL,
+				uniq_hash TEXT UNIQUE
+			)
+			"""
+		)
+		# ig_accounts reference
+		conn.exec_driver_sql(
+			"""
+			CREATE TABLE IF NOT EXISTS ig_accounts (
+				igba_id TEXT PRIMARY KEY,
+				username TEXT,
+				name TEXT,
+				profile_pic_url TEXT,
+				updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)
+			"""
+		)
+		# ig_users reference
+		conn.exec_driver_sql(
+			"""
+			CREATE TABLE IF NOT EXISTS ig_users (
+				ig_user_id TEXT PRIMARY KEY,
+				username TEXT,
+				name TEXT,
+				profile_pic_url TEXT,
+				last_seen_at DATETIME,
+				fetched_at DATETIME,
+				fetch_status TEXT,
+				fetch_error TEXT
+			)
+			"""
+		)
+		# conversations table
+		conn.exec_driver_sql(
+			"""
+			CREATE TABLE IF NOT EXISTS conversations (
+				convo_id TEXT PRIMARY KEY,
+				igba_id TEXT NOT NULL,
+				ig_user_id TEXT NOT NULL,
+				last_message_at DATETIME NOT NULL,
+				unread_count INTEGER NOT NULL DEFAULT 0,
+				UNIQUE (igba_id, ig_user_id)
+			)
+			"""
+		)
+		# attachments table (1..N per message)
+		conn.exec_driver_sql(
+			"""
+			CREATE TABLE IF NOT EXISTS attachments (
+				id INTEGER PRIMARY KEY,
+				message_id INTEGER NOT NULL,
+				kind TEXT NOT NULL,
+				graph_id TEXT,
+				position INTEGER,
+				mime TEXT,
+				size_bytes INTEGER,
+				checksum_sha256 TEXT,
+				storage_path TEXT,
+				thumb_path TEXT,
+				fetched_at DATETIME,
+				fetch_status TEXT,
+				fetch_error TEXT,
+				FOREIGN KEY(message_id) REFERENCES message(id) ON DELETE CASCADE
+			)
+			"""
+		)
+		# jobs table for lightweight queue dedupe/observability
+		conn.exec_driver_sql(
+			"""
+			CREATE TABLE IF NOT EXISTS jobs (
+				id INTEGER PRIMARY KEY,
+				kind TEXT NOT NULL,
+				key TEXT NOT NULL,
+				run_after DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				attempts INTEGER NOT NULL DEFAULT 0,
+				max_attempts INTEGER NOT NULL DEFAULT 8,
+				payload TEXT,
+				UNIQUE (kind, key)
+			)
+			"""
+		)
+		# Helpful indexes
+		try:
+			conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_attachments_graph_id ON attachments(graph_id)")
+		except Exception:
+			pass
+		try:
+			conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ig_users_fetched_at ON ig_users(fetched_at)")
+		except Exception:
+			pass
+
 
 @contextmanager
 def get_session() -> Iterator[Session]:
