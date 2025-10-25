@@ -137,6 +137,65 @@ async def receive_events(request: Request):
 		_log.info("IG webhook POST: enqueued ingest for entries=%d raw_saved=%d", len(entries), saved_raw)
 	except Exception:
 		pass
+
+	# Additionally, persist minimal Message rows immediately (no Graph calls)
+	# so that inbox can render even if workers or Graph are unavailable.
+	try:
+		with get_session() as session:
+			persisted = 0
+			for entry in entries:
+				messaging_events: List[Dict[str, Any]] = entry.get("messaging") or []
+				if not messaging_events and entry.get("changes"):
+					for change in entry.get("changes", []):
+						val = change.get("value") or {}
+						if isinstance(val, dict) and val.get("messaging"):
+							messaging_events.extend(val.get("messaging", []))
+				for event in messaging_events:
+					mobj = event.get("message") or {}
+					if not mobj or mobj.get("is_echo") or mobj.get("is_deleted"):
+						continue
+					mid = mobj.get("mid") or mobj.get("id")
+					if not mid:
+						continue
+					# idempotent insert by ig_message_id
+					exists = session.exec(select(Message).where(Message.ig_message_id == str(mid))).first()
+					if exists:
+						continue
+					sender_id = (event.get("sender") or {}).get("id")
+					recipient_id = (event.get("recipient") or {}).get("id")
+					text_val = mobj.get("text")
+					attachments = mobj.get("attachments")
+					ts_ms = event.get("timestamp")
+					# derive direction using entry.id when available
+					igba_id = str(entry.get("id")) if entry.get("id") is not None else None
+					direction = "in"
+					try:
+						if sender_id and igba_id and str(sender_id) == str(igba_id):
+							direction = "out"
+					except Exception:
+						pass
+					other_party_id = recipient_id if direction == "out" else sender_id
+					conversation_id = (f"dm:{other_party_id}" if other_party_id is not None else None)
+					row = Message(
+						ig_sender_id=str(sender_id) if sender_id is not None else None,
+						ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
+						ig_message_id=str(mid),
+						text=text_val,
+						attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
+						timestamp_ms=int(ts_ms) if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit() else None,
+						raw_json=json.dumps(event, ensure_ascii=False),
+						conversation_id=conversation_id,
+						direction=direction,
+					)
+					session.add(row)
+					persisted += 1
+		try:
+			_log.info("IG webhook POST: inserted messages=%d (direct path)", persisted)
+		except Exception:
+			pass
+	except Exception:
+		# best-effort: ignore failures here; ingestion worker will backfill later
+		pass
 	return {"status": "ok", "raw_saved": saved_raw}
 
 

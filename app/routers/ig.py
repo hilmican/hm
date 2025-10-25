@@ -71,19 +71,11 @@ async def inbox(request: Request, limit: int = 25):
 
 @router.post("/inbox/refresh")
 async def refresh_inbox(limit: int = 25):
+    # Temporarily bypass Graph API and rely solely on locally stored messages.
+    # This endpoint now acts as a no-op refresh to keep the UI flow intact.
     try:
-        saved = await sync_latest_conversations(limit=limit)
-        try:
-            _log.info("Inbox refresh: saved=%d", saved)
-        except Exception:
-            pass
-        return {"status": "ok", "saved": saved}
+        return {"status": "ok", "saved": 0}
     except Exception as e:
-        try:
-            _log.exception("Inbox refresh failed: %s", e)
-        except Exception:
-            pass
-        # Return 200 so the frontend doesn't alert; page will reload regardless
         return {"status": "error", "error": str(e)}
 
 
