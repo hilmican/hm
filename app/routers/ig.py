@@ -5,6 +5,7 @@ from sqlmodel import select
 
 from ..db import get_session
 from ..models import Message
+from sqlmodel import select
 from ..services.instagram_api import sync_latest_conversations
 
 
@@ -38,7 +39,7 @@ async def notify_new_message(event: dict) -> None:
 def inbox(request: Request, limit: int = 25):
     with get_session() as session:
         # Latest conversations by most recent message
-        rows = session.exec(select(Message).order_by(Message.timestamp_ms.desc()).limit(200)).all()
+        rows = session.exec(select(Message).order_by(Message.timestamp_ms.desc()).limit(500)).all()
         # Group by conversation_id
         conv_map = {}
         for m in rows:
@@ -47,8 +48,21 @@ def inbox(request: Request, limit: int = 25):
             if m.conversation_id not in conv_map:
                 conv_map[m.conversation_id] = m
         conversations = list(conv_map.values())[:limit]
+        # Build labels and ad map
+        labels = {}
+        ad_map = {}
+        for m in rows:
+            cid = m.conversation_id
+            if not cid:
+                continue
+            if (m.direction or "in") == "in" and m.sender_username and cid not in labels:
+                labels[cid] = f"@{m.sender_username}"
+            if not labels.get(cid) and m.sender_username:
+                labels[cid] = f"@{m.sender_username}"
+            if (m.ad_link or m.ad_title) and cid not in ad_map:
+                ad_map[cid] = {"link": m.ad_link, "title": m.ad_title}
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations})
+        return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "ad_map": ad_map})
 
 
 @router.post("/inbox/refresh")
@@ -93,8 +107,17 @@ async def ws_inbox(websocket: WebSocket):
 def thread(request: Request, conversation_id: str):
     with get_session() as session:
         msgs = session.exec(select(Message).where(Message.conversation_id == conversation_id).order_by(Message.timestamp_ms.asc())).all()
+        other_label = None
+        for mm in msgs:
+            if (mm.direction or "in") == "in" and mm.sender_username:
+                other_label = f"@{mm.sender_username}"
+        if not other_label:
+            for mm in msgs:
+                if mm.sender_username:
+                    other_label = f"@{mm.sender_username}"
+                    break
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs})
+        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label})
 
 
 @router.post("/inbox/{conversation_id}/refresh")

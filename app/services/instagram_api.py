@@ -73,12 +73,22 @@ async def fetch_conversations(limit: int = 25) -> List[Dict[str, Any]]:
 async def fetch_messages(conversation_id: str, limit: int = 50) -> List[Dict[str, Any]]:
     token, _, _ = _get_base_token_and_id()
     base = f"https://graph.facebook.com/{GRAPH_VERSION}"
-    fields = "id,from,to,created_time,message,attachments"
+    fields = "id,from{id,username},to,created_time,message,attachments"
     path = f"/{conversation_id}/messages"
     params = {"access_token": token, "limit": limit, "fields": fields}
     async with httpx.AsyncClient() as client:
         data = await _get(client, base + path, params)
         return data.get("data", [])
+
+
+async def fetch_user_username(user_id: str) -> Optional[str]:
+    token, _, _ = _get_base_token_and_id()
+    base = f"https://graph.facebook.com/{GRAPH_VERSION}"
+    path = f"/{user_id}"
+    params = {"access_token": token, "fields": "username,name"}
+    async with httpx.AsyncClient() as client:
+        data = await _get(client, base + path, params)
+        return data.get("username") or data.get("name")
 
 
 async def sync_latest_conversations(limit: int = 25) -> int:
@@ -97,6 +107,7 @@ async def sync_latest_conversations(limit: int = 25) -> int:
                 if exists:
                     continue
                 frm = (m.get("from") or {}).get("id")
+                frm_username = (m.get("from") or {}).get("username")
                 to = (m.get("to") or {}).get("data") or []
                 recipient_id = to[0]["id"] if to else None
                 direction = "in"
@@ -122,7 +133,7 @@ async def sync_latest_conversations(limit: int = 25) -> int:
                     raw_json=None,
                     conversation_id=cid,
                     direction=direction,
-                    sender_username=None,
+                    sender_username=frm_username,
                 )
                 session.add(row)
                 saved += 1

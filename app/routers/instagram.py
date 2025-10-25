@@ -5,10 +5,12 @@ import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 
 from ..db import get_session
 from ..models import Message
-from ..services.instagram_api import _get_base_token_and_id
+from ..services.instagram_api import _get_base_token_and_id, fetch_user_username, GRAPH_VERSION, _get as graph_get
+import httpx
 from .ig import notify_new_message
 import logging
 
@@ -112,6 +114,11 @@ async def receive_events(request: Request):
 					sender_username = (event.get("sender") or {}).get("username") or (message_obj.get("from") or {}).get("username")
 				except Exception:
 					pass
+				if not sender_username and sender_id:
+					try:
+						sender_username = await fetch_user_username(str(sender_id))
+					except Exception:
+						sender_username = None
 				# determine direction and a stable conversation id using our owner id
 				try:
 					_, owner_id, _ = _get_base_token_and_id()
@@ -137,6 +144,23 @@ async def receive_events(request: Request):
 					)
 				except Exception:
 					pass
+				# parse referral/ad metadata if present
+				ad_id = None
+				ad_link = None
+				ad_title = None
+				referral_json = None
+				try:
+					ref = event.get("referral") or {}
+					if not ref and isinstance(event.get("change"), dict):
+						ref = (event.get("change") or {}).get("value", {}).get("referral") or {}
+					if ref:
+						ad_id = ref.get("ad_id") or ref.get("adgroup_id") or ref.get("campaign_id")
+						ad_link = ref.get("ad_link") or ref.get("source_url") or ref.get("link")
+						ad_title = ref.get("ad_title") or ref.get("type")
+						referral_json = json.dumps(ref, ensure_ascii=False)
+				except Exception:
+					pass
+
 				row = Message(
 					ig_sender_id=str(sender_id) if sender_id is not None else None,
 					ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
@@ -148,6 +172,10 @@ async def receive_events(request: Request):
 					conversation_id=conversation_id,
 					direction=direction,
 					sender_username=sender_username,
+					ad_id=ad_id,
+					ad_link=ad_link,
+					ad_title=ad_title,
+					referral_json=referral_json,
 				)
 				session.add(row)
 				persisted += 1
@@ -167,5 +195,55 @@ async def receive_events(request: Request):
 	except Exception:
 		pass
 	return {"status": "ok", "saved": persisted}
+
+
+@router.get("/ig/media/{ig_message_id}/{idx}")
+async def get_media(ig_message_id: str, idx: int):
+    # Try to serve from attachments_json; otherwise query Graph attachments
+    url: Optional[str] = None
+    mime: Optional[str] = None
+    with get_session() as session:
+        rec = session.exec(select(Message).where(Message.ig_message_id == ig_message_id)).first()  # type: ignore
+        if rec and rec.attachments_json:
+            try:
+                data = json.loads(rec.attachments_json)
+                items = []
+                if isinstance(data, list):
+                    items = data
+                elif isinstance(data, dict) and isinstance(data.get("data"), list):
+                    items = data["data"]
+                if idx < len(items):
+                    att = items[idx] or {}
+                    # attempt common shapes
+                    url = (
+                        (att.get("file_url") if isinstance(att, dict) else None)
+                        or (((att.get("payload") or {}).get("url")) if isinstance(att, dict) else None)
+                        or (((att.get("image_data") or {}).get("url")) if isinstance(att, dict) else None)
+                        or (((att.get("image_data") or {}).get("preview_url")) if isinstance(att, dict) else None)
+                    )
+            except Exception:
+                url = None
+    if not url:
+        # query Graph attachments for the message id
+        token, _, _ = _get_base_token_and_id()
+        base = f"https://graph.facebook.com/{GRAPH_VERSION}"
+        path = f"/{ig_message_id}/attachments"
+        params = {"access_token": token, "fields": "mime_type,file_url,image_data{url,preview_url},name"}
+        async with httpx.AsyncClient() as client:
+            data = await graph_get(client, base + path, params)
+            arr = data.get("data") or []
+            if isinstance(arr, list) and idx < len(arr):
+                att = arr[idx] or {}
+                url = att.get("file_url") or ((att.get("image_data") or {}).get("url")) or ((att.get("image_data") or {}).get("preview_url"))
+                mime = att.get("mime_type")
+    if not url:
+        raise HTTPException(status_code=404, detail="Media not found")
+    # fetch and stream
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url, timeout=30, follow_redirects=True)
+        r.raise_for_status()
+        media_type = mime or r.headers.get("content-type") or "image/jpeg"
+        headers = {"Cache-Control": "public, max-age=86400"}
+        return StreamingResponse(iter([r.content]), media_type=media_type, headers=headers)
 
 

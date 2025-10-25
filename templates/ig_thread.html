@@ -20,7 +20,7 @@
       <a href="/ig/inbox">← Back to Inbox</a>
       <button id="refresh">Refresh</button>
     </div>
-    <h2>Conversation {{ conversation_id }}</h2>
+    <h2>Conversation {{ other_label or conversation_id }} {% if other_label %}<a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ other_label[1:] }}">profile ↗</a>{% endif %}</h2>
     <div id="thread">
       {% for m in messages %}
         <div class="msg {{ m.direction or 'in' }}">
@@ -29,6 +29,21 @@
               {% if m.sender_username %}<span class="meta">@{{ m.sender_username }}</span><br/>{% endif %}
               {{ m.text or '' }}
             </div>
+            {% if m.attachments_json %}
+              {% set atts = m.attachments_json | loads %}
+              {% if atts is mapping and atts.data is defined %}
+                {% set items = atts.data %}
+              {% elif atts is sequence %}
+                {% set items = atts %}
+              {% else %}
+                {% set items = [] %}
+              {% endif %}
+              {% for _ in items %}
+                <div style="margin-top:8px">
+                  <img src="/ig/media/{{ m.ig_message_id }}/{{ loop.index0 }}" alt="attachment" style="max-width:280px;border-radius:8px;border:1px solid #e5e7eb" />
+                </div>
+              {% endfor %}
+            {% endif %}
             <div class="meta">{{ m.timestamp_ms }}</div>
           </div>
         </div>

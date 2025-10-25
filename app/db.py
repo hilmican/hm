@@ -126,6 +126,15 @@ def init_db() -> None:
 				conn.exec_driver_sql("ALTER TABLE message ADD COLUMN direction TEXT")
 			if not column_exists("message", "sender_username"):
 				conn.exec_driver_sql("ALTER TABLE message ADD COLUMN sender_username TEXT")
+			# ads/referral columns
+			if not column_exists("message", "ad_id"):
+				conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_id TEXT")
+			if not column_exists("message", "ad_link"):
+				conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_link TEXT")
+			if not column_exists("message", "ad_title"):
+				conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_title TEXT")
+			if not column_exists("message", "referral_json"):
+				conn.exec_driver_sql("ALTER TABLE message ADD COLUMN referral_json TEXT")
 
 
 @contextmanager
