@@ -37,7 +37,7 @@ async def notify_new_message(event: dict) -> None:
 
 
 @router.get("/inbox")
-def inbox(request: Request, limit: int = 25):
+async def inbox(request: Request, limit: int = 25):
     with get_session() as session:
         # Latest conversations by most recent message
         rows = session.exec(select(Message).order_by(Message.timestamp_ms.desc()).limit(500)).all()
