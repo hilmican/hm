@@ -116,17 +116,12 @@ async def receive_events(request: Request):
 				text = message_obj.get("text")
 				attachments = message_obj.get("attachments")
 				timestamp_ms = event.get("timestamp")
-				# optional username if webhook provides it (best-effort)
+				# optional username if webhook provides it (best-effort). Avoid remote calls here.
 				sender_username = None
 				try:
 					sender_username = (event.get("sender") or {}).get("username") or (message_obj.get("from") or {}).get("username")
 				except Exception:
 					pass
-				if not sender_username and sender_id:
-					try:
-						sender_username = await fetch_user_username(str(sender_id))
-					except Exception:
-						sender_username = None
 				# determine direction and a stable conversation id using our owner id
 				try:
 					_, owner_id, _ = _get_base_token_and_id()
@@ -237,17 +232,16 @@ async def get_media(ig_message_id: str, idx: int):
 					items = data["data"]
 				if idx < len(items):
 					att = items[idx] or {}
-					# attempt common shapes
-					url = (
-						(att.get("file_url") if isinstance(att, dict) else None)
-						or (((att.get("payload") or {}).get("url")) if isinstance(att, dict) else None)
-						or (((att.get("image_data") or {}).get("url")) if isinstance(att, dict) else None)
-						or (((att.get("image_data") or {}).get("preview_url")) if isinstance(att, dict) else None)
-					)
+					# attempt common shapes; prefer direct URL to avoid Graph requests
+					url = None
+					if isinstance(att, dict):
+						url = att.get("file_url") or (att.get("payload") or {}).get("url")
+						if not url and isinstance(att.get("image_data"), dict):
+							url = att["image_data"].get("url") or att["image_data"].get("preview_url")
 			except Exception:
 				url = None
 	if not url:
-		# query Graph attachments for the message id
+		# As a last resort, query Graph attachments for the message id (avoid when possible)
 		token, _, _ = _get_base_token_and_id()
 		base = f"https://graph.facebook.com/{GRAPH_VERSION}"
 		path = f"/{ig_message_id}/attachments"

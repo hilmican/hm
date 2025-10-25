@@ -6,7 +6,7 @@ from sqlmodel import select
 from ..db import get_session
 from ..models import Message
 from sqlmodel import select
-from ..services.instagram_api import sync_latest_conversations, fetch_user_username
+from ..services.instagram_api import sync_latest_conversations
 import json
 
 
@@ -40,7 +40,7 @@ async def notify_new_message(event: dict) -> None:
 async def inbox(request: Request, limit: int = 25):
     with get_session() as session:
         # Latest conversations by most recent message
-        rows = session.exec(select(Message).order_by(Message.timestamp_ms.desc()).limit(500)).all()
+        rows = session.exec(select(Message).order_by(Message.timestamp_ms.desc()).limit(200)).all()
         # Group by conversation_id
         conv_map = {}
         for m in rows:
@@ -62,21 +62,7 @@ async def inbox(request: Request, limit: int = 25):
                 labels[cid] = f"@{m.sender_username}"
             if (m.ad_link or m.ad_title) and cid not in ad_map:
                 ad_map[cid] = {"link": m.ad_link, "title": m.ad_title}
-        # Best-effort fill labels by resolving username from the dm id when missing
-        try:
-            for cid in conv_map.keys():
-                if labels.get(cid):
-                    continue
-                if cid and cid.startswith("dm:"):
-                    other_id = cid.split(":", 1)[1]
-                    try:
-                        uname = await fetch_user_username(other_id)  # type: ignore
-                        if uname:
-                            labels[cid] = f"@{uname}"
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        # Do not perform any external lookups here to keep inbox fast.
         templates = request.app.state.templates
         return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "ad_map": ad_map})
 
