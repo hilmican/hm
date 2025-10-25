@@ -104,12 +104,12 @@ async def receive_events(request: Request):
 				message_obj = event.get("message") or {}
 				if not message_obj:
 					continue
-                # skip echoes/deleted to avoid duplicates
-                try:
-                    if message_obj.get("is_echo") or message_obj.get("is_deleted"):
-                        continue
-                except Exception:
-                    pass
+				# skip echoes/deleted to avoid duplicates
+				try:
+					if message_obj.get("is_echo") or message_obj.get("is_deleted"):
+						continue
+				except Exception:
+					pass
 				sender_id = (event.get("sender") or {}).get("id")
 				recipient_id = (event.get("recipient") or {}).get("id")
 				mid = message_obj.get("mid") or message_obj.get("id")
@@ -222,51 +222,51 @@ async def receive_events(request: Request):
 
 @router.get("/ig/media/{ig_message_id}/{idx}")
 async def get_media(ig_message_id: str, idx: int):
-    # Try to serve from attachments_json; otherwise query Graph attachments
-    url: Optional[str] = None
-    mime: Optional[str] = None
-    with get_session() as session:
-        rec = session.exec(select(Message).where(Message.ig_message_id == ig_message_id)).first()  # type: ignore
-        if rec and rec.attachments_json:
-            try:
-                data = json.loads(rec.attachments_json)
-                items = []
-                if isinstance(data, list):
-                    items = data
-                elif isinstance(data, dict) and isinstance(data.get("data"), list):
-                    items = data["data"]
-                if idx < len(items):
-                    att = items[idx] or {}
-                    # attempt common shapes
-                    url = (
-                        (att.get("file_url") if isinstance(att, dict) else None)
-                        or (((att.get("payload") or {}).get("url")) if isinstance(att, dict) else None)
-                        or (((att.get("image_data") or {}).get("url")) if isinstance(att, dict) else None)
-                        or (((att.get("image_data") or {}).get("preview_url")) if isinstance(att, dict) else None)
-                    )
-            except Exception:
-                url = None
-    if not url:
-        # query Graph attachments for the message id
-        token, _, _ = _get_base_token_and_id()
-        base = f"https://graph.facebook.com/{GRAPH_VERSION}"
-        path = f"/{ig_message_id}/attachments"
-        params = {"access_token": token, "fields": "mime_type,file_url,image_data{url,preview_url},name"}
-        async with httpx.AsyncClient() as client:
-            data = await graph_get(client, base + path, params)
-            arr = data.get("data") or []
-            if isinstance(arr, list) and idx < len(arr):
-                att = arr[idx] or {}
-                url = att.get("file_url") or ((att.get("image_data") or {}).get("url")) or ((att.get("image_data") or {}).get("preview_url"))
-                mime = att.get("mime_type")
-    if not url:
-        raise HTTPException(status_code=404, detail="Media not found")
-    # fetch and stream
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url, timeout=30, follow_redirects=True)
-        r.raise_for_status()
-        media_type = mime or r.headers.get("content-type") or "image/jpeg"
-        headers = {"Cache-Control": "public, max-age=86400"}
-        return StreamingResponse(iter([r.content]), media_type=media_type, headers=headers)
+	# Try to serve from attachments_json; otherwise query Graph attachments
+	url: Optional[str] = None
+	mime: Optional[str] = None
+	with get_session() as session:
+		rec = session.exec(select(Message).where(Message.ig_message_id == ig_message_id)).first()  # type: ignore
+		if rec and rec.attachments_json:
+			try:
+				data = json.loads(rec.attachments_json)
+				items = []
+				if isinstance(data, list):
+					items = data
+				elif isinstance(data, dict) and isinstance(data.get("data"), list):
+					items = data["data"]
+				if idx < len(items):
+					att = items[idx] or {}
+					# attempt common shapes
+					url = (
+						(att.get("file_url") if isinstance(att, dict) else None)
+						or (((att.get("payload") or {}).get("url")) if isinstance(att, dict) else None)
+						or (((att.get("image_data") or {}).get("url")) if isinstance(att, dict) else None)
+						or (((att.get("image_data") or {}).get("preview_url")) if isinstance(att, dict) else None)
+					)
+			except Exception:
+				url = None
+	if not url:
+		# query Graph attachments for the message id
+		token, _, _ = _get_base_token_and_id()
+		base = f"https://graph.facebook.com/{GRAPH_VERSION}"
+		path = f"/{ig_message_id}/attachments"
+		params = {"access_token": token, "fields": "mime_type,file_url,image_data{url,preview_url},name"}
+		async with httpx.AsyncClient() as client:
+			data = await graph_get(client, base + path, params)
+			arr = data.get("data") or []
+			if isinstance(arr, list) and idx < len(arr):
+				att = arr[idx] or {}
+				url = att.get("file_url") or ((att.get("image_data") or {}).get("url")) or ((att.get("image_data") or {}).get("preview_url"))
+				mime = att.get("mime_type")
+	if not url:
+		raise HTTPException(status_code=404, detail="Media not found")
+	# fetch and stream
+	async with httpx.AsyncClient() as client:
+		r = await client.get(url, timeout=30, follow_redirects=True)
+		r.raise_for_status()
+		media_type = mime or r.headers.get("content-type") or "image/jpeg"
+		headers = {"Cache-Control": "public, max-age=86400"}
+		return StreamingResponse(iter([r.content]), media_type=media_type, headers=headers)
 
 
