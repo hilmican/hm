@@ -3,6 +3,8 @@ import hmac
 import json
 import os
 from typing import Any, Dict, List, Optional
+from pathlib import Path
+import time
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
@@ -71,6 +73,15 @@ async def receive_events(request: Request):
 	except Exception:
 		pass
 	_validate_signature(body, signature)
+
+	# Persist raw payload for inspection
+	try:
+		out_dir = Path("payloads")
+		out_dir.mkdir(parents=True, exist_ok=True)
+		fname = f"ig_{int(time.time()*1000)}_{len(body or b'')}" + (f"_{(signature[-6:] if signature else 'nosig')}" ) + ".json"
+		(out_dir / fname).write_bytes(body)
+	except Exception:
+		pass
 
 	try:
 		payload: Dict[str, Any] = json.loads(body.decode("utf-8"))
