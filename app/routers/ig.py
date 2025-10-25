@@ -6,7 +6,8 @@ from sqlmodel import select
 from ..db import get_session
 from ..models import Message
 from sqlmodel import select
-from ..services.instagram_api import sync_latest_conversations
+from ..services.instagram_api import sync_latest_conversations, fetch_user_username
+import json
 
 
 router = APIRouter(prefix="/ig", tags=["instagram"])
@@ -61,6 +62,21 @@ def inbox(request: Request, limit: int = 25):
                 labels[cid] = f"@{m.sender_username}"
             if (m.ad_link or m.ad_title) and cid not in ad_map:
                 ad_map[cid] = {"link": m.ad_link, "title": m.ad_title}
+        # Best-effort fill labels by resolving username from the dm id when missing
+        try:
+            for cid in conv_map.keys():
+                if labels.get(cid):
+                    continue
+                if cid and cid.startswith("dm:"):
+                    other_id = cid.split(":", 1)[1]
+                    try:
+                        uname = await fetch_user_username(other_id)  # type: ignore
+                        if uname:
+                            labels[cid] = f"@{uname}"
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         templates = request.app.state.templates
         return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "ad_map": ad_map})
 
@@ -116,8 +132,24 @@ def thread(request: Request, conversation_id: str):
                 if mm.sender_username:
                     other_label = f"@{mm.sender_username}"
                     break
+        # Build attachment indices so template can render images
+        att_map = {}
+        for mm in msgs:
+            if not mm.attachments_json:
+                continue
+            try:
+                data = json.loads(mm.attachments_json)
+                items = []
+                if isinstance(data, list):
+                    items = data
+                elif isinstance(data, dict) and isinstance(data.get("data"), list):
+                    items = data["data"]
+                if items:
+                    att_map[mm.ig_message_id or ""] = list(range(len(items)))
+            except Exception:
+                pass
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label})
+        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label, "att_map": att_map})
 
 
 @router.post("/inbox/{conversation_id}/refresh")

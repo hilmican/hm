@@ -29,18 +29,10 @@
               {% if m.sender_username %}<span class="meta">@{{ m.sender_username }}</span><br/>{% endif %}
               {{ m.text or '' }}
             </div>
-            {% if m.attachments_json %}
-              {% set atts = m.attachments_json | loads %}
-              {% if atts is mapping and atts.data is defined %}
-                {% set items = atts.data %}
-              {% elif atts is sequence %}
-                {% set items = atts %}
-              {% else %}
-                {% set items = [] %}
-              {% endif %}
-              {% for _ in items %}
+            {% if att_map.get(m.ig_message_id) %}
+              {% for idx in att_map.get(m.ig_message_id) %}
                 <div style="margin-top:8px">
-                  <img src="/ig/media/{{ m.ig_message_id }}/{{ loop.index0 }}" alt="attachment" style="max-width:280px;border-radius:8px;border:1px solid #e5e7eb" />
+                  <img src="/ig/media/{{ m.ig_message_id }}/{{ idx }}" alt="attachment" style="max-width:280px;border-radius:8px;border:1px solid #e5e7eb" />
                 </div>
               {% endfor %}
             {% endif %}
