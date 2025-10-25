@@ -10,6 +10,7 @@ from .routers import inventory, mappings, products
 from .routers import instagram
 from .routers import legal
 from .routers import ig
+from .routers import admin
 
 
 def create_app() -> FastAPI:
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
 
 	app.include_router(dashboard.router)
 	app.include_router(auth.router)
+	app.include_router(admin.router)
 	app.include_router(importer.router, prefix="/import")
 	app.include_router(reconcile.router, prefix="/reconcile")
 	app.include_router(clients.router, prefix="/clients", tags=["clients"]) 

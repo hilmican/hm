@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>System Status</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .ok { color: #16a34a; }
+      .bad { color: #dc2626; }
+      .card { border:1px solid #e5e7eb; border-radius:8px; padding:16px; margin:12px 0; }
+      code { background:#f3f4f6; padding:2px 4px; border-radius:4px; }
+    </style>
+  </head>
+  <body>
+    <h2>System Status</h2>
+    <div class="card">
+      <div>Version: <code>{{ version }}</code></div>
+    </div>
+    <div class="card">
+      <div>DB: {% if db.ok %}<span class="ok">OK</span>{% else %}<span class="bad">DOWN</span>{% endif %}</div>
+      {% if db.counts %}
+        <ul>
+          <li>messages: {{ db.counts.get('message') }}</li>
+          <li>attachments: {{ db.counts.get('attachments') }}</li>
+          <li>raw_events: {{ db.counts.get('raw_events') }}</li>
+          <li>jobs: {{ db.counts.get('jobs') }}</li>
+        </ul>
+      {% endif %}
+      {% if db.error %}<div class="bad">{{ db.error }}</div>{% endif %}
+    </div>
+    <div class="card">
+      <div>Redis: {% if redis.ok %}<span class="ok">OK</span>{% else %}<span class="bad">DOWN</span>{% endif %}</div>
+      {% if redis.error %}<div class="bad">{{ redis.error }}</div>{% endif %}
+    </div>
+  </body>
+  </html>
+
+
