@@ -63,10 +63,23 @@ class AIClient:
         try:
             return json.loads(txt)
         except Exception:
-            # one repair attempt: wrap in braces or strip markdown fences
+            # Robust repairs for occasional non-strict JSON replies
             cleaned = txt.strip().strip("` ")
-            if cleaned.startswith("json\n"):
+            if cleaned.lower().startswith("json\n"):
                 cleaned = cleaned.split("\n", 1)[1]
-            return json.loads(cleaned)
+            # Extract JSON object substring between the first '{' and the last '}'
+            try:
+                start = cleaned.find("{")
+                end = cleaned.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    segment = cleaned[start : end + 1]
+                    import re as _re
+                    # Remove trailing commas before } or ]
+                    segment = _re.sub(r",\s*([}\]])", r"\1", segment)
+                    return json.loads(segment)
+            except Exception:
+                pass
+            # If still failing, raise a clear error with preview for logs
+            raise ValueError(f"AI returned non-JSON: {txt[:300]}...")
 
 
