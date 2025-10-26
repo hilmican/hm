@@ -169,52 +169,86 @@ def ai_suggest(req: AISuggestRequest, request: Request) -> AISuggestResponse:
 
     # Build concise prompt with constraints and examples (Turkish context)
     system = MAPPING_SYSTEM_PROMPT
-    # Provide compact input as JSON string to the model
+    import os as _os
     import json as _json
-    body = {
-        "unmatched_patterns": [
-            {
-                "pattern": p.pattern,
-                "count": p.count,
-                "samples": p.samples,
-                "suggested_price": p.suggested_price,
-            }
-            for p in req.unmatched_patterns
-        ],
+
+    # Prepare base body (without unmatched patterns) and batch according to input budget
+    def _pat_to_dict(p):
+        return {
+            "pattern": p.pattern,
+            "count": p.count,
+            "samples": p.samples,
+            "suggested_price": p.suggested_price,
+        }
+
+    base = {
+        "unmatched_patterns": [],
         "known_products": (req.context or {}).get("products") if req.context else None,
         "schema": {
-            "products_to_create": [
-                {"name": "str", "default_unit": "adet", "default_price": "float|null"}
-            ],
-            "mappings_to_create": [
-                {
-                    "source_pattern": "str",
-                    "match_mode": "exact|icontains|regex",
-                    "priority": "int",
-                    "outputs": [
-                        {"product_name": "str?", "item_sku": "str?", "size": "str?", "color": "str?", "quantity": "int", "unit_price": "float|null"}
-                    ],
-                }
-            ],
+            "products_to_create": [{"name": "str", "default_unit": "adet", "default_price": "float|null"}],
+            "mappings_to_create": [{
+                "source_pattern": "str",
+                "match_mode": "exact|icontains|regex",
+                "priority": "int",
+                "outputs": [{"product_name": "str?", "item_sku": "str?", "size": "str?", "color": "str?", "quantity": "int", "unit_price": "float|null"}],
+            }],
             "notes": "str?",
             "warnings": ["str"],
         },
     }
-    user = (
-        "Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
-        "Tüm alanlar çift tırnaklı olmalı.\nGirdi:" + "\n" + _json.dumps(body, ensure_ascii=False)
-    )
 
-    try:
-        raw = ai.generate_json(system_prompt=system, user_prompt=user)
-    except Exception as e:
-        # Surface an informative error with sizes to help diagnose
+    def _tok_estimate(obj: dict) -> int:
+        # Approx 4 chars/token
         try:
-            import json as _json
-            size_info = len(_json.dumps(body, ensure_ascii=False))
+            s = _json.dumps(obj, ensure_ascii=False)
         except Exception:
-            size_info = -1
-        raise HTTPException(status_code=502, detail=f"AI suggest failed: {e}; body_bytes={size_info}")
+            s = str(obj)
+        return max(1, len(s) // 4)
+
+    ctx_limit = int(_os.getenv("AI_CTX_LIMIT", "128000"))
+    input_budget = int(_os.getenv("AI_INPUT_BUDGET_TOK", str(ctx_limit - 8192)))
+    # Ensure some floor
+    input_budget = max(8000, input_budget)
+
+    batches: list[list[dict]] = []
+    batch: list[dict] = []
+    batch_tok = _tok_estimate({**base, "unmatched_patterns": []})
+    for p in req.unmatched_patterns:
+        pd = _pat_to_dict(p)
+        pd_tok = _tok_estimate(pd)
+        next_tok = batch_tok + pd_tok
+        if next_tok > input_budget and batch:
+            batches.append(batch)
+            batch = [pd]
+            batch_tok = _tok_estimate({**base, "unmatched_patterns": batch})
+        else:
+            batch.append(pd)
+            batch_tok = next_tok
+    if batch:
+        batches.append(batch)
+
+    # Execute per-batch calls and merge results
+    agg_products: list[dict] = []
+    agg_rules: list[dict] = []
+    agg_warnings: list[str] = []
+
+    for idx, b in enumerate(batches):
+        body = {**base, "unmatched_patterns": b}
+        user = (
+            "Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
+            "Tüm alanlar çift tırnaklı olmalı.\nGirdi:" + "\n" + _json.dumps(body, ensure_ascii=False)
+        )
+        try:
+            part = ai.generate_json(system_prompt=system, user_prompt=user)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"AI suggest failed in batch {idx+1}/{len(batches)}: {e}")
+        # Merge
+        agg_products.extend(part.get("products_to_create") or [])
+        agg_rules.extend(part.get("mappings_to_create") or [])
+        if part.get("warnings"):
+            agg_warnings.extend([str(w) for w in (part.get("warnings") or [])])
+
+    raw = {"products_to_create": agg_products, "mappings_to_create": agg_rules, "notes": None, "warnings": agg_warnings}
 
     # Validate via Pydantic and normalize
     try:

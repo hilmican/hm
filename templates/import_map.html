@@ -554,9 +554,9 @@
                     if (slugIndex[s]) pid = slugIndex[s];
                 }
                 // Quantity correction from pattern tokens (TEK/ÇİFT/x2/3LÜ/..)
-                let q = Number(o.quantity||1);
+                // If no explicit quantity indicator exists in the pattern, FORCE 1 (ignore AI quantity)
                 const inferred = inferQuantityFromPattern(r.source_pattern||'');
-                if (inferred !== null) q = inferred;
+                let q = (inferred !== null) ? inferred : 1;
                 // Default color fallback from product when AI did not set a color
                 let colorVal = (o.color||'').trim() || null;
                 if (!colorVal && pid){
