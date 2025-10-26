@@ -68,7 +68,7 @@ class AIClient:
         if max_output_tokens is None:
             # Defaults target for 128k context models; can be overridden via env
             ctx_limit = int(os.getenv("AI_CTX_LIMIT", "128000"))
-            out_ratio = float(os.getenv("AI_TARGET_OUT_RATIO", "1.3"))
+            out_ratio = float(os.getenv("AI_TARGET_OUT_RATIO", "2"))
             safety_in = int(os.getenv("AI_SAFETY_IN_TOK", "512"))
             safety_out_min = int(os.getenv("AI_SAFETY_OUT_MIN", "1024"))
 
