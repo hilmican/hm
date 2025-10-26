@@ -170,7 +170,10 @@ def ai_suggest(req: AISuggestRequest, request: Request) -> AISuggestResponse:
     system = (
         "Sen bir stok ve sipariş eşleştirme yardımcısısın. "
         "Girdi: Eşleşmeyen ürün patternleri. Çıktı: JSON olarak ürün önerileri ve eşleme kuralları. "
-        "match_mode: exact|icontains|regex. Birim 'adet'. Sadece geçerli JSON döndür."
+        "Kurallar: 1) Birim 'adet'. 2) Çoklu renkler '+' ile gelirse her renk ayrı çıktı olmalı (aynı beden). "
+        "3) Renkler Türkçe büyük harf ve noktalı harfler ile yazılmalı: SİYAH, LACİVERT, GRİ, AÇIK GRİ, KREM, BEYAZ vb. "
+        "4) Varsa verilen ürün listesinde olan ürünü kullan; yoksa yaratılacak ürünler listesine ekle. "
+        "Sadece geçerli JSON döndür."
     )
     # Provide compact input as JSON string to the model
     import json as _json
@@ -213,6 +216,23 @@ def ai_suggest(req: AISuggestRequest, request: Request) -> AISuggestResponse:
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Invalid AI response: {e}")
 
+    # Helper: canonicalize Turkish color tokens and split composites
+    def canonicalize_color(val: Optional[str]) -> Optional[str]:
+        if not val:
+            return None
+        t = str(val).strip().upper()
+        # common corrections
+        replacements = {
+            "SIYAH": "SİYAH",
+            "LACIVERT": "LACİVERT",
+            "LACVERT": "LACİVERT",
+            "GRI": "GRİ",
+            "ACIK GRI": "AÇIK GRİ",
+            "KAHVERENGI": "KAHVERENGİ",
+            "YESIL": "YEŞİL",
+        }
+        return replacements.get(t, t)
+
     # Deduplicate products_to_create by slug against existing products
     with get_session() as session:
         existing = session.exec(select(Product).limit(10000)).all()
@@ -229,6 +249,50 @@ def ai_suggest(req: AISuggestRequest, request: Request) -> AISuggestResponse:
             ProductCreateSuggestion(**u)  # type: ignore[name-defined]
             for u in uniq
         ]
+
+        # Post-process mapping outputs: color canonicalization, composite split, size fallback
+        expanded_rules: list = []
+        to_create_by_slug: set[str] = {slugify(p.name) for p in validated.products_to_create}
+        for r in (validated.mappings_to_create or []):
+            new_outputs = []
+            for out in (r.outputs or []):
+                # fallback size from pattern like "38- ..."
+                if (not out.size) and isinstance(r.source_pattern, str):
+                    try:
+                        import re as _re
+                        m = _re.match(r"^\s*(\d+)\s*[-]", r.source_pattern)
+                        if m:
+                            out.size = m.group(1)
+                    except Exception:
+                        pass
+                col = out.color or None
+                if col and "+" in col:
+                    parts = [p.strip() for p in col.split("+") if p.strip()]
+                    for c in parts:
+                        dup = MappingRuleSuggestion.__fields__["outputs"].type_.__args__[0]()  # type: ignore
+                        # Create a shallow-like copy without relying on pydantic internals
+                        dup = MappingOutputSuggestion(
+                            item_sku=out.item_sku,
+                            product_name=out.product_name,
+                            size=out.size,
+                            color=canonicalize_color(c),
+                            quantity=out.quantity or 1,
+                            unit_price=out.unit_price,
+                        )
+                        new_outputs.append(dup)
+                else:
+                    out.color = canonicalize_color(col)
+                    new_outputs.append(out)
+
+                # ensure product exists or will be created
+                if out.product_name:
+                    pslug = slugify(out.product_name)
+                    if pslug not in existing_slugs and pslug not in to_create_by_slug:
+                        validated.products_to_create.append(ProductCreateSuggestion(name=out.product_name, default_unit="adet", default_price=None))
+                        to_create_by_slug.add(pslug)
+            r.outputs = new_outputs
+            expanded_rules.append(r)
+        validated.mappings_to_create = expanded_rules
 
     return validated
 
