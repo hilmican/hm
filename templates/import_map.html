@@ -20,6 +20,16 @@
         .toolbar { display:flex; gap:8px; align-items:center; margin-bottom: 10px; }
         .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; }
         button { background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer }
+        /* AI-injected rows highlight */
+        .ai-suggested { border: 2px solid #10b981; }
+        /* Modal basic styles */
+        #aiProductModal { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: none; align-items: center; justify-content: center; z-index: 50; }
+        #aiProductModal .modal-card { width: min(960px, 96vw); max-height: 84vh; overflow: auto; background: #fff; border-radius: 10px; border: 1px solid #e5e7eb; }
+        #aiProductModal .modal-card h3 { margin: 0; padding: 12px 14px; background:#f9fafb; border-bottom:1px solid #e5e7eb; font-size: 15px; }
+        #aiProductModal .modal-card .body { padding: 12px; }
+        #aiProductModal table { width: 100%; border-collapse: collapse; }
+        #aiProductModal th, #aiProductModal td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+        #aiProductModal .actions { display:flex; gap:8px; justify-content: flex-end; padding: 12px; border-top:1px solid #e5e7eb; }
         .muted { color: #6b7280; font-size: 12px; }
     </style>
 </head>
@@ -98,30 +108,7 @@
                 </div>
             </div>
         </div>
-        <div class="card" id="aiPanel" style="display:none; grid-column: 2;">
-            <h2>AI Önerileri</h2>
-            <div class="inner">
-                <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
-                    <button id="applySelected" type="button" style="background:#10b981">Seçileni Uygula</button>
-                    <button id="applyAll" type="button" style="background:#059669">Tümünü Uygula</button>
-                    <span id="aiMsg" class="muted"></span>
-                </div>
-                <div>
-                    <h3 style="margin:6px 0">Ürün Önerileri</h3>
-                    <table id="aiProdTbl">
-                        <thead><tr><th><input type="checkbox" id="chkAllProd"/></th><th>Ad</th><th>Slug</th><th>Birim</th><th>Fiyat</th></tr></thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-                <div style="margin-top:10px">
-                    <h3 style="margin:6px 0">Eşleme Kuralları</h3>
-                    <table id="aiRuleTbl">
-                        <thead><tr><th><input type="checkbox" id="chkAllRule"/></th><th>Pattern</th><th>Mode</th><th>Priority</th><th>Outputs</th></tr></thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
+        <!-- AI panel removed in favor of product-first modal -->
         {% if filenames and filenames|length > 1 %}
         <div class="card" style="grid-column: 1">
             <h2>Dosya Bazli Tarihler</h2>
@@ -185,10 +172,9 @@
     const investigateBtn = document.getElementById('investigateBtn');
     const investigatePat = document.getElementById('investigatePat');
     const aiBtn = document.getElementById('aiSuggestBtn');
-    const aiPanel = document.getElementById('aiPanel');
-    const aiMsg = document.getElementById('aiMsg');
-    const aiProdTbl = document.getElementById('aiProdTbl');
-    const aiRuleTbl = document.getElementById('aiRuleTbl');
+    // Modal state
+    let aiSuggestions = null;
+    let aiRuleMap = {};
 
     function refillProducts(selectedId){
         productSel.innerHTML = '';
@@ -200,7 +186,7 @@
         }
     }
 
-    function addOutputRow(pref){
+    function addOutputRow(pref, opts){
         const tr = document.createElement('tr');
         // determine default product for the row: use provided, else current selector, else first product
         const defPid = (pref && pref.product_id) ? Number(pref.product_id) : (Number(productSel?.value||0)|| (products[0]?.id||''));
@@ -218,6 +204,7 @@
             <td><button type="button" class="rm">X</button></td>
         `;
         tr.querySelector('.rm').addEventListener('click', ()=> tr.remove());
+        if (opts && opts.isAI) tr.classList.add('ai-suggested');
         outsTbody.appendChild(tr);
     }
 
@@ -251,7 +238,14 @@
         patInp.value = pat;
         refillProducts();
         outsTbody.innerHTML = '';
-        addOutputRow(guessFromPattern(pat));
+        // Prefer AI outputs if available
+        if (aiRuleMap && aiRuleMap[pat] && aiRuleMap[pat].length){
+            for (const o of aiRuleMap[pat]){
+                addOutputRow({ product_id:o.product_id, size:o.size, color:o.color, quantity:o.quantity, unit_price:o.unit_price }, { isAI: true });
+            }
+        } else {
+            addOutputRow(guessFromPattern(pat));
+        }
         if (productSel.value) loadInventory(productSel.value);
         // price hint and prefill from suggested price
         try {
@@ -396,13 +390,24 @@
         } catch (e) { alert('Commit error'); }
     });
 
-    // --- AI suggestions ---
+    // --- AI suggestions (product-first modal) ---
     function slugifyClient(s){
         return String(s||'')
           .toLowerCase()
           .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
           .replace(/[^a-z0-9]+/g,'-')
           .replace(/(^-|-$)/g,'');
+    }
+    function buildSlugIndex(){
+        const m = {};
+        for (const p of (products||[])) if (p.slug) m[p.slug] = p.id;
+        return m;
+    }
+    let slugIndex = buildSlugIndex();
+    function updateProducts(newProd){
+        if (!newProd) return;
+        products.unshift({ id:newProd.id, name:newProd.name, slug:newProd.slug });
+        slugIndex = buildSlugIndex();
     }
     function collectUnmatched(){
         const list = [];
@@ -415,106 +420,114 @@
         }
         return list;
     }
-    function renderAiProducts(rows){
-        const tb = aiProdTbl.querySelector('tbody');
+    // Build product-first modal markup once and reuse
+    (function ensureModal(){
+        if (document.getElementById('aiProductModal')) return;
+        const wrap = document.createElement('div');
+        wrap.id = 'aiProductModal';
+        wrap.innerHTML = `
+            <div class="modal-card">
+              <h3>AI Ürün Önerileri</h3>
+              <div class="body">
+                <div id="aiModalMsg" class="muted" style="margin-bottom:8px"></div>
+                <table id="aiModalTbl">
+                  <thead><tr><th>Ad</th><th>Slug</th><th>Birim</th><th>Fiyat</th><th></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div class="actions">
+                <button type="button" id="aiModalClose" style="background:#6b7280">Kapat</button>
+                <button type="button" id="aiModalNext" style="background:#10b981">Next</button>
+              </div>
+            </div>`;
+        document.body.appendChild(wrap);
+        wrap.querySelector('#aiModalClose').addEventListener('click', ()=>{ wrap.style.display='none'; });
+        wrap.addEventListener('click', (e)=>{ if (e.target===wrap) wrap.style.display='none'; });
+    })();
+
+    function renderAiProductRows(rows){
+        const tb = document.querySelector('#aiModalTbl tbody');
+        const msg = document.getElementById('aiModalMsg');
+        if (!tb) return;
         tb.innerHTML = '';
         for (const r of (rows||[])){
-            const slug = slugifyClient(r.name);
             const tr = document.createElement('tr');
+            const defaultName = r.name||'';
+            const defaultUnit = r.default_unit||'adet';
+            const defaultPrice = (r.default_price==null||r.default_price===undefined)?'':String(r.default_price);
+            const initialSlug = slugifyClient(defaultName);
+            const exists = !!slugIndex[initialSlug];
             tr.innerHTML = `
-                <td><input type="checkbox" class="chkProd" checked></td>
-                <td><input class="pname" value="${r.name||''}"/></td>
-                <td>${slug}</td>
-                <td><input class="punit" value="${r.default_unit||'adet'}"/></td>
-                <td><input class="pprice" type="number" step="0.01" value="${r.default_price??''}"/></td>
+              <td><input class="pname" value="${defaultName}"/></td>
+              <td class="pslug">${initialSlug}</td>
+              <td><input class="punit" value="${defaultUnit}"/></td>
+              <td><input class="pprice" type="number" step="0.01" value="${defaultPrice}"/></td>
+              <td><button type="button" class="pcreate" ${exists? 'disabled title="Already exists"':''}>Create</button></td>
             `;
+            const inpName = tr.querySelector('.pname');
+            inpName.addEventListener('input', ()=>{
+                const s = slugifyClient(inpName.value||'');
+                tr.querySelector('.pslug').textContent = s;
+                const ex = !!slugIndex[s];
+                const btn = tr.querySelector('.pcreate');
+                if (ex) { btn.setAttribute('disabled','disabled'); btn.title = 'Already exists'; }
+                else { btn.removeAttribute('disabled'); btn.title=''; }
+            });
+            tr.querySelector('.pcreate').addEventListener('click', async ()=>{
+                const fd = new FormData();
+                const n = tr.querySelector('.pname').value;
+                const u = tr.querySelector('.punit').value || 'adet';
+                const pv = tr.querySelector('.pprice').value;
+                fd.append('name', n);
+                fd.append('default_unit', u);
+                if (pv !== '') fd.append('default_price', pv);
+                try {
+                    const r = await fetch('/products', { method:'POST', body: fd });
+                    if (!r.ok) throw new Error(await r.text());
+                    const j = await r.json();
+                    updateProducts(j);
+                    const btn = tr.querySelector('.pcreate');
+                    btn.setAttribute('disabled','disabled');
+                    btn.textContent = 'Created';
+                } catch (e) { alert('Ürün oluşturma hatası'); }
+            });
             tb.appendChild(tr);
         }
+        msg.textContent = rows && rows.length ? '' : 'AI herhangi bir ürün önermedi.';
     }
-    function renderAiRules(rows){
-        const tb = aiRuleTbl.querySelector('tbody');
-        tb.innerHTML = '';
-        for (const r of (rows||[])){
-            const outs = (r.outputs||[]).map(o=>{
-                const pn = o.product_name ? `product:${o.product_name}` : (o.item_sku ? `sku:${o.item_sku}` : '');
-                return `${pn} ${o.size||''} ${o.color||''} x${o.quantity||1} ${o.unit_price??''}`.trim();
-            }).join('<br/>');
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><input type="checkbox" class="chkRule" checked></td>
-                <td>${r.source_pattern}</td>
-                <td>
-                    <select class="rmode">
-                        <option value="exact" ${r.match_mode==='exact'?'selected':''}>exact</option>
-                        <option value="icontains" ${r.match_mode==='icontains'?'selected':''}>icontains</option>
-                        <option value="regex" ${r.match_mode==='regex'?'selected':''}>regex</option>
-                    </select>
-                </td>
-                <td><input class="rpri" type="number" value="${r.priority||100}" style="width:80px"/></td>
-                <td class="outs" data-outs='${JSON.stringify(r.outputs||[]).replace(/'/g,"&#39;")}' style="font-size:12px">${outs}</td>
-            `;
-            tb.appendChild(tr);
+
+    async function applyAiToRuleMap(){
+        aiRuleMap = {};
+        const rules = (aiSuggestions && aiSuggestions.mappings_to_create) || [];
+        for (const r of rules){
+            const outs = [];
+            for (const o of (r.outputs||[])){
+                let pid = null;
+                if (o.product_name){
+                    const s = slugifyClient(o.product_name);
+                    if (slugIndex[s]) pid = slugIndex[s];
+                }
+                outs.push({ product_id: pid, size: o.size||null, color: o.color||null, quantity: o.quantity||1, unit_price: (o.unit_price===''?null:o.unit_price) });
+            }
+            aiRuleMap[r.source_pattern] = outs;
         }
     }
     aiBtn?.addEventListener('click', async ()=>{
-        aiPanel.style.display = '';
-        aiMsg.textContent = 'Öneriler alınıyor...';
         try {
             const unmatched = collectUnmatched();
             const r = await fetch('/mappings/ai/suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ unmatched_patterns: unmatched, context: { products } })});
             if (!r.ok) throw new Error(await r.text());
-            const j = await r.json();
-            renderAiProducts(j.products_to_create||[]);
-            renderAiRules(j.mappings_to_create||[]);
-            aiMsg.textContent = (j.warnings&&j.warnings.length) ? j.warnings.join(' • ') : '';
-        } catch (e) {
-            aiMsg.textContent = 'Öneri hatası';
+            aiSuggestions = await r.json();
+            renderAiProductRows(aiSuggestions.products_to_create||[]);
+            document.getElementById('aiModalMsg').textContent = (aiSuggestions.warnings&&aiSuggestions.warnings.length) ? aiSuggestions.warnings.join(' • ') : '';
+            document.getElementById('aiProductModal').style.display = 'flex';
+        } catch (e) { alert('Öneri hatası'); }
+    });
+    document.addEventListener('click', async (e)=>{
+        if (e.target && e.target.id === 'aiModalNext'){
+            await applyAiToRuleMap();
+            document.getElementById('aiProductModal').style.display = 'none';
         }
-    });
-    document.getElementById('chkAllProd')?.addEventListener('change', (e)=>{
-        const v = e.target.checked; for (const c of aiProdTbl.querySelectorAll('.chkProd')) c.checked = v;
-    });
-    document.getElementById('chkAllRule')?.addEventListener('change', (e)=>{
-        const v = e.target.checked; for (const c of aiRuleTbl.querySelectorAll('.chkRule')) c.checked = v;
-    });
-    function collectApplyPayload(){
-        const products_to_create = [];
-        for (const tr of aiProdTbl.querySelectorAll('tbody tr')){
-            const chk = tr.querySelector('.chkProd');
-            if (!chk.checked) continue;
-            products_to_create.push({
-                name: tr.querySelector('.pname').value,
-                default_unit: tr.querySelector('.punit').value || 'adet',
-                default_price: (function(v){ return v===''?null:Number(v) })(tr.querySelector('.pprice').value)
-            });
-        }
-        const mappings_to_create = [];
-        for (const tr of aiRuleTbl.querySelectorAll('tbody tr')){
-            if (!tr.querySelector('.chkRule').checked) continue;
-            const outs = JSON.parse(tr.querySelector('.outs').getAttribute('data-outs')||'[]');
-            mappings_to_create.push({
-                source_pattern: tr.children[1].textContent,
-                match_mode: tr.querySelector('.rmode').value,
-                priority: Number(tr.querySelector('.rpri').value||100),
-                outputs: outs,
-            });
-        }
-        return { suggestions: { products_to_create, mappings_to_create, notes: null, warnings: [] }, create_products: true, create_rules: true };
-    }
-    document.getElementById('applySelected')?.addEventListener('click', async ()=>{
-        aiMsg.textContent = 'Uygulanıyor...';
-        try {
-            const payload = collectApplyPayload();
-            const r = await fetch('/mappings/ai/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-            if (!r.ok) throw new Error(await r.text());
-            aiMsg.textContent = 'Uygulandı';
-            await refreshPreviewCount();
-        } catch (e) { aiMsg.textContent = 'Uygulama hatası'; }
-    });
-    document.getElementById('applyAll')?.addEventListener('click', async ()=>{
-        for (const c of aiProdTbl.querySelectorAll('.chkProd')) c.checked = true;
-        for (const c of aiRuleTbl.querySelectorAll('.chkRule')) c.checked = true;
-        document.getElementById('applySelected').click();
     });
     </script>
 </body>

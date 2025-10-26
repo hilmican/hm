@@ -317,7 +317,7 @@ def import_map(source: str, filename: str, request: Request):
 	from ..models import Product as _Product
 	with get_session() as session:
 		products = session.exec(select(_Product).order_by(_Product.name.asc()).limit(1000)).all()
-		prod_rows = [{"id": p.id, "name": p.name} for p in products]
+		prod_rows = [{"id": p.id, "name": p.name, "slug": p.slug} for p in products]
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"import_map.html",
