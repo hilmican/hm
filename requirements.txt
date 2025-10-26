@@ -3,7 +3,7 @@ uvicorn[standard]==0.30.6
 sqlmodel==0.0.22
 SQLAlchemy==2.0.36
 pydantic==2.6.4
-typing-extensions==4.10.0
+typing-extensions==4.12.2
 jinja2==3.1.4
 python-multipart==0.0.9
 openpyxl==3.1.5
