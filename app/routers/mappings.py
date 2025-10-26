@@ -6,7 +6,12 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import ItemMappingRule, ItemMappingOutput
+from ..models import ItemMappingRule, ItemMappingOutput, Product, Item
+from ..schemas import AISuggestRequest, AISuggestResponse, AIApplyRequest
+from ..utils.slugify import slugify
+from ..db import get_session
+from sqlmodel import select
+
 
 
 router = APIRouter(prefix="/mappings", tags=["mappings"])
@@ -152,4 +157,140 @@ def replace_outputs(rule_id: int, outputs: List[Dict[str, Any]]):
             ))
         return {"status": "ok"}
 
+
+# --- AI assisted mapping endpoints ---
+
+@router.post("/ai/suggest", response_model=AISuggestResponse)
+def ai_suggest(req: AISuggestRequest, request: Request) -> AISuggestResponse:
+    ai = getattr(request.app.state, "ai", None)
+    if not ai or not getattr(ai, "enabled", False):
+        raise HTTPException(status_code=503, detail="AI not configured")
+
+    # Build concise prompt with constraints and examples (Turkish context)
+    system = (
+        "Sen bir stok ve sipariş eşleştirme yardımcısısın. "
+        "Girdi: Eşleşmeyen ürün patternleri. Çıktı: JSON olarak ürün önerileri ve eşleme kuralları. "
+        "match_mode: exact|icontains|regex. Birim 'adet'. Sadece geçerli JSON döndür."
+    )
+    # Provide compact input as JSON string to the model
+    import json as _json
+    body = {
+        "unmatched_patterns": [
+            {
+                "pattern": p.pattern,
+                "count": p.count,
+                "samples": p.samples,
+                "suggested_price": p.suggested_price,
+            }
+            for p in req.unmatched_patterns
+        ],
+        "known_products": (req.context or {}).get("products") if req.context else None,
+        "schema": {
+            "products_to_create": [
+                {"name": "str", "default_unit": "adet", "default_price": "float|null"}
+            ],
+            "mappings_to_create": [
+                {
+                    "source_pattern": "str",
+                    "match_mode": "exact|icontains|regex",
+                    "priority": "int",
+                    "outputs": [
+                        {"product_name": "str?", "item_sku": "str?", "size": "str?", "color": "str?", "quantity": "int", "unit_price": "float|null"}
+                    ],
+                }
+            ],
+            "notes": "str?",
+            "warnings": ["str"],
+        },
+    }
+    user = "Lütfen sadece JSON döndür. Girdi:" + "\n" + _json.dumps(body, ensure_ascii=False)
+
+    raw = ai.generate_json(system_prompt=system, user_prompt=user)
+
+    # Validate via Pydantic and normalize
+    try:
+        validated = AISuggestResponse(**raw)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid AI response: {e}")
+
+    # Deduplicate products_to_create by slug against existing products
+    with get_session() as session:
+        existing = session.exec(select(Product).limit(10000)).all()
+        existing_slugs = {p.slug for p in existing}
+        uniq: list[dict] = []
+        seen: set[str] = set()
+        for p in validated.products_to_create:
+            slug = slugify(p.name)
+            if slug in existing_slugs or slug in seen:
+                continue
+            seen.add(slug)
+            uniq.append({"name": p.name, "default_unit": p.default_unit, "default_price": p.default_price})
+        validated.products_to_create = [
+            ProductCreateSuggestion(**u)  # type: ignore[name-defined]
+            for u in uniq
+        ]
+
+    return validated
+
+
+@router.post("/ai/apply")
+def ai_apply(body: AIApplyRequest):
+    sug = body.suggestions
+    created_products: dict[str, int] = {}
+
+    with get_session() as session:
+        # Create products if requested
+        if body.create_products:
+            for p in (sug.products_to_create or []):
+                name = p.name
+                slug = slugify(name)
+                existing = session.exec(select(Product).where(Product.slug == slug)).first()
+                if existing:
+                    created_products[slug] = existing.id or 0
+                    continue
+                rec = Product(name=name, slug=slug, default_unit=p.default_unit or "adet", default_price=p.default_price)
+                session.add(rec)
+                session.flush()
+                if rec.id:
+                    created_products[slug] = rec.id
+
+        # Create mapping rules if requested
+        created_rules: list[int] = []
+        if body.create_rules:
+            for r in (sug.mappings_to_create or []):
+                rule = ItemMappingRule(
+                    source_pattern=r.source_pattern,
+                    match_mode=r.match_mode,
+                    priority=r.priority,
+                    is_active=True,
+                )
+                session.add(rule)
+                session.flush()
+                # outputs
+                for out in r.outputs:
+                    item_id = None
+                    product_id = None
+                    if out.item_sku:
+                        it = session.exec(select(Item).where(Item.sku == out.item_sku)).first()
+                        item_id = it.id if it else None
+                    if not item_id and out.product_name:
+                        pslug = slugify(out.product_name)
+                        prod = session.exec(select(Product).where(Product.slug == pslug)).first()
+                        if not prod and pslug in created_products:
+                            # resolve newly created product
+                            pid = created_products[pslug]
+                            prod = session.get(Product, pid)
+                        product_id = prod.id if prod else None
+                    session.add(ItemMappingOutput(
+                        rule_id=rule.id or 0,
+                        item_id=item_id,
+                        product_id=product_id,
+                        size=out.size,
+                        color=out.color,
+                        quantity=out.quantity or 1,
+                        unit_price=out.unit_price,
+                    ))
+                created_rules.append(rule.id or 0)
+
+        return {"created_products": created_products, "created_rules": created_rules}
 

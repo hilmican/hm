@@ -29,6 +29,7 @@
         <span class="pill"><span id="unmatchedCount">{{ total_unmatched or 0 }}</span> row(s) unmatched</span>
         <span class="muted">Source: {{ source }}{% if filenames %}, Files: {{ ", ".join(filenames) }}{% else %}, File: {{ filename }}{% endif %}</span>
         <button id="rescanBtn" type="button">Re-scan</button>
+        <button id="aiSuggestBtn" type="button" style="background:#7c3aed">AI ile Öneri Al</button>
         <button id="commitBtn" style="margin-left:auto" disabled>Commit Import</button>
     </div>
 
@@ -97,6 +98,30 @@
                 </div>
             </div>
         </div>
+        <div class="card" id="aiPanel" style="display:none">
+            <h2>AI Önerileri</h2>
+            <div class="inner">
+                <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+                    <button id="applySelected" type="button" style="background:#10b981">Seçileni Uygula</button>
+                    <button id="applyAll" type="button" style="background:#059669">Tümünü Uygula</button>
+                    <span id="aiMsg" class="muted"></span>
+                </div>
+                <div>
+                    <h3 style="margin:6px 0">Ürün Önerileri</h3>
+                    <table id="aiProdTbl">
+                        <thead><tr><th><input type="checkbox" id="chkAllProd"/></th><th>Ad</th><th>Slug</th><th>Birim</th><th>Fiyat</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div style="margin-top:10px">
+                    <h3 style="margin:6px 0">Eşleme Kuralları</h3>
+                    <table id="aiRuleTbl">
+                        <thead><tr><th><input type="checkbox" id="chkAllRule"/></th><th>Pattern</th><th>Mode</th><th>Priority</th><th>Outputs</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
         {% if filenames and filenames|length > 1 %}
         <div class="card">
             <h2>Dosya Bazli Tarihler</h2>
@@ -158,6 +183,11 @@
     const saveMsg = document.getElementById('saveMsg');
     const investigateBtn = document.getElementById('investigateBtn');
     const investigatePat = document.getElementById('investigatePat');
+    const aiBtn = document.getElementById('aiSuggestBtn');
+    const aiPanel = document.getElementById('aiPanel');
+    const aiMsg = document.getElementById('aiMsg');
+    const aiProdTbl = document.getElementById('aiProdTbl');
+    const aiRuleTbl = document.getElementById('aiRuleTbl');
 
     function refillProducts(selectedId){
         productSel.innerHTML = '';
@@ -363,6 +393,127 @@
             alert('Import committed.');
             location.href = '/dashboard';
         } catch (e) { alert('Commit error'); }
+    });
+
+    // --- AI suggestions ---
+    function slugifyClient(s){
+        return String(s||'')
+          .toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+          .replace(/[^a-z0-9]+/g,'-')
+          .replace(/(^-|-$)/g,'');
+    }
+    function collectUnmatched(){
+        const list = [];
+        for (const li of patList.querySelectorAll('li[data-pattern]')){
+            const pattern = li.getAttribute('data-pattern');
+            const count = Number(li.querySelector('.pill')?.textContent||'0')||0;
+            const suggested_price = Number(li.getAttribute('data-suggested-price')||'')||null;
+            // samples are not in DOM; omitted here (server investigates if needed)
+            list.push({ pattern, count, samples: [], suggested_price });
+        }
+        return list;
+    }
+    function renderAiProducts(rows){
+        const tb = aiProdTbl.querySelector('tbody');
+        tb.innerHTML = '';
+        for (const r of (rows||[])){
+            const slug = slugifyClient(r.name);
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><input type="checkbox" class="chkProd" checked></td>
+                <td><input class="pname" value="${r.name||''}"/></td>
+                <td>${slug}</td>
+                <td><input class="punit" value="${r.default_unit||'adet'}"/></td>
+                <td><input class="pprice" type="number" step="0.01" value="${r.default_price??''}"/></td>
+            `;
+            tb.appendChild(tr);
+        }
+    }
+    function renderAiRules(rows){
+        const tb = aiRuleTbl.querySelector('tbody');
+        tb.innerHTML = '';
+        for (const r of (rows||[])){
+            const outs = (r.outputs||[]).map(o=>{
+                const pn = o.product_name ? `product:${o.product_name}` : (o.item_sku ? `sku:${o.item_sku}` : '');
+                return `${pn} ${o.size||''} ${o.color||''} x${o.quantity||1} ${o.unit_price??''}`.trim();
+            }).join('<br/>');
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><input type="checkbox" class="chkRule" checked></td>
+                <td>${r.source_pattern}</td>
+                <td>
+                    <select class="rmode">
+                        <option value="exact" ${r.match_mode==='exact'?'selected':''}>exact</option>
+                        <option value="icontains" ${r.match_mode==='icontains'?'selected':''}>icontains</option>
+                        <option value="regex" ${r.match_mode==='regex'?'selected':''}>regex</option>
+                    </select>
+                </td>
+                <td><input class="rpri" type="number" value="${r.priority||100}" style="width:80px"/></td>
+                <td class="outs" data-outs='${JSON.stringify(r.outputs||[]).replace(/'/g,"&#39;")}' style="font-size:12px">${outs}</td>
+            `;
+            tb.appendChild(tr);
+        }
+    }
+    aiBtn?.addEventListener('click', async ()=>{
+        aiPanel.style.display = '';
+        aiMsg.textContent = 'Öneriler alınıyor...';
+        try {
+            const unmatched = collectUnmatched();
+            const r = await fetch('/mappings/ai/suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ unmatched_patterns: unmatched, context: { products } })});
+            if (!r.ok) throw new Error(await r.text());
+            const j = await r.json();
+            renderAiProducts(j.products_to_create||[]);
+            renderAiRules(j.mappings_to_create||[]);
+            aiMsg.textContent = (j.warnings&&j.warnings.length) ? j.warnings.join(' • ') : '';
+        } catch (e) {
+            aiMsg.textContent = 'Öneri hatası';
+        }
+    });
+    document.getElementById('chkAllProd')?.addEventListener('change', (e)=>{
+        const v = e.target.checked; for (const c of aiProdTbl.querySelectorAll('.chkProd')) c.checked = v;
+    });
+    document.getElementById('chkAllRule')?.addEventListener('change', (e)=>{
+        const v = e.target.checked; for (const c of aiRuleTbl.querySelectorAll('.chkRule')) c.checked = v;
+    });
+    function collectApplyPayload(){
+        const products_to_create = [];
+        for (const tr of aiProdTbl.querySelectorAll('tbody tr')){
+            const chk = tr.querySelector('.chkProd');
+            if (!chk.checked) continue;
+            products_to_create.push({
+                name: tr.querySelector('.pname').value,
+                default_unit: tr.querySelector('.punit').value || 'adet',
+                default_price: (function(v){ return v===''?null:Number(v) })(tr.querySelector('.pprice').value)
+            });
+        }
+        const mappings_to_create = [];
+        for (const tr of aiRuleTbl.querySelectorAll('tbody tr')){
+            if (!tr.querySelector('.chkRule').checked) continue;
+            const outs = JSON.parse(tr.querySelector('.outs').getAttribute('data-outs')||'[]');
+            mappings_to_create.push({
+                source_pattern: tr.children[1].textContent,
+                match_mode: tr.querySelector('.rmode').value,
+                priority: Number(tr.querySelector('.rpri').value||100),
+                outputs: outs,
+            });
+        }
+        return { suggestions: { products_to_create, mappings_to_create, notes: null, warnings: [] }, create_products: true, create_rules: true };
+    }
+    document.getElementById('applySelected')?.addEventListener('click', async ()=>{
+        aiMsg.textContent = 'Uygulanıyor...';
+        try {
+            const payload = collectApplyPayload();
+            const r = await fetch('/mappings/ai/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+            if (!r.ok) throw new Error(await r.text());
+            aiMsg.textContent = 'Uygulandı';
+            await refreshPreviewCount();
+        } catch (e) { aiMsg.textContent = 'Uygulama hatası'; }
+    });
+    document.getElementById('applyAll')?.addEventListener('click', async ()=>{
+        for (const c of aiProdTbl.querySelectorAll('.chkProd')) c.checked = true;
+        for (const c of aiRuleTbl.querySelectorAll('.chkRule')) c.checked = true;
+        document.getElementById('applySelected').click();
     });
     </script>
 </body>

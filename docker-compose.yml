@@ -12,6 +12,7 @@ services:
       - ./data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - IG_WEBHOOK_VERIFY_TOKEN=MHG_UYHS_IG_WEBHOOK_VERIFY_TOKEN_NANA
       - IG_APP_SECRET=9264d4f5304837e07b27ed267c8d2f21
       - REDIS_URL=redis://redis:6379/0
@@ -32,6 +33,7 @@ services:
     command: ["python", "scripts/worker_ingest.py"]
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
       - ./:/app
       - ./data:/app/data
@@ -44,6 +46,7 @@ services:
     command: ["python", "scripts/worker_enrich.py"]
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
       - ./:/app
       - ./data:/app/data
@@ -58,6 +61,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - MEDIA_ROOT=/app/data/media
       - THUMBS_ROOT=/app/data/thumbs
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
       - ./:/app
       - ./data:/app/data

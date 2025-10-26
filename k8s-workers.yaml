@@ -19,13 +19,13 @@ spec:
             claimName: hm-app-root
       initContainers:
         - name: seed-app
-          image: mediatriple/hm:0.4
+          image: mediatriple/hm:0.5
           command: ["/bin/sh","-c"]
           args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
-          image: mediatriple/hm:0.4
+          image: mediatriple/hm:0.5
           command: ["python","scripts/worker_ingest.py"]
           env:
             - name: REDIS_URL
@@ -34,6 +34,8 @@ spec:
               value: /app/data/media
             - name: THUMBS_ROOT
               value: /app/data/thumbs
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: hm-openai, key: OPENAI_API_KEY } }
             - name: IG_APP_SECRET
               valueFrom: { secretKeyRef: { name: hm-ig, key: IG_APP_SECRET } }
             - name: IG_WEBHOOK_VERIFY_TOKEN
@@ -67,13 +69,13 @@ spec:
             claimName: hm-app-root
       initContainers:
         - name: seed-app
-          image: mediatriple/hm:0.4
+          image: mediatriple/hm:0.5
           command: ["/bin/sh","-c"]
           args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
-          image: mediatriple/hm:0.4
+          image: mediatriple/hm:0.5
           command: ["python","scripts/worker_enrich.py"]
           env:
             - name: REDIS_URL
@@ -82,6 +84,8 @@ spec:
               value: /app/data/media
             - name: THUMBS_ROOT
               value: /app/data/thumbs
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: hm-openai, key: OPENAI_API_KEY } }
             - name: IG_APP_SECRET
               valueFrom: { secretKeyRef: { name: hm-ig, key: IG_APP_SECRET } }
             - name: IG_WEBHOOK_VERIFY_TOKEN
@@ -115,13 +119,13 @@ spec:
             claimName: hm-app-root
       initContainers:
         - name: seed-app
-          image: mediatriple/hm:0.4
+          image: mediatriple/hm:0.5
           command: ["/bin/sh","-c"]
           args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
-          image: mediatriple/hm:0.4
+          image: mediatriple/hm:0.5
           command: ["python","scripts/worker_media.py"]
           env:
             - name: REDIS_URL
@@ -130,6 +134,8 @@ spec:
               value: /app/data/media
             - name: THUMBS_ROOT
               value: /app/data/thumbs
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: hm-openai, key: OPENAI_API_KEY } }
             - name: IG_APP_SECRET
               valueFrom: { secretKeyRef: { name: hm-ig, key: IG_APP_SECRET } }
             - name: IG_WEBHOOK_VERIFY_TOKEN

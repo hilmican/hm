@@ -4,6 +4,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .db import init_db
+from .services.ai import AIClient
 from .routers import dashboard, importer, clients, items, orders, payments, reconcile, auth
 from .routers import reports
 from .routers import inventory, mappings, products
@@ -28,6 +29,11 @@ def create_app() -> FastAPI:
 	@app.on_event("startup")
 	def _startup() -> None:
 		init_db()
+		# Init AI client (optional)
+		try:
+			app.state.ai = AIClient()
+		except Exception:
+			app.state.ai = None
 		# Ensure media directories exist when app boots
 		try:
 			import os as _os

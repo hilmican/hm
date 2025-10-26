@@ -85,3 +85,53 @@ class KargoRow(BaseModel):
 
 BIZIM_ALLOWED_KEYS = set(BizimRow.__fields__.keys())
 KARGO_ALLOWED_KEYS = set(KargoRow.__fields__.keys())
+
+
+# --- AI Suggest/Apply Schemas ---
+
+class UnmatchedPattern(BaseModel):
+    pattern: str
+    count: int
+    samples: list[str] = []
+    suggested_price: float | None = None
+
+
+class AISuggestRequest(BaseModel):
+    unmatched_patterns: list[UnmatchedPattern]
+    context: dict[str, Any] | None = Field(default=None, description="Optional context like existing products list")
+
+
+class ProductCreateSuggestion(BaseModel):
+    name: str
+    default_unit: str | None = "adet"
+    default_price: float | None = None
+
+
+class MappingOutputSuggestion(BaseModel):
+    # either link to item via sku or product by name
+    item_sku: str | None = None
+    product_name: str | None = None
+    size: str | None = None
+    color: str | None = None
+    quantity: int = 1
+    unit_price: float | None = None
+
+
+class MappingRuleSuggestion(BaseModel):
+    source_pattern: str
+    match_mode: str = Field(default="exact")
+    priority: int = 100
+    outputs: list[MappingOutputSuggestion]
+
+
+class AISuggestResponse(BaseModel):
+    products_to_create: list[ProductCreateSuggestion] = []
+    mappings_to_create: list[MappingRuleSuggestion] = []
+    notes: str | None = None
+    warnings: list[str] = []
+
+
+class AIApplyRequest(BaseModel):
+    suggestions: AISuggestResponse
+    create_products: bool = True
+    create_rules: bool = True
