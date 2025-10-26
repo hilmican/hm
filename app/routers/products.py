@@ -23,6 +23,7 @@ def list_products(limit: int = Query(default=500, ge=1, le=5000)):
 					"name": p.name,
 					"slug": p.slug,
 					"default_unit": p.default_unit,
+					"default_color": p.default_color,
 					"default_price": p.default_price,
 				}
 				for p in rows
@@ -32,9 +33,10 @@ def list_products(limit: int = Query(default=500, ge=1, le=5000)):
 
 @router.post("")
 def create_product(
-	name: str = Form(...),
-	default_unit: str = Form("adet"),
-	default_price: float | None = Form(None),
+    name: str = Form(...),
+    default_unit: str = Form("adet"),
+    default_price: float | None = Form(None),
+    default_color: str | None = Form(None),
 ):
 	if not name:
 		raise HTTPException(status_code=400, detail="name required")
@@ -43,7 +45,7 @@ def create_product(
 		existing = session.exec(select(Product).where(Product.slug == slug)).first()
 		if existing:
 			raise HTTPException(status_code=409, detail="Product already exists")
-		p = Product(name=name, slug=slug, default_unit=default_unit, default_price=default_price)
+		p = Product(name=name, slug=slug, default_unit=default_unit, default_price=default_price, default_color=default_color)
 		session.add(p)
 		session.flush()
 		return {"id": p.id, "name": p.name, "slug": p.slug}
@@ -62,7 +64,7 @@ def products_table(request: Request, limit: int = Query(default=10000, ge=1, le=
 
 @router.put("/{product_id}")
 def update_product(product_id: int, body: dict):
-    allowed = {"name", "default_unit", "default_price"}
+    allowed = {"name", "default_unit", "default_price", "default_color"}
     with get_session() as session:
         p = session.exec(select(Product).where(Product.id == product_id)).first()
         if not p:
@@ -84,6 +86,8 @@ def update_product(product_id: int, body: dict):
                 p.default_price = float(val) if val is not None else None
             except Exception:
                 raise HTTPException(status_code=400, detail="Invalid default_price")
+        if "default_color" in body:
+            p.default_color = body.get("default_color") or None
         return {"status": "ok", "id": p.id}
 
 

@@ -93,6 +93,7 @@ class Product(SQLModel, table=True):
     name: str = Field(index=True)
     slug: str = Field(index=True, unique=True)
     default_unit: Optional[str] = Field(default="adet")
+    default_color: Optional[str] = None
     default_price: Optional[float] = None
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)

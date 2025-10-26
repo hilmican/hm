@@ -113,6 +113,10 @@ def init_db() -> None:
 				if not column_exists("payment", col):
 					conn.exec_driver_sql(f"ALTER TABLE payment ADD COLUMN {col} {coltype} DEFAULT 0")
 
+		# Product.default_color lightweight migration
+		if not column_exists("product", "default_color"):
+			conn.exec_driver_sql("ALTER TABLE product ADD COLUMN default_color TEXT")
+
 		# Message table lightweight migrations
 		try:
 			rows = conn.exec_driver_sql("PRAGMA table_info('message')").fetchall()
