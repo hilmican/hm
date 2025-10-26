@@ -205,7 +205,16 @@ def ai_suggest(req: AISuggestRequest, request: Request) -> AISuggestResponse:
         "Tüm alanlar çift tırnaklı olmalı.\nGirdi:" + "\n" + _json.dumps(body, ensure_ascii=False)
     )
 
-    raw = ai.generate_json(system_prompt=system, user_prompt=user)
+    try:
+        raw = ai.generate_json(system_prompt=system, user_prompt=user)
+    except Exception as e:
+        # Surface an informative error with sizes to help diagnose
+        try:
+            import json as _json
+            size_info = len(_json.dumps(body, ensure_ascii=False))
+        except Exception:
+            size_info = -1
+        raise HTTPException(status_code=502, detail=f"AI suggest failed: {e}; body_bytes={size_info}")
 
     # Validate via Pydantic and normalize
     try:
