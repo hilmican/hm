@@ -2,7 +2,7 @@
 <html>
     <head>
         <meta charset="utf-8" />
-        <title>Daily Report</title>
+        <title>Günlük Rapor</title>
         <style>
             body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
             h1 { margin-bottom: 12px; }
@@ -30,61 +30,62 @@
         </style>
     </head>
     <body>
-        <h1>Daily Report</h1>
+        <h1>Günlük Rapor</h1>
         <div class="nav">
-            <a href="/dashboard">Dashboard</a>
-            <a href="/clients/table">Clients</a>
-            <a href="/items/table">Items</a>
-            <a href="/products/table">Products</a>
-            <a href="/orders/table">Orders</a>
-            <a href="/inventory/table">Inventory</a>
-            <a class="active" href="/reports/daily">Daily Report</a>
+            <a href="/dashboard">Panel</a>
+            <a href="/clients/table">Müşteriler</a>
+            <a href="/items/table">Varyantlar</a>
+            <a href="/products/table">Ürünler</a>
+            <a href="/orders/table">Siparişler</a>
+            <a href="/inventory/table">Stok</a>
+            <a class="active" href="/reports/daily">Günlük Rapor</a>
         </div>
 
         <form class="toolbar" method="get" action="/reports/daily">
             <div>
-                <label style="display:block;font-size:12px;color:#374151">Start</label>
+                <label style="display:block;font-size:12px;color:#374151">Başlangıç</label>
                 <input type="date" name="start" value="{{ start }}" />
             </div>
             <div>
-                <label style="display:block;font-size:12px;color:#374151">End</label>
+                <label style="display:block;font-size:12px;color:#374151">Bitiş</label>
                 <input type="date" name="end" value="{{ end }}" />
             </div>
             <div>
-                <label style="display:block;font-size:12px;color:#374151">Date field</label>
+                <label style="display:block;font-size:12px;color:#374151">Tarih alanı</label>
                 <div class="radio">
-                    <label><input type="radio" name="date_field" value="shipment" {% if date_field=='shipment' %}checked{% endif %}/> shipment_date</label>
-                    <label><input type="radio" name="date_field" value="data" {% if date_field=='data' %}checked{% endif %}/> data_date</label>
-                    <label><input type="radio" name="date_field" value="both" {% if date_field=='both' %}checked{% endif %}/> either</label>
+                    <label><input type="radio" name="date_field" value="shipment" {% if date_field=='shipment' %}checked{% endif %}/> kargo_tarihi</label>
+                    <label><input type="radio" name="date_field" value="data" {% if date_field=='data' %}checked{% endif %}/> data_tarihi</label>
+                    <label><input type="radio" name="date_field" value="both" {% if date_field=='both' %}checked{% endif %}/> ikisinden biri</label>
                 </div>
             </div>
             <div>
-                <button class="btn" type="submit">Apply</button>
+                <button class="btn" type="submit">Uygula</button>
             </div>
         </form>
 
         <div class="kpis">
-            <div class="kpi"><div class="label">Total Sales</div><div class="value">{{ '%.2f'|format(total_sales or 0) }}</div></div>
-            <div class="kpi"><div class="label">Orders</div><div class="value">{{ order_count or 0 }}</div></div>
-            <div class="kpi"><div class="label">Total Quantity</div><div class="value">{{ total_quantity or 0 }}</div></div>
-            <div class="kpi"><div class="label">Avg Order Value</div><div class="value">{{ '%.2f'|format(aov or 0) }}</div></div>
-            <div class="kpi"><div class="label">Avg Sell Price</div><div class="value">{{ '%.2f'|format(asp or 0) }}</div></div>
-            <div class="kpi"><div class="label">Total Cost</div><div class="value">{{ '%.2f'|format(total_cost or 0) }}</div></div>
-            <div class="kpi"><div class="label">Gross Profit</div><div class="value">{{ '%.2f'|format(gross_profit or 0) }}</div></div>
-            <div class="kpi"><div class="label">Gross Margin</div><div class="value">{{ '%.1f'|format((gross_margin or 0)*100) }}%</div></div>
-            <div class="kpi"><div class="label">Gross Collected</div><div class="value">{{ '%.2f'|format(gross_collected or 0) }}</div></div>
-            <div class="kpi"><div class="label">Net Collected</div><div class="value">{{ '%.2f'|format(net_collected or 0) }}</div></div>
-            <div class="kpi"><div class="label">Total Fees</div><div class="value">{{ '%.2f'|format(total_fees or 0) }}</div></div>
-            <div class="kpi"><div class="label">Collection Ratio</div><div class="value">{{ '%.1f'|format((collection_ratio or 0)*100) }}%</div></div>
-            <div class="kpi"><div class="label">Outstanding (for period orders)</div><div class="value">{{ '%.2f'|format(outstanding or 0) }}</div></div>
+            <div class="kpi"><div class="label">Toplam Satış</div><div class="value">{{ '%.2f'|format(total_sales or 0) }}</div></div>
+            <div class="kpi"><div class="label">Sipariş</div><div class="value">{{ order_count or 0 }}</div></div>
+            <div class="kpi"><div class="label">Toplam Adet</div><div class="value">{{ total_quantity or 0 }}</div></div>
+            <div class="kpi"><div class="label">Sipariş Başına Ortalama</div><div class="value">{{ '%.2f'|format(aov or 0) }}</div></div>
+            <div class="kpi"><div class="label">Ortalama Satış Fiyatı</div><div class="value">{{ '%.2f'|format(asp or 0) }}</div></div>
+            <div class="kpi"><div class="label">Toplam Maliyet</div><div class="value">{{ '%.2f'|format(total_cost or 0) }}</div></div>
+            <div class="kpi"><div class="label">Brüt Kâr</div><div class="value">{{ '%.2f'|format(gross_profit or 0) }}</div></div>
+            <div class="kpi"><div class="label">Brüt Marj</div><div class="value">{{ '%.1f'|format((gross_margin or 0)*100) }}%</div></div>
+            <div class="kpi"><div class="label">Tahsilat (Brüt)</div><div class="value">{{ '%.2f'|format(gross_collected or 0) }}</div></div>
+            <div class="kpi"><div class="label">Tahsilat (Net)</div><div class="value">{{ '%.2f'|format(net_collected or 0) }}</div></div>
+            <div class="kpi"><div class="label">Toplam Kesintiler</div><div class="value">{{ '%.2f'|format(total_fees or 0) }}</div></div>
+            <div class="kpi"><div class="label">Tahsilat Oranı</div><div class="value">{{ '%.1f'|format((collection_ratio or 0)*100) }}%</div></div>
+            <div class="kpi"><div class="label">Dönem Siparişlerinde Kalan</div><div class="value">{{ '%.2f'|format(outstanding or 0) }}</div></div>
+            <div class="kpi"><div class="label">Net Kâr</div><div class="value">{{ '%.2f'|format(net_profit or 0) }}</div></div>
         </div>
 
         <div class="grid" style="margin-top:16px;">
             <div class="card">
-                <h2>Orders by Channel</h2>
+                <h2>Kanallara Göre Sipariş</h2>
                 <table>
                     <thead>
-                        <tr><th>Source</th><th>Count</th><th>Sales</th></tr>
+                        <tr><th>Kaynak</th><th>Adet</th><th>Satış</th></tr>
                     </thead>
                     <tbody>
                         {% for src, vals in by_channel.items() %}
@@ -99,10 +100,10 @@
             </div>
 
             <div class="card">
-                <h2>Payments (in period)</h2>
+                <h2>Ödemeler (dönem içinde)</h2>
                 <table>
                     <thead>
-                        <tr><th>Komisyon</th><th>Hizmet</th><th>Kargo</th><th>Iade</th><th>Erken Odeme</th></tr>
+                        <tr><th>Komisyon</th><th>Hizmet</th><th>Kargo</th><th>İade</th><th>Erken Ödeme</th></tr>
                     </thead>
                     <tbody>
                         <tr>
@@ -114,14 +115,14 @@
                         </tr>
                     </tbody>
                 </table>
-                <div class="caption">Gross: {{ '%.2f'|format(gross_collected or 0) }}, Net: {{ '%.2f'|format(net_collected or 0) }}, Fees: {{ '%.2f'|format(total_fees or 0) }}</div>
+                <div class="caption">Brüt: {{ '%.2f'|format(gross_collected or 0) }}, Net: {{ '%.2f'|format(net_collected or 0) }}, Kesintiler: {{ '%.2f'|format(total_fees or 0) }}</div>
             </div>
 
             <div class="card">
-                <h2>Top Items by Revenue</h2>
+                <h2>Hasılata Göre Ürünler</h2>
                 <table>
                     <thead>
-                        <tr><th>ID</th><th>SKU</th><th>Name</th><th>Revenue</th><th>Qty</th></tr>
+                        <tr><th>ID</th><th>SKU</th><th>Ad</th><th>Hasılat</th><th>Adet</th></tr>
                     </thead>
                     <tbody>
                         {% for it in top_items_by_revenue %}
@@ -138,10 +139,10 @@
             </div>
 
             <div class="card">
-                <h2>Top Items by Quantity</h2>
+                <h2>Adede Göre Ürünler</h2>
                 <table>
                     <thead>
-                        <tr><th>ID</th><th>SKU</th><th>Name</th><th>Qty</th><th>Revenue</th></tr>
+                        <tr><th>ID</th><th>SKU</th><th>Ad</th><th>Adet</th><th>Hasılat</th></tr>
                     </thead>
                     <tbody>
                         {% for it in top_items_by_quantity %}
@@ -158,10 +159,10 @@
             </div>
 
             <div class="card">
-                <h2>Top Clients by Revenue</h2>
+                <h2>Hasılata Göre Müşteriler</h2>
                 <table>
                     <thead>
-                        <tr><th>ID</th><th>Name</th><th>Phone</th><th>Revenue</th></tr>
+                        <tr><th>ID</th><th>Ad</th><th>Telefon</th><th>Hasılat</th></tr>
                     </thead>
                     <tbody>
                         {% for c in top_clients %}
@@ -177,10 +178,10 @@
             </div>
 
             <div class="card">
-                <h2>Import Runs (in period)</h2>
+                <h2>İçe Aktarmalar (dönem içinde)</h2>
                 <table>
                     <thead>
-                        <tr><th>Source</th><th>Filename</th><th>Data Date</th><th>Rows</th><th>Created (C/I/O/P)</th></tr>
+                        <tr><th>Kaynak</th><th>Dosya</th><th>Data Tarihi</th><th>Satır</th><th>Oluşan (M/V/S/Ö)</th></tr>
                     </thead>
                     <tbody>
                         {% for r in recent_imports %}
@@ -194,14 +195,14 @@
                         {% endfor %}
                     </tbody>
                 </table>
-                <div class="caption">Total runs: {{ imports_total }}, Rows: {{ imports_row_count }}, Created C/I/O/P: {{ imports_created.clients }}/{{ imports_created.items }}/{{ imports_created.orders }}/{{ imports_created.payments }}</div>
+                <div class="caption">Toplam çalıştırma: {{ imports_total }}, Satır: {{ imports_row_count }}, Oluşan M/V/S/Ö: {{ imports_created.clients }}/{{ imports_created.items }}/{{ imports_created.orders }}/{{ imports_created.payments }}</div>
             </div>
 
             <div class="card">
-                <h2>Stock Movements (in period)</h2>
+                <h2>Stok Hareketleri (dönem içinde)</h2>
                 <table>
                     <thead>
-                        <tr><th>In Qty</th><th>Out Qty</th></tr>
+                        <tr><th>Giriş</th><th>Çıkış</th></tr>
                     </thead>
                     <tbody>
                         <tr><td>{{ qty_in|int }}</td><td>{{ qty_out|int }}</td></tr>
@@ -210,19 +211,19 @@
             </div>
             
             <div class="card">
-                <h2>Orders (filtered)</h2>
+                <h2>Siparişler (filtreli)</h2>
                 <table>
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>Tracking</th>
-                            <th>Client</th>
-                            <th>Item</th>
-                            <th>Qty</th>
-                            <th>Total</th>
-                            <th>Shipment Date</th>
-                            <th>Data Date</th>
-                            <th>Source</th>
+                            <th>Takip</th>
+                            <th>Müşteri</th>
+                            <th>Ürün</th>
+                            <th>Adet</th>
+                            <th>Toplam</th>
+                            <th>Kargo Tarihi</th>
+                            <th>Data Tarihi</th>
+                            <th>Kanal</th>
                         </tr>
                     </thead>
                     <tbody>

@@ -116,6 +116,7 @@ def daily_report(
 		fee_iad = sum(float(p.fee_iade or 0.0) for p in payments)
 		fee_eok = sum(float(p.fee_erken_odeme or 0.0) for p in payments)
 		total_fees = fee_kom + fee_hiz + fee_kar + fee_iad + fee_eok
+		net_profit = gross_profit - total_fees
 		collection_ratio = (gross_collected / total_sales) if total_sales > 0 else 0.0
 
 		# Outstanding for period: payments linked to these orders (regardless of payment date)
@@ -235,6 +236,7 @@ def daily_report(
 				"total_cost": total_cost,
 				"gross_profit": gross_profit,
 				"gross_margin": gross_margin,
+				"net_profit": net_profit,
 				"aov": aov,
 				"asp": asp,
 				# payments summary
