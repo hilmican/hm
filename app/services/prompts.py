@@ -14,7 +14,8 @@ MAPPING_SYSTEM_PROMPT = (
     "   '31-SİYAH JOGGER PANTOLON' ⇒ ürün adı 'JOGGER PANTOLON' (çıktıda size=31, color=SİYAH). "
     "   '36-SİYAH + LACİVERT KIŞLIK JOGGER PANTOLON' ⇒ ürün adı 'KIŞLIK JOGGER PANTOLON' ve iki ayrı çıktı (36/SİYAH, 36/LACİVERT). "
     "5) Verilen ürün listesinde varsa onu kullan; yoksa products_to_create altında öner. "
-    "Sadece geçerli JSON döndür."
+    "6) SADECE geçerli JSON döndür. Açıklama, markdown, kod bloğu veya yorum ekleme. "
+    "7) JSON dışına çıkma. Tüm alanları çift tırnaklı yaz. Virgül ve köşeli/normal parantezleri doğru kapat. "
 )
 
 

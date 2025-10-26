@@ -80,14 +80,14 @@ class AIClient:
             except Exception:
                 pass
             # Final fallback: return empty, with warnings including raw text (truncated)
-            preview = cleaned[:1200] if 'cleaned' in locals() else txt[:1200]
+            raw_full = cleaned if 'cleaned' in locals() else txt
             return {
                 "products_to_create": [],
                 "mappings_to_create": [],
                 "notes": None,
                 "warnings": [
                     "AI yanıtı geçerli JSON değil; öneriler boş döndü.",
-                    f"AI raw (ilk 1200 karakter): {preview}"
+                    f"AI raw: {raw_full}"
                 ],
             }
 
