@@ -206,6 +206,21 @@
         tr.querySelector('.rm').addEventListener('click', ()=> tr.remove());
         if (opts && opts.isAI) tr.classList.add('ai-suggested');
         outsTbody.appendChild(tr);
+
+        // Default color fallback on render and on product change (only if empty)
+        try {
+            const prodSelEl = tr.querySelector('.prodSel');
+            const colorInp = tr.querySelector('td:nth-child(3) input');
+            function applyDefaultColorIfEmpty(){
+                if (!colorInp.value){
+                    const pidNow = Number(prodSelEl.value||0);
+                    const prod = (products||[]).find(p=>Number(p.id)===pidNow);
+                    if (prod && prod.default_color) colorInp.value = prod.default_color;
+                }
+            }
+            applyDefaultColorIfEmpty();
+            prodSelEl.addEventListener('change', applyDefaultColorIfEmpty);
+        } catch(_) {}
     }
 
     function guessFromPattern(txt){
