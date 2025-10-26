@@ -5,7 +5,7 @@ import re
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from sqlmodel import select
 
-from ..db import get_session, reset_db
+from ..db import get_session, reset_db, DB_PATH
 from ..models import Client, Item, Order, Payment, ImportRun, ImportRow, StockMovement, Product
 from ..services.importer import read_bizim_file, read_kargo_file
 from ..services.importer.committers import process_kargo_row, process_bizim_row
@@ -22,6 +22,38 @@ router = APIRouter(prefix="")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BIZIM_DIR = PROJECT_ROOT / "bizimexcellerimiz"
 KARGO_DIR = PROJECT_ROOT / "kargocununexcelleri"
+
+def _backup_db_snapshot(tag: str | None = None) -> None:
+    """Create a timestamped backup of the SQLite database and sidecar files.
+
+    Backups are stored under PROJECT_ROOT/dbbackups with name app-YYYYMMDD-HHMMSS[-tag].db
+    Sidecar files (-wal, -shm) are copied if present.
+    """
+    try:
+        from datetime import datetime as _dt
+        import shutil as _shutil
+        bdir = PROJECT_ROOT / "dbbackups"
+        bdir.mkdir(parents=True, exist_ok=True)
+        ts = _dt.utcnow().strftime("%Y%m%d-%H%M%S")
+        suffix = f"-{tag}" if tag else ""
+        dst = bdir / f"app-{ts}{suffix}.db"
+        src = DB_PATH
+        if src.exists():
+            _shutil.copy2(src, dst)
+            # sidecars
+            for suf in ("-wal", "-shm"):
+                side = Path(str(src) + suf)
+                if side.exists():
+                    _shutil.copy2(side, Path(str(dst) + suf))
+            try:
+                print("[DB BACKUP] snapshot created:", dst)
+            except Exception:
+                pass
+    except Exception as _e:
+        try:
+            print("[DB BACKUP] failed:", _e)
+        except Exception:
+            pass
 def parse_item_details(text: str | None) -> tuple[str, int | None, int | None, list[str]]:
 	"""Extract base item name, height(cm), weight(kg), and extra notes.
 
@@ -336,6 +368,8 @@ def import_map(source: str, filename: str, request: Request):
 def commit_import(body: dict, request: Request):
 	if not request.session.get("uid"):
 		raise HTTPException(status_code=401, detail="Unauthorized")
+    # Always take a DB snapshot before a commit run
+    _backup_db_snapshot(tag="commit")
 	source = body.get("source")
 	filename = body.get("filename")
 	filenames = body.get("filenames")
@@ -684,6 +718,8 @@ async def upload_excel(
 		raise HTTPException(status_code=400, detail="source must be 'bizim' or 'kargo'")
 	folder = BIZIM_DIR if source == "bizim" else KARGO_DIR
 	folder.mkdir(parents=True, exist_ok=True)
+    # DB snapshot before accepting new import files
+    _backup_db_snapshot(tag="upload")
 
 	# unify inputs: accept either 'files' (multiple) or single 'file'
 	uploads: List[UploadFile] = []
