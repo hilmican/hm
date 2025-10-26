@@ -79,12 +79,16 @@ class AIClient:
                     return json.loads(segment)
             except Exception:
                 pass
-            # Final fallback: return empty, with warning to surface in UI instead of 500
+            # Final fallback: return empty, with warnings including raw text (truncated)
+            preview = cleaned[:1200] if 'cleaned' in locals() else txt[:1200]
             return {
                 "products_to_create": [],
                 "mappings_to_create": [],
                 "notes": None,
-                "warnings": ["AI yanıtı geçerli JSON değil; öneriler boş döndü."]
+                "warnings": [
+                    "AI yanıtı geçerli JSON değil; öneriler boş döndü.",
+                    f"AI raw (ilk 1200 karakter): {preview}"
+                ],
             }
 
 
