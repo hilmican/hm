@@ -3,6 +3,7 @@ from sqlmodel import select
 
 from ..db import get_session
 from ..models import Client, Item, Order, Payment, ImportRow, ImportRun, StockMovement
+from ..services.shipping import compute_shipping_fee
 
 router = APIRouter()
 
@@ -17,15 +18,26 @@ def dashboard(request: Request):
 	# pull small samples for quick display
 	
 	with get_session() as session:
-		# aggregates for header
+		# aggregates for header (align with daily report definitions for all-time)
 		all_orders = session.exec(select(Order)).all()
 		total_sales = sum(float(o.total_amount or 0.0) for o in all_orders)
+		# Payments (all-time)
 		all_payments = session.exec(select(Payment)).all()
-		total_collected = sum(float(p.net_amount or 0.0) for p in all_payments)
-		total_fees = 0.0
-		for p in all_payments:
-			total_fees += float((p.fee_komisyon or 0.0) + (p.fee_hizmet or 0.0) + (p.fee_kargo or 0.0) + (p.fee_iade or 0.0) + (p.fee_erken_odeme or 0.0))
-		total_to_collect = max(0.0, total_sales - total_collected)
+		net_collected = sum(float(p.net_amount or 0.0) for p in all_payments)
+		# Fee breakdown like daily report (shipping by order, not from payments)
+		fee_kom = sum(float(p.fee_komisyon or 0.0) for p in all_payments)
+		fee_hiz = sum(float(p.fee_hizmet or 0.0) for p in all_payments)
+		fee_iad = sum(float(p.fee_iade or 0.0) for p in all_payments)
+		fee_eok = sum(float(p.fee_erken_odeme or 0.0) for p in all_payments)
+		fee_kar = 0.0
+		for o in all_orders:
+			fee_kar += float((o.shipping_fee if o.shipping_fee is not None else compute_shipping_fee(float(o.total_amount or 0.0))) or 0.0)
+		total_fees = fee_kom + fee_hiz + fee_kar + fee_iad + fee_eok
+		# Outstanding like daily report: use gross payments linked to orders
+		order_ids_all = [o.id for o in all_orders if o.id]
+		linked_payments_all = session.exec(select(Payment).where(Payment.order_id.in_(order_ids_all))).all() if order_ids_all else []
+		linked_gross_paid = sum(float(p.amount or 0.0) for p in linked_payments_all)
+		total_to_collect = max(0.0, total_sales - linked_gross_paid)
 
 		orders = session.exec(select(Order).order_by(Order.id.desc()).limit(20)).all()
 		# fetch only the related clients/items for shown orders (no extra limits)
@@ -109,7 +121,7 @@ def dashboard(request: Request):
 			{
 				"request": request,
 				"total_sales": total_sales,
-				"total_collected": total_collected,
+				"total_collected": net_collected,
 				"total_to_collect": total_to_collect,
 				"total_fees": total_fees,
 				"clients": clients,
