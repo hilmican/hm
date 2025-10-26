@@ -5,7 +5,7 @@
     <title>Haritalandirma Sihirbazi</title>
     <style>
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
-        .layout { display: grid; grid-template-columns: 340px 1fr 1.1fr; gap: 16px; }
+        .layout { display: grid; grid-template-columns: 340px 1fr; gap: 16px; }
         .card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
         .card h2 { margin: 0; padding: 10px 12px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
         .card .inner { padding: 12px; }
@@ -54,6 +54,25 @@
                 </ul>
             </div>
         </div>
+        {% if filenames and filenames|length > 1 %}
+        <div class="card" style="grid-column: 1">
+            <h2>Dosya Bazli Tarihler</h2>
+            <div class="inner">
+                <table>
+                    <thead><tr><th>Dosya</th><th>Data tarihi (YYYY-MM-DD)</th></tr></thead>
+                    <tbody id="datesTbody">
+                        {% for fn in filenames %}
+                        <tr>
+                            <td>{{ fn }}</td>
+                            <td><input type="date" data-filename="{{ fn }}" /></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="muted">Each file will use its specific date during commit.</div>
+            </div>
+        </div>
+        {% endif %}
         <div class="card" style="grid-column: 2">
             <h2>Editor</h2>
             <div class="inner">
@@ -98,7 +117,7 @@
                 </div>
             </div>
         </div>
-        <div class="card" id="aiPanel" style="display:none; grid-column: 3;">
+        <div class="card" id="aiPanel" style="display:none; grid-column: 2;">
             <h2>AI Önerileri</h2>
             <div class="inner">
                 <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
@@ -122,25 +141,7 @@
                 </div>
             </div>
         </div>
-        {% if filenames and filenames|length > 1 %}
-        <div class="card" style="grid-column: 1 / -1">
-            <h2>Dosya Bazli Tarihler</h2>
-            <div class="inner">
-                <table>
-                    <thead><tr><th>Dosya</th><th>Data tarihi (YYYY-MM-DD)</th></tr></thead>
-                    <tbody id="datesTbody">
-                        {% for fn in filenames %}
-                        <tr>
-                            <td>{{ fn }}</td>
-                            <td><input type="date" data-filename="{{ fn }}" /></td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                <div class="muted">Each file will use its specific date during commit.</div>
-            </div>
-        </div>
-        {% endif %}
+        
     </div>
 
     <script>
