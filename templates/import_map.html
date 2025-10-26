@@ -216,7 +216,17 @@
         let size = ''; for (const t of sizeTokens){ if (up.includes(t)) { size = t; break; } }
         let color = ''; for (const t of colorTokens){ if (up.includes(t)) { color = t; break; } }
         const isCift = up.includes('ÇİFT')||up.includes('CIFT');
-        return { size, color, quantity: isCift ? 2 : 1 };
+        const isTek = up.includes('TEK');
+        let quantity = isCift ? 2 : 1;
+        if (isTek) quantity = 1;
+        // detect numeric pack patterns like "3LÜ", "2LI", "x2", "2 ADET"
+        try {
+            const m1 = up.match(/(\d+)\s*(L[IUÜİ]|ADET)\b/);
+            const m2 = up.match(/X\s*(\d+)/);
+            const n = m1 ? Number(m1[1]) : (m2 ? Number(m2[1]) : NaN);
+            if (!isNaN(n) && n > 0) quantity = n;
+        } catch (_) {}
+        return { size, color, quantity };
     }
 
     function loadInventory(productId){
@@ -496,6 +506,20 @@
         msg.textContent = rows && rows.length ? '' : 'AI herhangi bir ürün önermedi.';
     }
 
+    function inferQuantityFromPattern(txt){
+        txt = txt || '';
+        const up = txt.toUpperCase();
+        if (up.includes('TEK')) return 1;
+        if (up.includes('ÇİFT') || up.includes('CIFT')) return 2;
+        try {
+            const m1 = up.match(/(\d+)\s*(L[IUÜİ]|ADET)\b/);
+            if (m1) return Math.max(1, Number(m1[1]));
+            const m2 = up.match(/X\s*(\d+)/);
+            if (m2) return Math.max(1, Number(m2[1]));
+        } catch (_) {}
+        return null;
+    }
+
     async function applyAiToRuleMap(){
         aiRuleMap = {};
         const rules = (aiSuggestions && aiSuggestions.mappings_to_create) || [];
@@ -507,7 +531,11 @@
                     const s = slugifyClient(o.product_name);
                     if (slugIndex[s]) pid = slugIndex[s];
                 }
-                outs.push({ product_id: pid, size: o.size||null, color: o.color||null, quantity: o.quantity||1, unit_price: (o.unit_price===''?null:o.unit_price) });
+                // Quantity correction from pattern tokens (TEK/ÇİFT/x2/3LÜ/..)
+                let q = Number(o.quantity||1);
+                const inferred = inferQuantityFromPattern(r.source_pattern||'');
+                if (inferred !== null) q = inferred;
+                outs.push({ product_id: pid, size: o.size||null, color: o.color||null, quantity: q, unit_price: (o.unit_price===''?null:o.unit_price) });
             }
             aiRuleMap[r.source_pattern] = outs;
         }
