@@ -79,7 +79,12 @@ class AIClient:
                     return json.loads(segment)
             except Exception:
                 pass
-            # If still failing, raise a clear error with preview for logs
-            raise ValueError(f"AI returned non-JSON: {txt[:300]}...")
+            # Final fallback: return empty, with warning to surface in UI instead of 500
+            return {
+                "products_to_create": [],
+                "mappings_to_create": [],
+                "notes": None,
+                "warnings": ["AI yanıtı geçerli JSON değil; öneriler boş döndü."]
+            }
 
 
