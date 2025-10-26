@@ -31,6 +31,10 @@
         #aiProductModal th, #aiProductModal td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
         #aiProductModal .actions { display:flex; gap:8px; justify-content: flex-end; padding: 12px; border-top:1px solid #e5e7eb; }
         .muted { color: #6b7280; font-size: 12px; }
+        /* Button spinner */
+        .btn-loading { opacity: 0.8; cursor: default; }
+        .spinner { display:inline-block; width:14px; height:14px; border:2px solid rgba(255,255,255,0.9); border-top-color: transparent; border-radius:50%; vertical-align:middle; margin-right:6px; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -567,6 +571,11 @@
         }
     }
     aiBtn?.addEventListener('click', async ()=>{
+        if (!aiBtn) return;
+        const originalText = aiBtn.textContent;
+        aiBtn.classList.add('btn-loading');
+        aiBtn.disabled = true;
+        aiBtn.innerHTML = '<span class="spinner"></span>Öneriler alınıyor...';
         try {
             const unmatched = collectUnmatched();
             const r = await fetch('/mappings/ai/suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ unmatched_patterns: unmatched, context: { products } })});
@@ -576,6 +585,11 @@
             document.getElementById('aiModalMsg').textContent = (aiSuggestions.warnings&&aiSuggestions.warnings.length) ? aiSuggestions.warnings.join(' • ') : '';
             document.getElementById('aiProductModal').style.display = 'flex';
         } catch (e) { alert('Öneri hatası'); }
+        finally {
+            aiBtn.classList.remove('btn-loading');
+            aiBtn.disabled = false;
+            aiBtn.textContent = originalText;
+        }
     });
     document.addEventListener('click', async (e)=>{
         if (e.target && e.target.id === 'aiModalNext'){

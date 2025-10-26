@@ -48,7 +48,7 @@ def create_product(
 		p = Product(name=name, slug=slug, default_unit=default_unit, default_price=default_price, default_color=default_color)
 		session.add(p)
 		session.flush()
-		return {"id": p.id, "name": p.name, "slug": p.slug}
+		return {"id": p.id, "name": p.name, "slug": p.slug, "default_unit": p.default_unit, "default_price": p.default_price, "default_color": p.default_color}
 
 
 @router.get("/table")
