@@ -11,6 +11,19 @@ except Exception:  # pragma: no cover
     OpenAI = None  # type: ignore
 
 
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimator.
+
+    Uses tiktoken if available; otherwise ~4 chars per token heuristic.
+    """
+    try:
+        import tiktoken  # type: ignore
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text or ""))
+    except Exception:
+        return max(1, len(text or "") // 4)
+
+
 class AIClient:
     """Thin wrapper around OpenAI client focused on JSON responses.
 
@@ -35,7 +48,7 @@ class AIClient:
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.2,
-        max_output_tokens: int = 2000,
+        max_output_tokens: int | None = None,
         extra_messages: Optional[list[dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         if not self._enabled or not self._client:
@@ -50,6 +63,20 @@ class AIClient:
                 if isinstance(m, dict) and "role" in m and "content" in m:
                     messages.append({"role": str(m["role"]), "content": str(m["content"])})
         messages.append({"role": "user", "content": user_prompt})
+
+        # Compute dynamic max tokens if not provided
+        if max_output_tokens is None:
+            # Defaults target for 128k context models; can be overridden via env
+            ctx_limit = int(os.getenv("AI_CTX_LIMIT", "128000"))
+            out_ratio = float(os.getenv("AI_TARGET_OUT_RATIO", "1.3"))
+            safety_in = int(os.getenv("AI_SAFETY_IN_TOK", "512"))
+            safety_out_min = int(os.getenv("AI_SAFETY_OUT_MIN", "1024"))
+
+            joined = "".join([(m.get("content") or "") for m in messages])
+            in_tokens = _estimate_tokens(joined)
+            target_out = int(in_tokens * out_ratio) + 256
+            available = max(safety_out_min, ctx_limit - in_tokens - safety_in)
+            max_output_tokens = max(1, min(target_out, available))
 
         # JSON mode
         response = self._client.chat.completions.create(

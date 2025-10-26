@@ -200,7 +200,10 @@ def ai_suggest(req: AISuggestRequest, request: Request) -> AISuggestResponse:
             "warnings": ["str"],
         },
     }
-    user = "Lütfen sadece JSON döndür. Girdi:" + "\n" + _json.dumps(body, ensure_ascii=False)
+    user = (
+        "Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
+        "Tüm alanlar çift tırnaklı olmalı.\nGirdi:" + "\n" + _json.dumps(body, ensure_ascii=False)
+    )
 
     raw = ai.generate_json(system_prompt=system, user_prompt=user)
 
