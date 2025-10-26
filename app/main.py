@@ -60,6 +60,11 @@ def create_app() -> FastAPI:
 	app.include_router(ig.router)
 	app.include_router(reports.router, prefix="/reports", tags=["reports"]) 
 
+	# ultra-light health endpoint (no DB touches)
+	@app.get("/health")
+	def _health() -> dict:
+		return {"status": "ok"}
+
 	return app
 
 
