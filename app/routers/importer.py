@@ -368,8 +368,8 @@ def import_map(source: str, filename: str, request: Request):
 def commit_import(body: dict, request: Request):
 	if not request.session.get("uid"):
 		raise HTTPException(status_code=401, detail="Unauthorized")
-    # Always take a DB snapshot before a commit run
-    _backup_db_snapshot(tag="commit")
+	# Always take a DB snapshot before a commit run
+	_backup_db_snapshot(tag="commit")
 	source = body.get("source")
 	filename = body.get("filename")
 	filenames = body.get("filenames")
@@ -718,8 +718,8 @@ async def upload_excel(
 		raise HTTPException(status_code=400, detail="source must be 'bizim' or 'kargo'")
 	folder = BIZIM_DIR if source == "bizim" else KARGO_DIR
 	folder.mkdir(parents=True, exist_ok=True)
-    # DB snapshot before accepting new import files
-    _backup_db_snapshot(tag="upload")
+	# DB snapshot before accepting new import files
+	_backup_db_snapshot(tag="upload")
 
 	# unify inputs: accept either 'files' (multiple) or single 'file'
 	uploads: List[UploadFile] = []
