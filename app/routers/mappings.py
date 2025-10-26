@@ -7,7 +7,7 @@ from sqlmodel import select
 
 from ..db import get_session
 from ..models import ItemMappingRule, ItemMappingOutput, Product, Item
-from ..schemas import AISuggestRequest, AISuggestResponse, AIApplyRequest
+from ..schemas import AISuggestRequest, AISuggestResponse, AIApplyRequest, ProductCreateSuggestion
 from ..utils.slugify import slugify
 from ..db import get_session
 from sqlmodel import select
