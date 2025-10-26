@@ -9,6 +9,7 @@ from ..db import get_session
 from ..models import ItemMappingRule, ItemMappingOutput, Product, Item
 from ..schemas import AISuggestRequest, AISuggestResponse, AIApplyRequest, ProductCreateSuggestion
 from ..utils.slugify import slugify
+from ..services.prompts import MAPPING_SYSTEM_PROMPT
 from ..db import get_session
 from sqlmodel import select
 
@@ -167,14 +168,7 @@ def ai_suggest(req: AISuggestRequest, request: Request) -> AISuggestResponse:
         raise HTTPException(status_code=503, detail="AI not configured")
 
     # Build concise prompt with constraints and examples (Turkish context)
-    system = (
-        "Sen bir stok ve sipariş eşleştirme yardımcısısın. "
-        "Girdi: Eşleşmeyen ürün patternleri. Çıktı: JSON olarak ürün önerileri ve eşleme kuralları. "
-        "Kurallar: 1) Birim 'adet'. 2) Çoklu renkler '+' ile gelirse her renk ayrı çıktı olmalı (aynı beden). "
-        "3) Renkler Türkçe büyük harf ve noktalı harfler ile yazılmalı: SİYAH, LACİVERT, GRİ, AÇIK GRİ, KREM, BEYAZ vb. "
-        "4) Varsa verilen ürün listesinde olan ürünü kullan; yoksa yaratılacak ürünler listesine ekle. "
-        "Sadece geçerli JSON döndür."
-    )
+    system = MAPPING_SYSTEM_PROMPT
     # Provide compact input as JSON string to the model
     import json as _json
     body = {
