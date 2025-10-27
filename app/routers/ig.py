@@ -7,9 +7,12 @@ from ..db import get_session
 from ..models import Message
 from sqlmodel import select
 from ..services.instagram_api import sync_latest_conversations
+from ..services.instagram_api import _get_base_token_and_id, GRAPH_VERSION
 import json
 from pathlib import Path
 from fastapi.responses import FileResponse
+import time
+import httpx
 
 
 router = APIRouter(prefix="/ig", tags=["instagram"])
@@ -185,4 +188,86 @@ async def refresh_thread(conversation_id: str):
             pass
         return {"status": "error", "error": str(e)}
 
+
+@router.post("/inbox/{conversation_id}/send")
+async def send_message(conversation_id: str, body: dict):
+    """Send a text reply to the other party in this conversation and persist locally.
+
+    conversation_id formats supported:
+    - "dm:<ig_user_id>" (preferred)
+    - Graph conversation id: will resolve other party id from recent messages
+    """
+    text_val = (body or {}).get("text")
+    if not text_val or not isinstance(text_val, str) or not text_val.strip():
+        raise HTTPException(status_code=400, detail="Message text is required")
+    text_val = text_val.strip()
+
+    # Resolve recipient (other party IG user id)
+    other_id: str | None = None
+    if conversation_id.startswith("dm:"):
+        other_id = conversation_id.split(":", 1)[1] or None
+    else:
+        # Fallback: infer from existing messages
+        with get_session() as session:
+            msgs = session.exec(
+                select(Message).where(Message.conversation_id == conversation_id).order_by(Message.timestamp_ms.desc()).limit(50)
+            ).all()
+            for m in msgs:
+                # other party is sender on inbound, recipient on outbound
+                if (m.direction or "in") == "in" and m.ig_sender_id:
+                    other_id = str(m.ig_sender_id)
+                    break
+                if (m.direction or "in") == "out" and m.ig_recipient_id:
+                    other_id = str(m.ig_recipient_id)
+                    break
+    if not other_id:
+        raise HTTPException(status_code=400, detail="Could not resolve recipient for this conversation")
+
+    # Send via Messenger API for Instagram (requires Page token)
+    token, entity_id, is_page = _get_base_token_and_id()
+    if not is_page:
+        raise HTTPException(status_code=400, detail="Sending requires a Page access token (IG_PAGE_ACCESS_TOKEN)")
+    base = f"https://graph.facebook.com/{GRAPH_VERSION}"
+    url = base + "/me/messages"
+    payload = {
+        "recipient": {"id": other_id},
+        "messaging_type": "RESPONSE",
+        "message": {"text": text_val},
+    }
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.post(url, params={"access_token": token}, json=payload, timeout=20)
+            r.raise_for_status()
+            resp = r.json()
+        except httpx.HTTPStatusError as e:
+            try:
+                detail = e.response.text
+            except Exception:
+                detail = str(e)
+            raise HTTPException(status_code=502, detail=f"Graph send failed: {detail}")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Graph send failed: {e}")
+
+    # Persist locally
+    mid = str((resp or {}).get("message_id") or "")
+    now_ms = int(time.time() * 1000)
+    conv_id = conversation_id if conversation_id.startswith("dm:") else f"dm:{other_id}"
+    with get_session() as session:
+        row = Message(
+            ig_sender_id=str(entity_id),
+            ig_recipient_id=str(other_id),
+            ig_message_id=(mid or None),
+            text=text_val,
+            attachments_json=None,
+            timestamp_ms=now_ms,
+            raw_json=json.dumps({"send_response": resp}, ensure_ascii=False),
+            conversation_id=conv_id,
+            direction="out",
+        )
+        session.add(row)
+    try:
+        await notify_new_message({"type": "ig_message", "conversation_id": conv_id, "text": text_val, "timestamp_ms": now_ms})
+    except Exception:
+        pass
+    return {"status": "ok", "message_id": mid or None}
 

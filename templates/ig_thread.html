@@ -51,6 +51,12 @@
         <div class="meta">No messages cached yet.</div>
       {% endif %}
     </div>
+    <div style="margin-top:16px">
+      <form id="replyForm" style="display:flex;gap:8px">
+        <input id="replyInput" type="text" placeholder="Type a reply..." style="flex:1;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px" />
+        <button id="sendBtn" type="submit" style="background:#2563eb;color:#fff;border:none;border-radius:8px;padding:10px 14px;cursor:pointer">Send</button>
+      </form>
+    </div>
     <script>
       const btn = document.getElementById('refresh');
       btn?.addEventListener('click', async () => {
@@ -86,6 +92,27 @@
         if (wsConnected) return;
         try { await fetch(location.pathname + '/refresh', { method: 'POST' }); location.reload(); } catch {}
       }, 15000);
+
+      // Send reply
+      const form = document.getElementById('replyForm');
+      const input = document.getElementById('replyInput');
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const text = (input?.value || '').trim();
+        if (!text) return;
+        try {
+          const r = await fetch(location.pathname + '/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+          if (!r.ok) {
+            const t = await r.text();
+            alert('Send failed: ' + t);
+            return;
+          }
+          input.value = '';
+          location.reload();
+        } catch (e) {
+          alert('Send error');
+        }
+      });
     </script>
   </body>
 </html>
