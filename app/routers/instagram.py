@@ -152,7 +152,7 @@ async def receive_events(request: Request):
 							messaging_events.extend(val.get("messaging", []))
 				for event in messaging_events:
 					mobj = event.get("message") or {}
-					if not mobj or mobj.get("is_echo") or mobj.get("is_deleted"):
+					if not mobj or mobj.get("is_deleted"):
 						continue
 					mid = mobj.get("mid") or mobj.get("id")
 					if not mid:
