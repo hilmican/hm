@@ -6,7 +6,7 @@ from sqlmodel import select
 from sqlalchemy import or_, and_
 
 from ..db import get_session
-from ..models import Order, Payment, Item, Client, ImportRun, StockMovement
+from ..models import Order, Payment, Item, Client, ImportRun, StockMovement, OrderItem
 from ..services.shipping import compute_shipping_fee
 
 
@@ -70,26 +70,43 @@ def daily_report(
 		total_quantity = sum(int(o.quantity or 0) for o in orders)
 		total_sales = sum(float(o.total_amount or 0.0) for o in orders)
 
-		# Prefetch items for cost estimation and names
+		# Prefetch items for name display (Order.item_id) and also prefetch OrderItems for cost fallback
 		item_ids = sorted({o.item_id for o in orders if o.item_id})
 		items = session.exec(select(Item).where(Item.id.in_(item_ids))).all() if item_ids else []
 		item_map = {it.id: it for it in items if it.id is not None}
+		order_ids = [o.id for o in orders if o.id]
+		order_items = session.exec(select(OrderItem).where(OrderItem.order_id.in_(order_ids))).all() if order_ids else []
+		# Build order -> list of (item_id, qty) and collect all item ids for cost lookup
+		order_item_map: dict[int, list[tuple[int, int]]] = {}
+		all_oi_item_ids: set[int] = set()
+		for oi in order_items:
+			if oi.order_id is None or oi.item_id is None:
+				continue
+			order_item_map.setdefault(int(oi.order_id), []).append((int(oi.item_id), int(oi.quantity or 0)))
+			all_oi_item_ids.add(int(oi.item_id))
+		# Prefetch costs for all items appearing in order items
+		cost_items = session.exec(select(Item).where(Item.id.in_(sorted(all_oi_item_ids)))).all() if all_oi_item_ids else []
+		cost_map: dict[int, float] = {it.id: float(it.cost or 0.0) for it in cost_items if it.id is not None}
 
 		# Prefetch clients for top clients section
 		client_ids = sorted({o.client_id for o in orders if o.client_id})
 		clients = session.exec(select(Client).where(Client.id.in_(client_ids))).all() if client_ids else []
 		client_map = {c.id: c for c in clients if c.id is not None}
 
-		# Compute total cost (use order.total_cost if available; otherwise estimate)
+		# Compute total cost (prefer stored per-order total_cost; otherwise sum over OrderItems * item.cost)
 		total_cost = 0.0
 		for o in orders:
 			if o.total_cost is not None:
 				total_cost += float(o.total_cost or 0.0)
 			else:
-				if o.item_id and o.item_id in item_map:
-					base_cost = float(item_map[o.item_id].cost or 0.0)
-					qty = int(o.quantity or 0)
-					total_cost += base_cost * qty
+				acc = 0.0
+				if o.id and (o.id in order_item_map):
+					for (iid, qty) in order_item_map.get(o.id, []):
+						acc += float(cost_map.get(iid, 0.0)) * int(qty or 0)
+				elif o.item_id and (o.item_id in item_map):
+					# fallback to single-item orders if present
+					acc = float(item_map[o.item_id].cost or 0.0) * int(o.quantity or 0)
+				total_cost += acc
 
 		gross_profit = total_sales - total_cost
 		gross_margin = (gross_profit / total_sales) if total_sales > 0 else 0.0
@@ -272,3 +289,71 @@ def daily_report(
 		)
 
 
+@router.post("/recalculate-costs")
+def recalculate_costs(
+	start: Optional[str] = Query(default=None),
+	end: Optional[str] = Query(default=None),
+	date_field: str = Query(default="shipment", regex="^(shipment|data|both)$"),
+):
+	"""Backfill per-order total_cost using OrderItems and Item.cost for the selected period."""
+	# default to last 7 days inclusive
+	today = dt.date.today()
+	default_start = today - dt.timedelta(days=6)
+	start_date = _parse_date_or_default(start, default_start)
+	end_date = _parse_date_or_default(end, today)
+	if end_date < start_date:
+		start_date, end_date = end_date, start_date
+	updated = 0
+	with get_session() as session:
+		# Select orders as in daily_report
+		if date_field == "both":
+			orders = session.exec(
+				select(Order)
+				.where(
+					or_(
+						and_(Order.shipment_date.is_not(None), Order.shipment_date >= start_date, Order.shipment_date <= end_date),
+						and_(Order.data_date.is_not(None), Order.data_date >= start_date, Order.data_date <= end_date),
+					)
+				)
+				.order_by(Order.id.desc())
+			).all()
+		else:
+			date_col = Order.shipment_date if date_field == "shipment" else Order.data_date
+			alt_date_col = Order.data_date if date_field == "shipment" else Order.shipment_date
+			orders = session.exec(
+				select(Order)
+				.where(
+					or_(
+						and_(date_col.is_not(None), date_col >= start_date, date_col <= end_date),
+						and_(date_col.is_(None), alt_date_col.is_not(None), alt_date_col >= start_date, alt_date_col <= end_date),
+					)
+				)
+				.order_by(Order.id.desc())
+			).all()
+		# Group OrderItems and costs
+		order_ids = [o.id for o in orders if o.id]
+		order_items = session.exec(select(OrderItem).where(OrderItem.order_id.in_(order_ids))).all() if order_ids else []
+		order_item_map: dict[int, list[tuple[int, int]]] = {}
+		all_item_ids: set[int] = set()
+		for oi in order_items:
+			if oi.order_id is None or oi.item_id is None:
+				continue
+			order_item_map.setdefault(int(oi.order_id), []).append((int(oi.item_id), int(oi.quantity or 0)))
+			all_item_ids.add(int(oi.item_id))
+		cost_items = session.exec(select(Item).where(Item.id.in_(sorted(all_item_ids)))).all() if all_item_ids else []
+		cost_map: dict[int, float] = {it.id: float(it.cost or 0.0) for it in cost_items if it.id is not None}
+		# Recompute per order
+		for o in orders:
+			acc = 0.0
+			if o.id and (o.id in order_item_map):
+				for (iid, qty) in order_item_map.get(o.id, []):
+					acc += float(cost_map.get(iid, 0.0)) * int(qty or 0)
+			elif o.item_id is not None:
+				it = session.exec(select(Item).where(Item.id == o.item_id)).first()
+				if it:
+					acc = float(it.cost or 0.0) * int(o.quantity or 0)
+			# Update only if changed or previously null
+			if o.total_cost is None or float(o.total_cost or 0.0) != round(acc, 2):
+				o.total_cost = round(acc, 2)
+				updated += 1
+	return {"status": "ok", "updated_orders": updated}

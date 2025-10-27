@@ -41,7 +41,7 @@
             <a class="active" href="/reports/daily">Günlük Rapor</a>
         </div>
 
-        <form class="toolbar" method="get" action="/reports/daily">
+        <form class="toolbar" method="get" action="/reports/daily" onsubmit="/*noop*/">
             <div>
                 <label style="display:block;font-size:12px;color:#374151">Başlangıç</label>
                 <input type="date" name="start" value="{{ start }}" />
@@ -59,7 +59,10 @@
                 </div>
             </div>
             <div>
-                <button class="btn" type="submit">Uygula</button>
+                <button class="btn" type="submit" onclick="this.closest('form').method='get'; this.closest('form').action='/reports/daily'">Uygula</button>
+            </div>
+            <div>
+                <button class="btn" type="button" onclick="recalcCosts()" style="background:#0ea5e9">Maliyeti Yeniden Hesapla</button>
             </div>
         </form>
 
@@ -250,6 +253,25 @@
                 </table>
             </div>
         </div>
+        <script>
+        async function recalcCosts(){
+            try{
+                const params = new URLSearchParams(new FormData(document.querySelector('form.toolbar')));
+                const res = await fetch(`/reports/recalculate-costs?${params.toString()}`, { method: 'POST' });
+                if(!res.ok){
+                    const t = await res.text();
+                    alert('Hesaplama başarısız: ' + t);
+                    return;
+                }
+                const j = await res.json();
+                alert(`Güncellendi: ${j.updated_orders} sipariş`);
+                // Refresh the page to reflect recalculated totals
+                location.href = `/reports/daily?${params.toString()}`;
+            }catch(e){
+                alert('Ağ hatası: ' + e);
+            }
+        }
+        </script>
     </body>
     </html>
 
