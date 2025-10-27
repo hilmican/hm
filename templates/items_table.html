@@ -38,7 +38,7 @@
     <h2>Varyantlar</h2>
     <table id="itemsTbl">
         <thead>
-            <tr><th>ID</th><th>SKU</th><th>Ad</th><th>Urun</th><th>Beden</th><th>Renk</th><th>Fiyat</th><th>Maliyet</th><th>Stok</th><th>Birim</th></tr>
+            <tr><th>ID</th><th>SKU</th><th>Ad</th><th>Urun</th><th>Beden</th><th>Renk</th><th>Fiyat</th><th>Maliyet</th><th>Stok</th><th>Birim</th><th></th></tr>
         </thead>
         <tbody>
             {% for it in rows %}
@@ -59,6 +59,9 @@
                 </td>
                 <td>{{ stock_map.get(it.id, 0) }}</td>
                 <td>{{ it.unit }}</td>
+                <td>
+                    <button onclick="deleteVariant({{ it.id }}, '{{ it.name | replace("'", " ") }}')" style="background:#ef4444;color:#fff;border:none;border-radius:6px;padding:4px 8px;cursor:pointer">Sil</button>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -73,6 +76,20 @@
                 alert('Guncelleme basarisiz: ' + txt);
                 return;
             }
+        }catch(e){
+            alert('Ag hatasi: ' + e);
+        }
+    }
+    async function deleteVariant(id, name){
+        if(!confirm(`Varyant silinsin mi?\n${name} (#${id})`)) return;
+        try{
+            const res = await fetch(`/items/${id}`, { method: 'DELETE' });
+            if(!res.ok){
+                const txt = await res.text();
+                alert('Silme basarisiz: ' + txt);
+                return;
+            }
+            location.reload();
         }catch(e){
             alert('Ag hatasi: ' + e);
         }

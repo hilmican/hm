@@ -13,7 +13,12 @@ router = APIRouter()
 @router.get("/")
 def list_items(limit: int = Query(default=100, ge=1, le=1000)):
 	with get_session() as session:
-		rows = session.exec(select(Item).order_by(Item.id.desc()).limit(limit)).all()
+		rows = session.exec(
+			select(Item)
+			.where((Item.status.is_(None)) | (Item.status != "inactive"))
+			.order_by(Item.id.desc())
+			.limit(limit)
+		).all()
 		stock_map = get_stock_map(session)
 		return {
 			"items": [
@@ -37,7 +42,12 @@ def list_items(limit: int = Query(default=100, ge=1, le=1000)):
 @router.get("/table")
 def list_items_table(request: Request, limit: int = Query(default=1000000, ge=1, le=1000000)):
 	with get_session() as session:
-		rows = session.exec(select(Item).order_by(Item.id.desc()).limit(limit)).all()
+		rows = session.exec(
+			select(Item)
+			.where((Item.status.is_(None)) | (Item.status != "inactive"))
+			.order_by(Item.id.desc())
+			.limit(limit)
+		).all()
 		stock_map = get_stock_map(session)
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
@@ -49,7 +59,12 @@ def list_items_table(request: Request, limit: int = Query(default=1000000, ge=1,
 @router.get("/variants")
 def list_variants(limit: int = Query(default=1000, ge=1, le=10000)):
 	with get_session() as session:
-		rows = session.exec(select(Item).order_by(Item.id.desc()).limit(limit)).all()
+		rows = session.exec(
+			select(Item)
+			.where((Item.status.is_(None)) | (Item.status != "inactive"))
+			.order_by(Item.id.desc())
+			.limit(limit)
+		).all()
 		stock_map = get_stock_map(session)
 		return {
 			"variants": [
@@ -66,6 +81,17 @@ def list_variants(limit: int = Query(default=1000, ge=1, le=10000)):
 				for it in rows
 			]
 		}
+
+
+@router.delete("/{item_id}")
+def delete_item(item_id: int):
+	with get_session() as session:
+		it = session.exec(select(Item).where(Item.id == item_id)).first()
+		if not it:
+			raise HTTPException(status_code=404, detail="Item not found")
+		# Soft-delete: mark inactive to keep SKU as tombstone and prevent recreation
+		it.status = "inactive"
+		return {"status": "ok", "item_id": it.id, "deleted": True}
 
 
 @router.put("/{item_id}/price")

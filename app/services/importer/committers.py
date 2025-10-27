@@ -230,6 +230,9 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             it: Optional[Item] = None
             if out.item_id:
                 it = session.exec(select(Item).where(Item.id == out.item_id)).first()
+                if it and (it.status or "") == "inactive":
+                    # Skip tombstoned variants
+                    it = None
             else:
                 prod: Optional[Product] = None
                 if out.product_id:
@@ -247,6 +250,9 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                     size=out.size,
                     color=out.color,
                 )
+                if it and (it.status or "") == "inactive":
+                    # Do not resurrect deleted variants
+                    it = None
             if it:
                 # Optionally update price from mapping output; do not use for accounting
                 if out.unit_price is not None:
@@ -256,6 +262,9 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
         # fallback generic item; mark as unmatched later
         sku = slugify(base_name)
         item = session.exec(select(Item).where(Item.sku == sku)).first()
+        if item and (item.status or "") == "inactive":
+            # Do not use or recreate tombstoned generic item
+            item = None
         if not item:
             item = Item(sku=sku, name=base_name)
             session.add(item)
@@ -372,10 +381,14 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
     except Exception:
         pass
 
-    # mark unmatched if there was no mapping rule
-    if not outputs:
-        status = "unmatched"
-        message = f"No mapping rule for '{base_name}'"
+    # mark unmatched if there was no usable mapping output
+    if not outputs or not created_items:
+        if not outputs:
+            status = "unmatched"
+            message = f"No mapping rule for '{base_name}'"
+        else:
+            status = "skipped"
+            message = f"Variant is deleted/inactive for '{base_name}'"
     return status, message, matched_client_id, matched_order_id
 
 
