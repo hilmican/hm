@@ -62,12 +62,12 @@ def rules_table(request: Request, limit: int = Query(default=1000, ge=1, le=5000
 		for r in rules:
 			outs = session.exec(select(ItemMappingOutput).where(ItemMappingOutput.rule_id == r.id)).all()
 			result.append((r, outs))
-        # fetch products for comboboxes
-        prods = session.exec(select(Product).order_by(Product.id.desc()).limit(5000)).all()
+		# fetch products for comboboxes
+		prods = session.exec(select(Product).order_by(Product.id.desc()).limit(5000)).all()
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"mappings_table.html",
-            {"request": request, "rows": result, "products": prods},
+			{"request": request, "rows": result, "products": prods},
 		)
 
 
