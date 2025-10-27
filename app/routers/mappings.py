@@ -62,10 +62,12 @@ def rules_table(request: Request, limit: int = Query(default=1000, ge=1, le=5000
 		for r in rules:
 			outs = session.exec(select(ItemMappingOutput).where(ItemMappingOutput.rule_id == r.id)).all()
 			result.append((r, outs))
+        # fetch products for comboboxes
+        prods = session.exec(select(Product).order_by(Product.id.desc()).limit(5000)).all()
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"mappings_table.html",
-			{"request": request, "rows": result},
+            {"request": request, "rows": result, "products": prods},
 		)
 
 
@@ -134,6 +136,50 @@ def patch_rule(rule_id: int, body: Dict[str, Any]):
             if f in body:
                 setattr(r, f, body.get(f))
         return {"status": "ok"}
+
+
+@router.patch("/outputs/{output_id}")
+def patch_output(output_id: int, body: Dict[str, Any]):
+    """Update a single mapping output. Primarily used to change product assignment quickly from the table UI."""
+    allowed = {"item_id", "product_id", "size", "color", "quantity", "unit_price"}
+    with get_session() as session:
+        o = session.exec(select(ItemMappingOutput).where(ItemMappingOutput.id == output_id)).first()
+        if not o:
+            raise HTTPException(status_code=404, detail="Output not found")
+        # validate and apply fields
+        if "product_id" in body:
+            pid = body.get("product_id")
+            if pid in (None, "", 0):
+                o.product_id = None
+            else:
+                try:
+                    pid_int = int(pid)
+                except Exception:
+                    raise HTTPException(status_code=400, detail="Invalid product_id")
+                p = session.exec(select(Product).where(Product.id == pid_int)).first()
+                if not p:
+                    raise HTTPException(status_code=404, detail="Product not found")
+                o.product_id = pid_int
+        if "item_id" in body:
+            val = body.get("item_id")
+            o.item_id = int(val) if val not in (None, "") else None
+        if "size" in body:
+            o.size = body.get("size") or None
+        if "color" in body:
+            o.color = body.get("color") or None
+        if "quantity" in body:
+            try:
+                q = body.get("quantity")
+                o.quantity = int(q) if q is not None else o.quantity
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid quantity")
+        if "unit_price" in body:
+            try:
+                up = body.get("unit_price")
+                o.unit_price = float(up) if up is not None else None
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid unit_price")
+        return {"status": "ok", "id": o.id}
 
 
 @router.put("/rules/{rule_id}/outputs")

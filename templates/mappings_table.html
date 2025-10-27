@@ -19,6 +19,7 @@
     <div class="toolbar">
         <a href="/dashboard">← Dashboard</a>
         <a href="/inventory/table">Inventory</a>
+        <a href="/products/table">Products</a>
         <span class="pill">{{ rows|length }} rule(s)</span>
     </div>
     <h2>Mapping Rules</h2>
@@ -48,7 +49,18 @@
                     <ul>
                         {% for o in outs %}
                         <li>
-                            item_id={{ o.item_id }}, product_id={{ o.product_id }}, size={{ o.size }}, color={{ o.color }}, qty={{ o.quantity }}, price={{ o.unit_price }}
+                            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                                <span>#{{ o.id }}</span>
+                                <label>Product</label>
+                                <select class="prodSel" data-output-id="{{ o.id }}">
+                                    <option value="">— none —</option>
+                                    {% for p in products %}
+                                        <option value="{{ p.id }}" {% if o.product_id==p.id %}selected{% endif %}>{{ p.name }} (#{{ p.id }})</option>
+                                    {% endfor %}
+                                </select>
+                                <span>size={{ o.size }}, color={{ o.color }}, qty={{ o.quantity }}, price={{ o.unit_price }}</span>
+                                <button class="updOutBtn" data-output-id="{{ o.id }}">Update</button>
+                            </div>
                         </li>
                         {% endfor %}
                     </ul>
@@ -109,6 +121,23 @@
                 alert('Outputs saved');
                 location.reload();
             } catch (err) { alert('Edit outputs error'); }
+        });
+    }
+
+    // inline product update for outputs
+    for (const btn of document.querySelectorAll('.updOutBtn')){
+        btn.addEventListener('click', async (e)=>{
+            const outId = e.target.getAttribute('data-output-id');
+            const root = e.target.closest('li');
+            const sel = root.querySelector('select.prodSel');
+            const pid = sel ? sel.value : '';
+            try {
+                const r = await fetch('/mappings/outputs/' + outId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ product_id: pid ? Number(pid) : null }) });
+                if (!r.ok) throw new Error(await r.text());
+                // no full reload needed; just show feedback
+                e.target.textContent = 'Updated';
+                setTimeout(()=>{ e.target.textContent = 'Update'; }, 800);
+            } catch (err) { alert('Update failed'); }
         });
     }
     </script>

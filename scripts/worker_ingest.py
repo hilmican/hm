@@ -5,6 +5,9 @@ from typing import Optional
 
 from app.services.queue import dequeue, delete_job, increment_attempts
 from app.services.ingest import handle as handle_ingest
+from app.services.monitoring import record_heartbeat, increment_counter
+import os
+import socket
 
 
 log = logging.getLogger("worker.ingest")
@@ -13,6 +16,11 @@ logging.basicConfig(level=logging.INFO)
 
 def main() -> None:
 	while True:
+		# heartbeat even when idle
+		try:
+			record_heartbeat("ingest", os.getpid(), socket.gethostname())
+		except Exception:
+			pass
 		job = dequeue("ingest", timeout=5)
 		if not job:
 			time.sleep(0.25)
@@ -26,6 +34,12 @@ def main() -> None:
 				continue
 			inserted = handle_ingest(raw_id)
 			log.info("ingest ok jid=%s raw=%s inserted=%s", jid, raw_id, inserted)
+			# counters: messages ingested
+			try:
+				if inserted and int(inserted) > 0:
+					increment_counter("messages", int(inserted))
+			except Exception:
+				pass
 			delete_job(jid)
 		except Exception as e:
 			log.warning("ingest fail jid=%s raw=%s err=%s", jid, raw_id, e)

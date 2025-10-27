@@ -4,6 +4,9 @@ import logging
 
 from app.services.queue import dequeue, delete_job, increment_attempts
 from app.services.media import fetch_and_store
+from app.services.monitoring import record_heartbeat, increment_counter
+import os
+import socket
 
 
 log = logging.getLogger("worker.media")
@@ -12,6 +15,11 @@ logging.basicConfig(level=logging.INFO)
 
 def main() -> None:
 	while True:
+		# heartbeat when idle
+		try:
+			record_heartbeat("media", os.getpid(), socket.gethostname())
+		except Exception:
+			pass
 		job = dequeue("fetch_media", timeout=5)
 		if not job:
 			time.sleep(0.25)
@@ -42,6 +50,11 @@ def main() -> None:
 				import asyncio
 				asyncio.run(fetch_and_store(att_id))
 			log.info("media ok jid=%s att=%s", jid, att_id)
+			# increment generic media fetch counter; fine-grained per kind will be handled after DB update by separate read if needed
+			try:
+				increment_counter("media_fetch", 1)
+			except Exception:
+				pass
 			delete_job(jid)
 		except Exception as e:
 			log.warning("media fail jid=%s att=%s err=%s", jid, att_id, e)

@@ -7,6 +7,7 @@ from redis import Redis
 from sqlalchemy import text
 
 from ..db import get_session
+from .monitoring import queue_enqueue_time_add, queue_enqueue_time_remove
 
 
 _redis_client: Optional[Redis] = None
@@ -56,6 +57,11 @@ def enqueue(kind: str, key: str, payload: Optional[dict] = None, max_attempts: i
 	job_id = _ensure_job(kind=kind, key=key, payload=payload, max_attempts=max_attempts)
 	msg = json.dumps({"id": job_id, "kind": kind, "key": key})
 	_get_redis().lpush(f"jobs:{kind}", msg)
+	# track enqueue time for latency metrics
+	try:
+		queue_enqueue_time_add(kind, job_id)
+	except Exception:
+		pass
 	return job_id
 
 
@@ -109,6 +115,11 @@ def dequeue(kind: str, timeout: int = 5) -> Optional[dict]:
 		job_id = int(data.get("id"))
 	except Exception:
 		return None
+	# remove from enqueue-time tracking upon dequeue
+	try:
+		queue_enqueue_time_remove(kind, job_id)
+	except Exception:
+		pass
 	return get_job(job_id)
 
 

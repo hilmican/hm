@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>NOC</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .card { border:1px solid #e5e7eb; border-radius:8px; padding:16px; margin:12px 0; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+      th { background: #f8fafc; }
+      .muted { color: #6b7280; font-size: 12px; }
+      .ok { color: #16a34a; }
+      .bad { color: #dc2626; }
+      .row { display:flex; gap:16px; }
+      .col { flex:1; }
+      input[type="number"] { width: 80px; }
+    </style>
+  </head>
+  <body>
+    <h2>NOC</h2>
+    <div class="card">
+      <form id="controls" onsubmit="return false;">
+        Window (minutes): <input id="window" type="number" value="60" min="1" max="1440" />
+        <span class="muted" id="now"></span>
+      </form>
+    </div>
+    <div class="row">
+      <div class="col card">
+        <h3>Workers</h3>
+        <table>
+          <thead>
+            <tr><th>Kind</th><th>Host</th><th>PID</th><th>Last Seen (s)</th><th>Version</th></tr>
+          </thead>
+          <tbody id="workers"></tbody>
+        </table>
+      </div>
+      <div class="col card">
+        <h3>Queues</h3>
+        <table>
+          <thead>
+            <tr><th>Kind</th><th>Depth</th><th>Oldest Age (s)</th></tr>
+          </thead>
+          <tbody id="queues"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Rates (Last <span id="wlabel">60</span> min)</h3>
+      <table>
+        <thead>
+          <tr><th>Metric</th><th>Count</th></tr>
+        </thead>
+        <tbody id="rates"></tbody>
+      </table>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      function renderTableBody(id, rows) {
+        $(id).innerHTML = rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('');
+      }
+      async function refresh() {
+        const w = Math.max(1, Math.min(parseInt($("window").value || '60', 10), 1440));
+        const resp = await fetch(`/noc/data?window=${w}`);
+        const data = await resp.json();
+        $("now").textContent = `Updated ${new Date(data.now).toLocaleString()}`;
+        $("wlabel").textContent = data.window_minutes;
+        // Workers
+        const wrows = (data.workers || []).map(x => [x.kind||'', x.host||'', x.pid||'', x.last_seen_sec??'', x.version||'']);
+        renderTableBody('workers', wrows);
+        // Queues
+        const qrows = (data.queues || []).map(q => [q.kind||'', q.depth||0, (q.oldest_age_seconds==null?'':q.oldest_age_seconds)]);
+        renderTableBody('queues', qrows);
+        // Rates
+        const r = data.rates || {};
+        const order = ['messages','enrich_success','enrich_user','enrich_page','media_fetch','media_image','media_video','media_audio'];
+        const rrows = order.map(k => [k, r[k]||0]);
+        renderTableBody('rates', rrows);
+      }
+      $("window").addEventListener('change', refresh);
+      refresh();
+      setInterval(refresh, 5000);
+    </script>
+  </body>
+  </html>
+
+

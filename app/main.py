@@ -11,6 +11,7 @@ from .routers import inventory, mappings, products
 from .routers import instagram
 from .routers import legal
 from .routers import ig
+from .routers import noc
 from .routers import admin
 
 
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
 	app.include_router(legal.router)
 	app.include_router(ig.router)
 	app.include_router(reports.router, prefix="/reports", tags=["reports"]) 
+	app.include_router(noc.router)
 
 	# ultra-light health endpoint (no DB touches)
 	@app.get("/health")
