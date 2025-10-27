@@ -15,40 +15,40 @@ router = APIRouter(prefix="/inventory", tags=["inventory"])
 
 @router.get("/attributes")
 def product_attributes(product_id: int = Query(...)):
-    with get_session() as session:
-        # distinct sizes for the given product (exclude nulls/empty)
-        size_rows = session.exec(
-            select(Item.size).where(
-                Item.product_id == product_id,
-                Item.size != None,
-                (Item.status.is_(None)) | (Item.status != "inactive"),
-            ).distinct()
-        ).all()
-        color_rows = session.exec(
-            select(Item.color).where(
-                Item.product_id == product_id,
-                Item.color != None,
-                (Item.status.is_(None)) | (Item.status != "inactive"),
-            ).distinct()
-        ).all()
-        # SQLModel may return scalars for single-column selects; avoid indexing into strings
-        def _extract(rows):
-            vals = []
-            for r in rows:
-                v = r
-                if isinstance(r, (list, tuple)):
-                    v = r[0]
-                if v:
-                    vals.append(v)
-            return sorted(set(vals))
-        sizes = _extract(size_rows)
-        colors = _extract(color_rows)
-        return {"sizes": sizes, "colors": colors}
+	with get_session() as session:
+		# distinct sizes for the given product (exclude nulls/empty)
+		size_rows = session.exec(
+			select(Item.size).where(
+				Item.product_id == product_id,
+				Item.size != None,
+				(Item.status.is_(None)) | (Item.status != "inactive"),
+			).distinct()
+		).all()
+		color_rows = session.exec(
+			select(Item.color).where(
+				Item.product_id == product_id,
+				Item.color != None,
+				(Item.status.is_(None)) | (Item.status != "inactive"),
+			).distinct()
+		).all()
+		# SQLModel may return scalars for single-column selects; avoid indexing into strings
+		def _extract(rows):
+			vals = []
+			for r in rows:
+				v = r
+				if isinstance(r, (list, tuple)):
+					v = r[0]
+				if v:
+					vals.append(v)
+			return sorted(set(vals))
+		sizes = _extract(size_rows)
+		colors = _extract(color_rows)
+		return {"sizes": sizes, "colors": colors}
 
 @router.get("/stock")
 def list_stock(product_id: Optional[int] = Query(default=None), size: Optional[str] = Query(default=None), color: Optional[str] = Query(default=None), limit: int = Query(default=1000, ge=1, le=10000)):
-    with get_session() as session:
-        q = select(Item).where((Item.status.is_(None)) | (Item.status != "inactive")).order_by(Item.id.desc())
+	with get_session() as session:
+		q = select(Item).where((Item.status.is_(None)) | (Item.status != "inactive")).order_by(Item.id.desc())
 		if product_id:
 			q = q.where(Item.product_id == product_id)
 		if size:
@@ -77,8 +77,8 @@ def list_stock(product_id: Optional[int] = Query(default=None), size: Optional[s
 
 @router.get("/table")
 def stock_table(request: Request, product_id: Optional[int] = Query(default=None), size: Optional[str] = Query(default=None), color: Optional[str] = Query(default=None), limit: int = Query(default=10000, ge=1, le=100000)):
-    with get_session() as session:
-        q = select(Item).where((Item.status.is_(None)) | (Item.status != "inactive")).order_by(Item.id.desc())
+	with get_session() as session:
+		q = select(Item).where((Item.status.is_(None)) | (Item.status != "inactive")).order_by(Item.id.desc())
 		if product_id:
 			q = q.where(Item.product_id == product_id)
 		if size:
