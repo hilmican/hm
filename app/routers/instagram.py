@@ -189,6 +189,39 @@ async def receive_events(request: Request):
 					)
 					session.add(row)
 					persisted += 1
+					# ensure attachments are tracked and fetched asynchronously
+					try:
+						session.flush()
+						if attachments:
+							items = []
+							if isinstance(attachments, list):
+								items = attachments
+							elif isinstance(attachments, dict) and isinstance(attachments.get("data"), list):
+								items = attachments.get("data") or []
+							for idx, att in enumerate(items):
+								kind = "file"
+								try:
+									ptype = (att.get("type") or att.get("mime_type") or "").lower()
+									if "image" in ptype:
+										kind = "image"
+									elif "video" in ptype:
+										kind = "video"
+									elif "audio" in ptype:
+										kind = "audio"
+								except Exception:
+									pass
+								gid = None
+								try:
+									gid = att.get("id") or (att.get("payload") or {}).get("id")
+								except Exception:
+									gid = None
+								session.exec(text(
+									"INSERT INTO attachments(message_id, kind, graph_id, position, fetch_status) "
+									"VALUES (:mid, :kind, :gid, :pos, 'pending')"
+								)).params(mid=int(row.id), kind=kind, gid=gid, pos=idx)
+								enqueue("fetch_media", key=f"{int(row.id)}:{idx}", payload={"message_id": int(row.id), "position": idx})
+					except Exception:
+						pass
 		try:
 			_log.info("IG webhook POST: inserted messages=%d (direct path)", persisted)
 		except Exception:
@@ -231,7 +264,10 @@ async def get_media(ig_message_id: str, idx: int):
 		path = f"/{ig_message_id}/attachments"
 		params = {"access_token": token, "fields": "mime_type,file_url,image_data{url,preview_url},name"}
 		async with httpx.AsyncClient() as client:
-			data = await graph_get(client, base + path, params)
+			try:
+				data = await graph_get(client, base + path, params)
+			except Exception:
+				raise HTTPException(status_code=404, detail="Media unavailable")
 			arr = data.get("data") or []
 			if isinstance(arr, list) and idx < len(arr):
 				att = arr[idx] or {}
