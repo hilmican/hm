@@ -189,6 +189,16 @@ async def receive_events(request: Request):
 					)
 					session.add(row)
 					persisted += 1
+				# Best-effort: notify live clients via WebSocket about the new message
+				try:
+					await notify_new_message({
+						"type": "ig_message",
+						"conversation_id": conversation_id,
+						"text": text_val,
+						"timestamp_ms": int(ts_ms) if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit() else None,
+					})
+				except Exception:
+					pass
 					# ensure attachments are tracked and fetched asynchronously
 					try:
 						session.flush()
