@@ -229,11 +229,11 @@ def handle(raw_event_id: int) -> int:
 						other_party_id = (event.get("recipient") or {}).get("id") if ((event.get("sender") or {}).get("id") == igba_id) else (event.get("sender") or {}).get("id")
 						_upsert_conversation(conn, igba_id, str(other_party_id), event.get("timestamp"))
 						# one-time hydration enqueue if not hydrated
-							cid = f"{igba_id}:{str(other_party_id)}"
-							row_h = session.exec(text("SELECT hydrated_at FROM conversations WHERE convo_id=:cid").params(cid=cid)).first()
-							need_hydrate = (not row_h) or (not (row_h.hydrated_at if hasattr(row_h, 'hydrated_at') else (row_h[0] if isinstance(row_h,(list,tuple)) else None)))
-							if need_hydrate:
-								enqueue("hydrate_conversation", key=cid, payload={"igba_id": str(igba_id), "ig_user_id": str(other_party_id), "max_messages": 200})
+						cid = f"{igba_id}:{str(other_party_id)}"
+						row_h = session.exec(text("SELECT hydrated_at FROM conversations WHERE convo_id=:cid").params(cid=cid)).first()
+						need_hydrate = (not row_h) or (not (row_h.hydrated_at if hasattr(row_h, 'hydrated_at') else (row_h[0] if isinstance(row_h,(list,tuple)) else None)))
+						if need_hydrate:
+							enqueue("hydrate_conversation", key=cid, payload={"igba_id": str(igba_id), "ig_user_id": str(other_party_id), "max_messages": 200})
 					except Exception:
 						pass
 					msg_id = _insert_message(session, event, igba_id)
