@@ -236,9 +236,16 @@ async def receive_events(request: Request):
 										pass
 					except Exception:
 						pass
-					# enqueue one-time hydration (idempotent via jobs uniqueness)
+					# ensure conversation row exists and enqueue one-time hydration (idempotent via jobs uniqueness)
 					try:
 						if other_party_id:
+							# persist conversation row so visibility/debug works even before hydration
+							session.exec(text(
+								"""
+								INSERT OR IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count)
+								VALUES(:cid, :g, :u, CURRENT_TIMESTAMP, 0)
+								"""
+							)).params(cid=f"{igba_id}:{str(other_party_id)}", g=str(igba_id), u=str(other_party_id))
 							enqueue("hydrate_conversation", key=f"{igba_id}:{str(other_party_id)}", payload={"igba_id": str(igba_id), "ig_user_id": str(other_party_id), "max_messages": 200})
 							try:
 								_log.info("webhook: enqueue hydrate convo=%s:%s", str(igba_id), str(other_party_id))
