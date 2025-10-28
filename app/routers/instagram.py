@@ -226,7 +226,14 @@ async def receive_events(request: Request):
 										"INSERT INTO attachments(message_id, kind, graph_id, position, fetch_status) "
 										"VALUES (:mid, :kind, :gid, :pos, 'pending')"
 									)).params(mid=int(row.id), kind=kind, gid=gid, pos=idx)
-									enqueue("fetch_media", key=f"{int(row.id)}:{idx}", payload={"message_id": int(row.id), "position": idx})
+									try:
+										enqueue("fetch_media", key=f"{int(row.id)}:{idx}", payload={"message_id": int(row.id), "position": idx})
+										try:
+											_log.info("webhook: queued fetch_media mid=%s pos=%s msg_row=%s", str(mid), idx, int(row.id))
+										except Exception:
+											pass
+									except Exception:
+										pass
 					except Exception:
 						pass
 					# enqueue enrich jobs for user and page similar to ingest path
