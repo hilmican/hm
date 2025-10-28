@@ -242,7 +242,7 @@ def init_db() -> None:
                         ig_user_id TEXT NOT NULL,
                         last_message_at DATETIME NOT NULL,
                         unread_count INTEGER NOT NULL DEFAULT 0,
-                        hydrated_at DATETIME
+                        hydrated_at DATETIME,
                         UNIQUE (igba_id, ig_user_id)
                     )
                     """
