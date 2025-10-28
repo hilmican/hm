@@ -23,6 +23,7 @@
 		</style>
 	</head>
 	<body>
+		{% include "_nav.html" %}
 		<h1>Kargo Management Dashboard</h1>
 		<div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 18px 0;">
 			<div class="card" style="padding:8px 12px;">
@@ -43,20 +44,6 @@
 			</div>
 		</div>
 		<div class="toolbar">
-			<div class="nav">
-				<a href="/clients/table">Musteriler</a>
-				<a href="/items/table">Varyantlar</a>
-				<a href="/products/table">Urunler</a>
-				<a href="/orders/table">Siparisler</a>
-				<a href="/inventory/table">Stok</a>
-				<a href="/mappings/table">Haritalandirma</a>
-				<a href="/payments">Odemeler</a>
-				<a href="/ig/inbox">Instagram</a>
-				<a href="/reports/daily">Gunluk Rapor</a>
-				<a href="/noc">NOC</a>
-			</div>
-			<button id="logoutBtn" type="button" style="margin-left:12px;background:#6b7280;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Logout</button>
-
 			<form id="uploadForm" method="post" action="/import/upload" enctype="multipart/form-data" style="display:inline-block;margin-left:12px;">
 				<select name="source" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;">
 					<option value="bizim">bizim</option>

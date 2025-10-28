@@ -49,8 +49,8 @@
     </script>
     </head>
 <body>
+    {% include "_nav.html" %}
     <div class="toolbar">
-        <a href="/dashboard">← Dashboard</a>
         <input id="search" type="search" placeholder="Musteri ara (ad, telefon, sehir, ...)" />
         <span class="pill">{{ rows|length }} musteri</span>
     </div>

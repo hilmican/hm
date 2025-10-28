@@ -30,8 +30,8 @@
     </script>
 </head>
 <body>
+    {% include "_nav.html" %}
     <div class="toolbar">
-        <a href="/dashboard">← Dashboard</a>
         <input id="search" type="search" placeholder="Urun ara (ad, sku, beden, renk)" />
         <span class="pill">{{ rows|length }} urun</span>
     </div>

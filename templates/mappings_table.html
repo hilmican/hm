@@ -16,10 +16,8 @@
     </style>
 </head>
 <body>
+    {% include "_nav.html" %}
     <div class="toolbar">
-        <a href="/dashboard">← Dashboard</a>
-        <a href="/inventory/table">Inventory</a>
-        <a href="/products/table">Products</a>
         <span class="pill">{{ rows|length }} rule(s)</span>
     </div>
     <h2>Mapping Rules</h2>

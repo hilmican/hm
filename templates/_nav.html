@@ -1,0 +1,52 @@
+<div class="global-nav" style="margin:12px 0 18px 0;">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;padding:8px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;">
+    <a href="/dashboard" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Dashboard</a>
+    <span style="color:#6b7280">|</span>
+    <span style="font-weight:600;">Data</span>
+    <a href="/clients/table" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Clients</a>
+    <a href="/items/table" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Items</a>
+    <a href="/products/table" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Products</a>
+    <a href="/inventory/table" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Inventory</a>
+    <span style="color:#6b7280">|</span>
+    <span style="font-weight:600;">Sales</span>
+    <a href="/orders/table" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Orders</a>
+    <a href="/payments/table" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Payments</a>
+    <span style="color:#6b7280">|</span>
+    <span style="font-weight:600;">Instagram</span>
+    <a href="/ig/inbox" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Inbox</a>
+    <span style="color:#6b7280">|</span>
+    <span style="font-weight:600;">Import</span>
+    <a href="/mappings/table" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Mappings</a>
+    <a href="/import/map?source=bizim&filename=last" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Mapping Wizard</a>
+    <span style="color:#6b7280">|</span>
+    <span style="font-weight:600;">Reports</span>
+    <a href="/reports/daily" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Daily</a>
+    <span style="color:#6b7280">|</span>
+    <span style="font-weight:600;">Admin</span>
+    <a href="/noc" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">NOC</a>
+    <a href="/admin/status" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">System Status</a>
+    <span style="color:#6b7280">|</span>
+    <span style="font-weight:600;">Legal</span>
+    <a href="/privacy" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Privacy</a>
+    <a href="/terms" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Terms</a>
+    <a href="/data_deletion" style="padding:6px 10px;border-radius:6px;color:#1f2937;text-decoration:none;border:1px solid transparent;">Data Deletion</a>
+    <button id="logoutBtn" type="button" style="margin-left:auto;background:#6b7280;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Logout</button>
+  </div>
+</div>
+<script>
+  (function(){
+    const btn = document.getElementById('logoutBtn');
+    if (btn) {
+      btn.addEventListener('click', async ()=>{
+        try { await fetch('/auth/logout', { method: 'POST' }); location.href = '/auth/login'; } catch(e){ alert('Logout error'); }
+      });
+    }
+  })();
+  // simple hover styles
+  for (const a of document.querySelectorAll('.global-nav a')){
+    a.addEventListener('mouseenter', ()=>{ a.style.background = '#eef2ff'; a.style.borderColor = '#c7d2fe'; a.style.color = '#1d4ed8'; });
+    a.addEventListener('mouseleave', ()=>{ a.style.background = ''; a.style.borderColor = 'transparent'; a.style.color = '#1f2937'; });
+  }
+</script>
+
+

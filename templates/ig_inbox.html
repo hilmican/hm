@@ -13,10 +13,10 @@
     </style>
   </head>
   <body>
+    {% include "_nav.html" %}
     <h1>Instagram Inbox</h1>
     <div class="toolbar">
       <button id="refresh">Refresh</button>
-      <a href="/dashboard">Back to Dashboard</a>
     </div>
     <div id="list">
       {% for m in conversations %}

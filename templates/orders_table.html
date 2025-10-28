@@ -38,8 +38,8 @@
     </script>
 </head>
 <body>
+    {% include "_nav.html" %}
     <div class="toolbar">
-        <a href="/dashboard">← Dashboard</a>
         <input id="search" type="search" placeholder="Siparis ara (musteri, urun, takip)" />
         <span class="pill">{{ rows|length }} siparis</span>
         <button onclick="recalc()">Tazele</button>

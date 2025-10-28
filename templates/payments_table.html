@@ -36,8 +36,8 @@
     </script>
 </head>
 <body>
+    {% include "_nav.html" %}
     <div class="toolbar">
-        <a href="/dashboard">← Dashboard</a>
         <input id="search" type="search" placeholder="Odeme ara (musteri, siparis, yontem)" />
         <span class="pill">{{ rows|length }} odeme</span>
     </div>

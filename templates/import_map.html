@@ -38,8 +38,8 @@
     </style>
 </head>
 <body>
+    {% include "_nav.html" %}
     <div class="toolbar">
-        <a href="/dashboard" style="color:#2563eb;text-decoration:none">← Dashboard</a>
         <span class="pill"><span id="unmatchedCount">{{ total_unmatched or 0 }}</span> row(s) unmatched</span>
         <span class="muted">Source: {{ source }}{% if filenames %}, Files: {{ ", ".join(filenames) }}{% else %}, File: {{ filename }}{% endif %}</span>
         <button id="rescanBtn" type="button">Re-scan</button>
