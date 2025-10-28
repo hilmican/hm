@@ -129,7 +129,9 @@ def debug_jobs(kind: str, limit: int = 50):
 @router.get("/debug/attachments")
 def debug_attachments(limit: int = 50):
     with get_session() as session:
-        rows = session.exec(text("SELECT id, message_id, kind, fetch_status, fetched_at FROM attachments ORDER BY id DESC LIMIT :n")).params(n=int(limit)).all()
+        safe_n = max(1, min(int(limit or 50), 1000))
+        # SQLite has quirks with bound params in LIMIT; embed sanitized value
+        rows = session.exec(text(f"SELECT id, message_id, kind, fetch_status, fetched_at FROM attachments ORDER BY id DESC LIMIT {safe_n}")) .all()
         out = []
         for r in rows:
             try:
@@ -143,6 +145,26 @@ def debug_attachments(limit: int = 50):
             except Exception:
                 continue
         return {"attachments": out}
+
+
+@router.get("/debug/conversations")
+def debug_conversations(limit: int = 20):
+    with get_session() as session:
+        safe_n = max(1, min(int(limit or 20), 200))
+        rows = session.exec(text(f"SELECT convo_id, igba_id, ig_user_id, hydrated_at, last_message_at FROM conversations ORDER BY last_message_at DESC LIMIT {safe_n}")).all()
+        out = []
+        for r in rows:
+            try:
+                out.append({
+                    "convo_id": (r.convo_id if hasattr(r, 'convo_id') else r[0]),
+                    "igba_id": (r.igba_id if hasattr(r, 'igba_id') else r[1]),
+                    "ig_user_id": (r.ig_user_id if hasattr(r, 'ig_user_id') else r[2]),
+                    "hydrated_at": (r.hydrated_at if hasattr(r, 'hydrated_at') else r[3]),
+                    "last_message_at": (r.last_message_at if hasattr(r, 'last_message_at') else r[4]),
+                })
+            except Exception:
+                continue
+        return {"conversations": out}
 
 
 @router.post("/debug/hydrate")
