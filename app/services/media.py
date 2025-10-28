@@ -134,6 +134,18 @@ async def fetch_and_store(attachment_id: int) -> bool:
 				"""
 			)
 		).params(mime=mime or "application/octet-stream", size=size_bytes, sum=checksum, sp=str(path), tp=str(thumb_path) if thumb_path else None, id=attachment_id)
+		# increment per-mime counters for NOC
+		try:
+			from .monitoring import increment_counter as _inc
+			_inc("media_fetch", 1)
+			if kind == "image":
+				_inc("media_image", 1)
+			elif kind == "video":
+				_inc("media_video", 1)
+			elif kind == "audio":
+				_inc("media_audio", 1)
+		except Exception:
+			pass
 		return True
 
 

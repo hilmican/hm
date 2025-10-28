@@ -60,6 +60,7 @@
                                 </select>
                                 <span>size={{ o.size }}, color={{ o.color }}, qty={{ o.quantity }}, price={{ o.unit_price }}</span>
                                 <button class="updOutBtn" data-output-id="{{ o.id }}">Update</button>
+                                <button class="ensureVarBtn" data-output-id="{{ o.id }}">Ensure variant</button>
                             </div>
                         </li>
                         {% endfor %}
@@ -68,6 +69,7 @@
                 <td>
                     <button class="saveRule" data-id="{{ r.id }}">Save</button>
                     <button class="editOutputs" data-id="{{ r.id }}">Edit outputs</button>
+                    <button class="ensureRuleVars" data-id="{{ r.id }}">Ensure all variants</button>
                 </td>
             </tr>
             {% endfor %}
@@ -138,6 +140,32 @@
                 e.target.textContent = 'Updated';
                 setTimeout(()=>{ e.target.textContent = 'Update'; }, 800);
             } catch (err) { alert('Update failed'); }
+        });
+    }
+
+    // ensure single output variant
+    for (const btn of document.querySelectorAll('.ensureVarBtn')){
+        btn.addEventListener('click', async (e)=>{
+            const outId = e.target.getAttribute('data-output-id');
+            try {
+                const r = await fetch('/mappings/outputs/' + outId + '/ensure-variant', { method:'POST' });
+                if (!r.ok) throw new Error(await r.text());
+                const j = await r.json();
+                alert('Variant ensured. item_id=' + j.item_id);
+            } catch (err) { alert('Ensure variant failed'); }
+        });
+    }
+
+    // ensure all variants for rule
+    for (const btn of document.querySelectorAll('.ensureRuleVars')){
+        btn.addEventListener('click', async (e)=>{
+            const id = e.target.getAttribute('data-id');
+            try {
+                const r = await fetch('/mappings/rules/' + id + '/ensure-variants', { method:'POST' });
+                if (!r.ok) throw new Error(await r.text());
+                const j = await r.json();
+                alert('Ensured ' + (j.count||0) + ' variant(s).');
+            } catch (err) { alert('Ensure all variants failed'); }
         });
     }
     </script>

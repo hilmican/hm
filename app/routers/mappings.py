@@ -12,6 +12,7 @@ from ..utils.slugify import slugify
 from ..services.prompts import MAPPING_SYSTEM_PROMPT
 from ..db import get_session
 from sqlmodel import select
+from ..services.mapping import find_or_create_variant
 
 
 
@@ -124,6 +125,45 @@ def update_rule(rule_id: int, body: Dict[str, Any]):
 				)
 				session.add(o_rec)
 		return {"status": "ok"}
+
+
+@router.post("/outputs/{output_id}/ensure-variant")
+def ensure_variant_for_output(output_id: int):
+	with get_session() as session:
+		o = session.exec(select(ItemMappingOutput).where(ItemMappingOutput.id == output_id)).first()
+		if not o:
+			raise HTTPException(status_code=404, detail="Output not found")
+		if o.item_id:
+			return {"status": "exists", "item_id": o.item_id}
+		if not o.product_id:
+			raise HTTPException(status_code=400, detail="Output has no product_id")
+		p = session.exec(select(Product).where(Product.id == o.product_id)).first()
+		if not p:
+			raise HTTPException(status_code=404, detail="Product not found")
+		item = find_or_create_variant(session, product=p, size=o.size, color=o.color)
+		o.item_id = item.id
+		return {"status": "ok", "item_id": item.id}
+
+
+@router.post("/rules/{rule_id}/ensure-variants")
+def ensure_variants_for_rule(rule_id: int):
+	updated: list[int] = []
+	with get_session() as session:
+		r = session.exec(select(ItemMappingRule).where(ItemMappingRule.id == rule_id)).first()
+		if not r:
+			raise HTTPException(status_code=404, detail="Rule not found")
+		outs = session.exec(select(ItemMappingOutput).where(ItemMappingOutput.rule_id == r.id)).all()
+		for o in outs:
+			if o.item_id or not o.product_id:
+				continue
+			p = session.exec(select(Product).where(Product.id == o.product_id)).first()
+			if not p:
+				continue
+			item = find_or_create_variant(session, product=p, size=o.size, color=o.color)
+			o.item_id = item.id
+			if o.id:
+				updated.append(int(o.id))
+	return {"status": "ok", "updated": updated, "count": len(updated)}
 
 
 @router.patch("/rules/{rule_id}")
