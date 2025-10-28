@@ -118,6 +118,39 @@ async function loadAttributes(pid){
     function addCustom(elId, inputId){ const el=document.getElementById(elId); const v=(document.getElementById(inputId).value||'').trim(); if(!v) return; if(![...el.options].some(o=>o.value===v)){ const opt = new Option(v, v, true, true); el.add(opt); } document.getElementById(inputId).value=''; }
 const getSelected = id => Array.from(document.getElementById(id).selectedOptions || []).map(o=>o.value);
 
+// --- Persist and restore filters across reloads ---
+const LS_KEY = 'invFilterState';
+function saveFilterState(){
+    const pid = document.getElementById('productId')?.value || '';
+    const sizes = getSelected('sizes');
+    const colors = getSelected('colors');
+    const q = document.getElementById('search')?.value || '';
+    try { localStorage.setItem(LS_KEY, JSON.stringify({ pid, sizes, colors, q })); } catch {}
+}
+async function restoreFilterState(){
+    let st = null;
+    try { st = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch {}
+    if (!st) return;
+    try {
+        if (st.pid){
+            const prodSel = document.getElementById('productId');
+            if (prodSel) prodSel.value = String(st.pid);
+            await loadAttributes(st.pid);
+        }
+        const sizesEl = document.getElementById('sizes');
+        const colorsEl = document.getElementById('colors');
+        if (sizesEl && Array.isArray(st.sizes)){
+            for (const opt of sizesEl.options) opt.selected = st.sizes.includes(opt.value);
+        }
+        if (colorsEl && Array.isArray(st.colors)){
+            for (const opt of colorsEl.options) opt.selected = st.colors.includes(opt.value);
+        }
+        const si = document.getElementById('search'); if (si) si.value = st.q || '';
+    } finally {
+        try { localStorage.removeItem(LS_KEY); } catch {}
+    }
+}
+
     function applyInventoryFilter(){
         const pid = Number(document.getElementById('productId')?.value || 0);
         const sizes = getSelected('sizes');
@@ -156,10 +189,11 @@ const getSelected = id => Array.from(document.getElementById(id).selectedOptions
         }
     }
 
-    document.addEventListener('DOMContentLoaded', ()=>{
-    loadProducts();
+document.addEventListener('DOMContentLoaded', async ()=>{
+    await loadProducts();
+    await restoreFilterState();
     const prodSel = document.getElementById('productId');
-        if (prodSel) prodSel.addEventListener('change', e=>{ const pid=e.target.value; if(pid) loadAttributes(pid); applyInventoryFilter(); });
+    if (prodSel) prodSel.addEventListener('change', e=>{ const pid=e.target.value; if(pid) loadAttributes(pid); applyInventoryFilter(); });
         const sas = document.getElementById('selectAllSizes'); if (sas) sas.addEventListener('click', ()=>{ selectAll('sizes'); applyInventoryFilter(); });
         const sac = document.getElementById('selectAllColors'); if (sac) sac.addEventListener('click', ()=>{ selectAll('colors'); applyInventoryFilter(); });
         const asz = document.getElementById('addSize'); if (asz) asz.addEventListener('click', ()=>{ addCustom('sizes','customSize'); applyInventoryFilter(); });
@@ -189,7 +223,9 @@ if (btn) {
             const j = await r.json();
             msg.style.display = 'inline-block';
             msg.textContent = `Eklendi: ${j.created_item_ids.length} variant`;
-            setTimeout(()=> location.reload(), 600);
+            // preserve filters and refresh view
+            saveFilterState();
+            setTimeout(()=> location.reload(), 400);
         } catch (e) {
             alert('Seri ekle hatası');
         }
