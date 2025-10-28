@@ -19,6 +19,7 @@ from ..services.instagram_api import _get_base_token_and_id, fetch_user_username
 import httpx
 from .ig import notify_new_message
 import logging
+from ..services.monitoring import increment_counter
 
 
 router = APIRouter()
@@ -189,6 +190,13 @@ async def receive_events(request: Request):
 					)
 					session.add(row)
 					persisted += 1
+					# enqueue enrich jobs for user and page similar to ingest path
+					try:
+						if sender_id:
+							enqueue("enrich_user", key=str(sender_id), payload={"ig_user_id": str(sender_id)})
+						enqueue("enrich_page", key=str(entry.get("id") or ""), payload={"igba_id": str(entry.get("id") or "")})
+					except Exception:
+						pass
 				# Best-effort: notify live clients via WebSocket about the new message
 				try:
 					await notify_new_message({
@@ -234,6 +242,12 @@ async def receive_events(request: Request):
 						pass
 		try:
 			_log.info("IG webhook POST: inserted messages=%d (direct path)", persisted)
+		except Exception:
+			pass
+		# increment rolling counter for messages to show up in NOC
+		try:
+			if persisted > 0:
+				increment_counter("messages", int(persisted))
 		except Exception:
 			pass
 	except Exception:
