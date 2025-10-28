@@ -7,7 +7,7 @@ from sqlmodel import select
 
 from ..db import get_session
 from ..models import Item, Product, StockMovement
-from ..services.inventory import get_stock_map
+from ..services.inventory import get_stock_map, recalc_orders_from_mappings
 
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -146,4 +146,30 @@ def series_add(body: Dict[str, Any]):
 				created.append(it.id or 0)
 		return {"status": "ok", "created_item_ids": created}
 
+
+@router.post("/recalc")
+def recalc_inventory(body: Dict[str, Any], request: Request):
+    if not request.session.get("uid"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    product_id = body.get("product_id")
+    since_raw = body.get("since")
+    dry_run = bool(body.get("dry_run", False))
+    since = None
+    if since_raw:
+        try:
+            import datetime as _dt
+            since = _dt.date.fromisoformat(str(since_raw))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid since; expected YYYY-MM-DD")
+    # take DB snapshot before mutating
+    if not dry_run:
+        try:
+            from . import importer as _importer_router
+            if hasattr(_importer_router, "_backup_db_snapshot"):
+                _importer_router._backup_db_snapshot(tag="recalc-stock")
+        except Exception:
+            pass
+    with get_session() as session:
+        summary = recalc_orders_from_mappings(session, product_id=product_id, since=since, dry_run=dry_run)
+        return {"status": "ok", **summary, "dry_run": dry_run}
 

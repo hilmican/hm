@@ -34,6 +34,9 @@
     <div class="toolbar">
         <input id="search" type="search" placeholder="Stokta ara (ad, sku, beden, renk)" />
         <span class="pill">{{ rows|length }} varyant</span>
+        <input id="sinceDate" type="date" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px;" />
+        <button id="recalcBtn" type="button" style="background:#334155;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Stokları yeniden hesapla</button>
+        <span id="recalcMsg" class="pill" style="display:none"></span>
     </div>
     <div class="card" style="padding:12px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:14px;">
         <h3 style="margin:0 0 8px 0; font-size:15px;">Seri Stok Ekle</h3>
@@ -228,6 +231,37 @@ if (btn) {
             setTimeout(()=> location.reload(), 400);
         } catch (e) {
             alert('Seri ekle hatası');
+        }
+    });
+}
+
+// Recalculate inventory button
+const recalcBtn = document.getElementById('recalcBtn');
+const recalcMsg = document.getElementById('recalcMsg');
+if (recalcBtn){
+    recalcBtn.addEventListener('click', async ()=>{
+        const pidVal = document.getElementById('productId')?.value || '';
+        const pid = pidVal ? Number(pidVal) : null;
+        const since = document.getElementById('sinceDate')?.value || null;
+        const dryRun = false; // set true if you want to preview only
+        const body = { product_id: pid || undefined, since: since || undefined, dry_run: dryRun };
+        try {
+            recalcBtn.disabled = true;
+            const r = await fetch('/inventory/recalc', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+            if (!r.ok){
+                const t = await r.text();
+                throw new Error(t);
+            }
+            const j = await r.json();
+            recalcMsg.style.display = 'inline-block';
+            recalcMsg.textContent = `OK · İşlenen: ${j.orders_processed}, Güncellenen: ${j.orders_updated}`;
+            // preserve filters and refresh
+            saveFilterState();
+            setTimeout(()=> location.reload(), 600);
+        } catch(e){
+            alert('Yeniden hesaplama hatası');
+        } finally {
+            recalcBtn.disabled = false;
         }
     });
 }
