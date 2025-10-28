@@ -236,24 +236,14 @@ async def receive_events(request: Request):
 										pass
 					except Exception:
 						pass
-					# enqueue one-time hydration if conversation not yet hydrated
+					# enqueue one-time hydration (idempotent via jobs uniqueness)
 					try:
 						if other_party_id:
-							# ensure conversation row exists
-							session.exec(text(
-								"""
-								INSERT OR IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count)
-								VALUES(:cid, :g, :u, CURRENT_TIMESTAMP, 0)
-								"""
-							)).params(cid=f"{igba_id}:{str(other_party_id)}", g=str(igba_id), u=str(other_party_id))
-							row2 = session.exec(text("SELECT hydrated_at FROM conversations WHERE convo_id=:cid")).params(cid=f"{igba_id}:{str(other_party_id)}").first()
-							need_hydrate = (not row2) or (not (row2.hydrated_at if hasattr(row2, 'hydrated_at') else (row2[0] if isinstance(row2,(list,tuple)) else None)))
-							if need_hydrate:
-								enqueue("hydrate_conversation", key=f"{igba_id}:{str(other_party_id)}", payload={"igba_id": str(igba_id), "ig_user_id": str(other_party_id), "max_messages": 200})
-								try:
-									_log.info("webhook: enqueue hydrate convo=%s:%s", str(igba_id), str(other_party_id))
-								except Exception:
-									pass
+							enqueue("hydrate_conversation", key=f"{igba_id}:{str(other_party_id)}", payload={"igba_id": str(igba_id), "ig_user_id": str(other_party_id), "max_messages": 200})
+							try:
+								_log.info("webhook: enqueue hydrate convo=%s:%s", str(igba_id), str(other_party_id))
+							except Exception:
+								pass
 					except Exception:
 						pass
 					# enqueue enrich jobs for user and page similar to ingest path
