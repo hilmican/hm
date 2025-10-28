@@ -75,7 +75,7 @@
         renderTableBody('queues', qrows);
         // Rates
         const r = data.rates || {};
-        const order = ['messages','enrich_success','enrich_user','enrich_page','media_fetch','media_image','media_video','media_audio'];
+        const order = ['messages','enrich_success','enrich_user','enrich_page','hydrate_conversation','media_fetch','media_image','media_video','media_audio'];
         const rrows = order.map(k => [k, r[k]||0]);
         renderTableBody('rates', rrows);
       }

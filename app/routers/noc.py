@@ -32,6 +32,7 @@ def noc_data(request: Request, window: int = 60):
         "enrich_success": sum_counters("enrich_success", window_minutes),
         "enrich_user": sum_counters("enrich_user", window_minutes),
         "enrich_page": sum_counters("enrich_page", window_minutes),
+        "hydrate_conversation": sum_counters("hydrate_conversation", window_minutes),
         "media_fetch": sum_counters("media_fetch", window_minutes),
         "media_image": sum_counters("media_image", window_minutes),
         "media_video": sum_counters("media_video", window_minutes),
