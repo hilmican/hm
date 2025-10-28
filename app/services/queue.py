@@ -120,6 +120,10 @@ def dequeue(kind: str, timeout: int = 5) -> Optional[dict]:
 		queue_enqueue_time_remove(kind, job_id)
 	except Exception:
 		pass
-	return get_job(job_id)
+	# Robustly hydrate job; if DB lookup fails for any reason, skip gracefully
+	try:
+		return get_job(job_id)
+	except Exception:
+		return None
 
 
