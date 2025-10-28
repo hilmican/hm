@@ -33,12 +33,10 @@ def _ensure_job(kind: str, key: str, payload: Optional[dict] = None, max_attempt
 				INSERT OR IGNORE INTO jobs(kind, key, run_after, attempts, max_attempts, payload)
 				VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
 				"""
-			),
-			{"kind": kind, "key": key, "max_attempts": max_attempts, "payload": json.dumps(payload or {})},
+			).params(kind=kind, key=key, max_attempts=max_attempts, payload=json.dumps(payload or {}))
 		)
 		row = session.exec(
-			text("SELECT id FROM jobs WHERE kind=:kind AND key=:key"),
-			{"kind": kind, "key": key},
+			text("SELECT id FROM jobs WHERE kind=:kind AND key=:key").params(kind=kind, key=key)
 		).first()
 		if not row:
 			# As a fallback, create a new unique key by appending timestamp
@@ -49,8 +47,7 @@ def _ensure_job(kind: str, key: str, payload: Optional[dict] = None, max_attempt
 					INSERT INTO jobs(kind, key, run_after, attempts, max_attempts, payload)
 					VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
 					"""
-				),
-				{"kind": kind, "key": f"{key}:{sfx}", "max_attempts": max_attempts, "payload": json.dumps(payload or {})},
+				).params(kind=kind, key=f"{key}:{sfx}", max_attempts=max_attempts, payload=json.dumps(payload or {}))
 			)
 			row = session.exec(text("SELECT last_insert_rowid() as id")).first()
 		return int(row.id if hasattr(row, "id") else row[0])  # type: ignore
