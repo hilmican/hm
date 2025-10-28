@@ -81,6 +81,34 @@ async def fetch_messages(conversation_id: str, limit: int = 50) -> List[Dict[str
         return data.get("data", [])
 
 
+async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200) -> List[Dict[str, Any]]:
+    """Fetch latest N messages for a thread defined by page/user pair.
+
+    Strategy:
+    - First resolve the conversation id by listing page/user conversations and
+      matching the participant set (best-effort and limited).
+    - Then fetch messages for that conversation id.
+    """
+    try:
+        convs = await fetch_conversations(limit=50)
+    except Exception:
+        convs = []
+    conv_id: Optional[str] = None
+    for c in convs:
+        cid = str(c.get("id"))
+        parts = ((c.get("participants") or {}).get("data") or [])
+        ids = {str(p.get("id")) for p in parts if p.get("id")}
+        if igba_id in ids and ig_user_id in ids:
+            conv_id = cid
+            break
+    if not conv_id:
+        return []
+    try:
+        msgs = await fetch_messages(conv_id, limit=min(max(limit, 1), 200))
+    except Exception:
+        msgs = []
+    return msgs
+
 async def fetch_user_username(user_id: str) -> Optional[str]:
     token, _, _ = _get_base_token_and_id()
     base = f"https://graph.facebook.com/{GRAPH_VERSION}"

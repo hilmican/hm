@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request, HTTPException
 from sqlalchemy import text
 
 from ..db import get_session
+from ..services.queue import _get_redis
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -114,3 +115,41 @@ def status_page(request: Request):
 	return templates.TemplateResponse("admin_status.html", {"request": request, **ctx})
 
 
+@router.get("/debug/jobs")
+def debug_jobs(kind: str, limit: int = 50):
+    try:
+        r = _get_redis()
+        ll = int(r.llen(f"jobs:{kind}"))
+        items = [r.lindex(f"jobs:{kind}", i) for i in range(0, min(max(limit, 1), ll))]
+        return {"kind": kind, "length": ll, "items": items}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/debug/attachments")
+def debug_attachments(limit: int = 50):
+    with get_session() as session:
+        rows = session.exec(text("SELECT id, message_id, kind, fetch_status, fetched_at FROM attachments ORDER BY id DESC LIMIT :n")).params(n=int(limit)).all()
+        out = []
+        for r in rows:
+            try:
+                out.append({
+                    "id": int(r.id if hasattr(r, 'id') else r[0]),
+                    "message_id": int(r.message_id if hasattr(r, 'message_id') else r[1]),
+                    "kind": (r.kind if hasattr(r, 'kind') else r[2]),
+                    "fetch_status": (r.fetch_status if hasattr(r, 'fetch_status') else r[3]),
+                    "fetched_at": (r.fetched_at if hasattr(r, 'fetched_at') else r[4]),
+                })
+            except Exception:
+                continue
+        return {"attachments": out}
+
+
+@router.post("/debug/hydrate")
+def debug_hydrate(igba_id: str, ig_user_id: str):
+    try:
+        from ..services.queue import enqueue
+        enqueue("hydrate_conversation", key=f"{igba_id}:{ig_user_id}", payload={"igba_id": str(igba_id), "ig_user_id": str(ig_user_id), "max_messages": 200})
+        return {"status": "queued"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}

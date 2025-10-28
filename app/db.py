@@ -242,6 +242,7 @@ def init_db() -> None:
                         ig_user_id TEXT NOT NULL,
                         last_message_at DATETIME NOT NULL,
                         unread_count INTEGER NOT NULL DEFAULT 0,
+                        hydrated_at DATETIME
                         UNIQUE (igba_id, ig_user_id)
                     )
                     """
@@ -285,6 +286,14 @@ def init_db() -> None:
                 # Helpful indexes
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_attachments_graph_id ON attachments(graph_id)")
+                except Exception:
+                    pass
+                # Lightweight migrations for conversations.hydrated_at (pre-existing tables)
+                try:
+                    rows = conn.exec_driver_sql("PRAGMA table_info('conversations')").fetchall()
+                    has_hydrated = any(r[1] == 'hydrated_at' for r in rows)
+                    if not has_hydrated:
+                        conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN hydrated_at DATETIME")
                 except Exception:
                     pass
                 try:
