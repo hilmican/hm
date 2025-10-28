@@ -69,13 +69,14 @@
         </form>
     </div>
     <h2>Stok</h2>
+    <div id="filterSummary" class="pill" style="display:none; margin: 6px 0; width: fit-content;">Filtrelenen: 0 · Toplam stok: 0</div>
     <table id="invTbl">
         <thead>
             <tr><th>ID</th><th>SKU</th><th>Ad</th><th>Urun</th><th>Beden</th><th>Renk</th><th>Fiyat</th><th>Stok</th></tr>
         </thead>
         <tbody>
             {% for it in rows %}
-            <tr>
+            <tr data-product-id="{{ it.product_id or '' }}" data-size="{{ it.size or '' }}" data-color="{{ it.color or '' }}" data-on-hand="{{ stock_map.get(it.id, 0) }}">
                 <td>{{ it.id }}</td>
                 <td>{{ it.sku }}</td>
                 <td>{{ it.name }}</td>
@@ -113,18 +114,60 @@ async function loadAttributes(pid){
         fill('colors', j.colors || []);
     } catch {}
 }
-function selectAll(elId){ const el=document.getElementById(elId); for(const o of el.options) o.selected = true; }
-function addCustom(elId, inputId){ const el=document.getElementById(elId); const v=(document.getElementById(inputId).value||'').trim(); if(!v) return; if(![...el.options].some(o=>o.value===v)){ const opt = new Option(v, v, true, true); el.add(opt); } document.getElementById(inputId).value=''; }
+    function selectAll(elId){ const el=document.getElementById(elId); for(const o of el.options) o.selected = true; }
+    function addCustom(elId, inputId){ const el=document.getElementById(elId); const v=(document.getElementById(inputId).value||'').trim(); if(!v) return; if(![...el.options].some(o=>o.value===v)){ const opt = new Option(v, v, true, true); el.add(opt); } document.getElementById(inputId).value=''; }
 const getSelected = id => Array.from(document.getElementById(id).selectedOptions || []).map(o=>o.value);
 
-document.addEventListener('DOMContentLoaded', ()=>{
+    function applyInventoryFilter(){
+        const pid = Number(document.getElementById('productId')?.value || 0);
+        const sizes = getSelected('sizes');
+        const colors = getSelected('colors');
+        const q = (document.getElementById('search')?.value || '').trim().toLowerCase();
+        const tbody = document.querySelector('#invTbl tbody');
+        let visibleCount = 0;
+        let totalOnHand = 0;
+        if (!tbody) return;
+        for (const tr of tbody.rows){
+            const rowPid = Number(tr.getAttribute('data-product-id') || 0);
+            const rowSize = (tr.getAttribute('data-size') || '').toString();
+            const rowColor = (tr.getAttribute('data-color') || '').toString();
+            const rowText = tr.textContent.toLowerCase();
+            const matchesPid = !pid || rowPid === pid;
+            const matchesSize = !sizes.length || sizes.includes(rowSize);
+            const matchesColor = !colors.length || colors.includes(rowColor);
+            const matchesSearch = !q || rowText.indexOf(q) !== -1;
+            const show = matchesPid && matchesSize && matchesColor && matchesSearch;
+            tr.style.display = show ? '' : 'none';
+            if (show){
+                visibleCount++;
+                const oh = Number(tr.getAttribute('data-on-hand') || 0);
+                if (!Number.isNaN(oh)) totalOnHand += oh;
+            }
+        }
+        const sumEl = document.getElementById('filterSummary');
+        const anyFilter = pid || sizes.length || colors.length || q;
+        if (sumEl){
+            if (anyFilter){
+                sumEl.style.display = 'inline-block';
+                sumEl.textContent = `Filtrelenen: ${visibleCount} · Toplam stok: ${totalOnHand}`;
+            } else {
+                sumEl.style.display = 'none';
+            }
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', ()=>{
     loadProducts();
     const prodSel = document.getElementById('productId');
-    if (prodSel) prodSel.addEventListener('change', e=>{ const pid=e.target.value; if(pid) loadAttributes(pid); });
-    const sas = document.getElementById('selectAllSizes'); if (sas) sas.addEventListener('click', ()=>selectAll('sizes'));
-    const sac = document.getElementById('selectAllColors'); if (sac) sac.addEventListener('click', ()=>selectAll('colors'));
-    const asz = document.getElementById('addSize'); if (asz) asz.addEventListener('click', ()=>addCustom('sizes','customSize'));
-    const acl = document.getElementById('addColor'); if (acl) acl.addEventListener('click', ()=>addCustom('colors','customColor'));
+        if (prodSel) prodSel.addEventListener('change', e=>{ const pid=e.target.value; if(pid) loadAttributes(pid); applyInventoryFilter(); });
+        const sas = document.getElementById('selectAllSizes'); if (sas) sas.addEventListener('click', ()=>{ selectAll('sizes'); applyInventoryFilter(); });
+        const sac = document.getElementById('selectAllColors'); if (sac) sac.addEventListener('click', ()=>{ selectAll('colors'); applyInventoryFilter(); });
+        const asz = document.getElementById('addSize'); if (asz) asz.addEventListener('click', ()=>{ addCustom('sizes','customSize'); applyInventoryFilter(); });
+        const acl = document.getElementById('addColor'); if (acl) acl.addEventListener('click', ()=>{ addCustom('colors','customColor'); applyInventoryFilter(); });
+        const sizesEl = document.getElementById('sizes'); if (sizesEl) sizesEl.addEventListener('change', applyInventoryFilter);
+        const colorsEl = document.getElementById('colors'); if (colorsEl) colorsEl.addEventListener('change', applyInventoryFilter);
+        const si = document.getElementById('search'); if (si) si.addEventListener('input', applyInventoryFilter);
+        applyInventoryFilter();
 });
 
 if (btn) {
