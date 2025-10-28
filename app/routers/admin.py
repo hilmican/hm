@@ -46,30 +46,30 @@ def _read_git_version(repo_root: Path = Path(".")) -> Optional[str]:
 def _check_db() -> Dict[str, Any]:
 	try:
 		with get_session() as session:
-            session.exec(text("SELECT 1")).first()
-            # quick counts (cheap) with robust row extraction
-            counts = {}
-            for tbl in ("message", "attachments", "raw_events", "jobs"):
-                try:
-                    row = session.exec(text(f"SELECT COUNT(1) AS c FROM {tbl}")).first()
-                    val = None
-                    if row is None:
-                        val = 0
-                    elif isinstance(row, (list, tuple)):
-                        val = int(row[0])
-                    else:
-                        # RowMapping-like
-                        try:
-                            val = int(getattr(row, "c", 0))
-                        except Exception:
-                            # attempt index access
-                            try:
-                                val = int(row[0])  # type: ignore
-                            except Exception:
-                                val = None
-                    counts[tbl] = val
-                except Exception:
-                    counts[tbl] = None
+			session.exec(text("SELECT 1")).first()
+			# quick counts (cheap) with robust row extraction
+			counts: Dict[str, Any] = {}
+			for tbl in ("message", "attachments", "raw_events", "jobs"):
+				try:
+					row = session.exec(text(f"SELECT COUNT(1) AS c FROM {tbl}")).first()
+					val = None
+					if row is None:
+						val = 0
+					elif isinstance(row, (list, tuple)):
+						val = int(row[0])
+					else:
+						# RowMapping-like
+						try:
+							val = int(getattr(row, "c", 0))
+						except Exception:
+							# attempt index access
+							try:
+								val = int(row[0])  # type: ignore
+							except Exception:
+								val = None
+					counts[tbl] = val
+				except Exception:
+					counts[tbl] = None
 			return {"ok": True, "counts": counts}
 	except Exception as e:
 		return {"ok": False, "error": str(e)}
