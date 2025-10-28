@@ -19,7 +19,7 @@ def _ttl_hours(env_key: str, default: int) -> int:
 async def enrich_user(ig_user_id: str) -> bool:
 	# TTL check
 	with get_session() as session:
-		row = session.exec(text("SELECT fetched_at FROM ig_users WHERE ig_user_id = :id")).params(id=ig_user_id).first()
+		row = session.exec(text("SELECT fetched_at FROM ig_users WHERE ig_user_id = :id").params(id=ig_user_id)).first()
 		if row and (row.fetched_at if hasattr(row, "fetched_at") else row[0]):
 			fa = row.fetched_at if hasattr(row, "fetched_at") else row[0]
 			if isinstance(fa, str):
@@ -33,21 +33,21 @@ async def enrich_user(ig_user_id: str) -> bool:
 		username = await fetch_user_username(ig_user_id)
 	except Exception as e:
 		with get_session() as session:
-			session.exec(text("UPDATE ig_users SET fetch_status='error', fetch_error=:e WHERE ig_user_id=:id")).params(id=ig_user_id, e=str(e))
+			session.exec(text("UPDATE ig_users SET fetch_status='error', fetch_error=:e WHERE ig_user_id=:id").params(id=ig_user_id, e=str(e)))
 		return False
 	with get_session() as session:
 		session.exec(
 			text(
 				"UPDATE ig_users SET username=:u, fetched_at=CURRENT_TIMESTAMP, fetch_status='ok' WHERE ig_user_id=:id"
-			)
-		).params(u=username, id=ig_user_id)
+			).params(u=username, id=ig_user_id)
+		)
 	return True
 
 
 async def enrich_page(igba_id: str) -> bool:
 	# TTL check on ig_accounts.updated_at
 	with get_session() as session:
-		row = session.exec(text("SELECT updated_at FROM ig_accounts WHERE igba_id=:id")).params(id=igba_id).first()
+		row = session.exec(text("SELECT updated_at FROM ig_accounts WHERE igba_id=:id").params(id=igba_id)).first()
 		if row and (row.updated_at if hasattr(row, "updated_at") else row[0]):
 			ua = row.updated_at if hasattr(row, "updated_at") else row[0]
 			if isinstance(ua, str):
@@ -71,8 +71,8 @@ async def enrich_page(igba_id: str) -> bool:
 		session.exec(
 			text(
 				"UPDATE ig_accounts SET username=:u, name=:n, profile_pic_url=:p, updated_at=CURRENT_TIMESTAMP WHERE igba_id=:id"
-			)
-		).params(u=username, n=name, p=pp, id=igba_id)
+			).params(u=username, n=name, p=pp, id=igba_id)
+		)
 	return True
 
 

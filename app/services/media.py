@@ -90,8 +90,8 @@ async def fetch_and_store(attachment_id: int) -> bool:
 				FROM attachments a JOIN message m ON a.message_id = m.id
 				WHERE a.id = :id
 				"""
-			)
-		).params(id=attachment_id).first()
+			).params(id=attachment_id)
+		).first()
 		if not row:
 			return False
 		att_id = row.id if hasattr(row, "id") else row[0]
@@ -132,8 +132,8 @@ async def fetch_and_store(attachment_id: int) -> bool:
 				SET mime=:mime, size_bytes=:size, checksum_sha256=:sum, storage_path=:sp, thumb_path=:tp, fetched_at=CURRENT_TIMESTAMP, fetch_status='ok'
 				WHERE id=:id
 				"""
-			)
-		).params(mime=mime or "application/octet-stream", size=size_bytes, sum=checksum, sp=str(path), tp=str(thumb_path) if thumb_path else None, id=attachment_id)
+			).params(mime=mime or "application/octet-stream", size=size_bytes, sum=checksum, sp=str(path), tp=str(thumb_path) if thumb_path else None, id=attachment_id)
+		)
 		# increment per-mime counters for NOC
 		try:
 			from .monitoring import increment_counter as _inc

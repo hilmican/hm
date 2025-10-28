@@ -59,7 +59,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	if not mid:
 		return None
 	# idempotency by ig_message_id
-	exists = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid")).params(mid=str(mid)).first()
+	exists = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid").params(mid=str(mid))).first()
 	if exists:
 		return None
 	sender_id = (event.get("sender") or {}).get("id")
@@ -125,8 +125,8 @@ def _create_attachment_stubs(session, message_id: int, mid: str, attachments: An
 				INSERT INTO attachments(message_id, kind, graph_id, position, fetch_status)
 				VALUES (:mid, :kind, :gid, :pos, 'pending')
 				"""
-			)
-		).params(mid=message_id, kind=kind, gid=graph_id, pos=idx)
+			).params(mid=message_id, kind=kind, gid=graph_id, pos=idx)
+		)
 		# enqueue media fetch by logical key ATT:<message_id>:<pos>
 		enqueue("fetch_media", key=f"{message_id}:{idx}", payload={"message_id": message_id, "position": idx})
 
@@ -142,7 +142,7 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any], igba_id: str) -
     mid = message_obj.get("mid") or message_obj.get("id") or event.get("id")
     if not mid:
         return None
-    exists = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid")).params(mid=str(mid)).first()
+    exists = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid").params(mid=str(mid))).first()
     if exists:
         row = exists
         return int(row.id if hasattr(row, "id") else row[0])
@@ -194,7 +194,7 @@ def handle(raw_event_id: int) -> int:
 	inserted = 0
 	with get_session() as session:
 		# Load raw payload
-		row = session.exec(text("SELECT id, payload FROM raw_events WHERE id = :id")).params(id=raw_event_id).first()
+		row = session.exec(text("SELECT id, payload FROM raw_events WHERE id = :id").params(id=raw_event_id)).first()
 		if not row:
 			return 0
 		payload_text = row.payload if hasattr(row, "payload") else row[1]
@@ -229,11 +229,11 @@ def handle(raw_event_id: int) -> int:
 						other_party_id = (event.get("recipient") or {}).get("id") if ((event.get("sender") or {}).get("id") == igba_id) else (event.get("sender") or {}).get("id")
 						_upsert_conversation(conn, igba_id, str(other_party_id), event.get("timestamp"))
 						# one-time hydration enqueue if not hydrated
-						cid = f"{igba_id}:{str(other_party_id)}"
-						row_h = session.exec(text("SELECT hydrated_at FROM conversations WHERE convo_id=:cid")).params(cid=cid).first()
-						need_hydrate = (not row_h) or (not (row_h.hydrated_at if hasattr(row_h, 'hydrated_at') else (row_h[0] if isinstance(row_h,(list,tuple)) else None)))
-						if need_hydrate:
-							enqueue("hydrate_conversation", key=cid, payload={"igba_id": str(igba_id), "ig_user_id": str(other_party_id), "max_messages": 200})
+							cid = f"{igba_id}:{str(other_party_id)}"
+							row_h = session.exec(text("SELECT hydrated_at FROM conversations WHERE convo_id=:cid").params(cid=cid)).first()
+							need_hydrate = (not row_h) or (not (row_h.hydrated_at if hasattr(row_h, 'hydrated_at') else (row_h[0] if isinstance(row_h,(list,tuple)) else None)))
+							if need_hydrate:
+								enqueue("hydrate_conversation", key=cid, payload={"igba_id": str(igba_id), "ig_user_id": str(other_party_id), "max_messages": 200})
 					except Exception:
 						pass
 					msg_id = _insert_message(session, event, igba_id)

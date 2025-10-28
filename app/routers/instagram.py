@@ -124,7 +124,7 @@ async def receive_events(request: Request):
 					sig256=signature or "",
 					uniq_hash=uniq_hash,
 				)
-				row = session.exec(text("SELECT id FROM raw_events WHERE uniq_hash = :h")).params(h=uniq_hash).first()
+				row = session.exec(text("SELECT id FROM raw_events WHERE uniq_hash = :h").params(h=uniq_hash)).first()
 				if row:
 					saved_raw += 1
 					try:

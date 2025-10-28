@@ -67,22 +67,22 @@ def enqueue(kind: str, key: str, payload: Optional[dict] = None, max_attempts: i
 
 def delete_job(job_id: int) -> None:
 	with get_session() as session:
-		session.exec(text("DELETE FROM jobs WHERE id = :id")).params(id=job_id)
+		session.exec(text("DELETE FROM jobs WHERE id = :id").params(id=job_id))
 
 
 def increment_attempts(job_id: int) -> None:
 	with get_session() as session:
-		session.exec(text("UPDATE jobs SET attempts = attempts + 1 WHERE id = :id")).params(id=job_id)
+		session.exec(text("UPDATE jobs SET attempts = attempts + 1 WHERE id = :id").params(id=job_id))
 
 
 def mark_failed(job_id: int, error: str) -> None:
 	with get_session() as session:
-		session.exec(text("UPDATE jobs SET payload = :payload WHERE id = :id")).params(id=job_id, payload=json.dumps({"error": error}))
+		session.exec(text("UPDATE jobs SET payload = :payload WHERE id = :id").params(id=job_id, payload=json.dumps({"error": error})))
 
 
 def get_job(job_id: int) -> Optional[dict]:
 	with get_session() as session:
-		row = session.exec(text("SELECT id, kind, key, run_after, attempts, max_attempts, payload FROM jobs WHERE id=:id")).params(id=job_id).first()
+		row = session.exec(text("SELECT id, kind, key, run_after, attempts, max_attempts, payload FROM jobs WHERE id=:id").params(id=job_id)).first()
 		if not row:
 			return None
 		# row can be RowMapping or tuple depending on driver; normalize
