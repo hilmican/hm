@@ -14,7 +14,7 @@
     </style>
 </head>
 <body>
-    <a href="/clients/table">← Back to Clients</a>
+    {% include "_nav.html" %}
     <h1>{{ client.name }}</h1>
     <div class="meta">Tel: {{ client.phone }} · City: {{ client.city }} · Height: {{ client.height_cm }} · Weight: {{ client.weight_kg }}</div>
 
