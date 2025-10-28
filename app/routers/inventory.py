@@ -7,7 +7,7 @@ from sqlmodel import select
 
 from ..db import get_session
 from ..models import Item, Product, StockMovement
-from ..services.inventory import get_stock_map, recalc_orders_from_mappings
+from ..services.inventory import get_stock_map, recalc_orders_from_mappings, adjust_stock
 
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -104,18 +104,97 @@ def stock_table(request: Request, product_id: Optional[int] = Query(default=None
 
 @router.post("/movements")
 def create_movement(body: Dict[str, Any]):
-	item_id = body.get("item_id")
-	direction = body.get("direction")
-	quantity = body.get("quantity")
-	if item_id is None or direction not in ("in", "out") or not isinstance(quantity, int) or quantity <= 0:
-		raise HTTPException(status_code=400, detail="item_id, direction in|out, quantity>0 required")
-	with get_session() as session:
-		it = session.exec(select(Item).where(Item.id == item_id)).first()
-		if not it:
-			raise HTTPException(status_code=404, detail="Item not found")
-		mv = StockMovement(item_id=item_id, direction=direction, quantity=quantity)
-		session.add(mv)
-		return {"status": "ok", "movement_id": mv.id or 0}
+    item_id = body.get("item_id")
+    delta = body.get("delta")
+    direction = body.get("direction")
+    quantity = body.get("quantity")
+    if item_id is None:
+        raise HTTPException(status_code=400, detail="item_id required")
+    # Support either {delta} (may be negative) or {direction, quantity>0}
+    if delta is not None:
+        try:
+            d = int(delta)
+        except Exception:
+            raise HTTPException(status_code=400, detail="delta must be integer")
+        if d == 0:
+            return {"status": "noop"}
+        with get_session() as session:
+            it = session.exec(select(Item).where(Item.id == item_id)).first()
+            if not it:
+                raise HTTPException(status_code=404, detail="Item not found")
+            adjust_stock(session, item_id=item_id, delta=d, related_order_id=None)
+            return {"status": "ok"}
+    # Fallback to direction/quantity path
+    if direction not in ("in", "out") or not isinstance(quantity, int) or quantity <= 0:
+        raise HTTPException(status_code=400, detail="Provide delta or direction in|out and quantity>0")
+    with get_session() as session:
+        it = session.exec(select(Item).where(Item.id == item_id)).first()
+        if not it:
+            raise HTTPException(status_code=404, detail="Item not found")
+        mv = StockMovement(item_id=item_id, direction=direction, quantity=quantity)
+        session.add(mv)
+        return {"status": "ok", "movement_id": mv.id or 0}
+
+
+@router.get("/movements")
+def list_movements(item_id: Optional[int] = Query(default=None), limit: int = Query(default=200, ge=1, le=5000)):
+    with get_session() as session:
+        q = select(StockMovement).order_by(StockMovement.id.desc())
+        if item_id:
+            q = q.where(StockMovement.item_id == item_id)
+        rows = session.exec(q.limit(limit)).all()
+        return {
+            "movements": [
+                {
+                    "id": m.id or 0,
+                    "item_id": m.item_id,
+                    "direction": m.direction,
+                    "quantity": m.quantity,
+                    "related_order_id": m.related_order_id,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in rows
+            ]
+        }
+
+
+@router.patch("/movements/{movement_id}")
+def update_movement(movement_id: int, body: Dict[str, Any]):
+    """Update a manual movement (related_order_id must be null)."""
+    with get_session() as session:
+        mv = session.exec(select(StockMovement).where(StockMovement.id == movement_id)).first()
+        if not mv:
+            raise HTTPException(status_code=404, detail="Movement not found")
+        if mv.related_order_id:
+            raise HTTPException(status_code=400, detail="Cannot edit order-linked movement; use recalc instead")
+        # allow direction and/or quantity update
+        new_dir = body.get("direction")
+        new_qty = body.get("quantity")
+        if new_dir is not None:
+            if new_dir not in ("in", "out"):
+                raise HTTPException(status_code=400, detail="direction must be 'in' or 'out'")
+            mv.direction = new_dir  # type: ignore
+        if new_qty is not None:
+            try:
+                q = int(new_qty)
+            except Exception:
+                raise HTTPException(status_code=400, detail="quantity must be integer > 0")
+            if q <= 0:
+                raise HTTPException(status_code=400, detail="quantity must be > 0")
+            mv.quantity = q  # type: ignore
+        return {"status": "ok"}
+
+
+@router.delete("/movements/{movement_id}")
+def delete_movement(movement_id: int):
+    with get_session() as session:
+        mv = session.exec(select(StockMovement).where(StockMovement.id == movement_id)).first()
+        if not mv:
+            raise HTTPException(status_code=404, detail="Movement not found")
+        if mv.related_order_id:
+            raise HTTPException(status_code=400, detail="Cannot delete order-linked movement; use recalc instead")
+        session.delete(mv)
+        return {"status": "ok"}
 
 
 @router.post("/series")
