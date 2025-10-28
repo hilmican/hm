@@ -190,6 +190,45 @@ async def receive_events(request: Request):
 					)
 					session.add(row)
 					persisted += 1
+					# ensure attachments are tracked per-message and fetch queued
+					try:
+						session.flush()  # obtain row.id
+						if attachments:
+							# reuse ingestion helper to normalize and enqueue fetch jobs
+							try:
+								from ..services.ingest import _create_attachment_stubs as _ins_atts
+								_ins_atts(session, int(row.id), str(mid), attachments)  # type: ignore[arg-type]
+							except Exception:
+								# fallback: minimal inline insertion (same logic)
+								items = []
+								if isinstance(attachments, list):
+									items = attachments
+								elif isinstance(attachments, dict) and isinstance(attachments.get("data"), list):
+									items = attachments.get("data") or []
+								for idx, att in enumerate(items):
+									kind = "file"
+									try:
+										ptype = (att.get("type") or att.get("mime_type") or "").lower()
+										if "image" in ptype:
+											kind = "image"
+										elif "video" in ptype:
+											kind = "video"
+										elif "audio" in ptype:
+											kind = "audio"
+									except Exception:
+										kind = "file"
+									gid = None
+									try:
+										gid = att.get("id") or (att.get("payload") or {}).get("id")
+									except Exception:
+										gid = None
+									session.exec(text(
+										"INSERT INTO attachments(message_id, kind, graph_id, position, fetch_status) "
+										"VALUES (:mid, :kind, :gid, :pos, 'pending')"
+									)).params(mid=int(row.id), kind=kind, gid=gid, pos=idx)
+									enqueue("fetch_media", key=f"{int(row.id)}:{idx}", payload={"message_id": int(row.id), "position": idx})
+					except Exception:
+						pass
 					# enqueue enrich jobs for user and page similar to ingest path
 					try:
 						if sender_id:
