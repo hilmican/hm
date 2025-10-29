@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from ..db import get_session
 from ..services.queue import _get_redis
+from ..services.queue import enqueue
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -175,3 +176,61 @@ def debug_hydrate(igba_id: str, ig_user_id: str):
         return {"status": "queued"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+@router.post("/debug/backfill")
+def debug_backfill(conv_limit: int = 50, media_limit: int = 100):
+    """Enqueue enrich_page, enrich_user, hydrate_conversation and pending media fetch.
+
+    This mirrors scripts/backfill_enqueue.py but is callable via HTTP for ops.
+    """
+    ep = 0
+    eu = 0
+    hy = 0
+    md = 0
+    # conversations backfill
+    try:
+        with get_session() as session:
+            rows = session.exec(text("SELECT igba_id, ig_user_id FROM conversations ORDER BY last_message_at DESC LIMIT :n").params(n=int(conv_limit))).all()
+            for r in rows:
+                igba_id = r.igba_id if hasattr(r, "igba_id") else r[0]
+                ig_user_id = r.ig_user_id if hasattr(r, "ig_user_id") else r[1]
+                try:
+                    enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})
+                    ep += 1
+                except Exception:
+                    pass
+                try:
+                    enqueue("enrich_user", key=str(ig_user_id), payload={"ig_user_id": str(ig_user_id)})
+                    eu += 1
+                except Exception:
+                    pass
+                try:
+                    cid = f"{igba_id}:{ig_user_id}"
+                    enqueue("hydrate_conversation", key=cid, payload={"igba_id": str(igba_id), "ig_user_id": str(ig_user_id), "max_messages": 200})
+                    hy += 1
+                except Exception:
+                    pass
+    except Exception as e:
+        return {"status": "error", "error": f"conversations backfill: {e}"}
+    # media backfill
+    try:
+        with get_session() as session:
+            rows = session.exec(text(
+                """
+                SELECT id FROM attachments
+                WHERE fetch_status IS NULL OR fetch_status IN ('pending','error')
+                ORDER BY id DESC
+                LIMIT :n
+                """
+            ).params(n=int(media_limit))).all()
+            for r in rows:
+                att_id = r.id if hasattr(r, "id") else r[0]
+                try:
+                    enqueue("fetch_media", key=str(att_id), payload={"attachment_id": int(att_id)})
+                    md += 1
+                except Exception:
+                    pass
+    except Exception as e:
+        return {"status": "partial", "enrich_page": ep, "enrich_user": eu, "hydrate": hy, "media": md, "error": f"media backfill: {e}"}
+    return {"status": "ok", "enrich_page": ep, "enrich_user": eu, "hydrate": hy, "media": md}
