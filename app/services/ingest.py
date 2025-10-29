@@ -284,6 +284,38 @@ def handle(raw_event_id: int) -> int:
 						if sender_id:
 							enqueue("enrich_user", key=str(sender_id), payload={"ig_user_id": str(sender_id)})
 						enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})
-	return inserted
+				# Additionally handle referral-only webhook events (messaging_referrals)
+				try:
+					ref_events = entry.get("messaging_referrals") or []
+					for rev in ref_events:
+						try:
+							sender_id = (rev.get("sender") or {}).get("id")
+							recipient_id = (rev.get("recipient") or {}).get("id")
+							ref = rev.get("referral") or {}
+							ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
+							ad_link = ref.get("ad_link") or ref.get("url") or ref.get("referer_uri") or None
+							ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
+							referral_json_val = None
+							try:
+								referral_json_val = json.dumps(ref, ensure_ascii=False)
+							except Exception:
+								referral_json_val = None
+							# Determine conversation id (other party is the user id)
+							other_party_id = sender_id if sender_id and str(sender_id) != str(igba_id) else recipient_id
+							conversation_id = f"dm:{other_party_id}" if other_party_id else None
+							if conversation_id:
+								# Update the latest message in this conversation with ad metadata if missing
+								rowm = session.exec(text(
+									"SELECT id FROM message WHERE conversation_id=:cid ORDER BY timestamp_ms DESC, id DESC LIMIT 1"
+								)).params(cid=conversation_id).first()
+								if rowm:
+									mid = rowm.id if hasattr(rowm, "id") else (rowm[0] if isinstance(rowm, (list, tuple)) else None)
+									if mid:
+										session.exec(text(
+											"UPDATE message SET ad_id=COALESCE(ad_id, :adid), ad_link=COALESCE(ad_link, :link), ad_title=COALESCE(ad_title, :title), referral_json=COALESCE(referral_json, :ref) WHERE id=:id"
+										)).params(id=int(mid), adid=ad_id, link=ad_link, title=ad_title, ref=referral_json_val)
+						except Exception:
+							pass
+		return inserted
 
 
