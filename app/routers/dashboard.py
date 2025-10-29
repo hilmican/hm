@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException
 from sqlmodel import select
+from sqlalchemy import text
 
 from ..db import get_session
 from ..models import Client, Item, Order, Payment, ImportRow, ImportRun, StockMovement
@@ -18,26 +19,23 @@ def dashboard(request: Request):
 	# pull small samples for quick display
 	
 	with get_session() as session:
-		# aggregates for header (align with daily report definitions for all-time)
-		all_orders = session.exec(select(Order)).all()
-		total_sales = sum(float(o.total_amount or 0.0) for o in all_orders)
-		# Payments (all-time)
-		all_payments = session.exec(select(Payment)).all()
-		net_collected = sum(float(p.net_amount or 0.0) for p in all_payments)
-		# Fee breakdown like daily report (shipping by order, not from payments)
-		fee_kom = sum(float(p.fee_komisyon or 0.0) for p in all_payments)
-		fee_hiz = sum(float(p.fee_hizmet or 0.0) for p in all_payments)
-		fee_iad = sum(float(p.fee_iade or 0.0) for p in all_payments)
-		fee_eok = sum(float(p.fee_erken_odeme or 0.0) for p in all_payments)
-		fee_kar = 0.0
-		for o in all_orders:
-			fee_kar += float((o.shipping_fee if o.shipping_fee is not None else compute_shipping_fee(float(o.total_amount or 0.0))) or 0.0)
+		# Fast aggregates using SQL (avoid loading full tables)
+		row = session.exec(text('SELECT SUM(total_amount) AS s FROM "order"')).first()
+		total_sales = float((row.s if hasattr(row, "s") else (row[0] if row else 0)) or 0)
+		row = session.exec(text('SELECT SUM(net_amount) AS s FROM payment')).first()
+		net_collected = float((row.s if hasattr(row, "s") else (row[0] if row else 0)) or 0)
+		# Fee breakdown from payments only
+		fee_kom = float((session.exec(text('SELECT SUM(COALESCE(fee_komisyon,0)) FROM payment')).first() or [0])[0] or 0)
+		fee_hiz = float((session.exec(text('SELECT SUM(COALESCE(fee_hizmet,0)) FROM payment')).first() or [0])[0] or 0)
+		fee_iad = float((session.exec(text('SELECT SUM(COALESCE(fee_iade,0)) FROM payment')).first() or [0])[0] or 0)
+		fee_eok = float((session.exec(text('SELECT SUM(COALESCE(fee_erken_odeme,0)) FROM payment')).first() or [0])[0] or 0)
+		# Shipping total from orders where present (skip compute_shipping_fee loop)
+		fee_kar = float((session.exec(text('SELECT SUM(COALESCE(shipping_fee,0)) FROM "order"')).first() or [0])[0] or 0)
 		total_fees = fee_kom + fee_hiz + fee_kar + fee_iad + fee_eok
-		# Outstanding like daily report: use gross payments linked to orders
-		order_ids_all = [o.id for o in all_orders if o.id]
-		linked_payments_all = session.exec(select(Payment).where(Payment.order_id.in_(order_ids_all))).all() if order_ids_all else []
-		linked_gross_paid = sum(float(p.amount or 0.0) for p in linked_payments_all)
-		total_to_collect = max(0.0, total_sales - linked_gross_paid)
+		# Outstanding: total order gross minus gross payments linked to orders
+		row = session.exec(text('SELECT SUM(amount) FROM payment WHERE order_id IS NOT NULL')).first()
+		linked_gross_paid = float((row[0] if row else 0) or 0)
+		total_to_collect = max(0.0, float(total_sales) - linked_gross_paid)
 
 		orders = session.exec(select(Order).order_by(Order.id.desc()).limit(20)).all()
 		# fetch only the related clients/items for shown orders (no extra limits)
@@ -107,8 +105,8 @@ def dashboard(request: Request):
 
 		# Unmatched mapping count (recent) and low-stock variants
 		unmatched = session.exec(select(ImportRow).where(ImportRow.status == "unmatched").order_by(ImportRow.id.desc()).limit(50)).all()
-		low_stock = session.exec(select(Item).order_by(Item.id.asc()).limit(200)).all()
-		# naive compute on-hand for first 200; could be optimized
+		low_stock = session.exec(select(Item).order_by(Item.id.asc()).limit(50)).all()
+		# compute on-hand for first 50
 		from ..services.inventory import compute_on_hand_for_items
 		stock_map = compute_on_hand_for_items(session, [it.id for it in low_stock if it.id])
 		low_stock_pairs = [(it, stock_map.get(it.id or 0, 0)) for it in low_stock]
