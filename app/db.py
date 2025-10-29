@@ -288,6 +288,39 @@ def init_db() -> None:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_attachments_graph_id ON attachments(graph_id)")
                 except Exception:
                     pass
+                # Additional indexes to speed up dashboard and common lookups
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_payment_order_id ON payment(order_id)")
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_payment_client_id ON payment(client_id)")
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_importrow_matched_client ON importrow(matched_client_id)")
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_importrow_matched_order ON importrow(matched_order_id)")
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_importrow_import_run ON importrow(import_run_id)")
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_stockmovement_item_id ON stockmovement(item_id)")
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_orderitem_order_id ON orderitem(order_id)")
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_orderitem_item_id ON orderitem(item_id)")
+                except Exception:
+                    pass
                 # Helpful composite index for inbox (latest message per conversation)
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_message_conv_ts ON message(conversation_id, timestamp_ms)")
