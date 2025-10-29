@@ -67,31 +67,49 @@ async def inbox(request: Request, limit: int = 25):
             if other:
                 other_ids.add(str(other))
         conversations = list(conv_map.values())[:limit]
-        # Resolve usernames for other parties from ig_users
+        # Resolve usernames preferring last inbound message's sender_username; fallback to ig_users
         labels = {}
+        try:
+            # Build map from conv -> latest inbound with sender_username
+            inbound_named: dict[str, str] = {}
+            for m in rows:
+                cid = m.conversation_id
+                if not cid:
+                    continue
+                if (m.direction or "in") == "in" and (m.sender_username or "").strip() and cid not in inbound_named:
+                    inbound_named[cid] = str(m.sender_username).strip()
+            for cid, un in inbound_named.items():
+                labels[cid] = f"@{un}"
+        except Exception:
+            pass
+        # Fallback via ig_users when inbox usernames missing
         if other_ids:
             try:
-                placeholders = ",".join([":p" + str(i) for i in range(len(other_ids))])
-                from sqlalchemy import text as _text
-                params = {("p" + str(i)): list(other_ids)[i] for i in range(len(other_ids))}
-                rows_u = session.exec(_text(f"SELECT ig_user_id, username FROM ig_users WHERE ig_user_id IN ({placeholders})")).params(**params).all()
-                id_to_username = {}
-                for r in rows_u:
-                    uid = r.ig_user_id if hasattr(r, "ig_user_id") else r[0]
-                    un = r.username if hasattr(r, "username") else r[1]
-                    if uid and un:
-                        id_to_username[str(uid)] = str(un)
-                for cid, m in conv_map.items():
-                    other = None
-                    try:
-                        if (m.direction or "in") == "out":
-                            other = m.ig_recipient_id
-                        else:
-                            other = m.ig_sender_id
-                    except Exception:
+                missing = [cid for cid in conv_map.keys() if cid not in labels]
+                if missing:
+                    placeholders = ",".join([":p" + str(i) for i in range(len(other_ids))])
+                    from sqlalchemy import text as _text
+                    params = {("p" + str(i)): list(other_ids)[i] for i in range(len(other_ids))}
+                    rows_u = session.exec(_text(f"SELECT ig_user_id, username FROM ig_users WHERE ig_user_id IN ({placeholders})")).params(**params).all()
+                    id_to_username = {}
+                    for r in rows_u:
+                        uid = r.ig_user_id if hasattr(r, "ig_user_id") else r[0]
+                        un = r.username if hasattr(r, "username") else r[1]
+                        if uid and un:
+                            id_to_username[str(uid)] = str(un)
+                    for cid, m in conv_map.items():
+                        if cid in labels:
+                            continue
                         other = None
-                    if other and str(other) in id_to_username:
-                        labels[cid] = f"@{id_to_username[str(other)]}"
+                        try:
+                            if (m.direction or "in") == "out":
+                                other = m.ig_recipient_id
+                            else:
+                                other = m.ig_sender_id
+                        except Exception:
+                            other = None
+                        if other and str(other) in id_to_username:
+                            labels[cid] = f"@{id_to_username[str(other)]}"
             except Exception:
                 pass
         # Best-effort ad metadata from messages

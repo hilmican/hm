@@ -293,32 +293,42 @@ def debug_coverage():
 
 
 @router.post("/debug/backfill_usernames")
-def debug_backfill_usernames(limit: int = 1000):
-    """Ensure ig_users rows exist for senders, enqueue enrich, and update message.sender_username."""
+def debug_backfill_usernames(limit: int = 2000):
+    """Ensure ig_users rows exist for both senders and recipients, enqueue enrich, and update message.sender_username."""
     created_users = 0
     enqueued = 0
     updated_msgs = 0
-    # Create missing ig_users from message senders
+    ids: list[str] = []
+    # Collect distinct user ids from senders and recipients
     with get_session() as session:
         try:
             rows = session.exec(text("SELECT DISTINCT ig_sender_id FROM message WHERE ig_sender_id IS NOT NULL")).all()
-            ids: list[str] = []
             for r in rows:
                 val = r.ig_sender_id if hasattr(r, "ig_sender_id") else (r[0] if isinstance(r, (list, tuple)) else None)
                 if val:
                     ids.append(str(val))
-            # Insert-or-ignore in chunks
-            for uid in ids[: max(1, min(int(limit or 1000), len(ids)) )]:
+            rows = session.exec(text("SELECT DISTINCT ig_recipient_id FROM message WHERE ig_recipient_id IS NOT NULL")).all()
+            for r in rows:
+                val = r.ig_recipient_id if hasattr(r, "ig_recipient_id") else (r[0] if isinstance(r, (list, tuple)) else None)
+                if val:
+                    ids.append(str(val))
+            # de-dup and cap by limit
+            uniq = []
+            seen = set()
+            for uid in ids:
+                if uid not in seen:
+                    seen.add(uid); uniq.append(uid)
+            for uid in uniq[: max(1, min(int(limit or 2000), len(uniq)) )]:
                 try:
                     session.exec(text("INSERT OR IGNORE INTO ig_users(ig_user_id) VALUES(:id)").params(id=uid))
                     created_users += 1
                 except Exception:
                     pass
         except Exception as e:
-            return {"status": "error", "error": f"scan senders: {e}"}
-    # Enqueue enrich for those users
+            return {"status": "error", "error": f"scan ids: {e}"}
+    # Enqueue enrich for all collected ids
     try:
-        for uid in ids[: max(1, min(int(limit or 1000), len(ids)) )]:
+        for uid in seen:
             try:
                 enqueue("enrich_user", key=str(uid), payload={"ig_user_id": str(uid)})
                 enqueued += 1
@@ -326,7 +336,7 @@ def debug_backfill_usernames(limit: int = 1000):
                 pass
     except Exception:
         pass
-    # Update message.sender_username from ig_users
+    # Update message.sender_username from ig_users (applies to inbound messages display)
     with get_session() as session:
         try:
             session.exec(text(
@@ -339,7 +349,6 @@ def debug_backfill_usernames(limit: int = 1000):
                 AND ig_sender_id IS NOT NULL
                 """
             ))
-            # Rough count of messages now having username
             row = session.exec(text("SELECT COUNT(1) FROM message WHERE sender_username IS NOT NULL AND sender_username<>''")).first()
             updated_msgs = int((row[0] if isinstance(row, (list, tuple)) else (row if isinstance(row, int) else 0)) or 0)
         except Exception:
