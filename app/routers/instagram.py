@@ -166,6 +166,18 @@ async def receive_events(request: Request):
 					recipient_id = (event.get("recipient") or {}).get("id")
 					text_val = mobj.get("text")
 					attachments = mobj.get("attachments")
+					# Ad/referral (best-effort)
+					ad_id = None
+					ad_link = None
+					ad_title = None
+					try:
+						ref = (event.get("referral") or mobj.get("referral") or {})
+						if isinstance(ref, dict):
+							ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
+							ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
+							ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
+					except Exception:
+						ad_id = ad_link = ad_title = None
 					ts_ms = event.get("timestamp")
 					# derive direction using entry.id when available
 					igba_id = str(entry.get("id")) if entry.get("id") is not None else None
@@ -187,6 +199,9 @@ async def receive_events(request: Request):
 						raw_json=json.dumps(event, ensure_ascii=False),
 						conversation_id=conversation_id,
 						direction=direction,
+						ad_id=ad_id,
+						ad_link=ad_link,
+						ad_title=ad_title,
 					)
 					session.add(row)
 					persisted += 1

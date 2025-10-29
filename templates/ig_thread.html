@@ -44,7 +44,7 @@
                 </div>
               {% endfor %}
             {% endif %}
-            <div class="meta">{{ m.timestamp_ms }}</div>
+            <div class="meta">{{ m.timestamp_ms }}{% if m.ad_id or m.ad_link or m.ad_title %} · Replied to an ad{% if m.ad_title %}: {{ m.ad_title }}{% endif %}{% if m.ad_link %} (<a target="_blank" rel="noopener" href="{{ m.ad_link }}">link</a>){% endif %}{% endif %}</div>
           </div>
         </div>
       {% endfor %}
