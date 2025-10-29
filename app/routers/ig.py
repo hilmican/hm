@@ -6,7 +6,8 @@ from sqlmodel import select
 from ..db import get_session
 from ..models import Message
 from sqlmodel import select
-from ..services.instagram_api import sync_latest_conversations, fetch_user_username
+from ..services.instagram_api import sync_latest_conversations
+from ..services.queue import enqueue
 from ..services.instagram_api import _get_base_token_and_id, GRAPH_VERSION
 import json
 from pathlib import Path
@@ -115,7 +116,7 @@ async def inbox(request: Request, limit: int = 25):
                 labels[cid] = f"@{un}"
         except Exception:
             pass
-        # Fallback via ig_users when inbox usernames missing; if missing there, resolve on-demand from Graph
+        # Fallback via ig_users when inbox usernames missing; if missing there, enqueue background enrich jobs
         if other_ids:
             try:
                 missing = [cid for cid in conv_map.keys() if cid not in labels]
@@ -133,30 +134,12 @@ async def inbox(request: Request, limit: int = 25):
                             id_to_username[str(uid)] = str(un)
                         elif uid:
                             ids_without_username.append(str(uid))
-                    # Fetch a small batch of missing usernames on-demand to improve UX
-                    to_fetch = ids_without_username[: min(20, len(ids_without_username))]
-                    if to_fetch:
-                        import asyncio as _asyncio
-                        async def _fetch_all(ids: list[str]) -> dict[str, str]:
-                            out: dict[str, str] = {}
-                            async def _one(uid: str) -> None:
-                                try:
-                                    uname = await fetch_user_username(uid)
-                                    if uname:
-                                        out[uid] = str(uname)
-                                except Exception:
-                                    pass
-                            await _asyncio.gather(*[_one(u) for u in ids])
-                            return out
-                        resolved = await _fetch_all(to_fetch)
-                        if resolved:
-                            # persist and update map
-                            try:
-                                for uid, uname in resolved.items():
-                                    session.exec(_text("UPDATE ig_users SET username=:u, fetched_at=CURRENT_TIMESTAMP, fetch_status='ok' WHERE ig_user_id=:id").params(u=uname, id=uid))
-                                    id_to_username[uid] = uname
-                            except Exception:
-                                pass
+                    # Enqueue background enrichment instead of fetching inline
+                    try:
+                        for uid in ids_without_username[: min(50, len(ids_without_username))]:
+                            enqueue("enrich_user", key=str(uid), payload={"ig_user_id": str(uid)})
+                    except Exception:
+                        pass
                     for cid, m in conv_map.items():
                         if cid in labels:
                             continue
@@ -218,7 +201,7 @@ async def ws_inbox(websocket: WebSocket):
 
 
 @router.get("/inbox/{conversation_id}")
-async def thread(request: Request, conversation_id: str, limit: int = 100):
+def thread(request: Request, conversation_id: str, limit: int = 100):
     with get_session() as session:
         msgs = session.exec(
             select(Message)
@@ -248,8 +231,8 @@ async def thread(request: Request, conversation_id: str, limit: int = 100):
                         other_label = f"@{un}"
             except Exception:
                 pass
-        # Resolve per-message sender usernames via ig_users as fallback for webhook-ingested rows.
-        # If missing in DB, resolve on-demand from Graph to populate UI immediately.
+        # Resolve per-message sender usernames via ig_users only.
+        # Enqueue missing ones for background enrichment instead of fetching inline.
         usernames: dict[str, str] = {}
         try:
             sender_ids: list[str] = []
@@ -271,29 +254,11 @@ async def thread(request: Request, conversation_id: str, limit: int = 100):
                         usernames[str(uid)] = str(un)
                     elif uid:
                         ids_without_username.append(str(uid))
-                # On-demand resolve a small batch for better UX
-                to_fetch = ids_without_username[: min(20, len(ids_without_username))]
-                if to_fetch:
-                    import asyncio as _asyncio
-                    async def _fetch_all(ids: list[str]) -> dict[str, str]:
-                        out: dict[str, str] = {}
-                        async def _one(uid: str) -> None:
-                            try:
-                                uname = await fetch_user_username(uid)
-                                if uname:
-                                    out[uid] = str(uname)
-                            except Exception:
-                                pass
-                        await _asyncio.gather(*[_one(u) for u in ids])
-                        return out
-                    resolved = await _fetch_all(to_fetch)
-                    if resolved:
-                        try:
-                            for uid, uname in resolved.items():
-                                session.exec(_text("UPDATE ig_users SET username=:u, fetched_at=CURRENT_TIMESTAMP, fetch_status='ok' WHERE ig_user_id=:id").params(u=uname, id=uid))
-                                usernames[uid] = uname
-                        except Exception:
-                            pass
+                try:
+                    for uid in ids_without_username[: min(50, len(ids_without_username))]:
+                        enqueue("enrich_user", key=str(uid), payload={"ig_user_id": str(uid)})
+                except Exception:
+                    pass
         except Exception:
             usernames = {}
 
