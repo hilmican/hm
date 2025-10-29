@@ -234,3 +234,59 @@ def debug_backfill(conv_limit: int = 50, media_limit: int = 100):
     except Exception as e:
         return {"status": "partial", "enrich_page": ep, "enrich_user": eu, "hydrate": hy, "media": md, "error": f"media backfill: {e}"}
     return {"status": "ok", "enrich_page": ep, "enrich_user": eu, "hydrate": hy, "media": md}
+
+
+@router.get("/debug/coverage")
+def debug_coverage():
+    """Return coverage metrics for messages, conversations, and attachments."""
+    out: Dict[str, Any] = {}
+    with get_session() as session:
+        def _scalar(sql: str) -> int:
+            try:
+                row = session.exec(text(sql)).first()
+                if row is None:
+                    return 0
+                if isinstance(row, (list, tuple)):
+                    return int(row[0] or 0)
+                try:
+                    # use first attribute
+                    return int(list(row)[0])  # type: ignore
+                except Exception:
+                    return 0
+            except Exception:
+                return 0
+
+        total_msgs = _scalar("SELECT COUNT(1) FROM message")
+        msgs_with_username = _scalar("SELECT COUNT(1) FROM message WHERE sender_username IS NOT NULL AND sender_username <> ''")
+        total_convs = _scalar("SELECT COUNT(1) FROM conversations")
+        convs_hydrated = _scalar("SELECT COUNT(1) FROM conversations WHERE hydrated_at IS NOT NULL")
+        total_atts = _scalar("SELECT COUNT(1) FROM attachments")
+        atts_ok = _scalar("SELECT COUNT(1) FROM attachments WHERE fetch_status='ok' AND storage_path IS NOT NULL AND storage_path <> ''")
+        atts_pending = _scalar("SELECT COUNT(1) FROM attachments WHERE fetch_status IS NULL OR fetch_status='pending'")
+        atts_error = _scalar("SELECT COUNT(1) FROM attachments WHERE fetch_status='error'")
+        users_ok = _scalar("SELECT COUNT(1) FROM ig_users WHERE fetch_status='ok'")
+        users_total = _scalar("SELECT COUNT(1) FROM ig_users")
+
+        out["messages"] = {
+            "total": total_msgs,
+            "with_username": msgs_with_username,
+            "pct_with_username": (round(100.0 * msgs_with_username / total_msgs, 1) if total_msgs else 0.0),
+        }
+        out["conversations"] = {
+            "total": total_convs,
+            "hydrated": convs_hydrated,
+            "pct_hydrated": (round(100.0 * convs_hydrated / total_convs, 1) if total_convs else 0.0),
+        }
+        out["attachments"] = {
+            "total": total_atts,
+            "ok": atts_ok,
+            "pending": atts_pending,
+            "error": atts_error,
+            "pct_ok": (round(100.0 * atts_ok / total_atts, 1) if total_atts else 0.0),
+        }
+        out["ig_users"] = {
+            "total": users_total,
+            "ok": users_ok,
+            "pct_ok": (round(100.0 * users_ok / users_total, 1) if users_total else 0.0),
+        }
+    return out
