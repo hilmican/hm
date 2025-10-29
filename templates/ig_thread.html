@@ -27,7 +27,8 @@
         <div class="msg {{ m.direction or 'in' }}">
           <div class="bubble">
             <div>
-              {% if m.sender_username %}<span class="meta">@{{ m.sender_username }}</span><br/>{% endif %}
+              {% set uname = m.sender_username or (usernames.get(m.ig_sender_id or '')) %}
+              {% if uname %}<span class="meta">@{{ uname }}</span><br/>{% endif %}
               {{ m.text or '' }}
             </div>
             {% set local_ids = att_ids_map.get(m.ig_message_id or '') %}

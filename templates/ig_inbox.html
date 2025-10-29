@@ -27,10 +27,14 @@
               <a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ labels.get(m.conversation_id)[1:] }}">profile ↗</a>
             {% endif %}
             {% if ad_map.get(m.conversation_id) %}
-              {% if ad_map.get(m.conversation_id).link %}
-                <a class="meta" target="_blank" rel="noopener" href="{{ ad_map.get(m.conversation_id).link }}">· Ad</a>
+              {% set ad = ad_map.get(m.conversation_id) %}
+              {% if ad.link %}
+                <a class="meta" target="_blank" rel="noopener" href="{{ ad.link }}">· Ad</a>
               {% else %}
                 <span class="meta">· Ad</span>
+              {% endif %}
+              {% if ad.title %}
+                <span class="meta"> — {{ (ad.title or '')[:60] }}</span>
               {% endif %}
             {% endif %}
           </div>

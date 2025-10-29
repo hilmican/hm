@@ -45,12 +45,42 @@ async def notify_new_message(event: dict) -> None:
 @router.get("/inbox")
 async def inbox(request: Request, limit: int = 25):
     with get_session() as session:
-        # Latest messages across convs; pick most recent per conversation
-        rows = session.exec(select(Message).order_by(Message.timestamp_ms.desc()).limit(300)).all()
+        # Fetch only lightweight columns for recent messages to reduce IO
+        from sqlalchemy import text as _text
+        sample_n = max(50, min(int(limit or 25) * 8, 400))
+        rows_raw = session.exec(
+            _text(
+                """
+                SELECT conversation_id, timestamp_ms, text, sender_username, direction,
+                       ig_sender_id, ig_recipient_id, ad_link, ad_title
+                FROM message
+                WHERE conversation_id IS NOT NULL
+                ORDER BY timestamp_ms DESC
+                LIMIT :n
+                """
+            ).params(n=int(sample_n))
+        ).all()
+        # Normalize rows into dicts for template use
+        rows = []
+        for r in rows_raw:
+            try:
+                rows.append({
+                    "conversation_id": (r.conversation_id if hasattr(r, "conversation_id") else r[0]),
+                    "timestamp_ms": (r.timestamp_ms if hasattr(r, "timestamp_ms") else r[1]),
+                    "text": (r.text if hasattr(r, "text") else r[2]),
+                    "sender_username": (r.sender_username if hasattr(r, "sender_username") else r[3]),
+                    "direction": (r.direction if hasattr(r, "direction") else r[4]),
+                    "ig_sender_id": (r.ig_sender_id if hasattr(r, "ig_sender_id") else r[5]),
+                    "ig_recipient_id": (r.ig_recipient_id if hasattr(r, "ig_recipient_id") else r[6]),
+                    "ad_link": (r.ad_link if hasattr(r, "ad_link") else r[7]),
+                    "ad_title": (r.ad_title if hasattr(r, "ad_title") else r[8]),
+                })
+            except Exception:
+                continue
         conv_map = {}
         other_ids: set[str] = set()
         for m in rows:
-            cid = m.conversation_id
+            cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
             if not cid:
                 continue
             if cid not in conv_map:
@@ -58,10 +88,11 @@ async def inbox(request: Request, limit: int = 25):
             # Determine the other party id for this message
             other = None
             try:
-                if (m.direction or "in") == "out":
-                    other = m.ig_recipient_id
+                direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
+                if direction == "out":
+                    other = m.get("ig_recipient_id") if isinstance(m, dict) else m.ig_recipient_id
                 else:
-                    other = m.ig_sender_id
+                    other = m.get("ig_sender_id") if isinstance(m, dict) else m.ig_sender_id
             except Exception:
                 other = None
             if other:
@@ -73,11 +104,13 @@ async def inbox(request: Request, limit: int = 25):
             # Build map from conv -> latest inbound with sender_username
             inbound_named: dict[str, str] = {}
             for m in rows:
-                cid = m.conversation_id
+                cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
                 if not cid:
                     continue
-                if (m.direction or "in") == "in" and (m.sender_username or "").strip() and cid not in inbound_named:
-                    inbound_named[cid] = str(m.sender_username).strip()
+                direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
+                sender_username = (m.get("sender_username") if isinstance(m, dict) else m.sender_username) or ""
+                if direction == "in" and sender_username.strip() and cid not in inbound_named:
+                    inbound_named[cid] = str(sender_username).strip()
             for cid, un in inbound_named.items():
                 labels[cid] = f"@{un}"
         except Exception:
@@ -102,10 +135,11 @@ async def inbox(request: Request, limit: int = 25):
                             continue
                         other = None
                         try:
-                            if (m.direction or "in") == "out":
-                                other = m.ig_recipient_id
+                            direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
+                            if direction == "out":
+                                other = m.get("ig_recipient_id") if isinstance(m, dict) else m.ig_recipient_id
                             else:
-                                other = m.ig_sender_id
+                                other = m.get("ig_sender_id") if isinstance(m, dict) else m.ig_sender_id
                         except Exception:
                             other = None
                         if other and str(other) in id_to_username:
@@ -115,11 +149,13 @@ async def inbox(request: Request, limit: int = 25):
         # Best-effort ad metadata from messages
         ad_map = {}
         for m in rows:
-            cid = m.conversation_id
+            cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
             if not cid:
                 continue
-            if (m.ad_link or m.ad_title) and cid not in ad_map:
-                ad_map[cid] = {"link": m.ad_link, "title": m.ad_title}
+            ad_link = (m.get("ad_link") if isinstance(m, dict) else m.ad_link)
+            ad_title = (m.get("ad_title") if isinstance(m, dict) else m.ad_title)
+            if (ad_link or ad_title) and cid not in ad_map:
+                ad_map[cid] = {"link": ad_link, "title": ad_title}
         templates = request.app.state.templates
         return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "ad_map": ad_map})
 
@@ -155,9 +191,16 @@ async def ws_inbox(websocket: WebSocket):
 
 
 @router.get("/inbox/{conversation_id}")
-def thread(request: Request, conversation_id: str):
+def thread(request: Request, conversation_id: str, limit: int = 100):
     with get_session() as session:
-        msgs = session.exec(select(Message).where(Message.conversation_id == conversation_id).order_by(Message.timestamp_ms.asc())).all()
+        msgs = session.exec(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.timestamp_ms.desc())
+            .limit(min(max(limit, 1), 500))
+        ).all()
+        # chronological order for display
+        msgs = list(reversed(msgs))
         # Determine other party id from messages then resolve username
         other_label = None
         other_id = None
@@ -178,6 +221,28 @@ def thread(request: Request, conversation_id: str):
                         other_label = f"@{un}"
             except Exception:
                 pass
+        # Resolve per-message sender usernames via ig_users as fallback for webhook-ingested rows
+        usernames: dict[str, str] = {}
+        try:
+            sender_ids: list[str] = []
+            for mm in msgs:
+                if mm.ig_sender_id:
+                    sid = str(mm.ig_sender_id)
+                    if sid not in usernames:
+                        sender_ids.append(sid)
+            if sender_ids:
+                placeholders = ",".join([":p" + str(i) for i in range(len(sender_ids))])
+                from sqlalchemy import text as _text
+                params = {("p" + str(i)): sender_ids[i] for i in range(len(sender_ids))}
+                rows_u = session.exec(_text(f"SELECT ig_user_id, username FROM ig_users WHERE ig_user_id IN ({placeholders})")).params(**params).all()
+                for r in rows_u:
+                    uid = r.ig_user_id if hasattr(r, "ig_user_id") else r[0]
+                    un = r.username if hasattr(r, "username") else r[1]
+                    if uid and un:
+                        usernames[str(uid)] = str(un)
+        except Exception:
+            usernames = {}
+
         # Build attachment indices so template can render images (fallback: legacy attachments_json)
         att_map = {}
         for mm in msgs:
@@ -220,7 +285,7 @@ def thread(request: Request, conversation_id: str):
         except Exception:
             att_ids_map = {}
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label, "att_map": att_map, "att_ids_map": att_ids_map})
+        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label, "att_map": att_map, "att_ids_map": att_ids_map, "usernames": usernames})
 
 
 @router.get("/media/local/{attachment_id}")

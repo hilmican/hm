@@ -288,6 +288,11 @@ def init_db() -> None:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_attachments_graph_id ON attachments(graph_id)")
                 except Exception:
                     pass
+                # Helpful composite index for inbox (latest message per conversation)
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_message_conv_ts ON message(conversation_id, timestamp_ms)")
+                except Exception:
+                    pass
                 # Lightweight migrations for conversations.hydrated_at (pre-existing tables)
                 try:
                     rows = conn.exec_driver_sql("PRAGMA table_info('conversations')").fetchall()
