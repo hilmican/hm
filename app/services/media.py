@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from ..db import get_session
 from ..services.instagram_api import GRAPH_VERSION, _get as graph_get, _get_base_token_and_id
+import logging
 
 try:
 	from PIL import Image
@@ -33,7 +34,14 @@ async def _resolve_attachment_url(ig_message_id: str, position: int) -> tuple[Op
 	path = f"/{ig_message_id}/attachments"
 	params = {"access_token": token, "fields": "mime_type,file_url,image_data{url,preview_url},name"}
 	async with httpx.AsyncClient() as client:
-		data = await graph_get(client, base + path, params)
+		try:
+			data = await graph_get(client, base + path, params)
+		except Exception as e:
+			try:
+				logging.getLogger("media.fetch").warning("resolve_url fail mid=%s pos=%s err=%s", ig_message_id, position, e)
+			except Exception:
+				pass
+			return None, None
 		arr = data.get("data") or []
 		if isinstance(arr, list) and position < len(arr):
 			att = arr[position] or {}

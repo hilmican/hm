@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
+import logging
 from sqlmodel import select
 
 from ..db import get_session
@@ -12,6 +13,7 @@ from ..models import Message
 
 
 GRAPH_VERSION = os.getenv("IG_GRAPH_API_VERSION", "v21.0")
+_log = logging.getLogger("graph.api")
 
 
 def _get_base_token_and_id() -> tuple[str, str, bool]:
@@ -34,6 +36,7 @@ async def _get(client: httpx.AsyncClient, url: str, params: Dict[str, Any]) -> D
     """GET with small retry/backoff to handle transient DNS/egress hiccups."""
     last_err: Optional[Exception] = None
     last_body: Optional[str] = None
+    safe_url = url.split("?")[0]
     for attempt in range(3):
         try:
             r = await client.get(url, params=params, timeout=20)
@@ -45,9 +48,17 @@ async def _get(client: httpx.AsyncClient, url: str, params: Dict[str, Any]) -> D
                 last_body = e.response.text
             except Exception:
                 last_body = None
+            try:
+                _log.warning("graph http %s attempt=%s code=%s url=%s body_snip=%s", type(e).__name__, attempt+1, getattr(e.response, 'status_code', None), safe_url, (last_body[:160] if last_body else None))
+            except Exception:
+                pass
             await asyncio.sleep(0.5 * (attempt + 1))
         except httpx.RequestError as e:
             last_err = e
+            try:
+                _log.warning("graph reqerr %s attempt=%s url=%s detail=%s", type(e).__name__, attempt+1, safe_url, str(e))
+            except Exception:
+                pass
             await asyncio.sleep(0.5 * (attempt + 1))
     detail = f"{type(last_err).__name__}: {last_err}"
     if last_body:
