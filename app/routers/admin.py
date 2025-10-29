@@ -290,3 +290,84 @@ def debug_coverage():
             "pct_ok": (round(100.0 * users_ok / users_total, 1) if users_total else 0.0),
         }
     return out
+
+
+@router.post("/debug/backfill_usernames")
+def debug_backfill_usernames(limit: int = 1000):
+    """Ensure ig_users rows exist for senders, enqueue enrich, and update message.sender_username."""
+    created_users = 0
+    enqueued = 0
+    updated_msgs = 0
+    # Create missing ig_users from message senders
+    with get_session() as session:
+        try:
+            rows = session.exec(text("SELECT DISTINCT ig_sender_id FROM message WHERE ig_sender_id IS NOT NULL")).all()
+            ids: list[str] = []
+            for r in rows:
+                val = r.ig_sender_id if hasattr(r, "ig_sender_id") else (r[0] if isinstance(r, (list, tuple)) else None)
+                if val:
+                    ids.append(str(val))
+            # Insert-or-ignore in chunks
+            for uid in ids[: max(1, min(int(limit or 1000), len(ids)) )]:
+                try:
+                    session.exec(text("INSERT OR IGNORE INTO ig_users(ig_user_id) VALUES(:id)").params(id=uid))
+                    created_users += 1
+                except Exception:
+                    pass
+        except Exception as e:
+            return {"status": "error", "error": f"scan senders: {e}"}
+    # Enqueue enrich for those users
+    try:
+        for uid in ids[: max(1, min(int(limit or 1000), len(ids)) )]:
+            try:
+                enqueue("enrich_user", key=str(uid), payload={"ig_user_id": str(uid)})
+                enqueued += 1
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # Update message.sender_username from ig_users
+    with get_session() as session:
+        try:
+            session.exec(text(
+                """
+                UPDATE message
+                SET sender_username = (
+                  SELECT username FROM ig_users WHERE ig_users.ig_user_id = message.ig_sender_id
+                )
+                WHERE (sender_username IS NULL OR sender_username='')
+                AND ig_sender_id IS NOT NULL
+                """
+            ))
+            # Rough count of messages now having username
+            row = session.exec(text("SELECT COUNT(1) FROM message WHERE sender_username IS NOT NULL AND sender_username<>''")).first()
+            updated_msgs = int((row[0] if isinstance(row, (list, tuple)) else (row if isinstance(row, int) else 0)) or 0)
+        except Exception:
+            pass
+    return {"status": "ok", "users_created": created_users, "enrich_enqueued": enqueued, "messages_with_username": updated_msgs}
+
+
+@router.post("/debug/backfill_media")
+def debug_backfill_media(limit: int = 200):
+    """Enqueue media fetch for pending/error attachments."""
+    md = 0
+    try:
+        with get_session() as session:
+            rows = session.exec(text(
+                """
+                SELECT id FROM attachments
+                WHERE fetch_status IS NULL OR fetch_status IN ('pending','error')
+                ORDER BY id DESC
+                LIMIT :n
+                """
+            ).params(n=int(limit))).all()
+            for r in rows:
+                att_id = r.id if hasattr(r, "id") else r[0]
+                try:
+                    enqueue("fetch_media", key=str(att_id), payload={"attachment_id": int(att_id)})
+                    md += 1
+                except Exception:
+                    pass
+    except Exception as e:
+        return {"status": "error", "error": str(e), "media_enqueued": md}
+    return {"status": "ok", "media_enqueued": md}
