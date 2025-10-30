@@ -44,7 +44,7 @@
                 <td><input type="number" data-id="{{ r.id }}" data-field="priority" value="{{ r.priority }}" style="width:80px" /></td>
                 <td><input type="checkbox" data-id="{{ r.id }}" data-field="is_active" {% if r.is_active %}checked{% endif %} /></td>
                 <td>
-                    <ul>
+                    <ul data-rule-id="{{ r.id }}">
                         {% for o in outs %}
                         <li>
                             <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
@@ -56,8 +56,16 @@
                                         <option value="{{ p.id }}" {% if o.product_id==p.id %}selected{% endif %}>{{ p.name }} (#{{ p.id }})</option>
                                     {% endfor %}
                                 </select>
-                                <span>size={{ o.size }}, color={{ o.color }}, qty={{ o.quantity }}, price={{ o.unit_price }}</span>
-                                <button class="updOutBtn" data-output-id="{{ o.id }}">Update</button>
+                                <label>size</label>
+                                <input class="outSize" type="text" value="{{ o.size }}" placeholder="size" style="width:70px" />
+                                <label>color</label>
+                                <input class="outColor" type="text" value="{{ o.color }}" placeholder="color" style="width:90px" />
+                                <label>qty</label>
+                                <input class="outQty" type="number" value="{{ o.quantity }}" min="1" style="width:64px" />
+                                <label>price</label>
+                                <input class="outPrice" type="number" step="0.01" value="{{ o.unit_price }}" style="width:90px" />
+                                <button class="updOutBtn" data-output-id="{{ o.id }}">Save</button>
+                                <button class="removeOutBtn" data-output-id="{{ o.id }}">Remove</button>
                                 <button class="ensureVarBtn" data-output-id="{{ o.id }}">Ensure variant</button>
                             </div>
                         </li>
@@ -67,6 +75,7 @@
                 <td>
                     <button class="saveRule" data-id="{{ r.id }}">Save</button>
                     <button class="editOutputs" data-id="{{ r.id }}">Edit outputs</button>
+                    <button class="addOutput" data-id="{{ r.id }}">Add output</button>
                     <button class="ensureRuleVars" data-id="{{ r.id }}">Ensure all variants</button>
                 </td>
             </tr>
@@ -124,20 +133,58 @@
         });
     }
 
-    // inline product update for outputs
+    // inline output update (product + attributes)
     for (const btn of document.querySelectorAll('.updOutBtn')){
         btn.addEventListener('click', async (e)=>{
             const outId = e.target.getAttribute('data-output-id');
             const root = e.target.closest('li');
             const sel = root.querySelector('select.prodSel');
             const pid = sel ? sel.value : '';
+            const size = (root.querySelector('.outSize')?.value || '').trim();
+            const color = (root.querySelector('.outColor')?.value || '').trim();
+            const qtyRaw = root.querySelector('.outQty')?.value;
+            const priceRaw = root.querySelector('.outPrice')?.value;
+            const body = {
+                product_id: pid ? Number(pid) : null,
+                size: size || null,
+                color: color || null,
+                quantity: qtyRaw ? Number(qtyRaw) : undefined,
+                unit_price: (priceRaw === '' || priceRaw === null || priceRaw === undefined) ? null : Number(priceRaw),
+            };
             try {
-                const r = await fetch('/mappings/outputs/' + outId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ product_id: pid ? Number(pid) : null }) });
+                const r = await fetch('/mappings/outputs/' + outId, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
                 if (!r.ok) throw new Error(await r.text());
-                // no full reload needed; just show feedback
-                e.target.textContent = 'Updated';
-                setTimeout(()=>{ e.target.textContent = 'Update'; }, 800);
+                e.target.textContent = 'Saved';
+                setTimeout(()=>{ e.target.textContent = 'Save'; }, 800);
             } catch (err) { alert('Update failed'); }
+        });
+    }
+
+    // remove output via replace-outputs
+    for (const btn of document.querySelectorAll('.removeOutBtn')){
+        btn.addEventListener('click', async (e)=>{
+            const outId = Number(e.target.getAttribute('data-output-id'));
+            const tr = e.target.closest('tr');
+            const ruleId = Number(tr.querySelector('.saveRule').getAttribute('data-id'));
+            const pattern = tr.querySelector('[data-field="source_pattern"]').value;
+            if (!confirm('Remove output #' + outId + '?')) return;
+            try {
+                const rs = await fetch('/mappings/rules?pattern=' + encodeURIComponent(pattern));
+                if (!rs.ok) throw new Error(await rs.text());
+                const jr = await rs.json();
+                const rule = (jr.rules||[])[0];
+                const kept = (rule?.outputs||[]).filter(o => Number(o.id) !== outId).map(o => ({
+                    item_id: o.item_id ?? null,
+                    product_id: o.product_id ?? null,
+                    size: o.size ?? null,
+                    color: o.color ?? null,
+                    quantity: o.quantity ?? 1,
+                    unit_price: o.unit_price ?? null,
+                }));
+                const r = await fetch('/mappings/rules/' + ruleId + '/outputs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(kept) });
+                if (!r.ok) throw new Error(await r.text());
+                location.reload();
+            } catch (err) { alert('Remove failed'); }
         });
     }
 
@@ -164,6 +211,106 @@
                 const j = await r.json();
                 alert('Ensured ' + (j.count||0) + ' variant(s).');
             } catch (err) { alert('Ensure all variants failed'); }
+        });
+    }
+
+    // add output inline form
+    function buildAddRow(products){
+        const li = document.createElement('li');
+        li.className = 'addOutRow';
+        li.innerHTML = `
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                <label>Product</label>
+                <select class=\"newProd\">
+                    <option value=\"\">— select —</option>
+                    ${products.map(p=>`<option value=\"${p.id}\">${p.name} (#${p.id})</option>`).join('')}
+                </select>
+                <label>size</label>
+                <select class=\"newSize\"><option value=\"\">—</option></select>
+                <label>color</label>
+                <select class=\"newColor\"><option value=\"\">—</option></select>
+                <label>qty</label>
+                <input class=\"newQty\" type=\"number\" min=\"1\" value=\"1\" style=\"width:64px\" />
+                <label>price</label>
+                <input class=\"newPrice\" type=\"number\" step=\"0.01\" style=\"width:90px\" />
+                <button class=\"confirmAdd\">Add</button>
+                <button class=\"cancelAdd\">Cancel</button>
+            </div>
+        `;
+        return li;
+    }
+
+    async function fetchAttributes(productId){
+        const r = await fetch('/inventory/attributes?product_id=' + productId);
+        if (!r.ok) throw new Error(await r.text());
+        return await r.json();
+    }
+
+    for (const btn of document.querySelectorAll('.addOutput')){
+        btn.addEventListener('click', async (e)=>{
+            const tr = e.target.closest('tr');
+            const ul = tr.querySelector('td:nth-child(6) ul');
+            if (ul.querySelector('.addOutRow')) return; // one form at a time per rule
+            // build add row
+            const products = Array.from(tr.querySelectorAll('select.prodSel option'))
+                .filter(opt=>opt.value)
+                .reduce((acc, opt)=>{ acc.push({id:Number(opt.value), name: opt.textContent.replace(/\s*\(#\d+\)$/, '')}); return acc; }, [])
+                .filter((v,i,a)=> a.findIndex(x=>x.id===v.id)===i);
+            const li = buildAddRow(products);
+            ul.appendChild(li);
+            const prodSel = li.querySelector('.newProd');
+            const sizeSel = li.querySelector('.newSize');
+            const colorSel = li.querySelector('.newColor');
+            const qtyEl = li.querySelector('.newQty');
+            const priceEl = li.querySelector('.newPrice');
+            prodSel.addEventListener('change', async ()=>{
+                const pid = prodSel.value;
+                sizeSel.innerHTML = '<option value="">—</option>';
+                colorSel.innerHTML = '<option value="">—</option>';
+                if (!pid) return;
+                try{
+                    const attrs = await fetchAttributes(Number(pid));
+                    for (const s of (attrs.sizes||[])){
+                        const o = document.createElement('option'); o.value = s; o.textContent = s; sizeSel.appendChild(o);
+                    }
+                    for (const c of (attrs.colors||[])){
+                        const o = document.createElement('option'); o.value = c; o.textContent = c; colorSel.appendChild(o);
+                    }
+                }catch(err){ /* ignore */ }
+            });
+            li.querySelector('.cancelAdd').addEventListener('click', ()=>{ li.remove(); });
+            li.querySelector('.confirmAdd').addEventListener('click', async ()=>{
+                const ruleId = Number(tr.querySelector('.saveRule').getAttribute('data-id'));
+                const pattern = tr.querySelector('[data-field="source_pattern"]').value;
+                const pid = prodSel.value ? Number(prodSel.value) : null;
+                const size = sizeSel.value || null;
+                const color = colorSel.value || null;
+                const qty = Number(qtyEl.value||1);
+                const priceVal = priceEl.value;
+                const unit_price = (priceVal === '' || priceVal === null || priceVal === undefined) ? null : Number(priceVal);
+                if (!pid){ alert('Select a product'); return; }
+                try {
+                    // load current outputs
+                    const rs = await fetch('/mappings/rules?pattern=' + encodeURIComponent(pattern));
+                    let outputs = [];
+                    if (rs.ok){
+                        const jr = await rs.json();
+                        outputs = ((jr.rules||[])[0]?.outputs)||[];
+                    }
+                    const clean = outputs.map(o => ({
+                        item_id: o.item_id ?? null,
+                        product_id: o.product_id ?? null,
+                        size: o.size ?? null,
+                        color: o.color ?? null,
+                        quantity: o.quantity ?? 1,
+                        unit_price: o.unit_price ?? null,
+                    }));
+                    clean.push({ item_id: null, product_id: pid, size, color, quantity: qty, unit_price });
+                    const r = await fetch('/mappings/rules/' + ruleId + '/outputs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(clean) });
+                    if (!r.ok) throw new Error(await r.text());
+                    location.reload();
+                } catch (err) { alert('Add output failed'); }
+            });
         });
     }
     </script>
