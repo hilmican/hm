@@ -74,9 +74,9 @@ class AIClient:
 
             joined = "".join([(m.get("content") or "") for m in messages])
             in_tokens = _estimate_tokens(joined)
-            target_out = int(in_tokens * out_ratio) + 256
+            target_out = int(in_tokens * out_ratio) + 1024
             # If computed target is smaller than legacy default (2000), behave like before
-            legacy_floor = 5000
+            legacy_floor = 25000
             desired = max(target_out, legacy_floor)
             available = max(safety_out_min, ctx_limit - in_tokens - safety_in)
             max_output_tokens = max(1, min(desired, available))
