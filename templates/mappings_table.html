@@ -214,21 +214,25 @@
         });
     }
 
-    // add output inline form
+    // add output inline form (inputs with datalist suggestions)
     function buildAddRow(products){
         const li = document.createElement('li');
         li.className = 'addOutRow';
+        const sizeListId = 'sizeList-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+        const colorListId = 'colorList-' + Date.now() + '-' + Math.random().toString(36).slice(2);
         li.innerHTML = `
-            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+            <div style=\"display:flex; gap:6px; align-items:center; flex-wrap:wrap;\">
                 <label>Product</label>
                 <select class=\"newProd\">
                     <option value=\"\">— select —</option>
                     ${products.map(p=>`<option value=\"${p.id}\">${p.name} (#${p.id})</option>`).join('')}
                 </select>
                 <label>size</label>
-                <select class=\"newSize\"><option value=\"\">—</option></select>
+                <input class=\"newSize\" type=\"text\" list=\"${sizeListId}\" placeholder=\"size\" style=\"width:90px\" />
+                <datalist id=\"${sizeListId}\"></datalist>
                 <label>color</label>
-                <select class=\"newColor\"><option value=\"\">—</option></select>
+                <input class=\"newColor\" type=\"text\" list=\"${colorListId}\" placeholder=\"color\" style=\"width:110px\" />
+                <datalist id=\"${colorListId}\"></datalist>
                 <label>qty</label>
                 <input class=\"newQty\" type=\"number\" min=\"1\" value=\"1\" style=\"width:64px\" />
                 <label>price</label>
@@ -246,35 +250,49 @@
         return await r.json();
     }
 
+    async function fetchAllProducts(){
+        try{
+            const r = await fetch('/products');
+            if (!r.ok) return [];
+            const j = await r.json();
+            return (j.products||[]).map(p=>({id: p.id, name: p.name}));
+        }catch(_e){ return []; }
+    }
+
     for (const btn of document.querySelectorAll('.addOutput')){
         btn.addEventListener('click', async (e)=>{
             const tr = e.target.closest('tr');
             const ul = tr.querySelector('td:nth-child(6) ul');
             if (ul.querySelector('.addOutRow')) return; // one form at a time per rule
             // build add row
-            const products = Array.from(tr.querySelectorAll('select.prodSel option'))
+            let products = Array.from(tr.querySelectorAll('select.prodSel option'))
                 .filter(opt=>opt.value)
                 .reduce((acc, opt)=>{ acc.push({id:Number(opt.value), name: opt.textContent.replace(/\s*\(#\d+\)$/, '')}); return acc; }, [])
                 .filter((v,i,a)=> a.findIndex(x=>x.id===v.id)===i);
+            if (!products.length) {
+                products = await fetchAllProducts();
+            }
             const li = buildAddRow(products);
             ul.appendChild(li);
             const prodSel = li.querySelector('.newProd');
-            const sizeSel = li.querySelector('.newSize');
-            const colorSel = li.querySelector('.newColor');
+            const sizeInput = li.querySelector('.newSize');
+            const colorInput = li.querySelector('.newColor');
+            const sizeList = li.querySelector('datalist[id^="sizeList-"]');
+            const colorList = li.querySelector('datalist[id^="colorList-"]');
             const qtyEl = li.querySelector('.newQty');
             const priceEl = li.querySelector('.newPrice');
             prodSel.addEventListener('change', async ()=>{
                 const pid = prodSel.value;
-                sizeSel.innerHTML = '<option value="">—</option>';
-                colorSel.innerHTML = '<option value="">—</option>';
+                sizeList.innerHTML = '';
+                colorList.innerHTML = '';
                 if (!pid) return;
                 try{
                     const attrs = await fetchAttributes(Number(pid));
                     for (const s of (attrs.sizes||[])){
-                        const o = document.createElement('option'); o.value = s; o.textContent = s; sizeSel.appendChild(o);
+                        const o = document.createElement('option'); o.value = s; sizeList.appendChild(o);
                     }
                     for (const c of (attrs.colors||[])){
-                        const o = document.createElement('option'); o.value = c; o.textContent = c; colorSel.appendChild(o);
+                        const o = document.createElement('option'); o.value = c; colorList.appendChild(o);
                     }
                 }catch(err){ /* ignore */ }
             });
@@ -283,8 +301,8 @@
                 const ruleId = Number(tr.querySelector('.saveRule').getAttribute('data-id'));
                 const pattern = tr.querySelector('[data-field="source_pattern"]').value;
                 const pid = prodSel.value ? Number(prodSel.value) : null;
-                const size = sizeSel.value || null;
-                const color = colorSel.value || null;
+                const size = (sizeInput.value || '').trim() || null;
+                const color = (colorInput.value || '').trim() || null;
                 const qty = Number(qtyEl.value||1);
                 const priceVal = priceEl.value;
                 const unit_price = (priceVal === '' || priceVal === null || priceVal === undefined) ? null : Number(priceVal);
