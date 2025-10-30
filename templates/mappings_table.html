@@ -77,6 +77,7 @@
                     <button class="editOutputs" data-id="{{ r.id }}">Edit outputs</button>
                     <button class="addOutput" data-id="{{ r.id }}">Add output</button>
                     <button class="ensureRuleVars" data-id="{{ r.id }}">Ensure all variants</button>
+                    <button class="deleteRule" data-id="{{ r.id }}" style="color:#b91c1c">Delete</button>
                 </td>
             </tr>
             {% endfor %}
@@ -329,6 +330,20 @@
                     location.reload();
                 } catch (err) { alert('Add output failed'); }
             });
+        });
+    }
+
+    // delete mapping rule
+    for (const btn of document.querySelectorAll('.deleteRule')){
+        btn.addEventListener('click', async (e)=>{
+            const id = e.target.getAttribute('data-id');
+            const pat = e.target.closest('tr').querySelector('[data-field="source_pattern"]').value;
+            if (!confirm('Delete rule #' + id + ' for pattern\n"' + pat + '" ?')) return;
+            try {
+                const r = await fetch('/mappings/rules/' + id, { method:'DELETE' });
+                if (!r.ok) throw new Error(await r.text());
+                location.reload();
+            } catch (err) { alert('Delete failed'); }
         });
     }
     </script>

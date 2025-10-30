@@ -245,6 +245,20 @@ def replace_outputs(rule_id: int, outputs: List[Dict[str, Any]]):
         return {"status": "ok"}
 
 
+@router.delete("/rules/{rule_id}")
+def delete_rule(rule_id: int):
+    """Delete a mapping rule and all of its outputs."""
+    with get_session() as session:
+        r = session.exec(select(ItemMappingRule).where(ItemMappingRule.id == rule_id)).first()
+        if not r:
+            raise HTTPException(status_code=404, detail="Rule not found")
+        outs = session.exec(select(ItemMappingOutput).where(ItemMappingOutput.rule_id == rule_id)).all()
+        for o in outs:
+            session.delete(o)
+        session.delete(r)
+        return {"status": "ok"}
+
+
 # --- AI assisted mapping endpoints ---
 
 @router.post("/ai/suggest", response_model=AISuggestResponse)
