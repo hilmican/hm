@@ -122,12 +122,12 @@ def daily_report(
 			cache_key,
 			ttl,
 			lambda: {
-				"gross": float((session.exec(text("SELECT SUM(amount) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
-				"net": float((session.exec(text("SELECT SUM(net_amount) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
-				"kom": float((session.exec(text("SELECT SUM(COALESCE(fee_komisyon,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
-				"hiz": float((session.exec(text("SELECT SUM(COALESCE(fee_hizmet,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
-				"iad": float((session.exec(text("SELECT SUM(COALESCE(fee_iade,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
-				"eok": float((session.exec(text("SELECT SUM(COALESCE(fee_erken_odeme,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
+				"gross": float((session.exec(text("SELECT SUM(amount) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e").bindparams(s=start_date, e=end_date)).first() or [0])[0] or 0),
+				"net": float((session.exec(text("SELECT SUM(net_amount) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e").bindparams(s=start_date, e=end_date)).first() or [0])[0] or 0),
+				"kom": float((session.exec(text("SELECT SUM(COALESCE(fee_komisyon,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e").bindparams(s=start_date, e=end_date)).first() or [0])[0] or 0),
+				"hiz": float((session.exec(text("SELECT SUM(COALESCE(fee_hizmet,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e").bindparams(s=start_date, e=end_date)).first() or [0])[0] or 0),
+				"iad": float((session.exec(text("SELECT SUM(COALESCE(fee_iade,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e").bindparams(s=start_date, e=end_date)).first() or [0])[0] or 0),
+				"eok": float((session.exec(text("SELECT SUM(COALESCE(fee_erken_odeme,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e").bindparams(s=start_date, e=end_date)).first() or [0])[0] or 0),
 			},
 		)
 		gross_collected = float(pay_sums.get("gross", 0.0))

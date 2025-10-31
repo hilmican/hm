@@ -151,80 +151,80 @@ def _create_attachment_stubs(session, message_id: int, mid: str, attachments: An
 
 
 def upsert_message_from_ig_event(session, event: Dict[str, Any], igba_id: str) -> Optional[int]:
-    """Insert message if missing, return internal message_id.
+	"""Insert message if missing, return internal message_id.
 
-    This mirrors webhook/ingestion logic and enqueues media fetch where needed.
-    """
-    message_obj = event.get("message") or {}
-    if not message_obj:
-        return None
-    mid = message_obj.get("mid") or message_obj.get("id") or event.get("id")
-    if not mid:
-        return None
-    exists = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid").params(mid=str(mid))).first()
-    if exists:
-        row = exists
-        return int(row.id if hasattr(row, "id") else row[0])
-    sender_id = (event.get("from") or event.get("sender") or {}).get("id")
-    recipient_id = None
-    try:
-        to = (event.get("to") or {}).get("data") or []
-        recipient_id = to[0].get("id") if to else None
-    except Exception:
-        recipient_id = None
-    text_val = message_obj.get("message") or message_obj.get("text")
-    attachments = message_obj.get("attachments")
-    ts_ms = None
-    try:
-        ts = event.get("created_time") or event.get("timestamp")
-        if isinstance(ts, (int, float)):
-            ts_ms = int(ts)
-    except Exception:
-        ts_ms = None
-    direction = "in"
-    try:
-        token, entity_id, is_page = __import__("app.services.instagram_api", fromlist=["_get_base_token_and_id"]).instagram_api._get_base_token_and_id()
-        owner = entity_id
-        if sender_id and str(sender_id) == str(owner):
-            direction = "out"
-    except Exception:
-        pass
-    conversation_id = f"dm:{(recipient_id if direction=='out' else sender_id)}" if ((recipient_id if direction=='out' else sender_id) is not None) else None
-    # Ad/referral extraction (best-effort)
-    ad_id = None
-    ad_link = None
-    ad_title = None
+	This mirrors webhook/ingestion logic and enqueues media fetch where needed.
+	"""
+	message_obj = event.get("message") or {}
+	if not message_obj:
+		return None
+	mid = message_obj.get("mid") or message_obj.get("id") or event.get("id")
+	if not mid:
+		return None
+	exists = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid").params(mid=str(mid))).first()
+	if exists:
+		row = exists
+		return int(row.id if hasattr(row, "id") else row[0])
+	sender_id = (event.get("from") or event.get("sender") or {}).get("id")
+	recipient_id = None
+	try:
+		to = (event.get("to") or {}).get("data") or []
+		recipient_id = to[0].get("id") if to else None
+	except Exception:
+		recipient_id = None
+	text_val = message_obj.get("message") or message_obj.get("text")
+	attachments = message_obj.get("attachments")
+	ts_ms = None
+	try:
+		ts = event.get("created_time") or event.get("timestamp")
+		if isinstance(ts, (int, float)):
+			ts_ms = int(ts)
+	except Exception:
+		ts_ms = None
+	direction = "in"
+	try:
+		token, entity_id, is_page = __import__("app.services.instagram_api", fromlist=["_get_base_token_and_id"]).instagram_api._get_base_token_and_id()
+		owner = entity_id
+		if sender_id and str(sender_id) == str(owner):
+			direction = "out"
+	except Exception:
+		pass
+	conversation_id = f"dm:{(recipient_id if direction=='out' else sender_id)}" if ((recipient_id if direction=='out' else sender_id) is not None) else None
+	# Ad/referral extraction (best-effort)
+	ad_id = None
+	ad_link = None
+	ad_title = None
 	referral_json_val = None
-    try:
+	try:
 		ref = (event.get("referral") or message_obj.get("referral") or {})
-        if isinstance(ref, dict):
-            ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
-            ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
-            ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
+		if isinstance(ref, dict):
+			ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
+			ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
+			ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
 			referral_json_val = json.dumps(ref, ensure_ascii=False)
-    except Exception:
+	except Exception:
 		ad_id = ad_link = ad_title = None
 		referral_json_val = None
-    row = Message(
-        ig_sender_id=str(sender_id) if sender_id is not None else None,
-        ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
-        ig_message_id=str(mid),
-        text=text_val,
-        attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
-        timestamp_ms=int(ts_ms) if ts_ms is not None else None,
-        raw_json=json.dumps(event, ensure_ascii=False),
-        conversation_id=conversation_id,
-        direction=direction,
-        ad_id=ad_id,
-        ad_link=ad_link,
-        ad_title=ad_title,
+	row = Message(
+		ig_sender_id=str(sender_id) if sender_id is not None else None,
+		ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
+		ig_message_id=str(mid),
+		text=text_val,
+		attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
+		timestamp_ms=int(ts_ms) if ts_ms is not None else None,
+		raw_json=json.dumps(event, ensure_ascii=False),
+		conversation_id=conversation_id,
+		direction=direction,
+		ad_id=ad_id,
+		ad_link=ad_link,
+		ad_title=ad_title,
 		referral_json=referral_json_val,
-    )
-    session.add(row)
-    session.flush()
-    if attachments:
-        _create_attachment_stubs(session, int(row.id), str(mid), attachments)  # type: ignore[arg-type]
-    return int(row.id)
+	)
+	session.add(row)
+	session.flush()
+	if attachments:
+		_create_attachment_stubs(session, int(row.id), str(mid), attachments)  # type: ignore[arg-type]
+	return int(row.id)
 
 
 def handle(raw_event_id: int) -> int:
