@@ -68,21 +68,35 @@ def list_orders_table(request: Request):
             total = float(o.total_amount or 0.0)
             paid = paid_map.get(oid, 0.0)
             status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
-        # Use stored total_cost; if missing, compute on the fly for display
+        # Use stored total_cost; if missing, compute via batch-loaded OrderItems and Items
         from sqlmodel import select as _select
         cost_map: dict[int, float] = {}
+        # Initialize from stored totals
         for o in rows:
             if o.total_cost is not None:
                 cost_map[o.id or 0] = float(o.total_cost or 0.0)
-            else:
-                if not o.id:
+        # Batch compute for remaining orders without stored total_cost
+        missing_ids = [o.id for o in rows if (o.id and (o.id not in cost_map))]
+        if missing_ids:
+            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id.in_(missing_ids))).all()
+            order_item_map: dict[int, list[tuple[int, int]]] = {}
+            item_ids_needed: set[int] = set()
+            for oi in oitems:
+                if oi.order_id is None or oi.item_id is None:
                     continue
-                oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
-                total_cost = 0.0
-                for oi in oitems:
-                    it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
-                    total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
-                cost_map[o.id] = round(total_cost, 2)
+                order_item_map.setdefault(int(oi.order_id), []).append((int(oi.item_id), int(oi.quantity or 0)))
+                item_ids_needed.add(int(oi.item_id))
+            item_cost_map: dict[int, float] = {}
+            if item_ids_needed:
+                cost_items = session.exec(_select(Item).where(Item.id.in_(sorted(item_ids_needed)))).all()
+                for it in cost_items:
+                    if it.id is not None:
+                        item_cost_map[int(it.id)] = float(it.cost or 0.0)
+            for oid in missing_ids:
+                acc = 0.0
+                for (iid, qty) in order_item_map.get(int(oid), []):
+                    acc += float(item_cost_map.get(int(iid), 0.0)) * int(qty or 0)
+                cost_map[int(oid)] = round(acc, 2)
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "orders_table.html",

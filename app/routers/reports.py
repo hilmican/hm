@@ -3,11 +3,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 from sqlmodel import select
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, text
+import os
 
 from ..db import get_session
 from ..models import Order, Payment, Item, Client, ImportRun, StockMovement, OrderItem
 from ..services.shipping import compute_shipping_fee
+from ..services.cache import cached_json
 
 
 router = APIRouter()
@@ -113,25 +115,32 @@ def daily_report(
 		aov = (total_sales / order_count) if order_count > 0 else 0.0
 		asp = (total_sales / total_quantity) if total_quantity > 0 else 0.0
 
-		# Payments in the period by payment.date
-		payments = session.exec(
-			select(Payment)
-			.where(Payment.date.is_not(None))
-			.where(Payment.date >= start_date)
-			.where(Payment.date <= end_date)
-			.order_by(Payment.id.desc())
-		).all()
-		gross_collected = sum(float(p.amount or 0.0) for p in payments)
-		net_collected = sum(float(p.net_amount or 0.0) for p in payments)
-		fee_kom = sum(float(p.fee_komisyon or 0.0) for p in payments)
-		fee_hiz = sum(float(p.fee_hizmet or 0.0) for p in payments)
+		# Payments in the period by payment.date (use SQL sums with short cache)
+		ttl = int(os.getenv("CACHE_TTL_REPORTS", "60"))
+		cache_key = f"rep:daily:pay:{start_date.isoformat()}:{end_date.isoformat()}"
+		pay_sums = cached_json(
+			cache_key,
+			ttl,
+			lambda: {
+				"gross": float((session.exec(text("SELECT SUM(amount) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
+				"net": float((session.exec(text("SELECT SUM(net_amount) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
+				"kom": float((session.exec(text("SELECT SUM(COALESCE(fee_komisyon,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
+				"hiz": float((session.exec(text("SELECT SUM(COALESCE(fee_hizmet,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
+				"iad": float((session.exec(text("SELECT SUM(COALESCE(fee_iade,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
+				"eok": float((session.exec(text("SELECT SUM(COALESCE(fee_erken_odeme,0)) FROM payment WHERE date IS NOT NULL AND date >= :s AND date <= :e")).params(s=start_date, e=end_date).first() or [0])[0] or 0),
+			},
+		)
+		gross_collected = float(pay_sums.get("gross", 0.0))
+		net_collected = float(pay_sums.get("net", 0.0))
+		fee_kom = float(pay_sums.get("kom", 0.0))
+		fee_hiz = float(pay_sums.get("hiz", 0.0))
 		# Shipping fee for KPIs: prefer stored per-order shipping fee; fallback to computed by toplam
 		order_shipping_map = {}
 		for o in orders:
 			order_shipping_map[o.id or 0] = float((o.shipping_fee if o.shipping_fee is not None else compute_shipping_fee(float(o.total_amount or 0.0))) or 0.0)
 		fee_kar = sum(order_shipping_map.get(o.id or 0, 0.0) for o in orders)
-		fee_iad = sum(float(p.fee_iade or 0.0) for p in payments)
-		fee_eok = sum(float(p.fee_erken_odeme or 0.0) for p in payments)
+		fee_iad = float(pay_sums.get("iad", 0.0))
+		fee_eok = float(pay_sums.get("eok", 0.0))
 		total_fees = fee_kom + fee_hiz + fee_kar + fee_iad + fee_eok
 		net_profit = gross_profit - total_fees
 		collection_ratio = (gross_collected / total_sales) if total_sales > 0 else 0.0

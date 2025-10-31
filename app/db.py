@@ -38,6 +38,16 @@ def init_db() -> None:
                 # set helpful pragmas
                 conn.execute("PRAGMA journal_mode=WAL;")
                 conn.execute(f"PRAGMA busy_timeout={int(busy_timeout_s*1000)};")
+                # optional performance tuning when enabled
+                if os.getenv("SQLITE_TUNE", "1") != "0":
+                    try:
+                        conn.execute("PRAGMA synchronous=NORMAL;")
+                        conn.execute("PRAGMA temp_store=MEMORY;")
+                        conn.execute("PRAGMA mmap_size=268435456;")  # 256MB
+                        conn.execute("PRAGMA cache_size=-262144;")    # ~256MB page cache
+                        conn.execute("PRAGMA journal_size_limit=134217728;")  # 128MB
+                    except Exception:
+                        pass
                 # try to acquire writer lock
                 conn.execute("BEGIN IMMEDIATE;")
                 conn.execute("ROLLBACK;")
@@ -66,6 +76,17 @@ def init_db() -> None:
             SQLModel.metadata.create_all(engine)
             # lightweight migrations for existing SQLite DBs
             with engine.begin() as conn:
+                # Apply SQLite PRAGMAs once at startup if enabled
+                try:
+                    if (getattr(engine, "url", None) and getattr(engine.url, "get_backend_name", lambda: "")() == "sqlite") and os.getenv("SQLITE_TUNE", "1") != "0":
+                        conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+                        conn.exec_driver_sql("PRAGMA synchronous=NORMAL")
+                        conn.exec_driver_sql("PRAGMA temp_store=MEMORY")
+                        conn.exec_driver_sql("PRAGMA mmap_size=268435456")
+                        conn.exec_driver_sql("PRAGMA cache_size=-262144")
+                        conn.exec_driver_sql("PRAGMA journal_size_limit=134217728")
+                except Exception:
+                    pass
                 def column_exists(table: str, column: str) -> bool:
                     rows = conn.exec_driver_sql(f"PRAGMA table_info('{table}')").fetchall()
                     # PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
@@ -293,6 +314,11 @@ def init_db() -> None:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_payment_order_id ON payment(order_id)")
                 except Exception:
                     pass
+                # Date-based filtering on payment reports
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_payment_date ON payment(date)")
+                except Exception:
+                    pass
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_payment_client_id ON payment(client_id)")
                 except Exception:
@@ -319,6 +345,19 @@ def init_db() -> None:
                     pass
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_orderitem_item_id ON orderitem(item_id)")
+                except Exception:
+                    pass
+                # Order filtering and joins
+                try:
+                    conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_order_shipment_date ON "order"(shipment_date)')
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_order_data_date ON "order"(data_date)')
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_order_client_id ON "order"(client_id)')
                 except Exception:
                     pass
                 # Helpful composite index for inbox (latest message per conversation)

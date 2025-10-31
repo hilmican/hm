@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Request, HTTPException
 from sqlmodel import select
 from sqlalchemy import text
+import os
 
 from ..db import get_session
 from ..models import Client, Item, Order, Payment, ImportRow, ImportRun, StockMovement
 from ..services.shipping import compute_shipping_fee
+from ..services.cache import cached_json
 
 router = APIRouter()
 
@@ -19,22 +21,31 @@ def dashboard(request: Request):
 	# pull small samples for quick display
 	
 	with get_session() as session:
-		# Fast aggregates using SQL (avoid loading full tables)
-		row = session.exec(text('SELECT SUM(total_amount) AS s FROM "order"')).first()
-		total_sales = float((row.s if hasattr(row, "s") else (row[0] if row else 0)) or 0)
-		row = session.exec(text('SELECT SUM(net_amount) AS s FROM payment')).first()
-		net_collected = float((row.s if hasattr(row, "s") else (row[0] if row else 0)) or 0)
-		# Fee breakdown from payments only
-		fee_kom = float((session.exec(text('SELECT SUM(COALESCE(fee_komisyon,0)) FROM payment')).first() or [0])[0] or 0)
-		fee_hiz = float((session.exec(text('SELECT SUM(COALESCE(fee_hizmet,0)) FROM payment')).first() or [0])[0] or 0)
-		fee_iad = float((session.exec(text('SELECT SUM(COALESCE(fee_iade,0)) FROM payment')).first() or [0])[0] or 0)
-		fee_eok = float((session.exec(text('SELECT SUM(COALESCE(fee_erken_odeme,0)) FROM payment')).first() or [0])[0] or 0)
-		# Shipping total from orders where present (skip compute_shipping_fee loop)
-		fee_kar = float((session.exec(text('SELECT SUM(COALESCE(shipping_fee,0)) FROM "order"')).first() or [0])[0] or 0)
+		# Fast aggregates with short-lived cache
+		ttl = int(os.getenv("CACHE_TTL_DASHBOARD", "60"))
+		agg = cached_json(
+			"dash:totals",
+			ttl,
+			lambda: {
+				"total_sales": float((session.exec(text('SELECT SUM(total_amount) AS s FROM "order"')).first() or [0])[0] or 0),
+				"net_collected": float((session.exec(text('SELECT SUM(net_amount) AS s FROM payment')).first() or [0])[0] or 0),
+				"fee_kom": float((session.exec(text('SELECT SUM(COALESCE(fee_komisyon,0)) FROM payment')).first() or [0])[0] or 0),
+				"fee_hiz": float((session.exec(text('SELECT SUM(COALESCE(fee_hizmet,0)) FROM payment')).first() or [0])[0] or 0),
+				"fee_iad": float((session.exec(text('SELECT SUM(COALESCE(fee_iade,0)) FROM payment')).first() or [0])[0] or 0),
+				"fee_eok": float((session.exec(text('SELECT SUM(COALESCE(fee_erken_odeme,0)) FROM payment')).first() or [0])[0] or 0),
+				"fee_kar": float((session.exec(text('SELECT SUM(COALESCE(shipping_fee,0)) FROM "order"')).first() or [0])[0] or 0),
+				"linked_gross_paid": float((session.exec(text('SELECT SUM(amount) FROM payment WHERE order_id IS NOT NULL')).first() or [0])[0] or 0),
+			},
+		)
+		total_sales = float(agg.get("total_sales", 0.0))
+		net_collected = float(agg.get("net_collected", 0.0))
+		fee_kom = float(agg.get("fee_kom", 0.0))
+		fee_hiz = float(agg.get("fee_hiz", 0.0))
+		fee_iad = float(agg.get("fee_iad", 0.0))
+		fee_eok = float(agg.get("fee_eok", 0.0))
+		fee_kar = float(agg.get("fee_kar", 0.0))
 		total_fees = fee_kom + fee_hiz + fee_kar + fee_iad + fee_eok
-		# Outstanding: total order gross minus gross payments linked to orders
-		row = session.exec(text('SELECT SUM(amount) FROM payment WHERE order_id IS NOT NULL')).first()
-		linked_gross_paid = float((row[0] if row else 0) or 0)
+		linked_gross_paid = float(agg.get("linked_gross_paid", 0.0))
 		total_to_collect = max(0.0, float(total_sales) - linked_gross_paid)
 
 		orders = session.exec(select(Order).order_by(Order.id.desc()).limit(20)).all()
