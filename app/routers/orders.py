@@ -107,8 +107,8 @@ def list_orders_table(
             oid = o.id or 0
             total = float(o.total_amount or 0.0)
             paid = paid_map.get(oid, 0.0)
-        # refunded/switched take precedence for row classes
-        if (o.status or "") in ("refunded", "switched", "stitched"):
+            # refunded/switched take precedence for row classes
+            if (o.status or "") in ("refunded", "switched", "stitched"):
                 status_map[oid] = str(o.status)
             else:
                 status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
