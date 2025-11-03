@@ -67,6 +67,7 @@
           <a href="/admin/debug/jobs?kind=ingest">Jobs (ingest)</a>
           <a href="/admin/debug/attachments">Attachments (JSON)</a>
           <a href="/admin/debug/conversations">Conversations (JSON)</a>
+          <a href="#" id="invalidateCacheLink">Cache Temizle</a>
         </div>
       </div>
       <div class="menu-item has-sub">
@@ -89,6 +90,18 @@
     if (btn) {
       btn.addEventListener('click', async ()=>{
         try { await fetch('/auth/logout', { method: 'POST' }); location.href = '/auth/login'; } catch(e){ alert('Logout error'); }
+      });
+    }
+    const inv = document.getElementById('invalidateCacheLink');
+    if (inv) {
+      inv.addEventListener('click', async (e)=>{
+        e.preventDefault();
+        try {
+          const res = await fetch('/admin/cache/invalidate', { method: 'POST' });
+          let msg = 'Cache invalidated';
+          try { const j = await res.json(); if (!res.ok) msg = 'Error: ' + (j && (j.detail||j.error) || res.status); } catch(_e) {}
+          alert(msg);
+        } catch(e){ alert('Invalidate error'); }
       });
     }
   })();

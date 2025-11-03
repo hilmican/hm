@@ -116,6 +116,19 @@ def status_page(request: Request):
 	return templates.TemplateResponse("admin_status.html", {"request": request, **ctx})
 
 
+@router.post("/cache/invalidate")
+def cache_invalidate(request: Request):
+    uid = request.session.get("uid")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        from ..services.cache import bump_namespace
+        ns = bump_namespace()
+        return {"status": "ok", "namespace": ns}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"invalidate failed: {e}")
+
+
 @router.get("/debug/jobs")
 def debug_jobs(kind: str, limit: int = 50):
     try:
