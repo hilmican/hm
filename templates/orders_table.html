@@ -110,7 +110,7 @@
                 <td>
                     <div style="display:flex; gap:6px;">
                         <button class="btn warn" onclick="refund({{ o.id }})">Iade</button>
-                        <button class="btn accent" onclick="stitch({{ o.id }})">Dikis</button>
+                        <button class="btn accent" onclick="stitch({{ o.id }})">Degis</button>
                     </div>
                 </td>
             </tr>
@@ -140,7 +140,7 @@
     async function stitch(id){
         try{
             const res = await fetch(`/orders/${id}/stitch`, { method: 'POST' });
-            if(!res.ok){ alert('Dikis hatasi'); return; }
+            if(!res.ok){ alert('Degisim hatasi'); return; }
             location.reload();
         }catch(e){ alert('Ag hatasi: ' + e); }
     }
