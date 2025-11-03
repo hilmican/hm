@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, HTTPException
 from sqlmodel import select
 from sqlalchemy import or_, and_
 import datetime as dt
@@ -6,6 +6,7 @@ from typing import Optional
 
 from ..db import get_session
 from ..models import Order, Payment, OrderItem, Item
+from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
 
 router = APIRouter()
@@ -93,7 +94,7 @@ def list_orders_table(
 
         rows = session.exec(q).all()
 
-        # Payments and status map for paid/unpaid classification
+        # Payments and status map for paid/unpaid classification and refund/stitch display
         order_ids = [o.id for o in rows if o.id]
         pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
         paid_map: dict[int, float] = {}
@@ -106,10 +107,14 @@ def list_orders_table(
             oid = o.id or 0
             total = float(o.total_amount or 0.0)
             paid = paid_map.get(oid, 0.0)
-            status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
+            # refunded/stitched take precedence for row classes
+            if (o.status or "") in ("refunded", "stitched"):
+                status_map[oid] = str(o.status)
+            else:
+                status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
 
         # Optional status filter
-        if status in ("paid", "unpaid"):
+        if status in ("paid", "unpaid", "refunded", "stitched"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
 
         # build simple maps for names based on filtered rows
@@ -224,3 +229,60 @@ def recalc_costs():
                 o.total_cost = round(total_cost, 2)
                 updated += 1
         return {"status": "ok", "orders_updated": updated}
+
+
+@router.post("/{order_id}/refund")
+def refund_order(order_id: int):
+    with get_session() as session:
+        o = session.exec(select(Order).where(Order.id == order_id)).first()
+        if not o:
+            raise HTTPException(status_code=404, detail="Order not found")
+        # idempotent: if already refunded/stitched, do nothing
+        if (o.status or "") in ("refunded", "stitched"):
+            return {"status": "ok", "message": "already_processed"}
+        # add stock back for all order items
+        oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
+        for oi in oitems:
+            if oi.item_id is None:
+                continue
+            qty = int(oi.quantity or 0)
+            if qty > 0:
+                adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order_id)
+        o.status = "refunded"
+        return {"status": "ok"}
+
+
+@router.post("/{order_id}/stitch")
+def stitch_order(order_id: int):
+    with get_session() as session:
+        o = session.exec(select(Order).where(Order.id == order_id)).first()
+        if not o:
+            raise HTTPException(status_code=404, detail="Order not found")
+        # idempotent: if already refunded/stitched, do nothing
+        if (o.status or "") in ("refunded", "stitched"):
+            return {"status": "ok", "message": "already_processed"}
+        # add stock back for all order items
+        oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
+        for oi in oitems:
+            if oi.item_id is None:
+                continue
+            qty = int(oi.quantity or 0)
+            if qty > 0:
+                adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order_id)
+        o.status = "stitched"
+        return {"status": "ok"}
+
+
+@router.post("/{order_id}/update-total")
+def update_total(order_id: int, body: dict):
+    try:
+        new_total_raw = body.get("total")
+        new_total = float(new_total_raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid total")
+    with get_session() as session:
+        o = session.exec(select(Order).where(Order.id == order_id)).first()
+        if not o:
+            raise HTTPException(status_code=404, detail="Order not found")
+        o.total_amount = round(new_total, 2)
+        return {"status": "ok"}

@@ -15,6 +15,12 @@
         a { color: #2563eb; text-decoration: none; }
         tr.paid { background: #eaffea; }
         tr.unpaid { background: #fff9db; }
+        tr.refunded { color: #b91c1c; background: #ffe5e5; }
+        tr.stitched { color: #92400e; background: #ede0d4; }
+        .btn { padding:4px 8px; border-radius:6px; border:1px solid #d1d5db; background:#fff; cursor:pointer; font-size:12px; }
+        .btn:hover { background:#f8fafc; }
+        .btn.warn { border-color:#ef4444; color:#b91c1c; }
+        .btn.accent { border-color:#92400e; color:#92400e; }
     </style>
     <script>
         function filterTable(table, q){
@@ -58,6 +64,8 @@
                 <option value="" {{ 'selected' if not status else '' }}>Tum Durumlar</option>
                 <option value="paid" {{ 'selected' if status == 'paid' else '' }}>Yesil (Odendi)</option>
                 <option value="unpaid" {{ 'selected' if status == 'unpaid' else '' }}>Sari (Odenmedi)</option>
+                <option value="refunded" {{ 'selected' if status == 'refunded' else '' }}>Kirmizi (Iade)</option>
+                <option value="stitched" {{ 'selected' if status == 'stitched' else '' }}>Kahverengi (Dikis)</option>
             </select>
             <button type="submit">Filtrele</button>
             <a href="/orders/table" style="font-size:12px; color:#6b7280;">Temizle</a>
@@ -68,7 +76,7 @@
     <h2>Siparisler</h2>
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th>Takip</th><th>Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>Kanali</th></tr>
+            <tr><th>ID</th><th>Takip</th><th>Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>Kanali</th><th></th></tr>
             <tr>
                 <th colspan="4" style="text-align:right">Toplamlar:</th>
                 <th data-type="num">{{ sum_qty }}</th>
@@ -90,12 +98,21 @@
                 </td>
                 <td>{{ o.notes or '' }}</td>
                 <td>{{ o.quantity }}</td>
-                <td>{{ o.total_amount }}</td>
+                <td>
+                    <span id="tot-{{ o.id }}">{{ o.total_amount }}</span>
+                    <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(o.total_amount or 0) }}')">Düzenle</button>
+                </td>
                 <td>{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
                 <td>{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
                 <td>{{ o.shipment_date }}</td>
                 <td>{{ o.data_date }}</td>
                 <td>{{ o.source }}</td>
+                <td>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn warn" onclick="refund({{ o.id }})">Iade</button>
+                        <button class="btn accent" onclick="stitch({{ o.id }})">Dikis</button>
+                    </div>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -109,6 +126,33 @@
                 alert('Hesaplama hatasi: ' + t);
                 return;
             }
+            location.reload();
+        }catch(e){ alert('Ag hatasi: ' + e); }
+    }
+
+    async function refund(id){
+        try{
+            const res = await fetch(`/orders/${id}/refund`, { method: 'POST' });
+            if(!res.ok){ alert('Iade hatasi'); return; }
+            location.reload();
+        }catch(e){ alert('Ag hatasi: ' + e); }
+    }
+    async function stitch(id){
+        try{
+            const res = await fetch(`/orders/${id}/stitch`, { method: 'POST' });
+            if(!res.ok){ alert('Dikis hatasi'); return; }
+            location.reload();
+        }catch(e){ alert('Ag hatasi: ' + e); }
+    }
+    async function editTotal(id, cur){
+        const s = prompt('Yeni Toplam:', cur);
+        if(s === null) return;
+        const val = s.replace(',', '.');
+        const num = parseFloat(val);
+        if(!isFinite(num)){ alert('Gecersiz tutar'); return; }
+        try{
+            const res = await fetch(`/orders/${id}/update-total`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ total: num }) });
+            if(!res.ok){ const t = await res.text(); alert('Guncelleme hatasi: ' + t); return; }
             location.reload();
         }catch(e){ alert('Ag hatasi: ' + e); }
     }
