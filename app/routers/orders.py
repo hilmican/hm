@@ -1,5 +1,8 @@
 from fastapi import APIRouter, Query, Request
 from sqlmodel import select
+from sqlalchemy import or_, and_
+import datetime as dt
+from typing import Optional
 
 from ..db import get_session
 from ..models import Order, Payment, OrderItem, Item
@@ -33,10 +36,83 @@ def list_orders(limit: int = Query(default=100, ge=1, le=1000)):
 
 
 @router.get("/table")
-def list_orders_table(request: Request):
+def list_orders_table(
+    request: Request,
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
+    date_field: str = Query(default="shipment", regex="^(shipment|data|both)$"),
+    source: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+):
+    def _parse_date_or_default(value: Optional[str], fallback: dt.date) -> dt.date:
+        try:
+            if value:
+                return dt.date.fromisoformat(value)
+        except Exception:
+            pass
+        return fallback
+
     with get_session() as session:
-        rows = session.exec(select(Order).order_by(Order.id.desc())).all()
-        # build simple maps for names
+        # default to last 7 days inclusive
+        today = dt.date.today()
+        default_start = today - dt.timedelta(days=6)
+        start_date = _parse_date_or_default(start, default_start)
+        end_date = _parse_date_or_default(end, today)
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
+
+        # Build base query with date filter logic similar to reports
+        if date_field == "both":
+            q = (
+                select(Order)
+                .where(
+                    or_(
+                        and_(Order.shipment_date.is_not(None), Order.shipment_date >= start_date, Order.shipment_date <= end_date),
+                        and_(Order.data_date.is_not(None), Order.data_date >= start_date, Order.data_date <= end_date),
+                    )
+                )
+                .order_by(Order.id.desc())
+            )
+        else:
+            date_col = Order.shipment_date if date_field == "shipment" else Order.data_date
+            alt_date_col = Order.data_date if date_field == "shipment" else Order.shipment_date
+            q = (
+                select(Order)
+                .where(
+                    or_(
+                        and_(date_col.is_not(None), date_col >= start_date, date_col <= end_date),
+                        and_(date_col.is_(None), alt_date_col.is_not(None), alt_date_col >= start_date, alt_date_col <= end_date),
+                    )
+                )
+                .order_by(Order.id.desc())
+            )
+
+        # Optional source filter (bizim|kargo)
+        if source in ("bizim", "kargo"):
+            q = q.where(Order.source == source)
+
+        rows = session.exec(q).all()
+
+        # Payments and status map for paid/unpaid classification
+        order_ids = [o.id for o in rows if o.id]
+        pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
+        paid_map: dict[int, float] = {}
+        for p in pays:
+            if p.order_id is None:
+                continue
+            paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
+        status_map: dict[int, str] = {}
+        for o in rows:
+            oid = o.id or 0
+            total = float(o.total_amount or 0.0)
+            paid = paid_map.get(oid, 0.0)
+            status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
+
+        # Optional status filter
+        if status in ("paid", "unpaid"):
+            rows = [o for o in rows if status_map.get(o.id or 0) == status]
+
+        # build simple maps for names based on filtered rows
         client_ids = sorted({o.client_id for o in rows if o.client_id})
         item_ids = sorted({o.item_id for o in rows if o.item_id})
         from ..models import Client, Item  # local import to avoid circulars
@@ -44,17 +120,9 @@ def list_orders_table(request: Request):
         items = session.exec(select(Item).where(Item.id.in_(item_ids))).all() if item_ids else []
         client_map = {c.id: c.name for c in clients if c.id is not None}
         item_map = {it.id: it.name for it in items if it.id is not None}
-        # compute paid/unpaid using TahsilatTutari (gross collected) amounts
-        order_ids = [o.id for o in rows if o.id]
-        pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
-        paid_map: dict[int, float] = {}
-        # shipping_map based on Order.total_amount for all orders (display only)
+
+        # shipping_map based on Order.total_amount for display
         shipping_map: dict[int, float] = {}
-        for p in pays:
-            if p.order_id is None:
-                continue
-            paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
-        # Use stored shipping_fee if present; else compute from toplam and show base for zero
         for o in rows:
             oid = o.id or 0
             if o.shipping_fee is not None:
@@ -62,20 +130,13 @@ def list_orders_table(request: Request):
             else:
                 amt = float(o.total_amount or 0.0)
                 shipping_map[oid] = compute_shipping_fee(amt)
-        status_map: dict[int, str] = {}
-        for o in rows:
-            oid = o.id or 0
-            total = float(o.total_amount or 0.0)
-            paid = paid_map.get(oid, 0.0)
-            status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
+
         # Use stored total_cost; if missing, compute via batch-loaded OrderItems and Items
         from sqlmodel import select as _select
         cost_map: dict[int, float] = {}
-        # Initialize from stored totals
         for o in rows:
             if o.total_cost is not None:
                 cost_map[o.id or 0] = float(o.total_cost or 0.0)
-        # Batch compute for remaining orders without stored total_cost
         missing_ids = [o.id for o in rows if (o.id and (o.id not in cost_map))]
         if missing_ids:
             oitems = session.exec(_select(OrderItem).where(OrderItem.order_id.in_(missing_ids))).all()
@@ -97,14 +158,30 @@ def list_orders_table(request: Request):
                 for (iid, qty) in order_item_map.get(int(oid), []):
                     acc += float(item_cost_map.get(int(iid), 0.0)) * int(qty or 0)
                 cost_map[int(oid)] = round(acc, 2)
+
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "orders_table.html",
-            {"request": request, "rows": rows, "client_map": client_map, "item_map": item_map, "status_map": status_map, "shipping_map": shipping_map, "cost_map": cost_map,
-            "sum_qty": sum(int(o.quantity or 0) for o in rows),
-            "sum_total": sum(float(o.total_amount or 0.0) for o in rows),
-            "sum_cost": sum(float(cost_map.get(o.id or 0, 0.0)) for o in rows),
-            "sum_shipping": sum(float(shipping_map.get(o.id or 0, 0.0)) for o in rows)},
+            {
+                "request": request,
+                "rows": rows,
+                "client_map": client_map,
+                "item_map": item_map,
+                "status_map": status_map,
+                "shipping_map": shipping_map,
+                "cost_map": cost_map,
+                # totals over filtered rows
+                "sum_qty": sum(int(o.quantity or 0) for o in rows),
+                "sum_total": sum(float(o.total_amount or 0.0) for o in rows),
+                "sum_cost": sum(float(cost_map.get(o.id or 0, 0.0)) for o in rows),
+                "sum_shipping": sum(float(shipping_map.get(o.id or 0, 0.0)) for o in rows),
+                # current filters
+                "start": start_date,
+                "end": end_date,
+                "date_field": date_field,
+                "source": source,
+                "status": status,
+            },
         )
 
 

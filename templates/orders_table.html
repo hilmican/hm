@@ -41,6 +41,27 @@
     {% include "_nav.html" %}
     <div class="toolbar">
         <input id="search" type="search" placeholder="Siparis ara (musteri, urun, takip)" />
+        <form method="get" action="/orders/table" style="display:flex; gap:8px; align-items:center;">
+            <select name="date_field">
+                <option value="shipment" {{ 'selected' if (date_field == 'shipment') else '' }}>Kargo Tarihi</option>
+                <option value="data" {{ 'selected' if (date_field == 'data') else '' }}>Data Tarihi</option>
+                <option value="both" {{ 'selected' if (date_field == 'both') else '' }}>Birlesik</option>
+            </select>
+            <input type="date" name="start" value="{{ start }}" />
+            <input type="date" name="end" value="{{ end }}" />
+            <select name="source">
+                <option value="" {{ 'selected' if not source else '' }}>Tum Kanallar</option>
+                <option value="bizim" {{ 'selected' if source == 'bizim' else '' }}>bizim</option>
+                <option value="kargo" {{ 'selected' if source == 'kargo' else '' }}>kargo</option>
+            </select>
+            <select name="status">
+                <option value="" {{ 'selected' if not status else '' }}>Tum Durumlar</option>
+                <option value="paid" {{ 'selected' if status == 'paid' else '' }}>Yesil (Odendi)</option>
+                <option value="unpaid" {{ 'selected' if status == 'unpaid' else '' }}>Sari (Odenmedi)</option>
+            </select>
+            <button type="submit">Filtrele</button>
+            <a href="/orders/table" style="font-size:12px; color:#6b7280;">Temizle</a>
+        </form>
         <span class="pill">{{ rows|length }} siparis</span>
         <button onclick="recalc()">Tazele</button>
     </div>
