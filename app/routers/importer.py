@@ -15,6 +15,7 @@ from ..services.matching import find_order_by_client_and_date, find_recent_place
 from ..utils.hashing import compute_row_hash
 from ..utils.normalize import client_unique_key, legacy_client_unique_key, normalize_phone, normalize_text
 from ..utils.slugify import slugify
+from ..services.cache import bump_namespace
 
 router = APIRouter(prefix="")
 
@@ -607,12 +608,17 @@ def commit_import(body: dict, request: Request):
 			agg["runs"].append({"filename": fn, **res})
 			for k in ("created_orders","created_clients","created_items","created_payments","unmatched","enriched_orders","payments_existing","payments_skipped_zero"):
 				agg[k] += (res.get(k) or 0)
+		# Invalidate all cached reads after commit
+		bump_namespace()
 		return agg
 
 	# single-file fallback (original behavior)
 	if not filename:
 		raise HTTPException(status_code=400, detail="filename is required for single commit")
-	return _commit_single(filename, data_date_raw)
+	res_single = _commit_single(filename, data_date_raw)
+	# Invalidate all cached reads after commit
+	bump_namespace()
+	return res_single
 
 
 @router.post("/reset")
@@ -751,4 +757,6 @@ async def upload_excel(
 			"sample": records[:3],
 		})
 
+	# Invalidate all cached reads after new data is uploaded
+	bump_namespace()
 	return {"status": "ok", "source": source, "files": saved}

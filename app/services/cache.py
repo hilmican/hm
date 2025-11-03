@@ -12,10 +12,27 @@ def _cache_enabled() -> bool:
     return os.getenv("CACHE_ENABLED", "1") != "0"
 
 
+def _key_with_namespace(key: str) -> str:
+    try:
+        r = _get_redis()
+        ns = r.get("cache:ns") or "1"
+    except Exception:
+        ns = "1"
+    return f"c{ns}:{key}"
+
+
+def bump_namespace() -> Optional[int]:
+    try:
+        r = _get_redis()
+        return int(r.incr("cache:ns"))
+    except Exception:
+        return None
+
+
 def get_json(key: str) -> Optional[Any]:
     try:
         r = _get_redis()
-        val = r.get(key)
+        val = r.get(_key_with_namespace(key))
         if val is None:
             return None
         return json.loads(val)
@@ -26,7 +43,7 @@ def get_json(key: str) -> Optional[Any]:
 def set_json(key: str, value: Any, ttl_seconds: int = 60) -> None:
     try:
         r = _get_redis()
-        r.setex(key, ttl_seconds, json.dumps(value))
+        r.setex(_key_with_namespace(key), ttl_seconds, json.dumps(value))
     except Exception:
         pass
 
