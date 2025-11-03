@@ -107,14 +107,14 @@ def list_orders_table(
             oid = o.id or 0
             total = float(o.total_amount or 0.0)
             paid = paid_map.get(oid, 0.0)
-            # refunded/stitched take precedence for row classes
-            if (o.status or "") in ("refunded", "stitched"):
+        # refunded/switched take precedence for row classes
+        if (o.status or "") in ("refunded", "switched", "stitched"):
                 status_map[oid] = str(o.status)
             else:
                 status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
 
         # Optional status filter
-        if status in ("paid", "unpaid", "refunded", "stitched"):
+        if status in ("paid", "unpaid", "refunded", "switched"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
 
         # build simple maps for names based on filtered rows
@@ -237,8 +237,8 @@ def refund_order(order_id: int):
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
-        # idempotent: if already refunded/stitched, do nothing
-        if (o.status or "") in ("refunded", "stitched"):
+        # idempotent: if already refunded/switched, do nothing
+        if (o.status or "") in ("refunded", "switched", "stitched"):
             return {"status": "ok", "message": "already_processed"}
         # add stock back for all order items
         oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
@@ -249,17 +249,18 @@ def refund_order(order_id: int):
             if qty > 0:
                 adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order_id)
         o.status = "refunded"
+        o.return_or_switch_date = dt.date.today()
         return {"status": "ok"}
 
 
-@router.post("/{order_id}/stitch")
-def stitch_order(order_id: int):
+@router.post("/{order_id}/switch")
+def switch_order(order_id: int):
     with get_session() as session:
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
-        # idempotent: if already refunded/stitched, do nothing
-        if (o.status or "") in ("refunded", "stitched"):
+        # idempotent: if already refunded/switched, do nothing
+        if (o.status or "") in ("refunded", "switched", "stitched"):
             return {"status": "ok", "message": "already_processed"}
         # add stock back for all order items
         oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
@@ -269,8 +270,15 @@ def stitch_order(order_id: int):
             qty = int(oi.quantity or 0)
             if qty > 0:
                 adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order_id)
-        o.status = "stitched"
+        o.status = "switched"
+        o.return_or_switch_date = dt.date.today()
         return {"status": "ok"}
+
+
+# Backward-compatible alias: /stitch maps to switch
+@router.post("/{order_id}/stitch")
+def stitch_order(order_id: int):
+    return switch_order(order_id)
 
 
 @router.post("/{order_id}/update-total")

@@ -6,10 +6,10 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from sqlmodel import select
 
 from ..db import get_session, reset_db, DB_PATH
-from ..models import Client, Item, Order, Payment, ImportRun, ImportRow, StockMovement, Product
-from ..services.importer import read_bizim_file, read_kargo_file
+from ..models import Client, Item, Order, Payment, ImportRun, ImportRow, StockMovement, Product, OrderItem
+from ..services.importer import read_bizim_file, read_kargo_file, read_returns_file
 from ..services.importer.committers import process_kargo_row, process_bizim_row
-from ..schemas import BizimRow, KargoRow, BIZIM_ALLOWED_KEYS, KARGO_ALLOWED_KEYS
+from ..schemas import BizimRow, KargoRow, ReturnsRow, BIZIM_ALLOWED_KEYS, KARGO_ALLOWED_KEYS, RETURNS_ALLOWED_KEYS
 from ..services.matching import find_order_by_tracking, find_client_candidates
 from ..services.matching import find_order_by_client_and_date, find_recent_placeholder_kargo_for_client
 from ..utils.hashing import compute_row_hash
@@ -23,6 +23,7 @@ router = APIRouter(prefix="")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BIZIM_DIR = PROJECT_ROOT / "bizimexcellerimiz"
 KARGO_DIR = PROJECT_ROOT / "kargocununexcelleri"
+IADE_DIR = PROJECT_ROOT / "iadeler"
 
 def _backup_db_snapshot(tag: str | None = None) -> None:
     """Create a timestamped backup of the SQLite database and sidecar files.
@@ -162,9 +163,9 @@ def preview_import(body: dict, request: Request):
 		raise HTTPException(status_code=401, detail="Unauthorized")
 	source = body.get("source")
 	filename = body.get("filename")
-	if source not in ("bizim", "kargo"):
-		raise HTTPException(status_code=400, detail="source must be 'bizim' or 'kargo'")
-	folder = BIZIM_DIR if source == "bizim" else KARGO_DIR
+    if source not in ("bizim", "kargo", "returns"):
+        raise HTTPException(status_code=400, detail="source must be 'bizim', 'kargo' or 'returns'")
+    folder = BIZIM_DIR if source == "bizim" else (KARGO_DIR if source == "kargo" else IADE_DIR)
 	if not folder.exists():
 		raise HTTPException(status_code=400, detail=f"Folder not found: {folder}")
 	if filename:
@@ -177,17 +178,27 @@ def preview_import(body: dict, request: Request):
 			raise HTTPException(status_code=404, detail="No .xlsx files found")
 		file_path = candidates[0]
 
-	records = read_bizim_file(str(file_path)) if source == "bizim" else read_kargo_file(str(file_path))
+    if source == "bizim":
+        records = read_bizim_file(str(file_path))
+    elif source == "kargo":
+        records = read_kargo_file(str(file_path))
+    else:
+        records = read_returns_file(str(file_path))
 	# enforce per-source whitelist and annotate record_type
 	filtered: list[dict] = []
-	allowed = BIZIM_ALLOWED_KEYS if source == "bizim" else KARGO_ALLOWED_KEYS
+    if source == "bizim":
+        allowed = BIZIM_ALLOWED_KEYS
+    elif source == "kargo":
+        allowed = KARGO_ALLOWED_KEYS
+    else:
+        allowed = RETURNS_ALLOWED_KEYS
 	for r in records:
 		# attach record_type for debugging
 		r["record_type"] = source
 		# drop unknown keys
 		r2 = {k: v for k, v in r.items() if k in allowed}
 		# map any stray item_name for kargo to notes just in case
-		if source == "kargo" and r.get("item_name"):
+    if source == "kargo" and r.get("item_name"):
 			val = r.get("item_name")
 			r2["notes"] = f"{r2.get('notes')} | {val}" if r2.get("notes") else val
 		filtered.append(r2)
@@ -376,8 +387,8 @@ def commit_import(body: dict, request: Request):
 	filenames = body.get("filenames")
 	data_date_raw = body.get("data_date")  # ISO YYYY-MM-DD string, may apply to all
 	data_dates_map = body.get("data_dates") or {}  # optional per-filename map
-	if source not in ("bizim", "kargo"):
-		raise HTTPException(status_code=400, detail="source ('bizim'|'kargo') is required")
+    if source not in ("bizim", "kargo", "returns"):
+        raise HTTPException(status_code=400, detail="source ('bizim'|'kargo'|'returns') is required")
 
 	# Preflight mapping guard: block bizim commits when there are unmatched patterns (including generics)
 	if source == "bizim":
@@ -406,16 +417,23 @@ def commit_import(body: dict, request: Request):
 			})
 
 	# helper to process a single file name
-	def _commit_single(fn: str, dd_raw: str | None) -> dict:
+    def _commit_single(fn: str, dd_raw: str | None) -> dict:
 		folder_loc = BIZIM_DIR if source == "bizim" else KARGO_DIR
-		file_path_loc = folder_loc / fn
+        if source == "returns":
+            folder_loc = IADE_DIR
+        file_path_loc = folder_loc / fn
 		if not file_path_loc.exists():
 			raise HTTPException(status_code=404, detail=f"File not found: {fn}")
-		records_loc = read_bizim_file(str(file_path_loc)) if source == "bizim" else read_kargo_file(str(file_path_loc))
+        if source == "bizim":
+            records_loc = read_bizim_file(str(file_path_loc))
+        elif source == "kargo":
+            records_loc = read_kargo_file(str(file_path_loc))
+        else:
+            records_loc = read_returns_file(str(file_path_loc))
 		with get_session() as session:
 			run = ImportRun(source=source, filename=fn)
 			# set data_date
-			if source == "bizim":
+            if source == "bizim":
 				if dd_raw:
 					try:
 						# Import here to avoid adding a new top-level import
@@ -423,13 +441,20 @@ def commit_import(body: dict, request: Request):
 						run.data_date = _dt.date.fromisoformat(dd_raw)
 					except Exception:
 						raise HTTPException(status_code=400, detail="Invalid data_date; expected YYYY-MM-DD")
-			else:  # kargo -> derive from records' shipment_date
+            elif source == "kargo":  # derive from records' shipment_date
 				try:
 					import datetime as _dt
 					dates = [r.get("shipment_date") for r in records_loc if r.get("shipment_date")]
 					run.data_date = max(dates) if dates else None
 				except Exception:
 					pass
+            else:  # returns -> expect dd_raw provided by caller (commit body)
+                if dd_raw:
+                    try:
+                        import datetime as _dt
+                        run.data_date = _dt.date.fromisoformat(dd_raw)
+                    except Exception:
+                        raise HTTPException(status_code=400, detail="Invalid data_date; expected YYYY-MM-DD")
 			session.add(run)
 			session.flush()
 
@@ -439,7 +464,7 @@ def commit_import(body: dict, request: Request):
 			payments_existing_cnt = 0
 			payments_skipped_zero_cnt = 0
 
-			for idx, rec in enumerate(records_loc):
+            for idx, rec in enumerate(records_loc):
 				# guard and normalize basic fields
 				rec_name = (rec.get("name") or "").strip()
 				rec_phone = normalize_phone(rec.get("phone"))
@@ -483,7 +508,7 @@ def commit_import(body: dict, request: Request):
 				matched_client_id = None
 				matched_order_id = None
 
-				try:
+                try:
 					# DEBUG: log each row minimal mapping state
 					if idx < 5 or (idx % 50 == 0):
 						print("[ROW DEBUG]", idx, {
@@ -498,7 +523,7 @@ def commit_import(body: dict, request: Request):
 							"shipment_date": rec.get("shipment_date"),
 							"delivery_date": rec.get("delivery_date"),
 						})
-					if source == "bizim":
+                    if source == "bizim":
 						new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
 						old_uq = legacy_client_unique_key(rec.get("name"), rec.get("phone"))
 						client = None
@@ -545,9 +570,71 @@ def commit_import(body: dict, request: Request):
 						# Bizim branch: delegate mapping/stock to committer
 						status, message, matched_client_id, matched_order_id = process_bizim_row(session, run, rec)
 
-					# Kargo branch extracted into service function
-					elif source == "kargo":
+                    # Kargo branch extracted into service function
+                    elif source == "kargo":
 						status, message, matched_client_id, matched_order_id = process_kargo_row(session, run, rec)
+                    elif source == "returns":
+                        # resolve client (best-effort)
+                        new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
+                        old_uq = legacy_client_unique_key(rec.get("name"), rec.get("phone"))
+                        client = None
+                        if new_uq:
+                            client = session.exec(select(Client).where(Client.unique_key == new_uq)).first()
+                        if not client and old_uq:
+                            client = session.exec(select(Client).where(Client.unique_key == old_uq)).first()
+                        matched_client_id = client.id if client and client.id is not None else None
+
+                        # find most relevant order for this client (most recent, try to match item base in notes or item name)
+                        matched_order_id = None
+                        action = (rec.get("action") or "").strip()  # refund | switch
+                        base = (rec.get("item_name") or "").strip()
+                        if client and client.id is not None:
+                            from sqlmodel import select as _select
+                            cand = session.exec(
+                                _select(Order).where(Order.client_id == client.id).order_by(Order.id.desc())
+                            ).all()
+                            def _order_matches(o: Order) -> bool:
+                                try:
+                                    if base:
+                                        # match via item name
+                                        if o.item_id:
+                                            it = session.exec(_select(Item).where(Item.id == o.item_id)).first()
+                                            if it and base and (base.lower() in (it.name or '').lower()):
+                                                return True
+                                        # match via notes
+                                        if o.notes and (base.lower() in (o.notes or '').lower()):
+                                            return True
+                                except Exception:
+                                    pass
+                                return False
+                            chosen = None
+                            for o in cand:
+                                if (o.status or "") in ("refunded", "switched", "stitched"):
+                                    continue
+                                if _order_matches(o):
+                                    chosen = o
+                                    break
+                            if not chosen and cand:
+                                chosen = cand[0]
+                            if chosen and chosen.id is not None:
+                                matched_order_id = chosen.id
+                                # restock items like refund/switch endpoint
+                                from ..services.inventory import adjust_stock as _adjust_stock
+                                oitems = session.exec(select(OrderItem).where(OrderItem.order_id == chosen.id)).all()
+                                for oi in oitems:
+                                    if oi.item_id is None:
+                                        continue
+                                    qty = int(oi.quantity or 0)
+                                    if qty > 0:
+                                        _adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=chosen.id)
+                                # set status and date
+                                if action == "refund":
+                                    chosen.status = "refunded"
+                                elif action == "switch":
+                                    # use new canonical term
+                                    chosen.status = "switched"
+                                # set return/switch date from run.data_date if available
+                                chosen.return_or_switch_date = run.data_date
 				except Exception as e:
 					status = "error"
 					message = str(e)
@@ -720,9 +807,9 @@ async def upload_excel(
 	# Starlette injects Request when declared as a parameter
 	if not request or not request.session.get("uid"):
 		raise HTTPException(status_code=401, detail="Unauthorized")
-	if source not in ("bizim", "kargo"):
-		raise HTTPException(status_code=400, detail="source must be 'bizim' or 'kargo'")
-	folder = BIZIM_DIR if source == "bizim" else KARGO_DIR
+	if source not in ("bizim", "kargo", "returns"):
+		raise HTTPException(status_code=400, detail="source must be 'bizim', 'kargo' or 'returns'")
+	folder = BIZIM_DIR if source == "bizim" else (KARGO_DIR if source == "kargo" else IADE_DIR)
 	folder.mkdir(parents=True, exist_ok=True)
 	# DB snapshot before accepting new import files
 	_backup_db_snapshot(tag="upload")
@@ -750,7 +837,12 @@ async def upload_excel(
 			ctr += 1
 		content = await file.read()
 		dst.write_bytes(content)
-		records = read_bizim_file(str(dst)) if source == "bizim" else read_kargo_file(str(dst))
+		if source == "bizim":
+			records = read_bizim_file(str(dst))
+		elif source == "kargo":
+			records = read_kargo_file(str(dst))
+		else:
+			records = read_returns_file(str(dst))
 		saved.append({
 			"filename": dst.name,
 			"row_count": len(records),

@@ -16,7 +16,7 @@
         tr.paid { background: #eaffea; }
         tr.unpaid { background: #fff9db; }
         tr.refunded { color: #b91c1c; background: #ffe5e5; }
-        tr.stitched { color: #92400e; background: #ede0d4; }
+        tr.switched { color: #92400e; background: #ede0d4; }
         .btn { padding:4px 8px; border-radius:6px; border:1px solid #d1d5db; background:#fff; cursor:pointer; font-size:12px; }
         .btn:hover { background:#f8fafc; }
         .btn.warn { border-color:#ef4444; color:#b91c1c; }
@@ -65,7 +65,7 @@
                 <option value="paid" {{ 'selected' if status == 'paid' else '' }}>Yesil (Odendi)</option>
                 <option value="unpaid" {{ 'selected' if status == 'unpaid' else '' }}>Sari (Odenmedi)</option>
                 <option value="refunded" {{ 'selected' if status == 'refunded' else '' }}>Kirmizi (Iade)</option>
-                <option value="stitched" {{ 'selected' if status == 'stitched' else '' }}>Kahverengi (Dikis)</option>
+                <option value="switched" {{ 'selected' if status == 'switched' else '' }}>Kahverengi (Degisim)</option>
             </select>
             <button type="submit">Filtrele</button>
             <a href="/orders/table" style="font-size:12px; color:#6b7280;">Temizle</a>
@@ -76,14 +76,14 @@
     <h2>Siparisler</h2>
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th>Takip</th><th>Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>Kanali</th><th></th></tr>
+            <tr><th>ID</th><th>Takip</th><th>Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>Iade/Degisim Tarihi</th><th>Kanali</th><th></th></tr>
             <tr>
                 <th colspan="4" style="text-align:right">Toplamlar:</th>
                 <th data-type="num">{{ sum_qty }}</th>
                 <th data-type="num">{{ '%.2f'|format(sum_total or 0) }}</th>
                 <th data-type="num">{{ '%.2f'|format(sum_cost or 0) }}</th>
                 <th data-type="num">{{ '%.2f'|format(sum_shipping or 0) }}</th>
-                <th colspan="3"></th>
+                <th colspan="5"></th>
             </tr>
         </thead>
         <tbody>
@@ -106,11 +106,12 @@
                 <td>{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
                 <td>{{ o.shipment_date }}</td>
                 <td>{{ o.data_date }}</td>
+                <td>{{ o.return_or_switch_date }}</td>
                 <td>{{ o.source }}</td>
                 <td>
                     <div style="display:flex; gap:6px;">
                         <button class="btn warn" onclick="refund({{ o.id }})">Iade</button>
-                        <button class="btn accent" onclick="stitch({{ o.id }})">Degis</button>
+                        <button class="btn accent" onclick="switchOrder({{ o.id }})">Degis</button>
                     </div>
                 </td>
             </tr>
@@ -137,9 +138,9 @@
             location.reload();
         }catch(e){ alert('Ag hatasi: ' + e); }
     }
-    async function stitch(id){
+    async function switchOrder(id){
         try{
-            const res = await fetch(`/orders/${id}/stitch`, { method: 'POST' });
+            const res = await fetch(`/orders/${id}/switch`, { method: 'POST' });
             if(!res.ok){ alert('Degisim hatasi'); return; }
             location.reload();
         }catch(e){ alert('Ag hatasi: ' + e); }

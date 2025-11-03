@@ -109,6 +109,15 @@ def init_db() -> None:
                 if not column_exists("order", "shipping_fee"):
                     conn.exec_driver_sql('ALTER TABLE "order" ADD COLUMN shipping_fee REAL')
 
+                # Order.return_or_switch_date (DATE)
+                if not column_exists("order", "return_or_switch_date"):
+                    conn.exec_driver_sql('ALTER TABLE "order" ADD COLUMN return_or_switch_date DATE')
+                # Optional helpful index for filtering
+                try:
+                    conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_order_return_or_switch_date ON "order"(return_or_switch_date)')
+                except Exception:
+                    pass
+
                 # ImportRow.row_hash index for dedup/idempotency (best-effort)
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_importrow_row_hash ON importrow(row_hash)")
@@ -358,6 +367,11 @@ def init_db() -> None:
                     pass
                 try:
                     conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_order_client_id ON "order"(client_id)')
+                except Exception:
+                    pass
+                # Backfill status rename stitched -> switched
+                try:
+                    conn.exec_driver_sql("UPDATE \"order\" SET status='switched' WHERE status='stitched'")
                 except Exception:
                     pass
                 # Helpful composite index for inbox (latest message per conversation)

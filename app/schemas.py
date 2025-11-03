@@ -87,6 +87,23 @@ BIZIM_ALLOWED_KEYS = set(BizimRow.__fields__.keys())
 KARGO_ALLOWED_KEYS = set(KargoRow.__fields__.keys())
 
 
+# Returns (iade/degisim)
+class ReturnsRow(BaseModel):
+    record_type: str = "returns"
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    item_name: Optional[str] = None
+    amount: Optional[float] = None
+    action: Optional[str] = None  # refund | switch
+    notes: Optional[str] = None
+
+    class Config:
+        extra = 'forbid'
+
+
+RETURNS_ALLOWED_KEYS = set(ReturnsRow.__fields__.keys())
+
+
 # --- AI Suggest/Apply Schemas ---
 
 class UnmatchedPattern(BaseModel):
