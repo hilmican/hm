@@ -164,8 +164,16 @@
     function presetOverdue7(){
         const params = new URLSearchParams(window.location.search);
         params.set('preset','overdue_unpaid_7');
-        // keep existing date_field/start/end if any; else switch to both
+        // force date range to show orders older than 7 days
         if (!params.get('date_field')) params.set('date_field','both');
+        const now = new Date();
+        const pad = (n)=> String(n).padStart(2,'0');
+        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+        const endStr = `${end.getFullYear()}-${pad(end.getMonth()+1)}-${pad(end.getDate())}`;
+        const start = new Date(end.getFullYear() - 10, end.getMonth(), end.getDate());
+        const startStr = `${start.getFullYear()}-${pad(start.getMonth()+1)}-${pad(start.getDate())}`;
+        params.set('end', endStr);
+        params.set('start', startStr);
         window.location.href = '/orders/table?' + params.toString();
     }
 
