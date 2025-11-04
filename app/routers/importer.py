@@ -589,8 +589,8 @@ def commit_import(body: dict, request: Request):
 						matched_client_id = client.id if client and client.id is not None else None
 
 						# find most relevant order for this client (most recent, try to match item base in notes or item name)
-						matched_order_id = None
-						action = (rec.get("action") or "").strip()  # refund | switch
+							matched_order_id = None
+							action = (rec.get("action") or "").strip()  # refund | switch
 							base = (rec.get("item_name_base") or rec.get("item_name") or "").strip()
 						if client and client.id is not None:
 							from sqlmodel import select as _select
