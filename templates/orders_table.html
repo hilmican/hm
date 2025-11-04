@@ -2,25 +2,53 @@
 <html>
 <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Siparisler</title>
     <style>
-        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
-        th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; }
-        tr:nth-child(even) { background: #fcfcfd; }
-        .toolbar { margin: 12px 0; display: flex; gap: 8px; align-items: center; }
-        .toolbar input { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; width: 320px; }
-        .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; }
-        a { color: #2563eb; text-decoration: none; }
-        tr.paid { background: #eaffea; }
-        tr.unpaid { background: #fff9db; }
-        tr.refunded { color: #b91c1c; background: #ffe5e5; }
-        tr.switched { color: #92400e; background: #ede0d4; }
-        .btn { padding:4px 8px; border-radius:6px; border:1px solid #d1d5db; background:#fff; cursor:pointer; font-size:12px; }
-        .btn:hover { background:#f8fafc; }
+        :root {
+            --bg: #f7f7fb;
+            --card: #ffffff;
+            --border: #e5e7eb;
+            --muted: #6b7280;
+            --primary: #2563eb;
+            --primary-100: #eef2ff;
+            --success-bg: #eaffea;
+            --warn-bg: #fff9db;
+            --danger-bg: #ffe5e5;
+            --switch-bg: #ede0d4;
+        }
+        html, body { background: var(--bg); }
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; }
+        .container { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+        .toolbar { margin: 12px 0 16px; padding: 12px; display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+        .toolbar input[type="search"] { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; min-width: 220px; flex: 1 1 280px; }
+        .toolbar select, .toolbar input[type="date"] { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+        .filters-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .pill { font-size: 12px; padding: 4px 10px; background: var(--primary-100); color: #4338ca; border-radius: 999px; }
+        .link-muted { color: var(--muted); text-decoration: none; font-size: 12px; }
+        a { color: var(--primary); text-decoration: none; }
+        .btn { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: #fff; cursor: pointer; font-size: 12px; }
+        .btn:hover { background: #f8fafc; }
+        .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
         .btn.warn { border-color:#ef4444; color:#b91c1c; }
         .btn.accent { border-color:#92400e; color:#92400e; }
+        .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; white-space: nowrap; }
+        th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; z-index: 1; }
+        tbody tr:nth-child(even) { background: #fcfcfd; }
+        td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        tr.paid { background: var(--success-bg); }
+        tr.unpaid { background: var(--warn-bg); }
+        tr.refunded { color: #b91c1c; background: var(--danger-bg); }
+        tr.switched { color: #92400e; background: var(--switch-bg); }
+        .row-actions { display:flex; gap:6px; justify-content:flex-end; }
+        @media (max-width: 768px){
+            th, td { font-size: 13px; padding: 8px 10px; }
+            .toolbar { padding: 10px; }
+            .toolbar input[type="search"] { flex-basis: 100%; }
+        }
     </style>
     <script>
         function filterTable(table, q){
@@ -44,10 +72,11 @@
     </script>
 </head>
 <body>
+    <div class="container">
     {% include "_nav.html" %}
-    <div class="toolbar">
+    <div class="toolbar card">
         <input id="search" type="search" placeholder="Siparis ara (musteri, urun, takip)" />
-        <form method="get" action="/orders/table" style="display:flex; gap:8px; align-items:center;">
+        <form method="get" action="/orders/table" class="filters-form">
             <select name="date_field">
                 <option value="shipment" {{ 'selected' if (date_field == 'shipment') else '' }}>Kargo Tarihi</option>
                 <option value="data" {{ 'selected' if (date_field == 'data') else '' }}>Data Tarihi</option>
@@ -67,16 +96,17 @@
                 <option value="refunded" {{ 'selected' if status == 'refunded' else '' }}>Kirmizi (Iade)</option>
                 <option value="switched" {{ 'selected' if status == 'switched' else '' }}>Kahverengi (Degisim)</option>
             </select>
-            <button type="submit">Filtrele</button>
-            <a href="/orders/table" style="font-size:12px; color:#6b7280;">Temizle</a>
+            <button class="btn" type="submit">Filtrele</button>
+            <a class="link-muted" href="/orders/table">Temizle</a>
         </form>
         <span class="pill">{{ rows|length }} siparis</span>
-        <button onclick="recalc()">Tazele</button>
+        <button class="btn primary" onclick="recalc()">Tazele</button>
         <button class="btn" onclick="presetOverdue7()">7 gün+ ödeme yok</button>
         <button class="btn" onclick="presetAll()">Tüm siparişler</button>
         <button class="btn" onclick="exportExcel()">Excel'e aktar</button>
     </div>
-    <h2>Siparisler</h2>
+    <h2 style="margin: 8px 0 10px; padding: 0 4px; color: #111827;">Siparisler</h2>
+    <div class="table-wrap card">
     <table id="ordersTbl">
         <thead>
             <tr><th>ID</th><th>Takip</th><th>Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>Iade/Degisim Tarihi</th><th>Kanali</th><th></th></tr>
@@ -100,19 +130,19 @@
                     <a href="/clients/{{ o.client_id }}">{{ cname }}</a>
                 </td>
                 <td>{{ o.notes or '' }}</td>
-                <td>{{ o.quantity }}</td>
-                <td>
+                <td class="num">{{ o.quantity }}</td>
+                <td class="num">
                     <span id="tot-{{ o.id }}">{{ o.total_amount }}</span>
                     <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(o.total_amount or 0) }}')">Düzenle</button>
                 </td>
-                <td>{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
-                <td>{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
+                <td class="num">{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
+                <td class="num">{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
                 <td>{{ o.shipment_date }}</td>
                 <td>{{ o.data_date }}</td>
                 <td>{{ o.return_or_switch_date }}</td>
                 <td>{{ o.source }}</td>
                 <td>
-                    <div style="display:flex; gap:6px;">
+                    <div class="row-actions">
                         <button class="btn warn" onclick="refund({{ o.id }})">Iade</button>
                         <button class="btn accent" onclick="switchOrder({{ o.id }})">Degis</button>
                     </div>
@@ -121,6 +151,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
     <script>
     async function recalc(){
         try{
@@ -196,6 +227,7 @@
         window.location.href = url;
     }
     </script>
+    </div>
 </body>
 </html>
 
