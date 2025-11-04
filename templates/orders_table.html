@@ -33,9 +33,10 @@
         .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
         .btn.warn { border-color:#ef4444; color:#b91c1c; }
         .btn.accent { border-color:#92400e; color:#92400e; }
-        .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
-        table { width: 100%; border-collapse: collapse; }
+        .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; -webkit-overflow-scrolling: touch; }
+        table { width: 100%; border-collapse: collapse; min-width: 1200px; }
         th, td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; white-space: nowrap; }
+        td.product { white-space: normal; max-width: 520px; word-break: break-word; }
         th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; z-index: 1; }
         tbody tr:nth-child(even) { background: #fcfcfd; }
         td.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -44,6 +45,12 @@
         tr.refunded { color: #b91c1c; background: var(--danger-bg); }
         tr.switched { color: #92400e; background: var(--switch-bg); }
         .row-actions { display:flex; gap:6px; justify-content:flex-end; }
+        @media (max-width: 1200px){
+            table { min-width: 1000px; }
+        }
+        @media (max-width: 900px){
+            table { min-width: 900px; }
+        }
         @media (max-width: 768px){
             th, td { font-size: 13px; padding: 8px 10px; }
             .toolbar { padding: 10px; }
@@ -129,7 +136,7 @@
                     {% set cname = client_map.get(o.client_id) if client_map else o.client_id %}
                     <a href="/clients/{{ o.client_id }}">{{ cname }}</a>
                 </td>
-                <td>{{ o.notes or '' }}</td>
+                <td class="product">{{ o.notes or '' }}</td>
                 <td class="num">{{ o.quantity }}</td>
                 <td class="num">
                     <span id="tot-{{ o.id }}">{{ o.total_amount }}</span>
