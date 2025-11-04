@@ -38,6 +38,17 @@
         th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; white-space: nowrap; }
         /* Allow wrapping only for the product (Urun) column */
         td.product { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
+        /* Constrain tracking and client columns */
+        th.tracking, td.tracking { max-width: 120px; }
+        th.client, td.client { max-width: 220px; }
+        td.tracking, td.client { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* Compact action icons */
+        .icon-actions { display:flex; gap:6px; }
+        .icon-btn { width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border); border-radius:8px; background:#fff; cursor:pointer; }
+        .icon-btn.warn { color:#b91c1c; border-color:#ef4444; }
+        .icon-btn.accent { color:#92400e; border-color:#92400e; }
+        .icon-btn:hover { background:#f8fafc; }
+        .icon-btn svg { width:16px; height:16px; }
         th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; z-index: 1; }
         
         
@@ -111,7 +122,7 @@
     <h2>Siparisler</h2>
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th>Takip</th><th>Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>I/D Tarihi</th><th>Kanali</th><th></th></tr>
+            <tr><th>ID</th><th class="tracking">Takip</th><th class="client">Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>I/D Tarihi</th><th>Kanali</th><th></th></tr>
             <tr>
                 <th colspan="4" style="text-align:right">Toplamlar:</th>
                 <th data-type="num">{{ sum_qty }}</th>
@@ -126,10 +137,10 @@
             {% set rowcls = status_map.get(o.id) if status_map else '' %}
             <tr class="{{ rowcls }}">
                 <td>{{ o.id }}</td>
-                <td>{{ o.tracking_no }}</td>
-                <td>
+                <td class="tracking">{{ o.tracking_no or '-' }}</td>
+                <td class="client">
                     {% set cname = client_map.get(o.client_id) if client_map else o.client_id %}
-                    <a href="/clients/{{ o.client_id }}">{{ cname }}</a>
+                    <a href="/clients/{{ o.client_id }}">{{ (cname or '')[:40] }}</a>
                 </td>
                 <td class="product">{{ o.notes or '' }}</td>
                 <td>{{ o.quantity }}</td>
@@ -144,10 +155,16 @@
                 <td>{{ o.return_or_switch_date }}</td>
                 <td>{{ o.source }}</td>
                 <td>
-                    <div style="display:flex; gap:6px;">
-                        <button class="btn warn" onclick="refund({{ o.id }})">Iade</button>
-                        <button class="btn accent" onclick="switchOrder({{ o.id }})">Degis</button>
-                        <a class="btn" href="/orders/{{ o.id }}/edit">Düzenle</a>
+                    <div class="icon-actions">
+                        <button class="icon-btn warn" title="İade" aria-label="İade" onclick="refund({{ o.id }})">
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5l-5 5 5 5V5z"></path><path d="M9 7h5a5 5 0 1 1 0 10H9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                        </button>
+                        <button class="icon-btn accent" title="Değişim" aria-label="Değişim" onclick="switchOrder({{ o.id }})">
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 7h10l-2-2 1.5-1.5L21 7l-4.5 3.5L15 9l2-2H7zM17 17H7l2 2-1.5 1.5L3 17l4.5-3.5L9 15l-2 2h10z"></path></svg>
+                        </button>
+                        <a class="icon-btn" title="Düzenle" aria-label="Düzenle" href="/orders/{{ o.id }}/edit">
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"></path><path d="M20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"></path></svg>
+                        </a>
                     </div>
                 </td>
             </tr>
