@@ -51,14 +51,14 @@ def daily_report(
 						and_(Order.data_date.is_not(None), Order.data_date >= start_date, Order.data_date <= end_date),
 					)
 				)
-                .where((Order.status.is_(None)) | (~Order.status.in_(["refunded","switched","stitched"])) )
+				.where((Order.status.is_(None)) | (~Order.status.in_(["refunded","switched","stitched"])) )
 				.order_by(Order.id.desc())
 			).all()
 		else:
 			# If chosen date is missing, fall back to the other date (covers zero-price or incomplete rows)
 			date_col = Order.shipment_date if date_field == "shipment" else Order.data_date
 			alt_date_col = Order.data_date if date_field == "shipment" else Order.shipment_date
-            orders = session.exec(
+			orders = session.exec(
 				select(Order)
 				.where(
 					or_(
@@ -66,7 +66,7 @@ def daily_report(
 						and_(date_col.is_(None), alt_date_col.is_not(None), alt_date_col >= start_date, alt_date_col <= end_date),
 					)
 				)
-                .where((Order.status.is_(None)) | (~Order.status.in_(["refunded","switched","stitched"])) )
+				.where((Order.status.is_(None)) | (~Order.status.in_(["refunded","switched","stitched"])) )
 				.order_by(Order.id.desc())
 			).all()
 
