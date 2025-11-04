@@ -33,26 +33,19 @@
         .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
         .btn.warn { border-color:#ef4444; color:#b91c1c; }
         .btn.accent { border-color:#92400e; color:#92400e; }
-        .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; -webkit-overflow-scrolling: touch; }
-        table { width: 100%; border-collapse: collapse; min-width: 1100px; table-layout: auto; }
-        th, td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 13px; white-space: nowrap; }
-        td.product, th.product { white-space: normal; overflow-wrap: anywhere; word-break: normal; min-width: 360px; max-width: 640px; }
+        .table-wrap { }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; white-space: nowrap; }
         th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; z-index: 1; }
         tbody tr:nth-child(even) { background: #fcfcfd; }
-        td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        
         tr.paid { background: var(--success-bg); }
         tr.unpaid { background: var(--warn-bg); }
         tr.refunded { color: #b91c1c; background: var(--danger-bg); }
         tr.switched { color: #92400e; background: var(--switch-bg); }
-        .row-actions { display:flex; gap:6px; justify-content:flex-end; }
-        @media (max-width: 1280px){
-            th, td { font-size: 12px; padding: 7px 9px; }
-        }
-        @media (max-width: 900px){
-            table { min-width: 900px; }
-        }
+        
         @media (max-width: 768px){
-            th, td { font-size: 12px; padding: 7px 9px; }
+            th, td { font-size: 13px; padding: 8px 10px; }
             .toolbar { padding: 10px; }
             .toolbar input[type="search"] { flex-basis: 100%; }
         }
@@ -112,11 +105,10 @@
         <button class="btn" onclick="presetAll()">Tüm siparişler</button>
         <button class="btn" onclick="exportExcel()">Excel'e aktar</button>
     </div>
-    <h2 style="margin: 8px 0 10px; padding: 0 4px; color: #111827;">Siparisler</h2>
-    <div class="table-wrap card">
+    <h2>Siparisler</h2>
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th>Takip</th><th>Musteri</th><th class="product">Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>Iade/Degisim Tarihi</th><th>Kanali</th><th></th></tr>
+            <tr><th>ID</th><th>Takip</th><th>Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>Iade/Degisim Tarihi</th><th>Kanali</th><th></th></tr>
             <tr>
                 <th colspan="4" style="text-align:right">Toplamlar:</th>
                 <th data-type="num">{{ sum_qty }}</th>
@@ -136,20 +128,20 @@
                     {% set cname = client_map.get(o.client_id) if client_map else o.client_id %}
                     <a href="/clients/{{ o.client_id }}">{{ cname }}</a>
                 </td>
-                <td class="product">{{ o.notes or '' }}</td>
-                <td class="num">{{ o.quantity }}</td>
-                <td class="num">
+                <td>{{ o.notes or '' }}</td>
+                <td>{{ o.quantity }}</td>
+                <td>
                     <span id="tot-{{ o.id }}">{{ o.total_amount }}</span>
                     <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(o.total_amount or 0) }}')">Düzenle</button>
                 </td>
-                <td class="num">{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
-                <td class="num">{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
+                <td>{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
+                <td>{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
                 <td>{{ o.shipment_date }}</td>
                 <td>{{ o.data_date }}</td>
                 <td>{{ o.return_or_switch_date }}</td>
                 <td>{{ o.source }}</td>
                 <td>
-                    <div class="row-actions">
+                    <div style="display:flex; gap:6px;">
                         <button class="btn warn" onclick="refund({{ o.id }})">Iade</button>
                         <button class="btn accent" onclick="switchOrder({{ o.id }})">Degis</button>
                     </div>
@@ -158,7 +150,6 @@
             {% endfor %}
         </tbody>
     </table>
-    </div>
     <script>
     async function recalc(){
         try{
