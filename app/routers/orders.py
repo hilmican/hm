@@ -71,11 +71,10 @@ def list_orders_table(
 
         # Preset-driven date adjustment
         if preset == "overdue_unpaid_7":
-            # Show orders up to 7 days ago (older than 7 days)
+            # Show all orders strictly before 7 days ago
             end_date = today - dt.timedelta(days=7)
-            # If user didn't explicitly provide start, widen to a longer window
-            if not start:
-                start_date = today - dt.timedelta(days=3650)
+            # Fixed start anchor per request
+            start_date = dt.date(2025, 1, 1)
 
         # Build base query with date filter logic similar to reports
         if date_field == "both":

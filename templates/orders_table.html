@@ -67,7 +67,6 @@
                 <option value="refunded" {{ 'selected' if status == 'refunded' else '' }}>Kirmizi (Iade)</option>
                 <option value="switched" {{ 'selected' if status == 'switched' else '' }}>Kahverengi (Degisim)</option>
             </select>
-            {% if preset %}<input type="hidden" name="preset" value="{{ preset }}" />{% endif %}
             <button type="submit">Filtrele</button>
             <a href="/orders/table" style="font-size:12px; color:#6b7280;">Temizle</a>
         </form>
@@ -170,8 +169,7 @@
         const pad = (n)=> String(n).padStart(2,'0');
         const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
         const endStr = `${end.getFullYear()}-${pad(end.getMonth()+1)}-${pad(end.getDate())}`;
-        const start = new Date(end.getFullYear() - 10, end.getMonth(), end.getDate());
-        const startStr = `${start.getFullYear()}-${pad(start.getMonth()+1)}-${pad(start.getDate())}`;
+        const startStr = `2025-01-01`;
         params.set('end', endStr);
         params.set('start', startStr);
         window.location.href = '/orders/table?' + params.toString();
