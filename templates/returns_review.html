@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>İade/Değişim İçeri Aktarma - Eşleştirme</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+    th { background: #fafafa; position: sticky; top: 0; }
+    .toolbar { margin: 12px 0; display: flex; gap: 8px; align-items: center; }
+    .btn { padding:4px 8px; border-radius:6px; border:1px solid #d1d5db; background:#fff; cursor:pointer; font-size:12px; }
+  </style>
+</head>
+<body>
+  {% include "_nav.html" %}
+  <h2>İade/Değişim Eşleştirme ({{ filename }})</h2>
+  <div class="toolbar">
+    <label>Data Tarihi: <input id="dataDate" type="date" /></label>
+    <button class="btn" onclick="applySelections()">Uygula ve Kaydet</button>
+  </div>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Ad Soyad</th><th>Ürün</th><th>İşlem</th><th>Tarih</th><th>Tutar</th><th>Aday Sipariş</th></tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.row_index }}</td>
+        <td>{{ r.record.name }}</td>
+        <td>{{ r.record.item_name }}</td>
+        <td>{{ r.record.action }}</td>
+        <td>{{ r.record.date }}</td>
+        <td>{{ r.record.amount }}</td>
+        <td>
+          <select data-row="{{ r.row_index }}">
+            <option value="">Seçiniz</option>
+            {% for c in r.candidates %}
+              <option value="{{ c.id }}">#{{ c.id }} · {{ c.date }} · {{ c.status }} · {{ c.item_name or '' }} · {{ c.total }}</option>
+            {% endfor %}
+          </select>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <script>
+    async function applySelections(){
+      const sels = [];
+      document.querySelectorAll('select[data-row]').forEach(sel => {
+        const idx = Number(sel.getAttribute('data-row'));
+        const oid = Number(sel.value || 0);
+        if (idx >= 0 && oid) sels.push({ row_index: idx, order_id: oid });
+      });
+      const dataDate = document.getElementById('dataDate').value || '';
+      if (!sels.length){ if(!confirm('Seçim yapılmadı. Devam edilsin mi?')) return; }
+      try{
+        const r = await fetch('/import/returns/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: '{{ filename }}', data_date: dataDate, selections: sels }) });
+        if (!r.ok){ const t = await r.text(); alert('Hata: ' + t); return; }
+        location.href = '/orders/table';
+      }catch(e){ alert('Ağ hatası'); }
+    }
+  </script>
+</body>
+</html>
+

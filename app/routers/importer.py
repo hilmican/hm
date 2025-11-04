@@ -16,6 +16,7 @@ from ..utils.hashing import compute_row_hash
 from ..utils.normalize import client_unique_key, legacy_client_unique_key, normalize_phone, normalize_text
 from ..utils.slugify import slugify
 from ..services.cache import bump_namespace
+from fastapi.responses import HTMLResponse
 
 router = APIRouter(prefix="")
 
@@ -702,27 +703,6 @@ def commit_import(body: dict, request: Request):
 					matched_order_id=matched_order_id,
 				)
 				session.add(ir)
-				# Create reconcile task for returns unmatched: present candidate orders for manual selection
-				if source == "returns" and status == "unmatched":
-					try:
-						from ..models import ReconcileTask as _RT
-						from sqlmodel import select as _sel2
-						session.flush()  # ensure ir.id
-						cands: list[dict] = []
-						cid = matched_client_id
-						if cid:
-							order_rows = session.exec(_sel2(Order).where(Order.client_id == cid).order_by(Order.id.desc())).all()
-							for co in order_rows[:20]:
-								itname = None
-								if co.item_id:
-									from sqlmodel import select as _sel3
-									itobj = session.exec(_sel3(Item).where(Item.id == co.item_id)).first()
-									itname = itobj.name if itobj else None
-								cands.append({"id": co.id, "date": str(co.shipment_date or co.data_date), "status": co.status, "total": float(co.total_amount or 0.0), "item_name": itname})
-						task = _RT(import_row_id=ir.id or 0, candidates_json=str(cands))
-						session.add(task)
-					except Exception:
-						pass
 				if status == "unmatched":
 					run.unmatched_count += 1
 
@@ -928,3 +908,149 @@ async def upload_excel(
 	# Invalidate all cached reads after new data is uploaded
 	bump_namespace()
 	return {"status": "ok", "source": source, "files": saved}
+
+
+# ---------- Returns interactive review before commit ----------
+
+@router.get("/returns/review", response_class=HTMLResponse)
+def returns_review(filename: str, request: Request):
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	folder = IADE_DIR
+	file_path = folder / filename
+	if not file_path.exists():
+		raise HTTPException(status_code=404, detail="File not found")
+	records = read_returns_file(str(file_path))
+	# build candidates per row
+	rows: list[dict] = []
+	from sqlmodel import select as _select
+	with get_session() as session:
+		for idx, rec in enumerate(records):
+			# resolve client like in commit
+			new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
+			old_uq = legacy_client_unique_key(rec.get("name"), rec.get("phone"))
+			client = None
+			if new_uq:
+				client = session.exec(_select(Client).where(Client.unique_key == new_uq)).first()
+			if not client and old_uq:
+				client = session.exec(_select(Client).where(Client.unique_key == old_uq)).first()
+			candidates: list[dict] = []
+			if client and client.id is not None:
+				cand = session.exec(_select(Order).where(Order.client_id == client.id).order_by(Order.id.desc())).all()
+				for o in cand[:20]:
+					itname = None
+					if o.item_id:
+						it = session.exec(_select(Item).where(Item.id == o.item_id)).first()
+						itname = it.name if it else None
+					candidates.append({
+						"id": o.id,
+						"date": str(o.shipment_date or o.data_date),
+						"status": o.status,
+						"total": float(o.total_amount or 0.0),
+						"item_name": itname,
+					})
+			rows.append({"row_index": idx, "record": rec, "candidates": candidates})
+	templates = request.app.state.templates
+	return templates.TemplateResponse(
+		"returns_review.html",
+		{"request": request, "filename": filename, "rows": rows},
+	)
+
+
+@router.post("/returns/apply")
+def returns_apply(body: dict, request: Request):
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	filename = body.get("filename")
+	data_date_raw = body.get("data_date")
+	selections = body.get("selections") or []
+	if not filename or not isinstance(selections, list):
+		raise HTTPException(status_code=400, detail="filename and selections[] required")
+	folder = IADE_DIR
+	file_path = folder / filename
+	if not file_path.exists():
+		raise HTTPException(status_code=404, detail="File not found")
+	records = read_returns_file(str(file_path))
+	# build quick map row_index -> chosen order id
+	chosen_map: dict[int, int] = {}
+	for sel in selections:
+		try:
+			ri = int(sel.get("row_index"))
+			oid = int(sel.get("order_id"))
+		except Exception:
+			continue
+		chosen_map[ri] = oid
+	with get_session() as session:
+		run = ImportRun(source="returns", filename=filename)
+		if data_date_raw:
+			try:
+				import datetime as _dt
+				run.data_date = _dt.date.fromisoformat(str(data_date_raw))
+			except Exception:
+				raise HTTPException(status_code=400, detail="Invalid data_date; expected YYYY-MM-DD")
+		session.add(run)
+		session.flush()
+		from sqlmodel import select as _select
+		updated = 0
+		unmatched = 0
+		for idx, rec in enumerate(records):
+			row_hash = compute_row_hash(rec)
+			chosen_id = chosen_map.get(idx)
+			status = "unmatched"
+			message = None
+			matched_client_id = None
+			matched_order_id = None
+			# resolve client id for logging
+			new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
+			old_uq = legacy_client_unique_key(rec.get("name"), rec.get("phone"))
+			client = None
+			if new_uq:
+				client = session.exec(_select(Client).where(Client.unique_key == new_uq)).first()
+			if not client and old_uq:
+				client = session.exec(_select(Client).where(Client.unique_key == old_uq)).first()
+			matched_client_id = client.id if client and client.id is not None else None
+			if chosen_id:
+				o = session.exec(_select(Order).where(Order.id == int(chosen_id))).first()
+				if o:
+					# restock
+					oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
+					for oi in oitems:
+						if oi.item_id is None:
+							continue
+						qty = int(oi.quantity or 0)
+						if qty > 0:
+							adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id)
+					# set status
+					action = (rec.get("action") or "").strip()
+					if action == "refund":
+						o.status = "refunded"
+					elif action == "switch":
+						o.status = "switched"
+					# date and amount
+					ret_date = rec.get("date") or run.data_date
+					o.return_or_switch_date = ret_date
+					try:
+						amt = rec.get("amount")
+						if amt is not None:
+							o.total_amount = round(float(amt), 2)
+					except Exception:
+						pass
+					status = "updated"
+					matched_order_id = o.id
+					updated += 1
+			else:
+				unmatched += 1
+			ir = ImportRow(
+				import_run_id=run.id or 0,
+				row_index=idx,
+				row_hash=row_hash,
+				mapped_json=str(rec),
+				status=status,  # type: ignore
+				message=message,
+				matched_client_id=matched_client_id,
+				matched_order_id=matched_order_id,
+			)
+			session.add(ir)
+		# Invalidate caches
+		bump_namespace()
+		return {"status": "ok", "run_id": run.id or 0, "updated": updated, "unmatched": unmatched}

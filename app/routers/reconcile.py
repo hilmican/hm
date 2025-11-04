@@ -6,7 +6,7 @@ import json
 import datetime as dt
 
 from ..db import get_session
-from ..models import ReconcileTask, ImportRow, Order, OrderItem, Item
+from ..models import ReconcileTask, ImportRow, Order, OrderItem, Item, ImportRun
 from ..services.inventory import adjust_stock
 
 router = APIRouter()
@@ -25,75 +25,116 @@ def get_queue():
 
 
 @router.get("/returns")
-def list_returns_tasks(request: Request):
+def review_returns(request: Request, run_id: int | None = None):
+    """Interactive review panel: list unmatched returns rows for a run and allow choosing orders.
+
+    If run_id is not given, picks the latest ImportRun with source='returns'.
+    """
     with get_session() as session:
-        tasks = session.exec(select(ReconcileTask).where(ReconcileTask.resolved_at == None).order_by(ReconcileTask.id.desc())).all()
+        if run_id is None:
+            run = session.exec(select(ImportRun).where(ImportRun.source == "returns").order_by(ImportRun.id.desc())).first()
+            if not run:
+                rows = []
+                run_id_val = None
+            else:
+                run_id_val = run.id
+                rows = session.exec(select(ImportRow).where(ImportRow.import_run_id == run.id, ImportRow.status == "unmatched")).all()
+        else:
+            run_id_val = run_id
+            rows = session.exec(select(ImportRow).where(ImportRow.import_run_id == run_id, ImportRow.status == "unmatched")).all()
+        # build candidate orders per row (by matched_client_id)
+        data: list[dict] = []
+        for ir in rows:
+            try:
+                rec = eval(ir.mapped_json) if ir.mapped_json else {}
+            except Exception:
+                rec = {}
+            cid = ir.matched_client_id
+            cands: list[dict] = []
+            if cid:
+                order_rows = session.exec(select(Order).where(Order.client_id == cid).order_by(Order.id.desc())).all()
+                for o in order_rows[:20]:
+                    itname = None
+                    if o.item_id:
+                        itobj = session.exec(select(Item).where(Item.id == o.item_id)).first()
+                        itname = itobj.name if itobj else None
+                    cands.append({
+                        "id": o.id,
+                        "date": str(o.shipment_date or o.data_date),
+                        "status": o.status,
+                        "total": float(o.total_amount or 0.0),
+                        "item_name": itname,
+                    })
+            data.append({
+                "import_row_id": ir.id,
+                "record": rec,
+                "candidates": cands,
+            })
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "reconcile_returns.html",
-            {"request": request, "tasks": tasks},
+            {"request": request, "rows": data, "run_id": run_id_val},
         )
 
 
-@router.post("/returns/{task_id}/choose")
-def choose_return(task_id: int, body: dict):
-    """Resolve a returns reconcile task by choosing an order id.
+@router.post("/returns/apply")
+def apply_returns_choices(body: dict):
+    """Apply chosen orders for unmatched returns rows.
 
-    Applies returns logic: restock items, set status/date, set total_amount from returns amount.
+    body: { selections: [{ import_row_id, order_id }] }
     """
-    chosen_id = body.get("order_id")
-    if not chosen_id:
-        raise HTTPException(status_code=400, detail="order_id required")
+    sels = body.get("selections") or []
+    if not isinstance(sels, list) or not sels:
+        raise HTTPException(status_code=400, detail="selections[] required")
+    updated = 0
     with get_session() as session:
-        task = session.exec(select(ReconcileTask).where(ReconcileTask.id == task_id)).first()
-        if not task:
-            raise HTTPException(status_code=404, detail="task not found")
-        ir = session.exec(select(ImportRow).where(ImportRow.id == task.import_row_id)).first()
-        if not ir:
-            raise HTTPException(status_code=404, detail="import row not found")
-        try:
-            rec = eval(ir.mapped_json) if ir.mapped_json else {}
-        except Exception:
-            rec = {}
-        order = session.exec(select(Order).where(Order.id == int(chosen_id))).first()
-        if not order:
-            raise HTTPException(status_code=404, detail="order not found")
-        # idempotency guards
-        if (order.status or "") in ("refunded", "switched", "stitched"):
-            task.chosen_id = int(chosen_id)
-            task.resolved_at = dt.datetime.utcnow()
-            return {"status": "ok", "message": "already_processed"}
-        # restock linked items
-        oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order.id)).all()
-        for oi in oitems:
-            if oi.item_id is None:
+        for sel in sels:
+            try:
+                ir_id = int(sel.get("import_row_id"))
+                order_id = int(sel.get("order_id"))
+            except Exception:
                 continue
-            qty = int(oi.quantity or 0)
-            if qty > 0:
-                adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order.id)
-        # set status/date and top-level amount
-        action = (rec.get("action") or "").strip()
-        if action == "refund":
-            order.status = "refunded"
-        elif action == "switch":
-            order.status = "switched"
-        # date
-        rdate = rec.get("date")
-        try:
-            if rdate and not isinstance(rdate, dt.date):
-                import datetime as _dt
-                # handle iso string fallback
-                rdate = _dt.date.fromisoformat(str(rdate))
-        except Exception:
-            rdate = None
-        order.return_or_switch_date = rdate or order.return_or_switch_date or dt.date.today()
-        # amount to Toplam
-        try:
-            amt = float(rec.get("amount") or 0.0)
-            order.total_amount = round(amt, 2)
-        except Exception:
-            pass
-        # resolve
-        task.chosen_id = int(chosen_id)
-        task.resolved_at = dt.datetime.utcnow()
-        return {"status": "ok", "order_id": order.id}
+            ir = session.exec(select(ImportRow).where(ImportRow.id == ir_id)).first()
+            if not ir:
+                continue
+            try:
+                rec = eval(ir.mapped_json) if ir.mapped_json else {}
+            except Exception:
+                rec = {}
+            order = session.exec(select(Order).where(Order.id == order_id)).first()
+            if not order:
+                continue
+            if (order.status or "") in ("refunded", "switched", "stitched"):
+                continue
+            # restock items
+            oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order.id)).all()
+            for oi in oitems:
+                if oi.item_id is None:
+                    continue
+                qty = int(oi.quantity or 0)
+                if qty > 0:
+                    adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order.id)
+            # set status/date/amount
+            action = (rec.get("action") or "").strip()
+            if action == "refund":
+                order.status = "refunded"
+            elif action == "switch":
+                order.status = "switched"
+            # date
+            rdate = rec.get("date")
+            try:
+                if rdate and not isinstance(rdate, dt.date):
+                    import datetime as _dt
+                    rdate = _dt.date.fromisoformat(str(rdate))
+            except Exception:
+                rdate = None
+            order.return_or_switch_date = rdate or dt.date.today()
+            try:
+                amt = float(rec.get("amount") or 0.0)
+                order.total_amount = round(amt, 2)
+            except Exception:
+                pass
+            ir.matched_order_id = order.id
+            ir.status = "updated"  # reflect resolution
+            updated += 1
+    return {"status": "ok", "updated": updated}

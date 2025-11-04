@@ -243,6 +243,12 @@
 					result.textContent = `Uploaded ${json.files.length} file(s).`;
                     // For 'bizim', check unmatched patterns across all uploaded files and redirect to mapping wizard if needed
                     if (json.source === 'bizim' && json.files && json.files.length) {
+                    // For 'returns', redirect to interactive review for the first file
+                    if (json.source === 'returns' && json.files && json.files.length){
+                        const fn = encodeURIComponent(json.files[0].filename);
+                        location.href = `/import/returns/review?filename=${fn}`;
+                        return;
+                    }
                         const fnames = json.files.map(f=>f.filename);
                         try {
                             const pm = await fetch('/import/preview-map', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source: 'bizim', filenames: fnames, exclude_generic: false }) });

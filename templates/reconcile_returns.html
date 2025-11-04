@@ -13,41 +13,47 @@
 </head>
 <body>
   {% include "_nav.html" %}
-  <h2>İade/Değişim Eşleştirme Kuyruğu</h2>
-  <table>
-    <thead>
-      <tr><th>Task ID</th><th>Import Row</th><th>Aday Siparişler</th><th>İşlem</th></tr>
-    </thead>
-    <tbody>
-    {% for t in tasks %}
-      <tr>
-        <td>{{ t.id }}</td>
-        <td>{{ t.import_row_id }}</td>
-        <td>
-          <div style="display:flex; flex-direction:column; gap:6px;">
-            {% set cands = (t.candidates_json or '[]') %}
-            {% set arr = cands %}
-            {% for c in arr %}
-              <div style="display:flex; gap:8px; align-items:center;">
-                <code>#{{ c.id }}</code>
-                <span>{{ c.date }} · {{ c.status }} · toplam={{ c.total }} · {{ c.item_name or '' }}</span>
-                <button class="btn" onclick="choose({{ t.id }}, {{ c.id }})">Seç</button>
-              </div>
-            {% endfor %}
-          </div>
-        </td>
-        <td>{% if t.chosen_id %}Seçildi: #{{ t.chosen_id }}{% endif %}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <h2>İade/Değişim Eşleştirme</h2>
+  <form id="applyForm" onsubmit="return false;">
+    <table>
+      <thead>
+        <tr><th>Import Row</th><th>İşlem</th><th>Tarih</th><th>Tutar</th><th>Aday Sipariş</th></tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>#{{ r.import_row_id }}</td>
+          <td>{{ r.record.action }}</td>
+          <td>{{ r.record.date }}</td>
+          <td>{{ r.record.amount }}</td>
+          <td>
+            <select data-row="{{ r.import_row_id }}">
+              <option value="">Seçiniz</option>
+              {% for c in r.candidates %}
+                <option value="{{ c.id }}">#{{ c.id }} · {{ c.date }} · {{ c.status }} · {{ c.item_name or '' }} · {{ c.total }}</option>
+              {% endfor %}
+            </select>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div style="margin-top:10px;">
+      <button class="btn" onclick="applySelections()">Uygula</button>
+    </div>
+  </form>
   <script>
-  async function choose(tid, oid){
+  async function applySelections(){
+    const sels = [];
+    document.querySelectorAll('select[data-row]').forEach(sel => {
+      const ir = Number(sel.getAttribute('data-row'));
+      const oid = Number(sel.value || 0);
+      if (ir && oid) sels.push({ import_row_id: ir, order_id: oid });
+    });
+    if (!sels.length){ alert('Seçim yapınız'); return; }
     try{
-      const r = await fetch('/reconcile/returns/' + tid + '/choose', {
-        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ order_id: oid })
-      });
-      if(!r.ok){ const t = await r.text(); alert('Hata: ' + t); return; }
+      const r = await fetch('/reconcile/returns/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ selections: sels }) });
+      if (!r.ok){ const t = await r.text(); alert('Hata: ' + t); return; }
       location.reload();
     }catch(e){ alert('Ağ hatası'); }
   }
