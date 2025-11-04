@@ -83,6 +83,33 @@
                     <textarea name="notes">{{ order.notes or '' }}</textarea>
                 </div>
             </div>
+
+            <h3 style="margin-top:16px;">Sipariş Kalemleri</h3>
+            <div>
+                <table id="orderItemsTbl">
+                    <thead>
+                        <tr><th>Item</th><th>Adet</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for row in (order_items or []) %}
+                        <tr>
+                            <td><input name="item_display" list="items_all" value="{{ (row.item.id ~ ' | ' ~ row.item.sku ~ ' | ' ~ row.item.name) if row.item else '' }}" /></td>
+                            <td><input name="item_qty" type="number" step="1" min="1" value="{{ row.quantity }}" /></td>
+                            <td><button type="button" onclick="removeRow(this)">Sil</button></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="toolbar">
+                    <button type="button" onclick="addRow()">Satır Ekle</button>
+                    <span style="color:#6b7280;">Toplam tutar elle girilir, otomatik hesaplanmaz.</span>
+                </div>
+                <datalist id="items_all">
+                    {% for it in (items_all or []) %}
+                    <option value="{{ it.id }} | {{ it.sku }} | {{ it.name }}"></option>
+                    {% endfor %}
+                </datalist>
+            </div>
             <div class="toolbar">
                 <button type="submit">Kaydet</button>
                 <a href="/orders/table" class="btn">Geri</a>
@@ -103,43 +130,32 @@
             {% endif %}
         </form>
         {% if mapping_outs and mapping_outs|length %}
-            <form method="post" action="/orders/{{ order.id }}/apply-mapping">
-                <input type="hidden" name="base" value="{{ mapping_base or '' }}" />
-                <table>
-                    <thead>
-                        <tr><th>Ürün/Item</th><th>Beden</th><th>Renk</th><th>Adet</th><th>Birim Fiyat</th><th>Uygula</th></tr>
-                    </thead>
-                    <tbody>
-                        {% for o in mapping_outs %}
-                        <tr>
-                            <td>
-                                {% if o.item_id %}
-                                    Item #{{ o.item_id }}
-                                {% elif o.product_id %}
-                                    Product #{{ o.product_id }}
-                                {% else %}
-                                    (boş)
-                                {% endif %}
-                            </td>
-                            <td>{{ o.size or '-' }}</td>
-                            <td>{{ o.color or '-' }}</td>
-                            <td>{{ o.quantity or 1 }}</td>
-                            <td>{{ o.unit_price if o.unit_price is not none else '-' }}</td>
-                            <td>
-                                <label><input type="radio" name="output_id" value="{{ o.id }}" required /> Seç</label>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                <div style="margin-top:8px; display:flex; gap:12px; align-items:center;">
-                    <label>Adet:
-                        <input type="number" name="quantity" step="1" min="0" value="{{ order.quantity or 1 }}" />
-                    </label>
-                    <label><input type="checkbox" name="apply_price" value="1" /> Fiyatı uygula</label>
-                    <button type="submit">Mapping Uygula</button>
-                </div>
-            </form>
+            <table>
+                <thead>
+                    <tr><th>Ürün/Item</th><th>Beden</th><th>Renk</th><th>Önerilen Adet</th><th></th></tr>
+                </thead>
+                <tbody>
+                    {% for o in mapping_outs %}
+                    <tr>
+                        <td>
+                            {% if o.item_id %}
+                                Item #{{ o.item_id }}
+                            {% elif o.product_id %}
+                                Product #{{ o.product_id }}
+                            {% else %}
+                                (boş)
+                            {% endif %}
+                        </td>
+                        <td>{{ o.size or '-' }}</td>
+                        <td>{{ o.color or '-' }}</td>
+                        <td>{{ o.quantity or 1 }}</td>
+                        <td>
+                            <button type="button" onclick="appendFromMapping({ id: {{ o.id }}, item_id: {{ o.item_id or 'null' }}, product_id: {{ o.product_id or 'null' }}, size: '{{ o.size or '' }}', color: '{{ o.color or '' }}', quantity: {{ o.quantity or 1 }} })">Ekle</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         {% else %}
             <div>Öneri bulunamadı. Temel ismi düzenleyip tekrar deneyin.</div>
         {% endif %}
@@ -163,6 +179,55 @@
             </tbody>
         </table>
     </div>
+    <script>
+    const form = document.querySelector('form[action="/orders/{{ order.id }}/edit"]');
+    function addRow(itemDisplay='', qty=1){
+        const tb = document.querySelector('#orderItemsTbl tbody');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input name="item_display" list="items_all" value="${itemDisplay}" /></td>
+            <td><input name="item_qty" type="number" step="1" min="1" value="${qty}" /></td>
+            <td><button type="button" onclick="removeRow(this)">Sil</button></td>
+        `;
+        tb.appendChild(tr);
+    }
+    function removeRow(btn){
+        const tr = btn.closest('tr');
+        tr && tr.remove();
+    }
+    function clearHidden(form){
+        for (const el of Array.from(form.querySelectorAll('input[name="item_ids[]"], input[name="qtys[]"]'))){ el.remove(); }
+    }
+    function serializeOrderItems(form){
+        clearHidden(form);
+        const rows = document.querySelectorAll('#orderItemsTbl tbody tr');
+        for (const r of rows){
+            const disp = r.querySelector('input[name="item_display"]').value.trim();
+            const qty = parseInt(r.querySelector('input[name="item_qty"]').value || '0', 10);
+            if (!disp || !isFinite(qty) || qty <= 0) continue;
+            const hid1 = document.createElement('input');
+            hid1.type = 'hidden'; hid1.name = 'item_ids[]'; hid1.value = disp;
+            const hid2 = document.createElement('input');
+            hid2.type = 'hidden'; hid2.name = 'qtys[]'; hid2.value = String(qty);
+            form.appendChild(hid1); form.appendChild(hid2);
+        }
+    }
+    if (form){
+        form.addEventListener('submit', (e)=>{ serializeOrderItems(form); });
+    }
+    async function appendFromMapping(o){
+        try{
+            let itemId = o.item_id;
+            if (!itemId){
+                const res = await fetch(`/mappings/outputs/${o.id}/ensure-variant`, { method: 'POST' });
+                if (!res.ok){ alert('Varyant olusturma hatasi'); return; }
+                const j = await res.json();
+                itemId = j.item_id;
+            }
+            addRow(`${itemId} | `, o.quantity || 1);
+        }catch(err){ alert('Mapping ekleme hatasi'); }
+    }
+    </script>
 </body>
 </html>
 

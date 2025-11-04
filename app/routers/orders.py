@@ -465,6 +465,14 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
         # small reference lists for comboboxes
         clients = session.exec(select(Client).order_by(Client.id.desc()).limit(500)).all()
         items = session.exec(select(Item).order_by(Item.id.desc()).limit(500)).all()
+        # load existing order items and a larger item pool for comboboxes
+        from sqlmodel import select as _select
+        oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == order_id)).all()
+        order_items: list[dict] = []
+        for oi in oitems:
+            it = session.exec(_select(Item).where(Item.id == oi.item_id)).first() if oi.item_id is not None else None
+            order_items.append({"item": it, "quantity": int(oi.quantity or 0)})
+        items_all = session.exec(select(Item).order_by(Item.id.desc()).limit(5000)).all()
         logs = session.exec(select(OrderEditLog).where(OrderEditLog.order_id == order_id).order_by(OrderEditLog.id.desc()).limit(100)).all()
         # current display strings
         client_disp = None
@@ -499,6 +507,8 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
                 "order": o,
                 "clients": clients,
                 "items": items,
+                "order_items": order_items,
+                "items_all": items_all,
                 "logs": logs,
                 "client_disp": client_disp,
                 "item_disp": item_disp,
@@ -541,18 +551,93 @@ async def edit_order_apply(order_id: int, request: Request):
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
         changes = {}
+        # Multi-item editor support: parse arrays item_ids[] and qtys[]
+        def _getlist(key: str) -> list[str]:
+            try:
+                return list(form.getlist(key))  # type: ignore[attr-defined]
+            except Exception:
+                vals = []
+                try:
+                    for k, v in form.multi_items():  # type: ignore[attr-defined]
+                        if k == key:
+                            vals.append(str(v))
+                except Exception:
+                    pass
+                return vals
+        items_changed = False
+        item_ids_arr = _getlist("item_ids[]")
+        qtys_arr = _getlist("qtys[]")
+        new_items_map: dict[int, int] = {}
+        if item_ids_arr and qtys_arr and (len(item_ids_arr) == len(qtys_arr)):
+            for s_iid, s_qty in zip(item_ids_arr, qtys_arr):
+                iid = _parse_id(str(s_iid))
+                try:
+                    qv = int(str(s_qty).replace(",", "."))
+                except Exception:
+                    qv = 0
+                if iid is None or qv <= 0:
+                    continue
+                new_items_map[iid] = new_items_map.get(iid, 0) + qv
+        if new_items_map:
+            from sqlmodel import select as _select
+            cur_items = session.exec(_select(OrderItem).where(OrderItem.order_id == order_id)).all()
+            old_items_map: dict[int, int] = {}
+            for oi in cur_items:
+                if oi.item_id is None:
+                    continue
+                old_items_map[int(oi.item_id)] = old_items_map.get(int(oi.item_id), 0) + int(oi.quantity or 0)
+            if new_items_map != old_items_map:
+                items_changed = True
+                changes["items"] = [old_items_map, new_items_map]
+                # remove existing order items
+                for oi in cur_items:
+                    session.delete(oi)
+                # delete only 'out' movements for this order
+                from ..models import StockMovement as _SM
+                mvs = session.exec(_select(_SM).where(_SM.related_order_id == order_id)).all()
+                for mv in mvs:
+                    if (mv.direction or "out") == "out":
+                        session.delete(mv)
+                # rebuild from new map
+                total_qty_sum = 0
+                rep_item_id = None
+                for iid in new_items_map.keys():
+                    rep_item_id = rep_item_id or int(iid)
+                for iid, qv in new_items_map.items():
+                    total_qty_sum += int(qv)
+                    session.add(OrderItem(order_id=order_id, item_id=int(iid), quantity=int(qv)))
+                    if (o.status or "") not in ("refunded", "switched", "stitched"):
+                        adjust_stock(session, item_id=int(iid), delta=-int(qv), related_order_id=order_id, reason=f"order-edit:{order_id}")
+                    else:
+                        adjust_stock(session, item_id=int(iid), delta=int(qv), related_order_id=order_id, reason=f"order-edit:{order_id}:status={o.status}")
+                if rep_item_id is not None and rep_item_id != (o.item_id or None):
+                    changes["item_id"] = [o.item_id, rep_item_id]
+                    o.item_id = rep_item_id
+                if total_qty_sum != int(o.quantity or 0):
+                    changes["quantity"] = [o.quantity, total_qty_sum]
+                    o.quantity = total_qty_sum
+                # recompute total_cost
+                try:
+                    from ..models import Item as _Item
+                    total_cost = 0.0
+                    for iid, qv in new_items_map.items():
+                        it = session.exec(_select(_Item).where(_Item.id == int(iid))).first()
+                        total_cost += float(qv) * float((it.cost or 0.0) if it else 0.0)
+                    o.total_cost = round(total_cost, 2)
+                except Exception:
+                    pass
         # compare and set fields
         if new_client_id and new_client_id != o.client_id:
             changes["client_id"] = [o.client_id, new_client_id]
             o.client_id = new_client_id  # type: ignore
-        if new_item_id and new_item_id != (o.item_id or None):
+        if (not items_changed) and new_item_id and new_item_id != (o.item_id or None):
             changes["item_id"] = [o.item_id, new_item_id]
             o.item_id = new_item_id
         if new_tracking != (o.tracking_no or None):
             changes["tracking_no"] = [o.tracking_no, new_tracking]
             o.tracking_no = new_tracking
         try:
-            if new_quantity != "":
+            if (not items_changed) and new_quantity != "":
                 qv = int(new_quantity)
                 if qv != int(o.quantity or 0):
                     changes["quantity"] = [o.quantity, qv]
@@ -596,8 +681,8 @@ async def edit_order_apply(order_id: int, request: Request):
             o.status = new_status
 
         # apply inventory adjustments when item/quantity/status changed
-        inv_touch = any(k in changes for k in ("item_id", "quantity", "status"))
-        if inv_touch:
+        inv_touch = items_changed or any(k in changes for k in ("item_id", "quantity", "status"))
+        if inv_touch and (not items_changed):
             from sqlmodel import select as _select
             # remove existing out movements and order items, then rebuild from current item_id/quantity
             # when transitioning to refunded/switched -> add 'in' movements
@@ -614,11 +699,11 @@ async def edit_order_apply(order_id: int, request: Request):
             if (o.status or "") not in ("refunded", "switched", "stitched"):
                 if o.item_id and int(o.quantity or 0) > 0:
                     session.add(OrderItem(order_id=order_id, item_id=int(o.item_id), quantity=int(o.quantity or 0)))
-                    adjust_stock(session, item_id=int(o.item_id), delta=-int(o.quantity or 0), related_order_id=order_id)
+                    adjust_stock(session, item_id=int(o.item_id), delta=-int(o.quantity or 0), related_order_id=order_id, reason=f"order-edit:{order_id}")
             else:
                 # ensure restock 'in' movements exist
                 if o.item_id and int(o.quantity or 0) > 0:
-                    adjust_stock(session, item_id=int(o.item_id), delta=int(o.quantity or 0), related_order_id=order_id)
+                    adjust_stock(session, item_id=int(o.item_id), delta=int(o.quantity or 0), related_order_id=order_id, reason=f"order-edit:{order_id}:status={o.status}")
                 if not o.return_or_switch_date:
                     o.return_or_switch_date = _dt.date.today()
 
@@ -642,6 +727,7 @@ async def apply_mapping(order_id: int, request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="output_id required")
     apply_price = _get("apply_price") in ("1", "true", "on", "yes")
+    mode = _get("mode") or "apply"
     qty_override = _get("quantity")
     with get_session() as session:
         from ..models import ItemMappingOutput as _Out, StockMovement as _SM
@@ -663,6 +749,15 @@ async def apply_mapping(order_id: int, request: Request):
             target_item_id = int(item.id or 0)
         if target_item_id <= 0:
             raise HTTPException(status_code=400, detail="Unable to resolve item for mapping")
+        # If mode=append, just return item info for client to add a row
+        if mode == "append":
+            q_each = int(out.quantity or 1)
+            try:
+                if qty_override != "":
+                    q_each = int(qty_override)
+            except Exception:
+                pass
+            return {"status": "ok", "item_id": target_item_id, "quantity": q_each}
         changes = {}
         if target_item_id != (o.item_id or 0):
             changes["item_id"] = [o.item_id, target_item_id]
@@ -680,13 +775,8 @@ async def apply_mapping(order_id: int, request: Request):
             o.quantity = qv
         # price
         if apply_price and (out.unit_price is not None):
-            try:
-                new_total = round(float(out.unit_price) * float(o.quantity or 0), 2)
-                if float(o.total_amount or 0.0) != new_total:
-                    changes["total_amount"] = [o.total_amount, new_total]
-                    o.total_amount = new_total
-            except Exception:
-                pass
+            # Keep manual total_amount per requirement; do not auto-update
+            pass
         # rebuild movements/items
         oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
         for oi in oitems:
@@ -698,10 +788,10 @@ async def apply_mapping(order_id: int, request: Request):
         if (o.status or "") not in ("refunded", "switched", "stitched"):
             if o.item_id and int(o.quantity or 0) > 0:
                 session.add(OrderItem(order_id=order_id, item_id=int(o.item_id), quantity=int(o.quantity or 0)))
-                adjust_stock(session, item_id=int(o.item_id), delta=-int(o.quantity or 0), related_order_id=order_id)
+                adjust_stock(session, item_id=int(o.item_id), delta=-int(o.quantity or 0), related_order_id=order_id, reason=f"order-edit:{order_id}")
         else:
             if o.item_id and int(o.quantity or 0) > 0:
-                adjust_stock(session, item_id=int(o.item_id), delta=int(o.quantity or 0), related_order_id=order_id)
+                adjust_stock(session, item_id=int(o.item_id), delta=int(o.quantity or 0), related_order_id=order_id, reason=f"order-edit:{order_id}:status={o.status}")
             import datetime as _dt
             if not o.return_or_switch_date:
                 o.return_or_switch_date = _dt.date.today()

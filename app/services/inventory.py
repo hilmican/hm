@@ -47,7 +47,7 @@ def get_or_create_item(session: Session, *, product_id: int, size: Optional[str]
     )
 
 
-def adjust_stock(session: Session, *, item_id: int, delta: int, related_order_id: Optional[int] = None) -> None:
+def adjust_stock(session: Session, *, item_id: int, delta: int, related_order_id: Optional[int] = None, reason: Optional[str] = None) -> None:
     """Record a stock movement for the given item.
 
     Positive delta => direction "in"; Negative delta => direction "out".
@@ -56,7 +56,7 @@ def adjust_stock(session: Session, *, item_id: int, delta: int, related_order_id
     qty = abs(int(delta))
     if qty <= 0:
         return
-    mv = StockMovement(item_id=item_id, direction=direction, quantity=qty, related_order_id=related_order_id)
+    mv = StockMovement(item_id=item_id, direction=direction, quantity=qty, related_order_id=related_order_id, reason=reason)
     session.add(mv)
 
 

@@ -96,6 +96,7 @@ class StockMovement(SQLModel, table=True):
     direction: str = Field(description="in|out")
     quantity: int
     related_order_id: Optional[int] = Field(default=None, foreign_key="order.id")
+    reason: Optional[str] = None
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 

@@ -348,6 +348,12 @@ def init_db() -> None:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_stockmovement_item_id ON stockmovement(item_id)")
                 except Exception:
                     pass
+                # StockMovement.reason column (TEXT)
+                if not column_exists("stockmovement", "reason"):
+                    try:
+                        conn.exec_driver_sql("ALTER TABLE stockmovement ADD COLUMN reason TEXT")
+                    except Exception:
+                        pass
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_orderitem_order_id ON orderitem(order_id)")
                 except Exception:
