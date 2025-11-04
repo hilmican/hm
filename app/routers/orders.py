@@ -6,6 +6,8 @@ from typing import Optional
 
 from ..db import get_session
 from ..models import Order, Payment, OrderItem, Item, Client, OrderEditLog
+from ..services.mapping import resolve_mapping
+from ..services.inventory import get_or_create_item as _get_or_create_item
 from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
 from fastapi.responses import StreamingResponse
@@ -455,7 +457,7 @@ def update_total(order_id: int, body: dict):
 
 
 @router.get("/{order_id}/edit")
-def edit_order_page(order_id: int, request: Request):
+def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query(default=None)):
     with get_session() as session:
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
@@ -464,6 +466,31 @@ def edit_order_page(order_id: int, request: Request):
         clients = session.exec(select(Client).order_by(Client.id.desc()).limit(500)).all()
         items = session.exec(select(Item).order_by(Item.id.desc()).limit(500)).all()
         logs = session.exec(select(OrderEditLog).where(OrderEditLog.order_id == order_id).order_by(OrderEditLog.id.desc()).limit(100)).all()
+		# current display strings
+		client_disp = None
+		if o.client_id:
+			c = session.exec(select(Client).where(Client.id == o.client_id)).first()
+			if c:
+				client_disp = f"{c.id} | {c.name} | {c.phone or ''}"
+		item_disp = None
+		if o.item_id:
+			it = session.exec(select(Item).where(Item.id == o.item_id)).first()
+			if it:
+				item_disp = f"{it.id} | {it.sku} | {it.name}"
+		# mapping candidates (guess base from notes unless provided)
+		base_guess = (base or '').strip()
+		if not base_guess:
+			try:
+				text = (o.notes or '').strip()
+				base_guess = text.split('|')[0].strip() if text else ''
+			except Exception:
+				base_guess = ''
+		outs, rule = ([], None)
+		try:
+			if base_guess:
+				outs, rule = resolve_mapping(session, base_guess)
+		except Exception:
+			outs, rule = [], None
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "order_edit.html",
@@ -473,6 +500,11 @@ def edit_order_page(order_id: int, request: Request):
                 "clients": clients,
                 "items": items,
                 "logs": logs,
+				"client_disp": client_disp,
+				"item_disp": item_disp,
+				"mapping_base": base_guess,
+				"mapping_outs": outs,
+				"mapping_rule": rule,
             },
         )
 
@@ -597,6 +629,87 @@ async def edit_order_apply(order_id: int, request: Request):
         except Exception:
             pass
 
+        return {"status": "ok", "changed": changes}
+
+
+@router.post("/{order_id}/apply-mapping")
+async def apply_mapping(order_id: int, request: Request):
+    form = await request.form()
+    def _get(name: str) -> str:
+        return str(form.get(name) or "").strip()
+    try:
+        out_id = int(_get("output_id"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="output_id required")
+    apply_price = _get("apply_price") in ("1", "true", "on", "yes")
+    qty_override = _get("quantity")
+    with get_session() as session:
+        from ..models import ItemMappingOutput as _Out, StockMovement as _SM
+        o = session.exec(select(Order).where(Order.id == order_id)).first()
+        if not o:
+            raise HTTPException(status_code=404, detail="Order not found")
+        out = session.exec(select(_Out).where(_Out.id == out_id)).first()
+        if not out:
+            raise HTTPException(status_code=404, detail="Mapping output not found")
+        # materialize item
+        target_item_id = None
+        if out.item_id:
+            target_item_id = int(out.item_id)
+        else:
+            if not out.product_id:
+                raise HTTPException(status_code=400, detail="Output has no product reference")
+            # ensure variant exists
+            item = _get_or_create_item(session, product_id=int(out.product_id), size=out.size, color=out.color)
+            target_item_id = int(item.id or 0)
+        if target_item_id <= 0:
+            raise HTTPException(status_code=400, detail="Unable to resolve item for mapping")
+        changes = {}
+        if target_item_id != (o.item_id or 0):
+            changes["item_id"] = [o.item_id, target_item_id]
+            o.item_id = target_item_id
+        # quantity
+        if qty_override != "":
+            try:
+                qv = int(qty_override)
+            except Exception:
+                qv = int(o.quantity or 0)
+        else:
+            qv = int(out.quantity or (o.quantity or 1))
+        if qv != int(o.quantity or 0):
+            changes["quantity"] = [o.quantity, qv]
+            o.quantity = qv
+        # price
+        if apply_price and (out.unit_price is not None):
+            try:
+                new_total = round(float(out.unit_price) * float(o.quantity or 0), 2)
+                if float(o.total_amount or 0.0) != new_total:
+                    changes["total_amount"] = [o.total_amount, new_total]
+                    o.total_amount = new_total
+            except Exception:
+                pass
+        # rebuild movements/items
+        oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
+        for oi in oitems:
+            session.delete(oi)
+        mvs = session.exec(select(_SM).where(_SM.related_order_id == order_id)).all()
+        for mv in mvs:
+            if (mv.direction or "out") == "out":
+                session.delete(mv)
+        if (o.status or "") not in ("refunded", "switched", "stitched"):
+            if o.item_id and int(o.quantity or 0) > 0:
+                session.add(OrderItem(order_id=order_id, item_id=int(o.item_id), quantity=int(o.quantity or 0)))
+                adjust_stock(session, item_id=int(o.item_id), delta=-int(o.quantity or 0), related_order_id=order_id)
+        else:
+            if o.item_id and int(o.quantity or 0) > 0:
+                adjust_stock(session, item_id=int(o.item_id), delta=int(o.quantity or 0), related_order_id=order_id)
+            import datetime as _dt
+            if not o.return_or_switch_date:
+                o.return_or_switch_date = _dt.date.today()
+        try:
+            editor = request.session.get("uid") if hasattr(request, "session") else None
+            session.add(OrderEditLog(order_id=order_id, editor_user_id=editor, action="apply_mapping", changes_json=str(changes)))
+        except Exception:
+            pass
         return {"status": "ok", "changed": changes}
 
 

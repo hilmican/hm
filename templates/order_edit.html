@@ -23,7 +23,7 @@
             <div class="row">
                 <div>
                     <label>Müşteri</label>
-                    <input name="client" list="clients" value="{{ order.client_id }}" />
+                    <input name="client" list="clients" value="{{ client_disp or order.client_id }}" />
                     <datalist id="clients">
                         {% for c in clients %}
                         <option value="{{ c.id }} | {{ c.name }} | {{ c.phone }}"></option>
@@ -36,7 +36,7 @@
                 </div>
                 <div>
                     <label>Ürün (Item)</label>
-                    <input name="item" list="items" value="{{ order.item_id or '' }}" />
+                    <input name="item" list="items" value="{{ item_disp or (order.item_id or '') }}" />
                     <datalist id="items">
                         {% for it in items %}
                         <option value="{{ it.id }} | {{ it.sku }} | {{ it.name }}"></option>
@@ -88,6 +88,61 @@
                 <a href="/orders/table" class="btn">Geri</a>
             </div>
         </form>
+    </div>
+
+    <h3>Eşleştirme (Mapping) Seçenekleri</h3>
+    <div class="card">
+        <form method="get" action="/orders/{{ order.id }}/edit" style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
+            <input type="hidden" name="id" value="{{ order.id }}" />
+            <label>Temel İsim:
+                <input type="text" name="base" value="{{ mapping_base or '' }}" />
+            </label>
+            <button type="submit">Bul</button>
+            {% if mapping_base %}
+                <a href="/mappings/table?pattern={{ mapping_base }}" style="margin-left:8px;">Haritalandırmayı Düzenle</a>
+            {% endif %}
+        </form>
+        {% if mapping_outs and mapping_outs|length %}
+            <form method="post" action="/orders/{{ order.id }}/apply-mapping">
+                <input type="hidden" name="base" value="{{ mapping_base or '' }}" />
+                <table>
+                    <thead>
+                        <tr><th>Ürün/Item</th><th>Beden</th><th>Renk</th><th>Adet</th><th>Birim Fiyat</th><th>Uygula</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for o in mapping_outs %}
+                        <tr>
+                            <td>
+                                {% if o.item_id %}
+                                    Item #{{ o.item_id }}
+                                {% elif o.product_id %}
+                                    Product #{{ o.product_id }}
+                                {% else %}
+                                    (boş)
+                                {% endif %}
+                            </td>
+                            <td>{{ o.size or '-' }}</td>
+                            <td>{{ o.color or '-' }}</td>
+                            <td>{{ o.quantity or 1 }}</td>
+                            <td>{{ o.unit_price if o.unit_price is not none else '-' }}</td>
+                            <td>
+                                <label><input type="radio" name="output_id" value="{{ o.id }}" required /> Seç</label>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div style="margin-top:8px; display:flex; gap:12px; align-items:center;">
+                    <label>Adet:
+                        <input type="number" name="quantity" step="1" min="0" value="{{ order.quantity or 1 }}" />
+                    </label>
+                    <label><input type="checkbox" name="apply_price" value="1" /> Fiyatı uygula</label>
+                    <button type="submit">Mapping Uygula</button>
+                </div>
+            </form>
+        {% else %}
+            <div>Öneri bulunamadı. Temel ismi düzenleyip tekrar deneyin.</div>
+        {% endif %}
     </div>
 
     <h3>Değişiklik Günlüğü</h3>
