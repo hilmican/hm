@@ -72,7 +72,7 @@
         </form>
         <span class="pill">{{ rows|length }} siparis</span>
         <button onclick="recalc()">Tazele</button>
-        <button class="btn" onclick="presetOverdue7()">7 gün+ ödeme yok</button>
+        <button class="btn" onclick="presetOverdue7()">7+ gün ödeme yok</button>
         <button class="btn" onclick="exportExcel()">Excel'e aktar</button>
     </div>
     <h2>Siparisler</h2>
@@ -161,17 +161,17 @@
     }
 
     function presetOverdue7(){
-        const params = new URLSearchParams(window.location.search);
+        // Build fresh params to clear any existing filters
+        const params = new URLSearchParams();
         params.set('preset','overdue_unpaid_7');
-        // force date range to show orders older than 7 days
-        if (!params.get('date_field')) params.set('date_field','both');
+        params.set('date_field','both');
         const now = new Date();
         const pad = (n)=> String(n).padStart(2,'0');
         const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
         const endStr = `${end.getFullYear()}-${pad(end.getMonth()+1)}-${pad(end.getDate())}`;
         const startStr = `2025-01-01`;
-        params.set('end', endStr);
         params.set('start', startStr);
+        params.set('end', endStr);
         window.location.href = '/orders/table?' + params.toString();
     }
 
