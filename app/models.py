@@ -81,6 +81,15 @@ class Payment(SQLModel, table=True):
     net_amount: Optional[float] = Field(default=0.0, index=True)
 
 
+class OrderEditLog(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    order_id: int = Field(foreign_key="order.id", index=True)
+    editor_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
+    action: Optional[str] = Field(default=None, index=True)
+    changes_json: Optional[str] = None
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
 class StockMovement(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     item_id: int = Field(foreign_key="item.id")

@@ -5,7 +5,7 @@ import datetime as dt
 from typing import Optional
 
 from ..db import get_session
-from ..models import Order, Payment, OrderItem, Item
+from ..models import Order, Payment, OrderItem, Item, Client, OrderEditLog
 from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
 from fastapi.responses import StreamingResponse
@@ -446,4 +446,193 @@ def update_total(order_id: int, body: dict):
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
         o.total_amount = round(new_total, 2)
+        try:
+            # log
+            session.add(OrderEditLog(order_id=order_id, action="update_total", changes_json=str({"total_amount": [o.total_amount, new_total]})))
+        except Exception:
+            pass
         return {"status": "ok"}
+
+
+@router.get("/{order_id}/edit")
+def edit_order_page(order_id: int, request: Request):
+    with get_session() as session:
+        o = session.exec(select(Order).where(Order.id == order_id)).first()
+        if not o:
+            raise HTTPException(status_code=404, detail="Order not found")
+        # small reference lists for comboboxes
+        clients = session.exec(select(Client).order_by(Client.id.desc()).limit(500)).all()
+        items = session.exec(select(Item).order_by(Item.id.desc()).limit(500)).all()
+        logs = session.exec(select(OrderEditLog).where(OrderEditLog.order_id == order_id).order_by(OrderEditLog.id.desc()).limit(100)).all()
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "order_edit.html",
+            {
+                "request": request,
+                "order": o,
+                "clients": clients,
+                "items": items,
+                "logs": logs,
+            },
+        )
+
+
+@router.post("/{order_id}/edit")
+async def edit_order_apply(order_id: int, request: Request):
+    form = await request.form()
+    def _get(name: str) -> str:
+        return str(form.get(name) or "").strip()
+    # parse combobox inputs: expect leading numeric id
+    def _parse_id(val: str) -> Optional[int]:
+        if not val:
+            return None
+        num = "".join(ch for ch in val if ch.isdigit())
+        try:
+            return int(num) if num else None
+        except Exception:
+            return None
+    client_val = _get("client")
+    item_val = _get("item")
+    new_client_id = _parse_id(client_val)
+    new_item_id = _parse_id(item_val)
+    new_tracking = _get("tracking_no") or None
+    new_quantity = _get("quantity")
+    new_total = _get("total_amount")
+    new_ship = _get("shipment_date")
+    new_data = _get("data_date")
+    new_status = _get("status") or None
+    new_notes = _get("notes") or None
+    new_source = _get("source") or None
+
+    with get_session() as session:
+        o = session.exec(select(Order).where(Order.id == order_id)).first()
+        if not o:
+            raise HTTPException(status_code=404, detail="Order not found")
+        changes = {}
+        # compare and set fields
+        if new_client_id and new_client_id != o.client_id:
+            changes["client_id"] = [o.client_id, new_client_id]
+            o.client_id = new_client_id  # type: ignore
+        if new_item_id and new_item_id != (o.item_id or None):
+            changes["item_id"] = [o.item_id, new_item_id]
+            o.item_id = new_item_id
+        if new_tracking != (o.tracking_no or None):
+            changes["tracking_no"] = [o.tracking_no, new_tracking]
+            o.tracking_no = new_tracking
+        try:
+            if new_quantity != "":
+                qv = int(new_quantity)
+                if qv != int(o.quantity or 0):
+                    changes["quantity"] = [o.quantity, qv]
+                    o.quantity = qv
+        except Exception:
+            pass
+        try:
+            if new_total != "":
+                tv = round(float(new_total.replace(",", ".")), 2)
+                if tv != float(o.total_amount or 0.0):
+                    changes["total_amount"] = [o.total_amount, tv]
+                    o.total_amount = tv
+        except Exception:
+            pass
+        import datetime as _dt
+        def _parse_date(s: Optional[str]):
+            if not s:
+                return None
+            try:
+                return _dt.date.fromisoformat(str(s))
+            except Exception:
+                return None
+        sd = _parse_date(new_ship)
+        if sd != (o.shipment_date or None):
+            changes["shipment_date"] = [o.shipment_date, sd]
+            o.shipment_date = sd
+        dd = _parse_date(new_data)
+        if dd != (o.data_date or None):
+            changes["data_date"] = [o.data_date, dd]
+            o.data_date = dd
+        if new_source and new_source != (o.source or None):
+            changes["source"] = [o.source, new_source]
+            o.source = new_source
+        if new_notes != (o.notes or None):
+            changes["notes"] = [o.notes, new_notes]
+            o.notes = new_notes
+
+        prev_status = o.status or None
+        if new_status != prev_status:
+            changes["status"] = [prev_status, new_status]
+            o.status = new_status
+
+        # apply inventory adjustments when item/quantity/status changed
+        inv_touch = any(k in changes for k in ("item_id", "quantity", "status"))
+        if inv_touch:
+            from sqlmodel import select as _select
+            # remove existing out movements and order items, then rebuild from current item_id/quantity
+            # when transitioning to refunded/switched -> add 'in' movements
+            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == order_id)).all()
+            for oi in oitems:
+                session.delete(oi)
+            # delete only 'out' movements; preserve 'in' history
+            from ..models import StockMovement as _SM
+            mvs = session.exec(_select(_SM).where(_SM.related_order_id == order_id)).all()
+            for mv in mvs:
+                if (mv.direction or "out") == "out":
+                    session.delete(mv)
+            # rebuild order items/out movements if order is not refunded/switched
+            if (o.status or "") not in ("refunded", "switched", "stitched"):
+                if o.item_id and int(o.quantity or 0) > 0:
+                    session.add(OrderItem(order_id=order_id, item_id=int(o.item_id), quantity=int(o.quantity or 0)))
+                    adjust_stock(session, item_id=int(o.item_id), delta=-int(o.quantity or 0), related_order_id=order_id)
+            else:
+                # ensure restock 'in' movements exist
+                if o.item_id and int(o.quantity or 0) > 0:
+                    adjust_stock(session, item_id=int(o.item_id), delta=int(o.quantity or 0), related_order_id=order_id)
+                if not o.return_or_switch_date:
+                    o.return_or_switch_date = _dt.date.today()
+
+        # write log
+        try:
+            editor = request.session.get("uid") if hasattr(request, "session") else None
+            session.add(OrderEditLog(order_id=order_id, editor_user_id=editor, action="edit", changes_json=str(changes)))
+        except Exception:
+            pass
+
+        return {"status": "ok", "changed": changes}
+
+
+@router.get("/duplicates")
+def find_duplicates(request: Request, start: Optional[str] = Query(default=None), end: Optional[str] = Query(default=None)):
+    import datetime as _dt
+    def _parse_date_or_default(value: Optional[str], fallback: _dt.date) -> _dt.date:
+        try:
+            if value:
+                return _dt.date.fromisoformat(value)
+        except Exception:
+            pass
+        return fallback
+    with get_session() as session:
+        today = _dt.date.today()
+        default_start = today - _dt.timedelta(days=30)
+        start_date = _parse_date_or_default(start, default_start)
+        end_date = _parse_date_or_default(end, today)
+        date_col = Order.shipment_date
+        from sqlalchemy import func
+        # group by (client_id, total_amount, shipment_date) within window; count>1
+        groups = session.exec(
+            select(Order.client_id, Order.total_amount, date_col, func.count(Order.id)).where(
+                date_col.is_not(None), date_col >= start_date, date_col <= end_date
+            ).group_by(Order.client_id, Order.total_amount, date_col).having(func.count(Order.id) > 1)
+        ).all()
+        # fetch orders for those groups
+        dupes: list[dict] = []
+        for cid, tot, d, cnt in groups:
+            rows = session.exec(select(Order).where(Order.client_id == cid, Order.total_amount == tot, date_col == d).order_by(Order.id.desc())).all()
+            if len(rows) > 1:
+                dupes.append({
+                    "client_id": cid,
+                    "total": float(tot or 0.0),
+                    "date": d,
+                    "orders": [{"id": r.id, "tracking_no": r.tracking_no, "status": r.status} for r in rows],
+                })
+        templates = request.app.state.templates
+        return templates.TemplateResponse("orders_duplicates.html", {"request": request, "groups": dupes, "start": start_date, "end": end_date})

@@ -106,6 +106,7 @@
         <button class="btn" onclick="presetOverdue7()">7 gün+ ödeme yok</button>
         <button class="btn" onclick="presetAll()">Tüm siparişler</button>
         <button class="btn" onclick="exportExcel()">Excel'e aktar</button>
+        <a class="btn" href="/orders/duplicates">Potansiyel Çiftler</a>
     </div>
     <h2>Siparisler</h2>
     <table id="ordersTbl">
@@ -146,6 +147,7 @@
                     <div style="display:flex; gap:6px;">
                         <button class="btn warn" onclick="refund({{ o.id }})">Iade</button>
                         <button class="btn accent" onclick="switchOrder({{ o.id }})">Degis</button>
+                        <a class="btn" href="/orders/{{ o.id }}/edit">Düzenle</a>
                     </div>
                 </td>
             </tr>

@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Potansiyel Çift Siparişler</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+        .card { border:1px solid #e5e7eb; border-radius:10px; padding:16px; background:#fff; }
+        table { width:100%; border-collapse: collapse; }
+        th, td { padding:8px 10px; border-bottom:1px solid #f0f0f0; text-align:left; font-size: 13px; }
+        .toolbar { margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <h2>Potansiyel Çift Siparişler</h2>
+    <div class="toolbar">
+        <form method="get" action="/orders/duplicates">
+            <label>Başlangıç: <input type="date" name="start" value="{{ start }}" /></label>
+            <label>Bitiş: <input type="date" name="end" value="{{ end }}" /></label>
+            <button type="submit">Ara</button>
+            <a href="/orders/table">Geri</a>
+        </form>
+    </div>
+    <div class="card">
+        <table>
+            <thead>
+                <tr><th>Tarih</th><th>Müşteri</th><th>Tutar</th><th>Adet</th><th>Siparişler</th></tr>
+            </thead>
+            <tbody>
+            {% for g in groups %}
+                <tr>
+                    <td>{{ g.date }}</td>
+                    <td><a href="/clients/{{ g.client_id }}">{{ g.client_id }}</a></td>
+                    <td>{{ '%.2f'|format(g.total or 0) }}</td>
+                    <td>{{ g.orders|length }}</td>
+                    <td>
+                        {% for r in g.orders %}
+                            <a href="/orders/{{ r.id }}/edit">#{{ r.id }}</a> ({{ r.status or '-' }}) {% if not loop.last %}, {% endif %}
+                        {% endfor %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
+
+

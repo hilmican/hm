@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Order Edit</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+        .card { border:1px solid #e5e7eb; border-radius:10px; padding:16px; background:#fff; max-width: 1000px; }
+        .row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+        label { display:block; font-size:12px; color:#6b7280; margin-bottom:4px; }
+        input, select, textarea { width:100%; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; }
+        textarea { min-height: 80px; }
+        .toolbar { display:flex; gap:8px; margin-bottom:12px; }
+        table { width:100%; border-collapse: collapse; }
+        th, td { padding:8px 10px; border-bottom:1px solid #f0f0f0; text-align:left; font-size: 13px; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <h2>Order #{{ order.id }} Düzenle</h2>
+    <div class="card">
+        <form method="post" action="/orders/{{ order.id }}/edit">
+            <div class="row">
+                <div>
+                    <label>Müşteri</label>
+                    <input name="client" list="clients" value="{{ order.client_id }}" />
+                    <datalist id="clients">
+                        {% for c in clients %}
+                        <option value="{{ c.id }} | {{ c.name }} | {{ c.phone }}"></option>
+                        {% endfor %}
+                    </datalist>
+                </div>
+                <div>
+                    <label>Takip No</label>
+                    <input name="tracking_no" value="{{ order.tracking_no or '' }}" />
+                </div>
+                <div>
+                    <label>Ürün (Item)</label>
+                    <input name="item" list="items" value="{{ order.item_id or '' }}" />
+                    <datalist id="items">
+                        {% for it in items %}
+                        <option value="{{ it.id }} | {{ it.sku }} | {{ it.name }}"></option>
+                        {% endfor %}
+                    </datalist>
+                </div>
+                <div>
+                    <label>Adet</label>
+                    <input name="quantity" type="number" step="1" value="{{ order.quantity or 1 }}" />
+                </div>
+                <div>
+                    <label>Toplam</label>
+                    <input name="total_amount" type="number" step="0.01" value="{{ order.total_amount or 0 }}" />
+                </div>
+                <div>
+                    <label>Durum</label>
+                    <select name="status">
+                        {% set st = order.status or '' %}
+                        <option value="" {{ 'selected' if st=='' else '' }}>(boş)</option>
+                        <option value="paid" {{ 'selected' if st=='paid' else '' }}>paid</option>
+                        <option value="unpaid" {{ 'selected' if st=='unpaid' else '' }}>unpaid</option>
+                        <option value="refunded" {{ 'selected' if st=='refunded' else '' }}>refunded</option>
+                        <option value="switched" {{ 'selected' if st=='switched' else '' }}>switched</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Kanal</label>
+                    <select name="source">
+                        {% set src = order.source or '' %}
+                        <option value="bizim" {{ 'selected' if src=='bizim' else '' }}>bizim</option>
+                        <option value="kargo" {{ 'selected' if src=='kargo' else '' }}>kargo</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Kargo Tarihi</label>
+                    <input name="shipment_date" type="date" value="{{ order.shipment_date }}" />
+                </div>
+                <div>
+                    <label>Data Tarihi</label>
+                    <input name="data_date" type="date" value="{{ order.data_date }}" />
+                </div>
+                <div style="grid-column:1/-1;">
+                    <label>Notlar</label>
+                    <textarea name="notes">{{ order.notes or '' }}</textarea>
+                </div>
+            </div>
+            <div class="toolbar">
+                <button type="submit">Kaydet</button>
+                <a href="/orders/table" class="btn">Geri</a>
+            </div>
+        </form>
+    </div>
+
+    <h3>Değişiklik Günlüğü</h3>
+    <div class="card">
+        <table>
+            <thead>
+                <tr><th>Zaman</th><th>Kullanıcı</th><th>Aksiyon</th><th>Değişiklikler</th></tr>
+            </thead>
+            <tbody>
+            {% for lg in logs %}
+                <tr>
+                    <td>{{ lg.created_at }}</td>
+                    <td>{{ lg.editor_user_id or '-' }}</td>
+                    <td>{{ lg.action }}</td>
+                    <td><pre style="margin:0; white-space: pre-wrap;">{{ lg.changes_json }}</pre></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
+
+
