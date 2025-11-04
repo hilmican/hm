@@ -241,14 +241,14 @@
 					const json = await res.json();
 					console.log('Uploaded files preview', json.files);
 					result.textContent = `Uploaded ${json.files.length} file(s).`;
-                    // For 'bizim', check unmatched patterns across all uploaded files and redirect to mapping wizard if needed
-                    if (json.source === 'bizim' && json.files && json.files.length) {
-                    // For 'returns', redirect to interactive review for the first file
-                    if (json.source === 'returns' && json.files && json.files.length){
-                        const fn = encodeURIComponent(json.files[0].filename);
-                        location.href = `/import/returns/review?filename=${fn}`;
-                        return;
-                    }
+					// For 'returns', redirect to interactive review for the first file
+					if (json.source === 'returns' && json.files && json.files.length){
+						const fn = encodeURIComponent(json.files[0].filename);
+						location.href = `/import/returns/review?filename=${fn}`;
+						return;
+					}
+					// For 'bizim', check unmatched patterns across all uploaded files and redirect to mapping wizard if needed
+					if (json.source === 'bizim' && json.files && json.files.length) {
                         const fnames = json.files.map(f=>f.filename);
                         try {
                             const pm = await fetch('/import/preview-map', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source: 'bizim', filenames: fnames, exclude_generic: false }) });
@@ -270,6 +270,8 @@
 						const totals = { created_orders:0, created_clients:0, created_items:0, created_payments:0, unmatched:0, enriched_orders:0, payments_existing:0, payments_skipped_zero:0 };
 						for (const f of json.files) {
 							let body = { source: json.source, filename: f.filename };
+							// returns are handled via interactive review; skip commit here
+							if (json.source === 'returns') { continue; }
 							if (json.source === 'bizim') {
 								let today = new Date();
 								const pad = (n)=> String(n).padStart(2,'0');
