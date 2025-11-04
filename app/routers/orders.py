@@ -378,7 +378,7 @@ def export_orders(
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Orders"
-        ws.append(["ID", "Takip", "Musteri", "Adet", "Toplam", "Kargo", "KargoTarihi", "DataTarihi", "Iade/DegisimTarihi", "Durum", "Kanal"]) 
+        ws.append(["ID", "Takip", "Musteri", "Adet", "Toplam", "Kargo", "KargoTarihi", "DataTarihi", "I/D Tarihi", "Durum", "Kanal"]) 
         for o in rows:
             cname = client_map.get(o.client_id) if o.client_id else None
             ws.append([
