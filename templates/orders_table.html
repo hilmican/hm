@@ -38,6 +38,8 @@
         th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; white-space: nowrap; }
         /* Allow wrapping only for the product (Urun) column */
         td.product { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
+        /* Slightly smaller font for client and product */
+        td.client, td.product { font-size: 12px; }
         /* Constrain tracking and client columns */
         th.tracking, td.tracking { max-width: 120px; }
         th.client, td.client { max-width: 220px; }
@@ -136,7 +138,7 @@
             {% for o in rows %}
             {% set rowcls = status_map.get(o.id) if status_map else '' %}
             <tr class="{{ rowcls }}">
-                <td>{{ o.id }}</td>
+                <td><a href="/orders/{{ o.id }}/edit" title="Düzenle #{{ o.id }}">{{ o.id }}</a></td>
                 <td class="tracking">{{ o.tracking_no or '-' }}</td>
                 <td class="client">
                     {% set cname = client_map.get(o.client_id) if client_map else o.client_id %}
@@ -162,9 +164,6 @@
                         <button class="icon-btn accent" title="Değişim" aria-label="Değişim" onclick="switchOrder({{ o.id }})">
                             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 7h10l-2-2 1.5-1.5L21 7l-4.5 3.5L15 9l2-2H7zM17 17H7l2 2-1.5 1.5L3 17l4.5-3.5L9 15l-2 2h10z"></path></svg>
                         </button>
-                        <a class="icon-btn" title="Düzenle" aria-label="Düzenle" href="/orders/{{ o.id }}/edit">
-                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"></path><path d="M20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"></path></svg>
-                        </a>
                     </div>
                 </td>
             </tr>
