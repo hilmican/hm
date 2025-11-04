@@ -96,6 +96,7 @@ class ReturnsRow(BaseModel):
     amount: Optional[float] = None
     action: Optional[str] = None  # refund | switch
     notes: Optional[str] = None
+    date: Optional[date] = None
 
     class Config:
         extra = 'forbid'

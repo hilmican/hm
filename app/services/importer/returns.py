@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from .common import read_sheet_rows, row_to_dict, parse_float
+from .common import read_sheet_rows, row_to_dict, parse_float, parse_date
 from ...utils.normalize import strip_parenthetical_suffix, normalize_text
 
 
@@ -24,6 +24,7 @@ RETURNS_MAPPING: dict[str, str] = {
     "iade-degisim": "action",
     "aciklama": "notes",
     "açıklama": "notes",
+    "tarih": "date",
 }
 
 
@@ -54,6 +55,8 @@ def map_row(raw: dict[str, Any]) -> dict[str, Any]:
         mapped["amount"] = parse_float(mapped.get("amount"))
     if "action" in mapped:
         mapped["action"] = _normalize_action(mapped.get("action"))
+    if "date" in mapped:
+        mapped["date"] = parse_date(mapped.get("date"))
     return mapped
 
 

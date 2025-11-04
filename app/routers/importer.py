@@ -644,7 +644,17 @@ def commit_import(body: dict, request: Request):
 										chosen.status = "refunded"
 									elif action == "switch":
 										chosen.status = "switched"
-									chosen.return_or_switch_date = run.data_date
+								# prefer per-row date, fallback to run date
+								ret_date = rec.get("date") or run.data_date
+								chosen.return_or_switch_date = ret_date
+								# adjust revenue (Toplam) by returned/exchanged amount when provided
+								amt = rec.get("amount")
+								try:
+									if amt is not None:
+										cur = float(chosen.total_amount or 0.0)
+										chosen.total_amount = round(cur + float(amt), 2)
+								except Exception:
+									pass
 								# structured debug
 								try:
 									print("[RETURNS DEBUG]", {
@@ -652,6 +662,8 @@ def commit_import(body: dict, request: Request):
 										"action": action,
 										"chosen_order_id": chosen.id,
 										"restocked_total": restocked,
+										"date": str(ret_date),
+										"amount": amt,
 									})
 								except Exception:
 									pass

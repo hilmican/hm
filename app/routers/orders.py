@@ -393,7 +393,8 @@ def export_orders(
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
-        filename = "orders_export.xlsx"
+        ts = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        filename = f"orders_export_{ts}.xlsx"
         return StreamingResponse(
             buf,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
