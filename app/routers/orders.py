@@ -75,6 +75,10 @@ def list_orders_table(
             end_date = today - dt.timedelta(days=7)
             # Fixed start anchor per request
             start_date = dt.date(2025, 1, 1)
+        elif preset == "all":
+            # Show the full history by widening the range
+            start_date = dt.date(2000, 1, 1)
+            end_date = today
 
         # Build base query with date filter logic similar to reports
         if date_field == "both":
@@ -102,8 +106,8 @@ def list_orders_table(
                 .order_by(Order.id.desc())
             )
 
-        # Optional source filter (bizim|kargo) — ignored for overdue preset quicksearch
-        if preset != "overdue_unpaid_7" and source in ("bizim", "kargo"):
+        # Optional source filter (bizim|kargo) — ignored for quicksearch presets
+        if (preset not in ("overdue_unpaid_7", "all")) and source in ("bizim", "kargo"):
             q = q.where(Order.source == source)
 
         rows = session.exec(q).all()
@@ -127,8 +131,8 @@ def list_orders_table(
             else:
                 status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
 
-        # Optional status filter — ignored for overdue preset quicksearch
-        if preset != "overdue_unpaid_7" and status in ("paid", "unpaid", "refunded", "switched"):
+        # Optional status filter — ignored for quicksearch presets
+        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
 
         # Preset filters
@@ -331,7 +335,7 @@ def export_orders(
                 )
                 .order_by(Order.id.desc())
             )
-        if preset != "overdue_unpaid_7" and source in ("bizim", "kargo"):
+        if (preset not in ("overdue_unpaid_7", "all")) and source in ("bizim", "kargo"):
             q = q.where(Order.source == source)
         rows = session.exec(q).all()
         # payments map
@@ -351,7 +355,7 @@ def export_orders(
                 status_map[oid] = str(o.status)
             else:
                 status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
-        if preset != "overdue_unpaid_7" and status in ("paid", "unpaid", "refunded", "switched"):
+        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
         if preset == "overdue_unpaid_7":
             cutoff = today - dt.timedelta(days=7)
