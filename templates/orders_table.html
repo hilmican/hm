@@ -36,8 +36,10 @@
         .table-wrap { }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; white-space: nowrap; }
+        /* Allow wrapping only for the product (Urun) column */
+        td.product { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
         th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; z-index: 1; }
-        tbody tr:nth-child(even) { background: #fcfcfd; }
+        
         
         tr.paid { background: var(--success-bg); }
         tr.unpaid { background: var(--warn-bg); }
@@ -128,7 +130,7 @@
                     {% set cname = client_map.get(o.client_id) if client_map else o.client_id %}
                     <a href="/clients/{{ o.client_id }}">{{ cname }}</a>
                 </td>
-                <td>{{ o.notes or '' }}</td>
+                <td class="product">{{ o.notes or '' }}</td>
                 <td>{{ o.quantity }}</td>
                 <td>
                     <span id="tot-{{ o.id }}">{{ o.total_amount }}</span>
