@@ -57,6 +57,16 @@ def map_row(raw: dict[str, Any]) -> dict[str, Any]:
         mapped["action"] = _normalize_action(mapped.get("action"))
     if "date" in mapped:
         mapped["date"] = parse_date(mapped.get("date"))
+    # derive a loose base to aid matching (strip leading size token like XL-, 30-, etc.)
+    try:
+        txt = str(mapped.get("item_name") or "").strip()
+        if txt:
+            import re as _re
+            base = _re.sub(r"^(?:\d{2,3}|xs|s|m|l|xl|xxl|3xl)\s*[- ]\s*", "", txt, flags=_re.IGNORECASE)
+            base = base.strip()
+            mapped["item_name_base"] = base or txt
+    except Exception:
+        pass
     return mapped
 
 

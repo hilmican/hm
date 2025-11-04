@@ -590,7 +590,7 @@ def commit_import(body: dict, request: Request):
 						# find most relevant order for this client (most recent, try to match item base in notes or item name)
 						matched_order_id = None
 						action = (rec.get("action") or "").strip()  # refund | switch
-						base = (rec.get("item_name") or "").strip()
+							base = (rec.get("item_name_base") or rec.get("item_name") or "").strip()
 						if client and client.id is not None:
 							from sqlmodel import select as _select
 							cand = session.exec(
@@ -647,12 +647,11 @@ def commit_import(body: dict, request: Request):
 								# prefer per-row date, fallback to run date
 								ret_date = rec.get("date") or run.data_date
 								chosen.return_or_switch_date = ret_date
-								# adjust revenue (Toplam) by returned/exchanged amount when provided
+								# set revenue (Toplam) from provided amount when available (e.g., -88 for refund)
 								amt = rec.get("amount")
 								try:
 									if amt is not None:
-										cur = float(chosen.total_amount or 0.0)
-										chosen.total_amount = round(cur + float(amt), 2)
+										chosen.total_amount = round(float(amt), 2)
 								except Exception:
 									pass
 								# structured debug
@@ -703,6 +702,27 @@ def commit_import(body: dict, request: Request):
 					matched_order_id=matched_order_id,
 				)
 				session.add(ir)
+				# Create reconcile task for returns unmatched: present candidate orders for manual selection
+				if source == "returns" and status == "unmatched":
+					try:
+						from ..models import ReconcileTask as _RT
+						from sqlmodel import select as _sel2
+						session.flush()  # ensure ir.id
+						cands: list[dict] = []
+						cid = matched_client_id
+						if cid:
+							order_rows = session.exec(_sel2(Order).where(Order.client_id == cid).order_by(Order.id.desc())).all()
+							for co in order_rows[:20]:
+								itname = None
+								if co.item_id:
+									from sqlmodel import select as _sel3
+									itobj = session.exec(_sel3(Item).where(Item.id == co.item_id)).first()
+									itname = itobj.name if itobj else None
+								cands.append({"id": co.id, "date": str(co.shipment_date or co.data_date), "status": co.status, "total": float(co.total_amount or 0.0), "item_name": itname})
+						task = _RT(import_row_id=ir.id or 0, candidates_json=str(cands))
+						session.add(task)
+					except Exception:
+						pass
 				if status == "unmatched":
 					run.unmatched_count += 1
 

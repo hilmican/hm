@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>İade/Değişim Eşleştirme</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+    th { background: #fafafa; position: sticky; top: 0; }
+    .btn { padding:4px 8px; border-radius:6px; border:1px solid #d1d5db; background:#fff; cursor:pointer; font-size:12px; }
+  </style>
+</head>
+<body>
+  {% include "_nav.html" %}
+  <h2>İade/Değişim Eşleştirme Kuyruğu</h2>
+  <table>
+    <thead>
+      <tr><th>Task ID</th><th>Import Row</th><th>Aday Siparişler</th><th>İşlem</th></tr>
+    </thead>
+    <tbody>
+    {% for t in tasks %}
+      <tr>
+        <td>{{ t.id }}</td>
+        <td>{{ t.import_row_id }}</td>
+        <td>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            {% set cands = (t.candidates_json or '[]') %}
+            {% set arr = cands %}
+            {% for c in arr %}
+              <div style="display:flex; gap:8px; align-items:center;">
+                <code>#{{ c.id }}</code>
+                <span>{{ c.date }} · {{ c.status }} · toplam={{ c.total }} · {{ c.item_name or '' }}</span>
+                <button class="btn" onclick="choose({{ t.id }}, {{ c.id }})">Seç</button>
+              </div>
+            {% endfor %}
+          </div>
+        </td>
+        <td>{% if t.chosen_id %}Seçildi: #{{ t.chosen_id }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <script>
+  async function choose(tid, oid){
+    try{
+      const r = await fetch('/reconcile/returns/' + tid + '/choose', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ order_id: oid })
+      });
+      if(!r.ok){ const t = await r.text(); alert('Hata: ' + t); return; }
+      location.reload();
+    }catch(e){ alert('Ağ hatası'); }
+  }
+  </script>
+</body>
+</html>
+
