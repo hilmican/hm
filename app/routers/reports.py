@@ -42,7 +42,7 @@ def daily_report(
 
 	with get_session() as session:
 		# Select orders based on date filter mode
-        if date_field == "both":
+		if date_field == "both":
 			orders = session.exec(
 				select(Order)
 				.where(
