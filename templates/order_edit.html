@@ -117,50 +117,7 @@
         </form>
     </div>
 
-    <h3>Eşleştirme (Mapping) Seçenekleri</h3>
-    <div class="card">
-        <form method="get" action="/orders/{{ order.id }}/edit" style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
-            <input type="hidden" name="id" value="{{ order.id }}" />
-            <label>Temel İsim:
-                <input type="text" name="base" value="{{ mapping_base or '' }}" />
-            </label>
-            <button type="submit">Bul</button>
-            {% set mb = (mapping_candidates[0] if (mapping_candidates and mapping_candidates|length) else (mapping_base or '')) %}
-            {% if mb %}
-                <a href="/mappings/table?pattern={{ mb }}" style="margin-left:8px;">Haritalandırmayı Düzenle</a>
-            {% endif %}
-        </form>
-        {% if mapping_outs and mapping_outs|length %}
-            <table>
-                <thead>
-                    <tr><th>Ürün/Item</th><th>Beden</th><th>Renk</th><th>Önerilen Adet</th><th></th></tr>
-                </thead>
-                <tbody>
-                    {% for o in mapping_outs %}
-                    <tr>
-                        <td>
-                            {% if o.item_id %}
-                                Item #{{ o.item_id }}
-                            {% elif o.product_id %}
-                                Product #{{ o.product_id }}
-                            {% else %}
-                                (boş)
-                            {% endif %}
-                        </td>
-                        <td>{{ o.size or '-' }}</td>
-                        <td>{{ o.color or '-' }}</td>
-                        <td>{{ o.quantity or 1 }}</td>
-                        <td>
-                            <button type="button" onclick="appendFromMapping({ id: {{ o.id }}, item_id: {{ o.item_id or 'null' }}, product_id: {{ o.product_id or 'null' }}, size: '{{ o.size or '' }}', color: '{{ o.color or '' }}', quantity: {{ o.quantity or 1 }} })">Ekle</button>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        {% else %}
-            <div>Öneri bulunamadı. Temel ismi düzenleyip tekrar deneyin.</div>
-        {% endif %}
-    </div>
+    
 
     <h3>Değişiklik Günlüğü</h3>
     <div class="card">
@@ -216,18 +173,7 @@
     if (form){
         form.addEventListener('submit', (e)=>{ serializeOrderItems(form); });
     }
-    async function appendFromMapping(o){
-        try{
-            let itemId = o.item_id;
-            if (!itemId){
-                const res = await fetch(`/mappings/outputs/${o.id}/ensure-variant`, { method: 'POST' });
-                if (!res.ok){ alert('Varyant olusturma hatasi'); return; }
-                const j = await res.json();
-                itemId = j.item_id;
-            }
-            addRow(`${itemId} | `, o.quantity || 1);
-        }catch(err){ alert('Mapping ekleme hatasi'); }
-    }
+    
     </script>
 </body>
 </html>

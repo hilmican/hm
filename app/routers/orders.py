@@ -6,7 +6,6 @@ from typing import Optional
 
 from ..db import get_session
 from ..models import Order, Payment, OrderItem, Item, Client, OrderEditLog
-from ..services.mapping import resolve_mapping
 from ..services.inventory import get_or_create_item as _get_or_create_item
 from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
@@ -485,53 +484,6 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
             it = session.exec(select(Item).where(Item.id == o.item_id)).first()
             if it:
                 item_disp = f"{it.id} | {it.sku} | {it.name}"
-        # mapping candidates (guess base from items/notes and optional input)
-        def _strip_after_dash(s: str) -> str:
-            # take part before first ' - '
-            return s.split(' - ')[0].strip()
-        def _split_candidates(s: str) -> list[str]:
-            vals: list[str] = []
-            for sep in ['|', '+']:
-                s = s.replace(sep, '\n')
-            for chunk in s.split('\n'):
-                t = _strip_after_dash(chunk.strip())
-                if t:
-                    vals.append(t)
-            return vals
-        base_guess = (base or '').strip()
-        candidates: list[str] = []
-        if base_guess:
-            candidates.extend(_split_candidates(base_guess))
-        # derive from existing order items
-        for row in order_items:
-            it = row.get("item")
-            if it and getattr(it, 'name', None):
-                candidates.append(_strip_after_dash(str(it.name)))
-        # fallback from notes
-        if not candidates:
-            try:
-                text = (o.notes or '').strip()
-                if text:
-                    candidates.extend(_split_candidates(text))
-            except Exception:
-                pass
-        # resolve and aggregate unique outputs
-        seen_keys = set()
-        outs: list = []
-        rule = None
-        for cand in candidates:
-            try:
-                found, r = resolve_mapping(session, cand)
-            except Exception:
-                found, r = [], None
-            for out in found or []:
-                key = (out.item_id, out.product_id, out.size or '', out.color or '')
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
-                outs.append(out)
-            if not rule and r:
-                rule = r
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "order_edit.html",
@@ -545,10 +497,6 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
                 "logs": logs,
                 "client_disp": client_disp,
                 "item_disp": item_disp,
-                "mapping_base": base_guess,
-                "mapping_outs": outs,
-                "mapping_rule": rule,
-                "mapping_candidates": candidates,
             },
         )
 
