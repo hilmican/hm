@@ -989,9 +989,10 @@ def returns_review(filename: str, request: Request):
 def returns_apply(body: dict, request: Request):
 	if not request.session.get("uid"):
 		raise HTTPException(status_code=401, detail="Unauthorized")
-	filename = body.get("filename")
+    filename = body.get("filename")
 	data_date_raw = body.get("data_date")
 	selections = body.get("selections") or []
+    skip_stock = bool(body.get("skip_stock", False))
 	if not filename or not isinstance(selections, list):
 		raise HTTPException(status_code=400, detail="filename and selections[] required")
 	folder = IADE_DIR
@@ -1022,13 +1023,28 @@ def returns_apply(body: dict, request: Request):
 		updated = 0
 		unmatched = 0
 		errors: list[dict] = []
-		for idx, rec in enumerate(records):
+        for idx, rec in enumerate(records):
 			row_hash = compute_row_hash(rec)
 			chosen_id = chosen_map.get(idx)
 			status = "unmatched"
 			message = None
 			matched_client_id = None
 			matched_order_id = None
+            # Idempotency: if an ImportRow with the same row_hash was already applied, skip
+            existing_applied = session.exec(select(ImportRow).where(ImportRow.row_hash == row_hash, ImportRow.status == "updated")).first()
+            if existing_applied:
+                ir = ImportRow(
+                    import_run_id=run.id or 0,
+                    row_index=idx,
+                    row_hash=row_hash,
+                    mapped_json=str(rec),
+                    status="skipped",  # type: ignore
+                    message="duplicate row",
+                    matched_client_id=existing_applied.matched_client_id,
+                    matched_order_id=existing_applied.matched_order_id,
+                )
+                session.add(ir)
+                continue
 			# resolve client id for logging
 			new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
 			old_uq = legacy_client_unique_key(rec.get("name"), rec.get("phone"))
@@ -1038,20 +1054,40 @@ def returns_apply(body: dict, request: Request):
 			if not client and old_uq:
 				client = session.exec(_select(Client).where(Client.unique_key == old_uq)).first()
 			matched_client_id = client.id if client and client.id is not None else None
-			if chosen_id:
+            if chosen_id:
 				try:
 					o = session.exec(_select(Order).where(Order.id == int(chosen_id))).first()
 					if not o:
 						errors.append({"row_index": idx, "error": "order_not_found", "order_id": chosen_id})
 					else:
-						# restock
-						oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
-						for oi in oitems:
-							if oi.item_id is None:
-								continue
-							qty = int(oi.quantity or 0)
-							if qty > 0:
-								adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id)
+                        # Check if already processed for this order
+                        already_in = session.exec(select(StockMovement).where(StockMovement.related_order_id == o.id, StockMovement.direction == "in")).first()
+                        if already_in is not None or (o.return_or_switch_date is not None):
+                            status = "skipped"
+                            message = "already_processed"
+                            matched_order_id = o.id
+                            # still ensure status/date/amount are not duplicated; keep as-is
+                            ir = ImportRow(
+                                import_run_id=run.id or 0,
+                                row_index=idx,
+                                row_hash=row_hash,
+                                mapped_json=str(rec),
+                                status=status,  # type: ignore
+                                message=message,
+                                matched_client_id=matched_client_id,
+                                matched_order_id=matched_order_id,
+                            )
+                            session.add(ir)
+                            continue
+                        # restock unless explicitly disabled
+                        if not skip_stock:
+                            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
+                            for oi in oitems:
+                                if oi.item_id is None:
+                                    continue
+                                qty = int(oi.quantity or 0)
+                                if qty > 0:
+                                    adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id)
 						# set status
 						action = (rec.get("action") or "").strip()
 						if action == "refund":

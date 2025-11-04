@@ -17,6 +17,7 @@
   <h2>İade/Değişim Eşleştirme ({{ filename }})</h2>
   <div class="toolbar">
     <label>Data Tarihi: <input id="dataDate" type="date" /></label>
+    <label><input id="skipStock" type="checkbox" /> stok hareketi yapma</label>
     <button class="btn" onclick="applySelections()">Uygula ve Kaydet</button>
   </div>
   <table>
@@ -61,9 +62,10 @@
         if (idx >= 0 && oid) sels.push({ row_index: idx, order_id: oid });
       });
       const dataDate = document.getElementById('dataDate').value || '';
+      const skipStock = !!document.getElementById('skipStock').checked;
       if (!sels.length){ if(!confirm('Seçim yapılmadı. Devam edilsin mi?')) return; }
       try{
-        const r = await fetch('/import/returns/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: '{{ filename }}', data_date: dataDate, selections: sels }) });
+        const r = await fetch('/import/returns/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: '{{ filename }}', data_date: dataDate, skip_stock: skipStock, selections: sels }) });
         if (!r.ok){ const t = await r.text(); alert('Hata: ' + t); return; }
         location.href = '/orders/table';
       }catch(e){ alert('Ağ hatası'); }
