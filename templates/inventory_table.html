@@ -19,9 +19,11 @@
             const rows = table.tBodies[0].rows; const s = q.trim().toLowerCase();
             for (const r of rows){ const txt = r.textContent.toLowerCase(); r.style.display = s && txt.indexOf(s) === -1 ? 'none' : ''; }
         }
+        function cmp(a,b,isNum){ if(isNum){ const na=parseFloat(a.replace(',','.'))||0, nb=parseFloat(b.replace(',','.'))||0; return na-nb; } return a.localeCompare(b,'tr'); }
         function sortTable(table, idx, dir){
             const rows = Array.from(table.tBodies[0].rows);
-            rows.sort((r1,r2)=>{ const a=r1.cells[idx].textContent.trim(); const b=r2.cells[idx].textContent.trim(); return dir==='asc'?a.localeCompare(b,'tr'):b.localeCompare(a,'tr'); });
+            const isNum = table.tHead.rows[0].cells[idx].dataset.type === 'num';
+            rows.sort((r1,r2)=>{ const a=r1.cells[idx].textContent.trim(); const b=r2.cells[idx].textContent.trim(); return dir==='asc'?cmp(a,b,isNum):cmp(b,a,isNum); });
             for(const r of rows) table.tBodies[0].appendChild(r);
         }
         function attach(table){ const ths=table.tHead.rows[0].cells; let active=-1, dir='asc'; for(let i=0;i<ths.length;i++){ ths[i].addEventListener('click',()=>{ dir=(active===i&&dir==='asc')?'desc':'asc'; active=i; sortTable(table,i,dir); }); } }
@@ -84,7 +86,7 @@
     <div id="filterSummary" class="pill" style="display:none; margin: 6px 0; width: fit-content;">Filtrelenen: 0 · Toplam stok: 0</div>
     <table id="invTbl">
         <thead>
-            <tr><th>ID</th><th>SKU</th><th>Ad</th><th>Urun</th><th>Beden</th><th>Renk</th><th>Fiyat</th><th>Stok</th></tr>
+            <tr><th>ID</th><th>SKU</th><th>Ad</th><th>Urun</th><th>Beden</th><th>Renk</th><th data-type="num">Fiyat</th><th data-type="num">Stok</th></tr>
         </thead>
         <tbody>
             {% for it in rows %}
