@@ -114,8 +114,8 @@ def dashboard(request: Request):
 			if o.item_id and o.id and o.id in order_sources:
 				item_sources[o.item_id] = order_sources[o.id]
 
-		# Unmatched mapping count (recent) and low-stock variants
-		unmatched = session.exec(select(ImportRow).where(ImportRow.status == "unmatched").order_by(ImportRow.id.desc()).limit(50)).all()
+		# Unmatched mapping count removed to avoid extra DB work
+		unmatched_count = 0
 		low_stock = session.exec(select(Item).order_by(Item.id.asc()).limit(50)).all()
 		# compute on-hand for first 50
 		from ..services.inventory import compute_on_hand_for_items
@@ -145,7 +145,7 @@ def dashboard(request: Request):
 				"order_sources": order_sources,
 				"item_sources": item_sources,
 				"status_map": status_map,
-				"unmatched_count": len(unmatched),
+				"unmatched_count": unmatched_count,
 				"low_stock": low_stock_pairs,
 			},
 		)

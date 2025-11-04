@@ -5,6 +5,7 @@ import ast
 import datetime as dt
 
 from sqlmodel import Session, select
+from sqlalchemy import func, case
 
 from ..models import Item, StockMovement, Product, ImportRow, ImportRun, Order, OrderItem
 from .mapping import find_or_create_variant, resolve_mapping
@@ -15,18 +16,12 @@ def compute_on_hand_for_items(session: Session, item_ids: Iterable[int]) -> Dict
 	ids = [i for i in item_ids if i is not None]
 	if not ids:
 		return {}
-	rows = session.exec(select(StockMovement).where(StockMovement.item_id.in_(ids))).all()
-	acc: Dict[int, int] = {}
-	for mv in rows:
-		if mv.item_id is None:
-			continue
-		cur = acc.get(mv.item_id, 0)
-		if (mv.direction or "out") == "in":
-			cur += int(mv.quantity or 0)
-		else:
-			cur -= int(mv.quantity or 0)
-		acc[mv.item_id] = cur
-	return acc
+	# Use a single SQL aggregation instead of Python-side accumulation
+	qty_expr = func.sum(case((StockMovement.direction == "in", StockMovement.quantity), else_=-StockMovement.quantity))
+	rows = session.exec(
+		select(StockMovement.item_id, qty_expr).where(StockMovement.item_id.in_(ids)).group_by(StockMovement.item_id)
+	).all()
+	return {int(item_id): int(total or 0) for item_id, total in rows if item_id is not None}
 
 
 def get_stock_map(session: Session) -> Dict[int, int]:

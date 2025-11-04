@@ -15,7 +15,15 @@ def _get_redis() -> Redis:
     if _redis_client is not None:
         return _redis_client
     url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    _redis_client = Redis.from_url(url, decode_responses=True)
+    # Fail fast if Redis is unreachable to avoid UI stalls
+    socket_timeout = float(os.getenv("REDIS_SOCKET_TIMEOUT", "0.25"))
+    connect_timeout = float(os.getenv("REDIS_CONNECT_TIMEOUT", "0.25"))
+    _redis_client = Redis.from_url(
+        url,
+        decode_responses=True,
+        socket_timeout=socket_timeout,
+        socket_connect_timeout=connect_timeout,
+    )
     return _redis_client
 
 
