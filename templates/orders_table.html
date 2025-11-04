@@ -19,7 +19,7 @@
         }
         html, body { background: var(--bg); }
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; }
-        .container { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+        .container { max-width: 100%; width: 100%; margin: 16px auto; padding: 0 16px; }
         .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
         .toolbar { margin: 12px 0 16px; padding: 12px; display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
         .toolbar input[type="search"] { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; min-width: 220px; flex: 1 1 280px; }
@@ -35,8 +35,8 @@
         .btn.accent { border-color:#92400e; color:#92400e; }
         .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; -webkit-overflow-scrolling: touch; }
         table { width: 100%; border-collapse: collapse; min-width: 1100px; table-layout: auto; }
-        th, td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; white-space: nowrap; }
-        td.product, th.product { white-space: normal; overflow-wrap: anywhere; word-break: normal; min-width: 420px; max-width: 640px; }
+        th, td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 13px; white-space: nowrap; }
+        td.product, th.product { white-space: normal; overflow-wrap: anywhere; word-break: normal; min-width: 360px; max-width: 640px; }
         th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; z-index: 1; }
         tbody tr:nth-child(even) { background: #fcfcfd; }
         td.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -45,14 +45,14 @@
         tr.refunded { color: #b91c1c; background: var(--danger-bg); }
         tr.switched { color: #92400e; background: var(--switch-bg); }
         .row-actions { display:flex; gap:6px; justify-content:flex-end; }
-        @media (max-width: 1200px){
-            table { min-width: 1000px; }
+        @media (max-width: 1280px){
+            th, td { font-size: 12px; padding: 7px 9px; }
         }
         @media (max-width: 900px){
             table { min-width: 900px; }
         }
         @media (max-width: 768px){
-            th, td { font-size: 13px; padding: 8px 10px; }
+            th, td { font-size: 12px; padding: 7px 9px; }
             .toolbar { padding: 10px; }
             .toolbar input[type="search"] { flex-basis: 100%; }
         }
