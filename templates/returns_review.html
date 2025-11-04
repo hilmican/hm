@@ -21,7 +21,7 @@
   </div>
   <table>
     <thead>
-      <tr><th>#</th><th>Ad Soyad</th><th>Ürün</th><th>İşlem</th><th>Tarih</th><th>Tutar</th><th>Aday Sipariş</th></tr>
+      <tr><th>#</th><th>Ad Soyad</th><th>Ürün</th><th>İşlem</th><th>Tarih</th><th>Tutar</th><th>Aday Sipariş</th><th>Ad/Soyad veya Telefon ile Ara</th></tr>
     </thead>
     <tbody>
     {% for r in rows %}
@@ -42,6 +42,12 @@
             {% endfor %}
           </select>
         </td>
+        <td>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input type="text" placeholder="Ad Soyad veya Telefon" data-search="{{ r.row_index }}" />
+            <button class="btn" type="button" onclick="searchOrders({{ r.row_index }})">Ara</button>
+          </div>
+        </td>
       </tr>
     {% endfor %}
     </tbody>
@@ -60,6 +66,28 @@
         const r = await fetch('/import/returns/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: '{{ filename }}', data_date: dataDate, selections: sels }) });
         if (!r.ok){ const t = await r.text(); alert('Hata: ' + t); return; }
         location.href = '/orders/table';
+      }catch(e){ alert('Ağ hatası'); }
+    }
+
+    async function searchOrders(rowIdx){
+      const inp = document.querySelector(`input[data-search="${rowIdx}"]`);
+      const sel = document.querySelector(`select[data-row="${rowIdx}"]`);
+      if (!inp || !sel) return;
+      const q = (inp.value || '').trim();
+      if (q.length < 2){ alert('En az 2 karakter giriniz'); return; }
+      try{
+        const r = await fetch(`/reconcile/returns/search-orders?q=${encodeURIComponent(q)}`);
+        if (!r.ok){ const t = await r.text(); alert('Arama hatası: ' + t); return; }
+        const data = await r.json();
+        Array.from(sel.querySelectorAll('option[data-src="search"]')).forEach(o => o.remove());
+        (data.orders || []).forEach(o => {
+          const opt = document.createElement('option');
+          opt.value = String(o.id);
+          opt.textContent = `#${o.id} · ${o.date || ''} · ${o.status || ''} · ${o.item_name || ''} · ${o.total || ''} · ${o.client_name || ''} ${o.client_phone || ''}`;
+          opt.setAttribute('data-src', 'search');
+          sel.appendChild(opt);
+        });
+        if ((data.orders || []).length === 0){ alert('Sonuç bulunamadı'); }
       }catch(e){ alert('Ağ hatası'); }
     }
   </script>
