@@ -388,23 +388,23 @@ def commit_import(body: dict, request: Request):
 	filenames = body.get("filenames")
 	data_date_raw = body.get("data_date")  # ISO YYYY-MM-DD string, may apply to all
 	data_dates_map = body.get("data_dates") or {}  # optional per-filename map
-    if source not in ("bizim", "kargo", "returns"):
+	if source not in ("bizim", "kargo", "returns"):
 		raise HTTPException(status_code=400, detail="source ('bizim'|'kargo'|'returns') is required")
 
-    # For returns, block direct commit and route users to interactive review first
-    if source == "returns":
-        fn = None
-        if body.get("filename"):
-            fn = str(body.get("filename"))
-        elif body.get("filenames") and isinstance(body.get("filenames"), list) and body.get("filenames"):
-            try:
-                fn = str(body.get("filenames")[0])
-            except Exception:
-                fn = None
-        raise HTTPException(status_code=400, detail={
-            "error": "returns_interactive_required",
-            "next": f"/import/returns/review?filename={fn}" if fn else "/import/returns/review",
-        })
+	# For returns, block direct commit and route users to interactive review first
+	if source == "returns":
+		fn = None
+		if body.get("filename"):
+			fn = str(body.get("filename"))
+		elif body.get("filenames") and isinstance(body.get("filenames"), list) and body.get("filenames"):
+			try:
+				fn = str(body.get("filenames")[0])
+			except Exception:
+				fn = None
+		raise HTTPException(status_code=400, detail={
+			"error": "returns_interactive_required",
+			"next": f"/import/returns/review?filename={fn}" if fn else "/import/returns/review",
+		})
 
 	# Preflight mapping guard: block bizim commits when there are unmatched patterns (including generics)
 	if source == "bizim":
