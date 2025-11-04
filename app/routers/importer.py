@@ -950,6 +950,8 @@ def returns_review(filename: str, request: Request):
 			if not client and old_uq:
 				client = session.exec(_select(Client).where(Client.unique_key == old_uq)).first()
 			candidates: list[dict] = []
+			base = str(rec.get("item_name_base") or rec.get("item_name") or "").strip().lower()
+			row_date = rec.get("date")
 			if client and client.id is not None:
 				cand = session.exec(_select(Order).where(Order.client_id == client.id).order_by(Order.id.desc())).all()
 				for o in cand[:20]:
@@ -957,12 +959,22 @@ def returns_review(filename: str, request: Request):
 					if o.item_id:
 						it = session.exec(_select(Item).where(Item.id == o.item_id)).first()
 						itname = it.name if it else None
+					# include client details for clarity
+					cname = client.name if client else None
+					cphone = client.phone if client else None
+					# preselect when base matches item/notes (strict)
+					iname_l = (itname or "").lower() if itname else ""
+					notes_l = (o.notes or "").lower() if o.notes else ""
+					exact = bool(base and (base in iname_l or base in notes_l))
 					candidates.append({
 						"id": o.id,
 						"date": str(o.shipment_date or o.data_date),
 						"status": o.status,
 						"total": float(o.total_amount or 0.0),
 						"item_name": itname,
+						"client_name": cname,
+						"client_phone": cphone,
+						"selected": exact,
 					})
 			rows.append({"row_index": idx, "record": rec, "candidates": candidates})
 	templates = request.app.state.templates

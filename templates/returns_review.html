@@ -36,7 +36,9 @@
           <select data-row="{{ r.row_index }}">
             <option value="">Seçiniz</option>
             {% for c in r.candidates %}
-              <option value="{{ c.id }}">#{{ c.id }} · {{ c.date }} · {{ c.status }} · {{ c.item_name or '' }} · {{ c.total }}</option>
+              <option value="{{ c.id }}" {{ 'selected' if c.selected else '' }}>
+                #{{ c.id }} · {{ c.date }} · {{ c.status }} · {{ c.item_name or '' }} · {{ c.total }} · {{ c.client_name or '' }} {{ c.client_phone or '' }}
+              </option>
             {% endfor %}
           </select>
         </td>
