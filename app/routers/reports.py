@@ -9,6 +9,7 @@ import os
 from ..db import get_session
 from ..models import Order, Payment, Item, Client, ImportRun, StockMovement, OrderItem
 from ..services.shipping import compute_shipping_fee
+from ..services.inventory import get_stock_map
 from ..services.cache import cached_json
 
 
@@ -249,6 +250,20 @@ def daily_report(
 		qty_in = sum(int(m.quantity or 0) for m in movs if (m.direction or "").lower() == "in")
 		qty_out = sum(int(m.quantity or 0) for m in movs if (m.direction or "").lower() == "out")
 
+		# Current inventory snapshot (on-hand quantities and value)
+		stock_map = get_stock_map(session)
+		inv_item_ids = [iid for iid, qty in stock_map.items() if int(qty or 0) > 0]
+		inv_items = session.exec(select(Item).where(Item.id.in_(inv_item_ids))).all() if inv_item_ids else []
+		inventory_value = 0.0
+		for it in inv_items:
+			if it.id is None:
+				continue
+			qty = int(stock_map.get(int(it.id), 0) or 0)
+			cost = float(it.cost or 0.0)
+			if qty > 0 and cost > 0:
+				inventory_value += qty * cost
+		inventory_item_count = len(inv_item_ids)
+
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"reports_daily.html",
@@ -267,6 +282,8 @@ def daily_report(
 				"net_profit": net_profit,
 				"aov": aov,
 				"asp": asp,
+				"inventory_value": inventory_value,
+				"inventory_item_count": inventory_item_count,
 				# payments summary
 				"gross_collected": gross_collected,
 				"net_collected": net_collected,
