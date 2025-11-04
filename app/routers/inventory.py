@@ -158,6 +158,55 @@ def list_movements(item_id: Optional[int] = Query(default=None), limit: int = Qu
         }
 
 
+@router.get("/movements/table")
+def movements_table(request: Request, start: Optional[str] = Query(default=None), end: Optional[str] = Query(default=None), item_id: Optional[int] = Query(default=None), related_order_id: Optional[int] = Query(default=None), limit: int = Query(default=500, ge=1, le=5000)):
+    def _parse_date(value: Optional[str]):
+        if not value:
+            return None
+        try:
+            import datetime as _dt
+            return _dt.date.fromisoformat(str(value))
+        except Exception:
+            return None
+    s = _parse_date(start)
+    e = _parse_date(end)
+    with get_session() as session:
+        q = select(StockMovement)
+        if s:
+            from datetime import datetime as _dt, time as _time
+            q = q.where(StockMovement.created_at >= _dt.combine(s, _time.min))
+        if e:
+            from datetime import datetime as _dt, time as _time
+            q = q.where(StockMovement.created_at <= _dt.combine(e, _time.max))
+        if item_id:
+            q = q.where(StockMovement.item_id == item_id)
+        if related_order_id:
+            q = q.where(StockMovement.related_order_id == related_order_id)
+        rows = session.exec(q.order_by(StockMovement.id.desc()).limit(limit)).all()
+        # fetch item/order names for linking
+        item_ids = sorted({m.item_id for m in rows if m.item_id})
+        order_ids = sorted({m.related_order_id for m in rows if m.related_order_id})
+        items = session.exec(select(Item).where(Item.id.in_(item_ids))).all() if item_ids else []
+        orders = session.exec(select(Order).where(Order.id.in_(order_ids))).all() if order_ids else []
+        item_map = {it.id: it for it in items if it.id is not None}
+        order_map = {o.id: o for o in orders if o.id is not None}
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "inventory_movements.html",
+            {
+                "request": request,
+                "rows": rows,
+                "item_map": item_map,
+                "order_map": order_map,
+                "start": s,
+                "end": e,
+                "limit": limit,
+                "item_id": item_id,
+                "related_order_id": related_order_id,
+            },
+        )
+
+
 @router.patch("/movements/{movement_id}")
 def update_movement(movement_id: int, body: Dict[str, Any]):
     """Update a manual movement (related_order_id must be null)."""

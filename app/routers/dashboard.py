@@ -27,13 +27,13 @@ def dashboard(request: Request):
 			"dash:totals",
 			ttl,
 			lambda: {
-				"total_sales": float((session.exec(text('SELECT SUM(total_amount) AS s FROM "order"')).first() or [0])[0] or 0),
+				"total_sales": float((session.exec(text('SELECT SUM(total_amount) AS s FROM "order" WHERE COALESCE(status, "") NOT IN ("refunded","switched","stitched")')).first() or [0])[0] or 0),
 				"net_collected": float((session.exec(text('SELECT SUM(net_amount) AS s FROM payment')).first() or [0])[0] or 0),
 				"fee_kom": float((session.exec(text('SELECT SUM(COALESCE(fee_komisyon,0)) FROM payment')).first() or [0])[0] or 0),
 				"fee_hiz": float((session.exec(text('SELECT SUM(COALESCE(fee_hizmet,0)) FROM payment')).first() or [0])[0] or 0),
 				"fee_iad": float((session.exec(text('SELECT SUM(COALESCE(fee_iade,0)) FROM payment')).first() or [0])[0] or 0),
 				"fee_eok": float((session.exec(text('SELECT SUM(COALESCE(fee_erken_odeme,0)) FROM payment')).first() or [0])[0] or 0),
-				"fee_kar": float((session.exec(text('SELECT SUM(COALESCE(shipping_fee,0)) FROM "order"')).first() or [0])[0] or 0),
+				"fee_kar": float((session.exec(text('SELECT SUM(COALESCE(shipping_fee,0)) FROM "order" WHERE COALESCE(status, "") NOT IN ("refunded","switched","stitched")')).first() or [0])[0] or 0),
 				"linked_gross_paid": float((session.exec(text('SELECT SUM(amount) FROM payment WHERE order_id IS NOT NULL')).first() or [0])[0] or 0),
 			},
 		)

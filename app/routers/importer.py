@@ -463,6 +463,9 @@ def commit_import(body: dict, request: Request):
 			payments_created_cnt = 0
 			payments_existing_cnt = 0
 			payments_skipped_zero_cnt = 0
+			returns_processed_cnt = 0
+			returns_skipped_cnt = 0
+			returns_unmatched_cnt = 0
 
 			for idx, rec in enumerate(records_loc):
 				# guard and normalize basic fields
@@ -614,13 +617,51 @@ def commit_import(body: dict, request: Request):
 								if _order_matches(o):
 									chosen = o
 									break
-							if not chosen and cand:
-								chosen = cand[0]
 							if chosen and chosen.id is not None:
 								matched_order_id = chosen.id
 								# restock items like refund/switch endpoint
 								from ..services.inventory import adjust_stock as _adjust_stock
 								oitems = session.exec(select(OrderItem).where(OrderItem.order_id == chosen.id)).all()
+								# idempotency guard: skip if already has an 'in' movement linked or date set
+								already_in = session.exec(
+									select(StockMovement).where(StockMovement.related_order_id == chosen.id, StockMovement.direction == "in")
+								).first()
+								if (chosen.status or "") in ("refunded", "switched", "stitched") or already_in is not None or chosen.return_or_switch_date is not None:
+									status = "skipped"
+									message = "already_processed"
+									returns_skipped_cnt += 1
+								else:
+									restocked = 0
+									for oi in oitems:
+										if oi.item_id is None:
+											continue
+										qty = int(oi.quantity or 0)
+										if qty > 0:
+											_adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=chosen.id)
+											restocked += qty
+								# set status and date
+									if action == "refund":
+										chosen.status = "refunded"
+									elif action == "switch":
+										chosen.status = "switched"
+									chosen.return_or_switch_date = run.data_date
+								# structured debug
+								try:
+									print("[RETURNS DEBUG]", {
+										"client_id": matched_client_id,
+										"action": action,
+										"chosen_order_id": chosen.id,
+										"restocked_total": restocked,
+									})
+								except Exception:
+									pass
+									status = "updated"
+									message = f"returns:{action},restocked:{restocked}"
+									returns_processed_cnt += 1
+							else:
+								status = "unmatched"
+								message = "no_matching_order"
+								returns_unmatched_cnt += 1
 								for oi in oitems:
 									if oi.item_id is None:
 										continue
@@ -665,6 +706,9 @@ def commit_import(body: dict, request: Request):
 				"enriched_orders": enriched_orders_cnt,
 				"payments_existing": payments_existing_cnt,
 				"payments_skipped_zero": payments_skipped_zero_cnt,
+				"returns_processed": returns_processed_cnt,
+				"returns_skipped": returns_skipped_cnt,
+				"returns_unmatched": returns_unmatched_cnt,
 			}
 			try:
 				print("[IMPORT COMMIT] summary:", summary_loc)
