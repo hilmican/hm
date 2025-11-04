@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Item, Product, StockMovement
+from ..models import Item, Product, StockMovement, Order
 from ..services.inventory import get_stock_map, recalc_orders_from_mappings, adjust_stock
 
 
