@@ -125,8 +125,9 @@
                 <input type="text" name="base" value="{{ mapping_base or '' }}" />
             </label>
             <button type="submit">Bul</button>
-            {% if mapping_base %}
-                <a href="/mappings/table?pattern={{ mapping_base }}" style="margin-left:8px;">Haritalandırmayı Düzenle</a>
+            {% set mb = (mapping_candidates[0] if (mapping_candidates and mapping_candidates|length) else (mapping_base or '')) %}
+            {% if mb %}
+                <a href="/mappings/table?pattern={{ mb }}" style="margin-left:8px;">Haritalandırmayı Düzenle</a>
             {% endif %}
         </form>
         {% if mapping_outs and mapping_outs|length %}
