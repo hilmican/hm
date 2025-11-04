@@ -1008,7 +1008,7 @@ def returns_apply(body: dict, request: Request):
 		except Exception:
 			continue
 		chosen_map[ri] = oid
-    with get_session() as session:
+	with get_session() as session:
 		run = ImportRun(source="returns", filename=filename)
 		if data_date_raw:
 			try:
@@ -1019,9 +1019,9 @@ def returns_apply(body: dict, request: Request):
 		session.add(run)
 		session.flush()
 		from sqlmodel import select as _select
-        updated = 0
-        unmatched = 0
-        errors: list[dict] = []
+		updated = 0
+		unmatched = 0
+		errors: list[dict] = []
 		for idx, rec in enumerate(records):
 			row_hash = compute_row_hash(rec)
 			chosen_id = chosen_map.get(idx)
@@ -1038,42 +1038,42 @@ def returns_apply(body: dict, request: Request):
 			if not client and old_uq:
 				client = session.exec(_select(Client).where(Client.unique_key == old_uq)).first()
 			matched_client_id = client.id if client and client.id is not None else None
-            if chosen_id:
-                try:
-                    o = session.exec(_select(Order).where(Order.id == int(chosen_id))).first()
-                    if not o:
-                        errors.append({"row_index": idx, "error": "order_not_found", "order_id": chosen_id})
-                    else:
-                        # restock
-                        oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
-                        for oi in oitems:
-                            if oi.item_id is None:
-                                continue
-                            qty = int(oi.quantity or 0)
-                            if qty > 0:
-                                adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id)
-                        # set status
-                        action = (rec.get("action") or "").strip()
-                        if action == "refund":
-                            o.status = "refunded"
-                        elif action == "switch":
-                            o.status = "switched"
-                        # date and amount
-                        ret_date = rec.get("date") or run.data_date
-                        o.return_or_switch_date = ret_date
-                        try:
-                            amt = rec.get("amount")
-                            if amt is not None:
-                                o.total_amount = round(float(amt), 2)
-                        except Exception as _e_amt:
-                            errors.append({"row_index": idx, "error": "invalid_amount", "detail": str(_e_amt)})
-                        status = "updated"
-                        matched_order_id = o.id
-                        updated += 1
-                except Exception as _e:
-                    errors.append({"row_index": idx, "error": "apply_failed", "detail": str(_e), "order_id": chosen_id})
-            else:
-                unmatched += 1
+			if chosen_id:
+				try:
+					o = session.exec(_select(Order).where(Order.id == int(chosen_id))).first()
+					if not o:
+						errors.append({"row_index": idx, "error": "order_not_found", "order_id": chosen_id})
+					else:
+						# restock
+						oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
+						for oi in oitems:
+							if oi.item_id is None:
+								continue
+							qty = int(oi.quantity or 0)
+							if qty > 0:
+								adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id)
+						# set status
+						action = (rec.get("action") or "").strip()
+						if action == "refund":
+							o.status = "refunded"
+						elif action == "switch":
+							o.status = "switched"
+						# date and amount
+						ret_date = rec.get("date") or run.data_date
+						o.return_or_switch_date = ret_date
+						try:
+							amt = rec.get("amount")
+							if amt is not None:
+								o.total_amount = round(float(amt), 2)
+						except Exception as _e_amt:
+							errors.append({"row_index": idx, "error": "invalid_amount", "detail": str(_e_amt)})
+						status = "updated"
+						matched_order_id = o.id
+						updated += 1
+				except Exception as _e:
+					errors.append({"row_index": idx, "error": "apply_failed", "detail": str(_e), "order_id": chosen_id})
+			else:
+				unmatched += 1
 			ir = ImportRow(
 				import_run_id=run.id or 0,
 				row_index=idx,
@@ -1085,15 +1085,15 @@ def returns_apply(body: dict, request: Request):
 				matched_order_id=matched_order_id,
 			)
 			session.add(ir)
-        # Invalidate caches
-        bump_namespace()
-        if errors:
-            # Return 400 with details so UI can show the error and allow correction
-            raise HTTPException(status_code=400, detail={
-                "message": "Some rows failed to apply",
-                "run_id": run.id or 0,
-                "updated": updated,
-                "unmatched": unmatched,
-                "errors": errors,
-            })
-        return {"status": "ok", "run_id": run.id or 0, "updated": updated, "unmatched": unmatched}
+		# Invalidate caches
+		bump_namespace()
+		if errors:
+			# Return 400 with details so UI can show the error and allow correction
+			raise HTTPException(status_code=400, detail={
+				"message": "Some rows failed to apply",
+				"run_id": run.id or 0,
+				"updated": updated,
+				"unmatched": unmatched,
+				"errors": errors,
+			})
+		return {"status": "ok", "run_id": run.id or 0, "updated": updated, "unmatched": unmatched}
