@@ -466,31 +466,31 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
         clients = session.exec(select(Client).order_by(Client.id.desc()).limit(500)).all()
         items = session.exec(select(Item).order_by(Item.id.desc()).limit(500)).all()
         logs = session.exec(select(OrderEditLog).where(OrderEditLog.order_id == order_id).order_by(OrderEditLog.id.desc()).limit(100)).all()
-		# current display strings
-		client_disp = None
-		if o.client_id:
-			c = session.exec(select(Client).where(Client.id == o.client_id)).first()
-			if c:
-				client_disp = f"{c.id} | {c.name} | {c.phone or ''}"
-		item_disp = None
-		if o.item_id:
-			it = session.exec(select(Item).where(Item.id == o.item_id)).first()
-			if it:
-				item_disp = f"{it.id} | {it.sku} | {it.name}"
-		# mapping candidates (guess base from notes unless provided)
-		base_guess = (base or '').strip()
-		if not base_guess:
-			try:
-				text = (o.notes or '').strip()
-				base_guess = text.split('|')[0].strip() if text else ''
-			except Exception:
-				base_guess = ''
-		outs, rule = ([], None)
-		try:
-			if base_guess:
-				outs, rule = resolve_mapping(session, base_guess)
-		except Exception:
-			outs, rule = [], None
+        # current display strings
+        client_disp = None
+        if o.client_id:
+            c = session.exec(select(Client).where(Client.id == o.client_id)).first()
+            if c:
+                client_disp = f"{c.id} | {c.name} | {c.phone or ''}"
+        item_disp = None
+        if o.item_id:
+            it = session.exec(select(Item).where(Item.id == o.item_id)).first()
+            if it:
+                item_disp = f"{it.id} | {it.sku} | {it.name}"
+        # mapping candidates (guess base from notes unless provided)
+        base_guess = (base or '').strip()
+        if not base_guess:
+            try:
+                text = (o.notes or '').strip()
+                base_guess = text.split('|')[0].strip() if text else ''
+            except Exception:
+                base_guess = ''
+        outs, rule = ([], None)
+        try:
+            if base_guess:
+                outs, rule = resolve_mapping(session, base_guess)
+        except Exception:
+            outs, rule = [], None
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "order_edit.html",
@@ -500,11 +500,11 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
                 "clients": clients,
                 "items": items,
                 "logs": logs,
-				"client_disp": client_disp,
-				"item_disp": item_disp,
-				"mapping_base": base_guess,
-				"mapping_outs": outs,
-				"mapping_rule": rule,
+                "client_disp": client_disp,
+                "item_disp": item_disp,
+                "mapping_base": base_guess,
+                "mapping_outs": outs,
+                "mapping_rule": rule,
             },
         )
 
