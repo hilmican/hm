@@ -67,11 +67,14 @@
                 <option value="refunded" {{ 'selected' if status == 'refunded' else '' }}>Kirmizi (Iade)</option>
                 <option value="switched" {{ 'selected' if status == 'switched' else '' }}>Kahverengi (Degisim)</option>
             </select>
+            {% if preset %}<input type="hidden" name="preset" value="{{ preset }}" />{% endif %}
             <button type="submit">Filtrele</button>
             <a href="/orders/table" style="font-size:12px; color:#6b7280;">Temizle</a>
         </form>
         <span class="pill">{{ rows|length }} siparis</span>
         <button onclick="recalc()">Tazele</button>
+        <button class="btn" onclick="presetOverdue7()">7 gün+ ödeme yok</button>
+        <button class="btn" onclick="exportExcel()">Excel'e aktar</button>
     </div>
     <h2>Siparisler</h2>
     <table id="ordersTbl">
@@ -156,6 +159,20 @@
             if(!res.ok){ const t = await res.text(); alert('Guncelleme hatasi: ' + t); return; }
             location.reload();
         }catch(e){ alert('Ag hatasi: ' + e); }
+    }
+
+    function presetOverdue7(){
+        const params = new URLSearchParams(window.location.search);
+        params.set('preset','overdue_unpaid_7');
+        // keep existing date_field/start/end if any; else switch to both
+        if (!params.get('date_field')) params.set('date_field','both');
+        window.location.href = '/orders/table?' + params.toString();
+    }
+
+    function exportExcel(){
+        const params = new URLSearchParams(window.location.search);
+        const url = '/orders/export?' + params.toString();
+        window.location.href = url;
     }
     </script>
 </body>

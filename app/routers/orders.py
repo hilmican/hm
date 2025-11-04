@@ -8,6 +8,12 @@ from ..db import get_session
 from ..models import Order, Payment, OrderItem, Item
 from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
+from fastapi.responses import StreamingResponse
+import io
+try:
+    import openpyxl
+except Exception:
+    openpyxl = None  # type: ignore
 
 router = APIRouter()
 
@@ -44,6 +50,7 @@ def list_orders_table(
     date_field: str = Query(default="shipment", regex="^(shipment|data|both)$"),
     source: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
+    preset: Optional[str] = Query(default=None),
 ):
     def _parse_date_or_default(value: Optional[str], fallback: dt.date) -> dt.date:
         try:
@@ -117,6 +124,19 @@ def list_orders_table(
         if status in ("paid", "unpaid", "refunded", "switched"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
 
+        # Preset filters
+        if preset == "overdue_unpaid_7":
+            cutoff = today - dt.timedelta(days=7)
+            def _is_overdue_unpaid(o: Order) -> bool:
+                if (o.status or "") in ("refunded", "switched", "stitched"):
+                    return False
+                base_date = o.shipment_date or o.data_date
+                if (base_date is None) or (base_date > cutoff):
+                    return False
+                paid = paid_map.get(o.id or 0, 0.0)
+                return paid <= 0.0
+            rows = [o for o in rows if _is_overdue_unpaid(o)]
+
         # build simple maps for names based on filtered rows
         client_ids = sorted({o.client_id for o in rows if o.client_id})
         item_ids = sorted({o.item_id for o in rows if o.item_id})
@@ -186,6 +206,8 @@ def list_orders_table(
                 "date_field": date_field,
                 "source": source,
                 "status": status,
+                # current preset
+                "preset": preset,
             },
         )
 
@@ -251,6 +273,125 @@ def refund_order(order_id: int):
         o.status = "refunded"
         o.return_or_switch_date = dt.date.today()
         return {"status": "ok"}
+
+
+@router.get("/export")
+def export_orders(
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
+    date_field: str = Query(default="shipment", regex="^(shipment|data|both)$"),
+    source: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    preset: Optional[str] = Query(default=None),
+):
+    if openpyxl is None:
+        raise HTTPException(status_code=500, detail="openpyxl not available for export")
+    def _parse_date_or_default(value: Optional[str], fallback: dt.date) -> dt.date:
+        try:
+            if value:
+                return dt.date.fromisoformat(value)
+        except Exception:
+            pass
+        return fallback
+    with get_session() as session:
+        today = dt.date.today()
+        default_start = today - dt.timedelta(days=6)
+        start_date = _parse_date_or_default(start, default_start)
+        end_date = _parse_date_or_default(end, today)
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
+        if date_field == "both":
+            q = (
+                select(Order)
+                .where(
+                    or_(
+                        and_(Order.shipment_date.is_not(None), Order.shipment_date >= start_date, Order.shipment_date <= end_date),
+                        and_(Order.data_date.is_not(None), Order.data_date >= start_date, Order.data_date <= end_date),
+                    )
+                )
+                .order_by(Order.id.desc())
+            )
+        else:
+            date_col = Order.shipment_date if date_field == "shipment" else Order.data_date
+            alt_date_col = Order.data_date if date_field == "shipment" else Order.shipment_date
+            q = (
+                select(Order)
+                .where(
+                    or_(
+                        and_(date_col.is_not(None), date_col >= start_date, date_col <= end_date),
+                        and_(date_col.is_(None), alt_date_col.is_not(None), alt_date_col >= start_date, alt_date_col <= end_date),
+                    )
+                )
+                .order_by(Order.id.desc())
+            )
+        if source in ("bizim", "kargo"):
+            q = q.where(Order.source == source)
+        rows = session.exec(q).all()
+        # payments map
+        order_ids = [o.id for o in rows if o.id]
+        pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
+        paid_map: dict[int, float] = {}
+        for p in pays:
+            if p.order_id is None:
+                continue
+            paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
+        status_map: dict[int, str] = {}
+        for o in rows:
+            oid = o.id or 0
+            total = float(o.total_amount or 0.0)
+            paid = paid_map.get(oid, 0.0)
+            if (o.status or "") in ("refunded", "switched", "stitched"):
+                status_map[oid] = str(o.status)
+            else:
+                status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
+        if status in ("paid", "unpaid", "refunded", "switched"):
+            rows = [o for o in rows if status_map.get(o.id or 0) == status]
+        if preset == "overdue_unpaid_7":
+            cutoff = today - dt.timedelta(days=7)
+            def _is_overdue_unpaid(o: Order) -> bool:
+                if (o.status or "") in ("refunded", "switched", "stitched"):
+                    return False
+                base_date = o.shipment_date or o.data_date
+                if (base_date is None) or (base_date > cutoff):
+                    return False
+                paid = paid_map.get(o.id or 0, 0.0)
+                return paid <= 0.0
+            rows = [o for o in rows if _is_overdue_unpaid(o)]
+        # client names
+        client_ids = sorted({o.client_id for o in rows if o.client_id})
+        clients = session.exec(select(Item).where(Item.id == 0)).all()  # no-op to keep types
+        from ..models import Client as _Client
+        clients = session.exec(select(_Client).where(_Client.id.in_(client_ids))).all() if client_ids else []
+        client_map = {c.id: c.name for c in clients if c.id is not None}
+        # workbook
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Orders"
+        ws.append(["ID", "Takip", "Musteri", "Adet", "Toplam", "Kargo", "KargoTarihi", "DataTarihi", "Iade/DegisimTarihi", "Durum", "Kanal"]) 
+        for o in rows:
+            cname = client_map.get(o.client_id) if o.client_id else None
+            ws.append([
+                o.id,
+                o.tracking_no,
+                cname,
+                o.quantity,
+                o.total_amount,
+                o.shipping_fee,
+                o.shipment_date,
+                o.data_date,
+                getattr(o, "return_or_switch_date", None),
+                status_map.get(o.id or 0),
+                o.source,
+            ])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        filename = "orders_export.xlsx"
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
 
 
 @router.post("/{order_id}/switch")
