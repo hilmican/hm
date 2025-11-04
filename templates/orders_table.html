@@ -34,9 +34,9 @@
         .btn.warn { border-color:#ef4444; color:#b91c1c; }
         .btn.accent { border-color:#92400e; color:#92400e; }
         .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; -webkit-overflow-scrolling: touch; }
-        table { width: 100%; border-collapse: collapse; min-width: 1200px; }
+        table { width: 100%; border-collapse: collapse; min-width: 1100px; table-layout: auto; }
         th, td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; white-space: nowrap; }
-        td.product { white-space: normal; max-width: 520px; word-break: break-word; }
+        td.product, th.product { white-space: normal; overflow-wrap: anywhere; word-break: normal; min-width: 420px; max-width: 640px; }
         th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; z-index: 1; }
         tbody tr:nth-child(even) { background: #fcfcfd; }
         td.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -116,7 +116,7 @@
     <div class="table-wrap card">
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th>Takip</th><th>Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>Iade/Degisim Tarihi</th><th>Kanali</th><th></th></tr>
+            <tr><th>ID</th><th>Takip</th><th>Musteri</th><th class="product">Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>Iade/Degisim Tarihi</th><th>Kanali</th><th></th></tr>
             <tr>
                 <th colspan="4" style="text-align:right">Toplamlar:</th>
                 <th data-type="num">{{ sum_qty }}</th>
