@@ -17,7 +17,7 @@
   <form id="applyForm" onsubmit="return false;">
     <table>
       <thead>
-        <tr><th>Import Row</th><th>İşlem</th><th>Tarih</th><th>Tutar</th><th>Aday Sipariş</th></tr>
+        <tr><th>Import Row</th><th>İşlem</th><th>Tarih</th><th>Tutar</th><th>Aday Sipariş</th><th>Ad/Soyad veya Telefon ile Ara</th></tr>
       </thead>
       <tbody>
       {% for r in rows %}
@@ -33,6 +33,12 @@
                 <option value="{{ c.id }}">#{{ c.id }} · {{ c.date }} · {{ c.status }} · {{ c.item_name or '' }} · {{ c.total }}</option>
               {% endfor %}
             </select>
+          </td>
+          <td>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input type="text" placeholder="Ad Soyad veya Telefon" data-search="{{ r.import_row_id }}" />
+              <button class="btn" type="button" onclick="searchOrders({{ r.import_row_id }})">Ara</button>
+            </div>
           </td>
         </tr>
       {% endfor %}
@@ -55,6 +61,30 @@
       const r = await fetch('/reconcile/returns/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ selections: sels }) });
       if (!r.ok){ const t = await r.text(); alert('Hata: ' + t); return; }
       location.reload();
+    }catch(e){ alert('Ağ hatası'); }
+  }
+
+  async function searchOrders(rowId){
+    const inp = document.querySelector(`input[data-search="${rowId}"]`);
+    const sel = document.querySelector(`select[data-row="${rowId}"]`);
+    if (!inp || !sel) return;
+    const q = (inp.value || "").trim();
+    if (q.length < 2){ alert('En az 2 karakter giriniz'); return; }
+    try{
+      const r = await fetch(`/reconcile/returns/search-orders?q=${encodeURIComponent(q)}`);
+      if (!r.ok){ const t = await r.text(); alert('Arama hatası: ' + t); return; }
+      const data = await r.json();
+      // Remove previous search results
+      Array.from(sel.querySelectorAll('option[data-src="search"]')).forEach(o => o.remove());
+      // Append new options
+      (data.orders || []).forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = String(o.id);
+        opt.textContent = `#${o.id} · ${o.date || ''} · ${o.status || ''} · ${o.item_name || ''} · ${o.total || ''} · ${o.client_name || ''} ${o.client_phone || ''}`;
+        opt.setAttribute('data-src', 'search');
+        sel.appendChild(opt);
+      });
+      if ((data.orders || []).length === 0){ alert('Sonuç bulunamadı'); }
     }catch(e){ alert('Ağ hatası'); }
   }
   </script>

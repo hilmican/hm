@@ -6,7 +6,7 @@ import json
 import datetime as dt
 
 from ..db import get_session
-from ..models import ReconcileTask, ImportRow, Order, OrderItem, Item, ImportRun
+from ..models import ReconcileTask, ImportRow, Order, OrderItem, Item, ImportRun, Client
 from ..services.inventory import adjust_stock
 
 router = APIRouter()
@@ -138,3 +138,59 @@ def apply_returns_choices(body: dict):
             ir.status = "updated"  # reflect resolution
             updated += 1
     return {"status": "ok", "updated": updated}
+
+
+@router.get("/returns/search-orders")
+def search_orders(q: str, limit: int = 20):
+    """Search recent orders by client phone or name.
+
+    - q: free text. If it contains >=3 digits, match phone contains those digits.
+         Otherwise, match client name contains text (case-insensitive by SQLite collation).
+    - Returns at most `limit` orders, newest first, across matched clients.
+    """
+    q = (q or "").strip()
+    if not q or len(q) < 2:
+        return {"orders": []}
+    # Extract digits for phone search heuristic
+    digits = "".join(ch for ch in q if ch.isdigit())
+    results: list[dict] = []
+    with get_session() as session:
+        clients: list[Client] = []
+        if digits and len(digits) >= 3:
+            clients = session.exec(select(Client).where(Client.phone != None).where(Client.phone.contains(digits)).limit(50)).all()
+        # If no phone hits or no significant digits, fall back to name search
+        if not clients:
+            clients = session.exec(select(Client).where(Client.name.contains(q)).limit(50)).all()
+        if not clients:
+            return {"orders": []}
+        # Fetch recent orders per client until we fill limit
+        remaining = max(1, min(int(limit or 20), 100))
+        for c in clients:
+            if remaining <= 0:
+                break
+            orders = session.exec(
+                select(Order)
+                .where(Order.client_id == c.id)
+                .order_by(Order.id.desc())
+                .limit(remaining)
+            ).all()
+            for o in orders:
+                itname = None
+                if o.item_id:
+                    itobj = session.exec(select(Item).where(Item.id == o.item_id)).first()
+                    itname = itobj.name if itobj else None
+                results.append(
+                    {
+                        "id": o.id,
+                        "date": str(o.shipment_date or o.data_date),
+                        "status": o.status,
+                        "total": float(o.total_amount or 0.0),
+                        "item_name": itname,
+                        "client_name": c.name,
+                        "client_phone": c.phone,
+                    }
+                )
+                remaining -= 1
+                if remaining <= 0:
+                    break
+    return {"orders": results}
