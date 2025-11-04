@@ -989,10 +989,10 @@ def returns_review(filename: str, request: Request):
 def returns_apply(body: dict, request: Request):
 	if not request.session.get("uid"):
 		raise HTTPException(status_code=401, detail="Unauthorized")
-    filename = body.get("filename")
+	filename = body.get("filename")
 	data_date_raw = body.get("data_date")
 	selections = body.get("selections") or []
-    skip_stock = bool(body.get("skip_stock", False))
+	skip_stock = bool(body.get("skip_stock", False))
 	if not filename or not isinstance(selections, list):
 		raise HTTPException(status_code=400, detail="filename and selections[] required")
 	folder = IADE_DIR
