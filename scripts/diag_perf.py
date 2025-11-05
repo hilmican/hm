@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Performance diagnostics for the app (SQLite + Redis + hotspot queries).
+Performance diagnostics for the app (SQLite + Redis + hotspot queries + HTTP endpoints).
 
 Usage:
-  python scripts/diag_perf.py            # auto-detects DB and Redis
-  python scripts/diag_perf.py --db /app/data/app.db --redis redis://localhost:6379/0
+  python scripts/diag_perf.py                                    # auto-detect DB/Redis
+  python scripts/diag_perf.py --db /app/data/app.db \
+      --redis redis://localhost:6379/0 \
+      --http-base http://127.0.0.1:8000 \
+      --http-endpoints /health,/ig/inbox,/orders/table,/ig/ai/process
 
 Outputs a human-readable summary and a JSON blob at the end.
 """
@@ -16,7 +19,7 @@ import json
 import os
 import sqlite3
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 def autodetect_db(path: str | None) -> str:
@@ -73,6 +76,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="App performance diagnostics")
     ap.add_argument("--db", type=str, default=None, help="Path to SQLite DB")
     ap.add_argument("--redis", type=str, default=None, help="Redis URL")
+    ap.add_argument("--http-base", type=str, default=None, help="Base HTTP URL (e.g., http://127.0.0.1:8000)")
+    ap.add_argument("--http-endpoints", type=str, default=None, help="Comma-separated endpoints to GET (default: /health)")
     args = ap.parse_args()
 
     db_path = autodetect_db(args.db)
@@ -96,6 +101,7 @@ def main() -> None:
         "busy_timeout(ms)": pragma("busy_timeout"),
         "page_count": pragma("page_count"),
         "page_size": pragma("page_size"),
+        "wal_autocheckpoint": pragma("wal_autocheckpoint"),
     }
 
     # Table sizes
@@ -112,6 +118,19 @@ def main() -> None:
     cur.execute("SELECT name, tbl_name, sql FROM sqlite_master WHERE type='index'")
     idx = [{"name": r[0], "table": r[1], "sql": r[2]} for r in cur.fetchall()]
     out["indexes"] = idx
+
+    # WAL sizes (if present)
+    try:
+        wal_path = db_path + "-wal"
+        shm_path = db_path + "-shm"
+        out["wal_files"] = {
+            "wal_bytes": (os.path.getsize(wal_path) if os.path.exists(wal_path) else 0),
+            "shm_bytes": (os.path.getsize(shm_path) if os.path.exists(shm_path) else 0),
+        }
+        cur.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        out["wal_checkpoint"] = list(cur.fetchall())
+    except Exception:
+        out["wal_files"] = {"wal_bytes": None, "shm_bytes": None}
 
     # Hotspot query timings
     timings: Dict[str, float] = {}
@@ -146,6 +165,18 @@ def main() -> None:
     out["query_timings_ms"] = timings
     out["query_plans"] = plans
 
+    # Lock acquisition test (BEGIN IMMEDIATE -> ROLLBACK)
+    lock_test: Dict[str, Any] = {}
+    try:
+        t0 = time.perf_counter()
+        cur.execute("BEGIN IMMEDIATE;")
+        cur.execute("ROLLBACK;")
+        lock_test["acquired_ms"] = round((time.perf_counter() - t0) * 1000.0, 2)
+        lock_test["status"] = "ok"
+    except Exception as e:
+        lock_test["status"] = f"fail: {e}"
+    out["lock_test"] = lock_test
+
     # Redis queue depths
     rclient = connect_redis(args.redis)
     qdepth: Dict[str, int] = {}
@@ -163,6 +194,32 @@ def main() -> None:
                 qdepth[k] = -1
     out["queue_depths"] = qdepth
 
+    # HTTP endpoint latency checks
+    http_results: List[dict] = []
+    base = (args.http_base or os.getenv("HTTP_BASE") or None)
+    endpoints = (args.http_endpoints or os.getenv("HTTP_ENDPOINTS") or "/health")
+    if base:
+        try:
+            import requests  # type: ignore
+        except Exception:
+            requests = None  # type: ignore
+        if requests:
+            for ep in [e.strip() for e in endpoints.split(",") if e.strip()]:
+                url = base.rstrip("/") + ep
+                t0 = time.perf_counter()
+                status = None
+                err = None
+                clen = None
+                try:
+                    r = requests.get(url, timeout=10)
+                    status = r.status_code
+                    clen = len(r.content or b"")
+                except Exception as e:
+                    err = str(e)
+                dt_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+                http_results.append({"url": url, "ms": dt_ms, "status": status, "bytes": clen, "error": err})
+    out["http"] = http_results
+
     # Heuristics / suggestions
     suggestions: list[str] = []
     idx_names = {i["name"] for i in idx if i.get("name")}
@@ -172,6 +229,11 @@ def main() -> None:
         suggestions.append("Add index on message(conversation_id, timestamp_ms)")
     if qdepth.get("jobs:ingest", 0) > 1000:
         suggestions.append("Ingest queue is backed up; scale workers or reduce webhook rate")
+    walb = (out.get("wal_files") or {}).get("wal_bytes") or 0
+    if walb and walb > 128 * 1024 * 1024:
+        suggestions.append("WAL file is large; ensure periodic checkpoints or reduce write bursts")
+    if (lock_test.get("status") != "ok"):
+        suggestions.append("Write lock acquisition failed/slow; reduce concurrent writers or increase busy_timeout")
     out["suggestions"] = suggestions
 
     # Human-readable summary
@@ -184,6 +246,10 @@ def main() -> None:
     print("\n=== Query timings (ms) ===")
     for k, v in timings.items():
         print(f"{k}: {v}")
+    if http_results:
+        print("\n=== HTTP endpoints ===")
+        for r in http_results:
+            print(f"{r['url']}: {r['ms']} ms (status={r['status']} bytes={r['bytes']} err={r['error']})")
     if suggestions:
         print("\n=== Suggestions ===")
         for s in suggestions:
