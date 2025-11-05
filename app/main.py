@@ -13,6 +13,8 @@ from .routers import legal
 from .routers import ig
 from .routers import ig_ai
 from .routers import noc
+from collections import deque
+import time as _time
 from .routers import admin
 
 
@@ -44,6 +46,39 @@ def create_app() -> FastAPI:
 			_Path(_os.getenv("THUMBS_ROOT", "data/thumbs")).mkdir(parents=True, exist_ok=True)
 		except Exception:
 			pass
+		# Initialize in-memory slowlog buffer
+		try:
+			app.state.slowlog = deque(maxlen=int(_os.getenv("SLOWLOG_SIZE", "500")))
+		except Exception:
+			app.state.slowlog = deque(maxlen=500)
+
+	# Lightweight timing middleware for slow-request diagnostics
+	@app.middleware("http")
+	async def _timing_mw(request: Request, call_next):
+		start = _time.perf_counter()
+		response = await call_next(request)
+		dt_ms = int(((_time.perf_counter() - start) * 1000.0))
+		try:
+			import os as _os
+			thr = int(_os.getenv("APP_SLOW_MS", "800"))
+		except Exception:
+			thr = 800
+		if dt_ms >= thr:
+			try:
+				entry = {
+					"ts": int(_time.time()),
+					"ms": dt_ms,
+					"method": request.method,
+					"path": str(request.url.path),
+					"status": getattr(response, "status_code", None),
+				}
+				buf = getattr(request.app.state, "slowlog", None)
+				if buf is not None:
+					buf.append(entry)
+				# Also print to stdout for live tailing
+			except Exception:
+				pass
+		return response
 
 	app.include_router(dashboard.router)
 	app.include_router(auth.router)
@@ -63,6 +98,25 @@ def create_app() -> FastAPI:
 	app.include_router(ig_ai.router)
 	app.include_router(reports.router, prefix="/reports", tags=["reports"]) 
 	app.include_router(noc.router)
+
+	# Diag router for slowlog endpoints
+	from fastapi import APIRouter as _AR
+	diag = _AR(prefix="/admin", tags=["admin"])
+
+	@diag.get("/slowlog")
+	def _slowlog_list(limit: int = 100):
+		buf = getattr(app.state, "slowlog", None) or []
+		rows = list(buf)[-int(max(1, min(limit, 1000))):]
+		return {"slow": rows}
+
+	@diag.post("/slowlog/clear")
+	def _slowlog_clear():
+		buf = getattr(app.state, "slowlog", None)
+		if hasattr(buf, "clear"):
+			buf.clear()
+		return {"status": "ok"}
+
+	app.include_router(diag)
 
 	# ultra-light health endpoint (no DB touches)
 	@app.get("/health")
