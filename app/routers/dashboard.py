@@ -49,28 +49,49 @@ def dashboard(request: Request):
 		total_to_collect = max(0.0, float(total_sales) - linked_gross_paid)
 
 
-		# Order status counts (cached) — align with orders table logic:
-		# refunded|switched|stitched are taken from Order.status; else classify as paid/unpaid by payments sum vs total
+
+		# Order status counts (cached) — buckets in Turkish UI terms:
+		# - tamamlandi: paid (payments sum >= total)
+		# - dagitimda: unpaid and base_date within last 7 days or missing
+		# - gecikmede: unpaid and 8..17 days old
+		# - sorunlu: unpaid and >17 days old
+		# Plus explicit statuses: refunded, switched, stitched
 		def _compute_status_counts():
-			base = {"paid": 0, "unpaid": 0, "refunded": 0, "switched": 0, "stitched": 0}
-			# counts for explicit statuses
+			base = {"tamamlandi": 0, "dagitimda": 0, "gecikmede": 0, "sorunlu": 0, "refunded": 0, "switched": 0, "stitched": 0}
+			# explicit statuses
 			rows_explicit = session.exec(text('SELECT status, COUNT(*) FROM "order" WHERE status IN ("refunded","switched","stitched") GROUP BY status')).all()
 			for st, cnt in rows_explicit:
 				if st in ("refunded", "switched", "stitched"):
 					base[str(st)] = int(cnt or 0)
-			# counts for paid/unpaid among the rest
-			row_pu = session.exec(text(
+			# derived buckets for others
+			row_buckets = session.exec(text(
 				'SELECT\n'
-				'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0 THEN 1 ELSE 0 END) AS paid_count,\n'
-				'  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0) THEN 1 ELSE 0 END) AS unpaid_count\n'
+				'  SUM(CASE\n'
+				'        WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0 THEN 1\n'
+				'        ELSE 0 END) AS tamamlandi,\n'
+				'  SUM(CASE\n'
+				'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
+				'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1\n'
+				'        ELSE 0 END) AS dagitimda,\n'
+				'  SUM(CASE\n'
+				'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
+				'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n'
+				'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1\n'
+				'        ELSE 0 END) AS gecikmede,\n'
+				'  SUM(CASE\n'
+				'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
+				'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1\n'
+				'        ELSE 0 END) AS sorunlu\n'
 				'FROM "order" o\n'
 				'LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n'
 				'WHERE COALESCE(o.status, "") NOT IN ("refunded","switched","stitched")'
-			)).first() or [0, 0]
-			base["paid"] = int(row_pu[0] or 0)
-			base["unpaid"] = int(row_pu[1] or 0)
-			# return as list in a consistent order
-			order = ["paid", "unpaid", "refunded", "switched", "stitched"]
+			)).first() or [0, 0, 0, 0]
+			base["tamamlandi"] = int(row_buckets[0] or 0)
+			base["dagitimda"] = int(row_buckets[1] or 0)
+			base["gecikmede"] = int(row_buckets[2] or 0)
+			base["sorunlu"] = int(row_buckets[3] or 0)
+			# return as list in consistent order used by UI
+			order = ["tamamlandi", "dagitimda", "gecikmede", "sorunlu", "refunded", "switched", "stitched"]
 			return [{"status": k, "count": base.get(k, 0)} for k in order]
 
 		status_counts = cached_json("dash:status_counts", ttl, _compute_status_counts)

@@ -174,8 +174,8 @@
 			if (!canvas) return;
 			const ctx = canvas.getContext('2d');
 			const total = data.reduce((s, r) => s + (r.count || 0), 0) || 1;
-			// tuned palette and consistent order: paid, unpaid, refunded, switched, stitched
-			const colors = ['#10b981','#f59e0b','#f87171','#a78bfa','#60a5fa','#34d399','#fbbf24','#f472b6'];
+			// Palette order matches: tamamlandi, dagitimda, gecikmede, sorunlu, refunded, switched, stitched
+			const colors = ['#10b981','#60a5fa','#f59e0b','#ef4444','#a78bfa','#fbbf24','#34d399'];
 			let start = -Math.PI/2;
 			data.forEach((r, i) => {
 				const frac = (r.count || 0) / total;
@@ -191,8 +191,10 @@
 			const legend = document.getElementById('statusLegend');
 			if (legend) {
 				const trMap = {
-					'paid': 'Ödendi',
-					'unpaid': 'Ödenmedi',
+					'tamamlandi': 'Tamamlandı',
+					'dagitimda': 'Dağıtımda (≤7g)',
+					'gecikmede': 'Gecikmede (8‑17g)',
+					'sorunlu': 'Sorunlu (>17g)',
 					'refunded': 'İade',
 					'switched': 'Değişim',
 					'stitched': 'Birleştirilmiş',
@@ -203,6 +205,43 @@
 					<span style="display:inline-block;width:10px;height:10px;background:${colors[i%colors.length]};border-radius:2px;margin-right:6px;"></span>
 					${label(r.status)}: <strong style="margin-left:4px;">${r.count}</strong>
 				</span>`).join('');
+
+				// Tooltip on hover
+				const tip = document.createElement('div');
+				tip.style.position = 'absolute';
+				tip.style.background = 'rgba(17,24,39,0.9)';
+				tip.style.color = '#fff';
+				tip.style.fontSize = '12px';
+				tip.style.padding = '6px 8px';
+				tip.style.borderRadius = '6px';
+				tip.style.pointerEvents = 'none';
+				tip.style.display = 'none';
+				canvas.parentElement.style.position = 'relative';
+				canvas.parentElement.appendChild(tip);
+				const totals = data.map(r=>r.count||0);
+				const sum = totals.reduce((a,b)=>a+b,0)||1;
+				const cum = []; let acc = 0; for(const r of totals){ acc += r/sum; cum.push(acc); }
+				function sliceAt(theta){
+					let t = theta; while (t < -Math.PI/2) t += Math.PI*2; while (t > Math.PI*3/2) t -= Math.PI*2;
+					let frac = (t + Math.PI/2) / (Math.PI*2);
+					for (let i=0;i<cum.length;i++){ if (frac <= cum[i]) return i; }
+					return cum.length-1;
+				}
+				canvas.addEventListener('mousemove', (e)=>{
+					const rect = canvas.getBoundingClientRect();
+					const x = e.clientX - rect.left - canvas.width/2;
+					const y = e.clientY - rect.top - canvas.height/2;
+					const r = Math.min(canvas.width, canvas.height)/2 - 8;
+					if (Math.sqrt(x*x + y*y) > r){ tip.style.display='none'; return; }
+					const theta = Math.atan2(y, x);
+					const idx = sliceAt(theta);
+					const d = data[idx]; const cnt = totals[idx]; const pct = Math.round((cnt/sum)*1000)/10;
+					tip.textContent = `${label(d.status)}: ${cnt} (${pct}%)`;
+					tip.style.left = (e.clientX - rect.left + 10) + 'px';
+					tip.style.top = (e.clientY - rect.top + 10) + 'px';
+					tip.style.display = 'block';
+				});
+				canvas.addEventListener('mouseleave', ()=>{ tip.style.display='none'; });
 			}
 		})();
 		</script>
