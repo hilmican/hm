@@ -62,9 +62,9 @@ def list_orders_table(
         return fallback
 
     with get_session() as session:
-        # default to last 7 days inclusive
-        today = dt.date.today()
-        default_start = today - dt.timedelta(days=6)
+		# default window starts from 2025-10-01 until today
+		today = dt.date.today()
+		default_start = dt.date(2025, 10, 1)
         start_date = _parse_date_or_default(start, default_start)
         end_date = _parse_date_or_default(end, today)
         if end_date < start_date:
