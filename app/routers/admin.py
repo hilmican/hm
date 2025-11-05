@@ -135,6 +135,9 @@ def _find_latest_sqlite_backup() -> Optional[str]:
 					except Exception:
 						pass
 					continue
+			except Exception:
+				# connection or integrity check failed; try next candidate
+				continue
 		return None
 	except Exception:
 		return None
