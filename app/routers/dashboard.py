@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException
 from sqlmodel import select
-from sqlalchemy import text
+from sqlalchemy import text, func, or_, not_
 import os
 
 from ..db import get_session
@@ -23,18 +23,43 @@ def dashboard(request: Request):
 	with get_session() as session:
 		# Fast aggregates with short-lived cache
 		ttl = int(os.getenv("CACHE_TTL_DASHBOARD", "60"))
+		# detect dialect for cross-db SQL where needed
+		backend = session.get_bind().dialect.name if session.get_bind() is not None else "sqlite"
 		agg = cached_json(
 			"dash:totals",
 			ttl,
 			lambda: {
-				"total_sales": float((session.exec(text('SELECT SUM(total_amount) AS s FROM "order" WHERE COALESCE(status, "") NOT IN ("refunded","switched","stitched")')).first() or [0])[0] or 0),
-				"net_collected": float((session.exec(text('SELECT SUM(net_amount) AS s FROM payment')).first() or [0])[0] or 0),
-				"fee_kom": float((session.exec(text('SELECT SUM(COALESCE(fee_komisyon,0)) FROM payment')).first() or [0])[0] or 0),
-				"fee_hiz": float((session.exec(text('SELECT SUM(COALESCE(fee_hizmet,0)) FROM payment')).first() or [0])[0] or 0),
-				"fee_iad": float((session.exec(text('SELECT SUM(COALESCE(fee_iade,0)) FROM payment')).first() or [0])[0] or 0),
-				"fee_eok": float((session.exec(text('SELECT SUM(COALESCE(fee_erken_odeme,0)) FROM payment')).first() or [0])[0] or 0),
-				"fee_kar": float((session.exec(text('SELECT SUM(COALESCE(shipping_fee,0)) FROM "order" WHERE COALESCE(status, "") NOT IN ("refunded","switched","stitched")')).first() or [0])[0] or 0),
-				"linked_gross_paid": float((session.exec(text('SELECT SUM(amount) FROM payment WHERE order_id IS NOT NULL')).first() or [0])[0] or 0),
+				# Use ORM for DB-agnostic quoting
+				"total_sales": float(
+					(
+						session.exec(
+							select(func.coalesce(func.sum(Order.total_amount), 0)).where(
+								or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"]))
+							)
+						)
+						.first()
+						or [0]
+					)[0]
+					or 0
+				),
+				"net_collected": float((session.exec(select(func.coalesce(func.sum(Payment.net_amount), 0))).first() or [0])[0] or 0),
+				"fee_kom": float((session.exec(select(func.coalesce(func.sum(Payment.fee_komisyon), 0))).first() or [0])[0] or 0),
+				"fee_hiz": float((session.exec(select(func.coalesce(func.sum(Payment.fee_hizmet), 0))).first() or [0])[0] or 0),
+				"fee_iad": float((session.exec(select(func.coalesce(func.sum(Payment.fee_iade), 0))).first() or [0])[0] or 0),
+				"fee_eok": float((session.exec(select(func.coalesce(func.sum(Payment.fee_erken_odeme), 0))).first() or [0])[0] or 0),
+				"fee_kar": float(
+					(
+						session.exec(
+							select(func.coalesce(func.sum(Order.shipping_fee), 0)).where(
+								or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"]))
+							)
+						)
+						.first()
+						or [0]
+					)[0]
+					or 0
+				),
+				"linked_gross_paid": float((session.exec(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.order_id.is_not(None))).first() or [0])[0] or 0),
 			},
 		)
 		total_sales = float(agg.get("total_sales", 0.0))
@@ -59,33 +84,52 @@ def dashboard(request: Request):
 		def _compute_status_counts():
 			base = {"tamamlandi": 0, "dagitimda": 0, "gecikmede": 0, "sorunlu": 0, "refunded": 0, "switched": 0, "stitched": 0}
 			# explicit statuses
-			rows_explicit = session.exec(text('SELECT status, COUNT(*) FROM "order" WHERE status IN ("refunded","switched","stitched") GROUP BY status')).all()
+			if backend == "mysql":
+				rows_explicit = session.exec(text("SELECT status, COUNT(*) FROM `order` WHERE status IN ('refunded','switched','stitched') GROUP BY status")).all()
+			else:
+				rows_explicit = session.exec(text('SELECT status, COUNT(*) FROM "order" WHERE status IN ("refunded","switched","stitched") GROUP BY status')).all()
 			for st, cnt in rows_explicit:
 				if st in ("refunded", "switched", "stitched"):
 					base[str(st)] = int(cnt or 0)
 			# derived buckets for others
-			row_buckets = session.exec(text(
-				'SELECT\n'
-				'  SUM(CASE\n'
-				'        WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0 THEN 1\n'
-				'        ELSE 0 END) AS tamamlandi,\n'
-				'  SUM(CASE\n'
-				'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
-				'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1\n'
-				'        ELSE 0 END) AS dagitimda,\n'
-				'  SUM(CASE\n'
-				'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
-				'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n'
-				'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1\n'
-				'        ELSE 0 END) AS gecikmede,\n'
-				'  SUM(CASE\n'
-				'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
-				'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1\n'
-				'        ELSE 0 END) AS sorunlu\n'
-				'FROM "order" o\n'
-				'LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n'
-				'WHERE COALESCE(o.status, "") NOT IN ("refunded","switched","stitched")'
-			)).first() or [0, 0, 0, 0]
+			if backend == "mysql":
+				row_buckets = session.exec(text(
+					"SELECT\n"
+					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0 THEN 1 ELSE 0 END) AS tamamlandi,\n"
+					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1 ELSE 0 END) AS dagitimda,\n"
+					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n"
+					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1 ELSE 0 END) AS gecikmede,\n"
+					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1 ELSE 0 END) AS sorunlu\n"
+					"FROM `order` o\n"
+					"LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n"
+					"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')"
+				)).first() or [0, 0, 0, 0]
+			else:
+				row_buckets = session.exec(text(
+					'SELECT\n'
+					'  SUM(CASE\n'
+					'        WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0 THEN 1\n'
+					'        ELSE 0 END) AS tamamlandi,\n'
+					'  SUM(CASE\n'
+					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
+					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1\n'
+					'        ELSE 0 END) AS dagitimda,\n'
+					'  SUM(CASE\n'
+					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
+					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n'
+					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1\n'
+					'        ELSE 0 END) AS gecikmede,\n'
+					'  SUM(CASE\n'
+					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
+					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1\n'
+					'        ELSE 0 END) AS sorunlu\n'
+					'FROM "order" o\n'
+					'LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n'
+					'WHERE COALESCE(o.status, "") NOT IN ("refunded","switched","stitched")'
+				)).first() or [0, 0, 0, 0]
 			base["tamamlandi"] = int(row_buckets[0] or 0)
 			base["dagitimda"] = int(row_buckets[1] or 0)
 			base["gecikmede"] = int(row_buckets[2] or 0)
