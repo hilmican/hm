@@ -24,15 +24,30 @@ import sqlite3
 from typing import Iterable, List, Tuple
 
 
-def _db_path() -> str:
+def _db_path(cli_override: str | None = None) -> str:
+    # Priority: CLI --db > APP_DB_PATH > detected project root /app/data/app.db > relative data/app.db
+    if cli_override:
+        return cli_override
     p = os.getenv("APP_DB_PATH")
     if p:
         return p
-    return os.path.join("data", "app.db")
+    # Try project root relative to this file
+    here = os.path.abspath(os.path.dirname(__file__))
+    root = os.path.abspath(os.path.join(here, ".."))
+    candidates = [
+        os.path.join(root, "data", "app.db"),   # /app/data/app.db in container
+        "/app/data/app.db",
+        os.path.join("data", "app.db"),          # relative fallback
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    # default best-guess
+    return os.path.join(root, "data", "app.db")
 
 
-def _connect_db() -> sqlite3.Connection:
-    path = _db_path()
+def _connect_db(db_path: str | None = None) -> sqlite3.Connection:
+    path = _db_path(db_path)
     conn = sqlite3.connect(path, timeout=float(os.getenv("SQLITE_BUSY_TIMEOUT", "30")))
     conn.row_factory = sqlite3.Row
     return conn
@@ -133,9 +148,10 @@ def _purge_redis_messages(rows: List[sqlite3.Row]) -> Tuple[int, int]:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Cancel IG AI processing runs and purge queued jobs")
     ap.add_argument("--runs", nargs="*", type=int, help="Specific run ids to cancel (default: all active)")
+    ap.add_argument("--db", type=str, default=None, help="Path to SQLite DB (default auto-detect)")
     args = ap.parse_args()
 
-    conn = _connect_db()
+    conn = _connect_db(args.db)
     try:
         rows = _select_active_runs(conn, args.runs)
         if not rows:
