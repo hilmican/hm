@@ -204,16 +204,28 @@ def preview_process(body: dict):
         rowc = session.exec(text(sql_conv).params(**params)).first()
         conv_count = int((getattr(rowc, "c", None) if rowc is not None else 0) or (rowc[0] if rowc else 0) or 0)
 
-        # Messages count within eligible conversations; also count missing timestamps
+        # Messages count by timestamp window only (robust even if conversation links are missing)
+        msg_where = ["(m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)"]
+        msg_params = {"cutoff_ms": int(cutoff_ms)}
+        if date_from and date_to and date_from <= date_to:
+            ms_from = int(dt.datetime.combine(date_from, dt.time.min).timestamp() * 1000)
+            ms_to = int(dt.datetime.combine(date_to + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
+            msg_where.append("(m.timestamp_ms IS NULL OR (m.timestamp_ms >= :ms_from AND m.timestamp_ms < :ms_to))")
+            msg_params["ms_from"] = int(ms_from)
+            msg_params["ms_to"] = int(ms_to)
+        elif date_from:
+            ms_from = int(dt.datetime.combine(date_from, dt.time.min).timestamp() * 1000)
+            msg_where.append("(m.timestamp_ms IS NULL OR m.timestamp_ms >= :ms_from)")
+            msg_params["ms_from"] = int(ms_from)
+        elif date_to:
+            ms_to = int(dt.datetime.combine(date_to + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
+            msg_where.append("(m.timestamp_ms IS NULL OR m.timestamp_ms < :ms_to)")
+            msg_params["ms_to"] = int(ms_to)
         sql_msg = (
-            "SELECT COUNT(1) AS mc, SUM(CASE WHEN m.timestamp_ms IS NULL THEN 1 ELSE 0 END) AS mt0 "
-            "FROM message m WHERE "
-            "(m.conversation_id IN (SELECT convo_id FROM conversations WHERE " + " AND ".join(where) + ")) "
-            "AND (m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)"
+            "SELECT COUNT(1) AS mc, SUM(CASE WHEN m.timestamp_ms IS NULL THEN 1 ELSE 0 END) AS mt0 FROM message m WHERE "
+            + " AND ".join(msg_where)
         )
-        params_msg = dict(params)
-        params_msg["cutoff_ms"] = int(cutoff_ms)
-        rowm = session.exec(text(sql_msg).params(**params_msg)).first()
+        rowm = session.exec(text(sql_msg).params(**msg_params)).first()
         msg_count = int((getattr(rowm, "mc", None) if rowm is not None else 0) or (rowm[0] if rowm else 0) or 0)
         msg_ts_missing = int((getattr(rowm, "mt0", None) if rowm is not None else 0) or (rowm[1] if rowm and len(rowm) > 1 else 0) or 0)
 

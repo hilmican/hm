@@ -234,6 +234,35 @@ def init_db() -> None:
                                 pass
                         except Exception:
                             pass
+                        # Ensure jobs.id is AUTO_INCREMENT and unique(kind,key) exists (MySQL)
+                        try:
+                            row = conn.exec_driver_sql(
+                                """
+                                SELECT COLUMN_KEY, EXTRA FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'jobs' AND COLUMN_NAME = 'id'
+                                """
+                            ).fetchone()
+                            # Make id auto-increment primary key when missing
+                            if row is not None:
+                                colkey = str(row[0] or '').lower()
+                                extra = str(row[1] or '').lower()
+                                if 'auto_increment' not in extra:
+                                    conn.exec_driver_sql("ALTER TABLE `jobs` MODIFY COLUMN `id` INT NOT NULL AUTO_INCREMENT, ADD PRIMARY KEY (`id`)")
+                        except Exception:
+                            pass
+                        try:
+                            # Add UNIQUE(kind,key) if missing
+                            idx = conn.exec_driver_sql(
+                                """
+                                SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'jobs' AND CONSTRAINT_TYPE='UNIQUE'
+                                """
+                            ).fetchall()
+                            have = {str(r[0]) for r in (idx or [])}
+                            if 'uq_jobs_kind_key' not in have:
+                                conn.exec_driver_sql("ALTER TABLE `jobs` ADD CONSTRAINT `uq_jobs_kind_key` UNIQUE (`kind`,`key`)")
+                        except Exception:
+                            pass
                 return
             # lightweight migrations for existing SQLite DBs
             with engine.begin() as conn:
