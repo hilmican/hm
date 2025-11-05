@@ -10,18 +10,42 @@ import sqlite3
 
 DB_PATH = Path("data/app.db")
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-DATABASE_URL = f"sqlite:///{DB_PATH}"
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={
-        "check_same_thread": False,
-        # increase sqlite busy timeout to reduce 'database is locked' errors on startup
-        "timeout": float(os.getenv("SQLITE_BUSY_TIMEOUT", "30")),
-    },
-)
+
+# Allow overriding DB via env (e.g., MySQL)
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("MYSQL_URL")
+if not DATABASE_URL:
+    DATABASE_URL = f"sqlite:///{DB_PATH}"
+
+if DATABASE_URL.startswith("mysql+") or DATABASE_URL.startswith("mysql://"):
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={
+            "check_same_thread": False,
+            # increase sqlite busy timeout to reduce 'database is locked' errors on startup
+            "timeout": float(os.getenv("SQLITE_BUSY_TIMEOUT", "30")),
+        },
+    )
 
 
 def init_db() -> None:
+    def _auto_reset_on_corruption() -> bool:
+        return os.getenv("SQLITE_AUTO_RESET_ON_CORRUPTION", "0") not in ("0", "false", "False", "")
+
+    def _backup_corrupt_db() -> None:
+        try:
+            ts = int(time.time())
+            backup_path = DB_PATH.with_suffix(f".corrupt-{ts}.db")
+            if DB_PATH.exists():
+                DB_PATH.rename(backup_path)
+                try:
+                    print(f"[DB INIT] Detected corrupted DB; moved to {backup_path}")
+                except Exception:
+                    pass
+        except Exception:
+            # Best-effort only
+            pass
     def _wait_for_sqlite_available() -> None:
         """Ensure we can obtain a write lock before proceeding with DDL/migrations.
 
@@ -36,7 +60,27 @@ def init_db() -> None:
             try:
                 conn = sqlite3.connect(str(DB_PATH), timeout=busy_timeout_s)
                 # set helpful pragmas
-                conn.execute("PRAGMA journal_mode=WAL;")
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL;")
+                except sqlite3.DatabaseError as de:
+                    msg = str(de).lower()
+                    if "malformed" in msg or "database disk image is malformed" in msg:
+                        if _auto_reset_on_corruption():
+                            _backup_corrupt_db()
+                            conn.close()
+                            # recreate empty file to proceed
+                            conn = sqlite3.connect(str(DB_PATH), timeout=busy_timeout_s)
+                        else:
+                            conn.close()
+                            raise
+                    else:
+                        # fallback to default DELETE journaling if WAL not available
+                        try:
+                            conn = sqlite3.connect(str(DB_PATH), timeout=busy_timeout_s)
+                            conn.execute("PRAGMA journal_mode=DELETE;")
+                        except Exception:
+                            # ignore; continue
+                            pass
                 conn.execute(f"PRAGMA busy_timeout={int(busy_timeout_s*1000)};")
                 # optional performance tuning when enabled
                 if os.getenv("SQLITE_TUNE", "1") != "0":
@@ -57,6 +101,11 @@ def init_db() -> None:
                 last = e
                 msg = str(e).lower()
                 locked = isinstance(e, sqlite3.OperationalError) or ("database is locked" in msg)
+                if ("malformed" in msg or "database disk image is malformed" in msg) and _auto_reset_on_corruption():
+                    _backup_corrupt_db()
+                    # retry immediately with fresh DB on next loop
+                    time.sleep(min(backoff, 0.5))
+                    continue
                 if locked and attempt < retries:
                     try:
                         print(f"[DB INIT] waiting for SQLite lock release ({attempt}/{retries})...")
@@ -67,7 +116,9 @@ def init_db() -> None:
                     continue
                 raise
 
-    _wait_for_sqlite_available()
+    # Only for SQLite
+    if getattr(engine, "url", None) and getattr(engine.url, "get_backend_name", lambda: "")() == "sqlite":
+        _wait_for_sqlite_available()
     retries = int(os.getenv("DB_INIT_RETRIES", "10"))
     backoff = float(os.getenv("DB_INIT_BACKOFF", "0.5"))
     last_err: Exception | None = None
@@ -79,7 +130,17 @@ def init_db() -> None:
                 # Apply SQLite PRAGMAs once at startup if enabled
                 try:
                     if (getattr(engine, "url", None) and getattr(engine.url, "get_backend_name", lambda: "")() == "sqlite") and os.getenv("SQLITE_TUNE", "1") != "0":
-                        conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+                        try:
+                            conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+                        except Exception as de:
+                            # If WAL setting fails (e.g., on certain FS or corruption), fall back silently
+                            try:
+                                if "malformed" in str(de).lower() and _auto_reset_on_corruption():
+                                    # Let outer loop handle reset if needed by raising again
+                                    raise
+                                conn.exec_driver_sql("PRAGMA journal_mode=DELETE")
+                            except Exception:
+                                pass
                         conn.exec_driver_sql("PRAGMA synchronous=NORMAL")
                         conn.exec_driver_sql("PRAGMA temp_store=MEMORY")
                         conn.exec_driver_sql("PRAGMA mmap_size=268435456")

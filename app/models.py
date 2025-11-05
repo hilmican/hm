@@ -2,6 +2,7 @@ import datetime as dt
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
+from sqlalchemy import UniqueConstraint
 
 
 class Client(SQLModel, table=True):
@@ -202,3 +203,57 @@ class Message(SQLModel, table=True):
     ad_title: Optional[str] = Field(default=None)
     referral_json: Optional[str] = Field(default=None)
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
+# Additional tables used by ingestion/workers that were previously created via raw SQL
+
+class Attachment(SQLModel, table=True):
+    __tablename__ = "attachments"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    message_id: int = Field(foreign_key="message.id", index=True)
+    kind: str
+    graph_id: Optional[str] = None
+    position: Optional[int] = None
+    mime: Optional[str] = None
+    size_bytes: Optional[int] = None
+    checksum_sha256: Optional[str] = None
+    storage_path: Optional[str] = None
+    thumb_path: Optional[str] = None
+    fetched_at: Optional[dt.datetime] = None
+    fetch_status: Optional[str] = Field(default=None, index=True)
+    fetch_error: Optional[str] = None
+
+
+class Conversation(SQLModel, table=True):
+    __tablename__ = "conversations"
+    convo_id: str = Field(primary_key=True)
+    igba_id: str = Field(index=True)
+    ig_user_id: str = Field(index=True)
+    last_message_at: dt.datetime = Field(index=True)
+    unread_count: int = 0
+    hydrated_at: Optional[dt.datetime] = None
+
+
+class IGUser(SQLModel, table=True):
+    __tablename__ = "ig_users"
+    ig_user_id: str = Field(primary_key=True)
+    username: Optional[str] = Field(default=None, index=True)
+    name: Optional[str] = None
+    profile_pic_url: Optional[str] = None
+    last_seen_at: Optional[dt.datetime] = Field(default=None, index=True)
+    fetched_at: Optional[dt.datetime] = Field(default=None, index=True)
+    fetch_status: Optional[str] = Field(default=None, index=True)
+    fetch_error: Optional[str] = None
+
+
+class Job(SQLModel, table=True):
+    __tablename__ = "jobs"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str = Field(index=True)
+    key: str = Field(index=True)
+    run_after: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+    attempts: int = 0
+    max_attempts: int = 8
+    payload: Optional[str] = None
+
+    __table_args__ = (UniqueConstraint("kind", "key", name="uq_jobs_kind_key"),)
