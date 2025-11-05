@@ -361,6 +361,8 @@ def init_db() -> None:
                         id INTEGER PRIMARY KEY,
                         started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         completed_at DATETIME,
+                        cancelled_at DATETIME,
+                        job_id INTEGER,
                         date_from DATE,
                         date_to DATE,
                         min_age_minutes INTEGER,
@@ -373,6 +375,16 @@ def init_db() -> None:
                     )
                     """
                 )
+                # Ensure columns exist for older DBs
+                try:
+                    rows = conn.exec_driver_sql("PRAGMA table_info('ig_ai_run')").fetchall()
+                    have = {r[1] for r in rows}
+                    if 'cancelled_at' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ig_ai_run ADD COLUMN cancelled_at DATETIME")
+                    if 'job_id' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ig_ai_run ADD COLUMN job_id INTEGER")
+                except Exception:
+                    pass
                 # Helpful indexes
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_attachments_graph_id ON attachments(graph_id)")

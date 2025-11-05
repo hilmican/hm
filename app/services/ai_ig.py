@@ -113,6 +113,34 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
         convo_ids = [r.convo_id if hasattr(r, "convo_id") else r[0] for r in rows]
         considered = len(convo_ids)
 
+    # Helper to check cancellation flag quickly
+    def _is_cancelled() -> bool:
+        try:
+            with get_session() as s2:
+                row = s2.exec(_text("SELECT cancelled_at FROM ig_ai_run WHERE id=:id").params(id=int(run_id))).first()
+                if not row:
+                    return False
+                val = row.cancelled_at if hasattr(row, 'cancelled_at') else (row[0] if isinstance(row, (list, tuple)) else None)
+                return bool(val)
+        except Exception:
+            return False
+
+    if _is_cancelled():
+        errors.append("cancelled")
+        with get_session() as session:
+            try:
+                session.exec(_text("UPDATE ig_ai_run SET completed_at=CURRENT_TIMESTAMP WHERE id=:id").params(id=int(run_id)))
+            except Exception:
+                pass
+        return {
+            "considered": 0,
+            "processed": 0,
+            "linked": 0,
+            "purchases": 0,
+            "purchases_unlinked": 0,
+            "errors": errors,
+        }
+
     for cid in convo_ids:
         try:
             data = analyze_conversation(cid)
@@ -183,6 +211,11 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                 processed += 1
             except Exception as pe:
                 errors.append(f"{cid}: persist_err {pe}")
+
+        # cancellation check between items
+        if _is_cancelled():
+            errors.append("cancelled")
+            break
 
     # Update run row
     with get_session() as session:

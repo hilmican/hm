@@ -36,8 +36,8 @@
     <table>
       <thead>
         <tr>
-          <th>ID</th><th>Başladı</th><th>Bitti</th><th>Tarih Aralığı</th><th>Min Yaş</th>
-          <th>Konuşma</th><th>İşlenen</th><th>Bağlandı</th><th>Satın Alma</th><th>Eşleşmeyen</th>
+          <th>ID</th><th>Başladı</th><th>Bitti</th><th>İptal</th><th>Tarih Aralığı</th><th>Min Yaş</th>
+          <th>Konuşma</th><th>İşlenen</th><th>Bağlandı</th><th>Satın Alma</th><th>Eşleşmeyen</th><th></th>
         </tr>
       </thead>
       <tbody id="runsBody">
@@ -94,15 +94,30 @@
         tb.innerHTML = '';
         for(const rr of (data.runs||[])){
           const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${rr.id}</td><td>${rr.started_at||''}</td><td>${rr.completed_at||'-'}</td>`+
+          const cancelCell = rr.cancelled_at ? rr.cancelled_at : '-';
+          const btn = (!rr.completed_at && !rr.cancelled_at) ? `<button data-id="${rr.id}" class="btn-cancel" title="İptal">İptal</button>` : '';
+          tr.innerHTML = `<td>${rr.id}</td><td>${rr.started_at||''}</td><td>${rr.completed_at||'-'}</td><td>${cancelCell}</td>`+
                          `<td>${rr.date_from||'-'} → ${rr.date_to||'-'}</td><td>${rr.min_age_minutes||''}</td>`+
                          `<td>${rr.conversations_considered||0}</td><td>${rr.conversations_processed||0}</td>`+
                          `<td>${rr.orders_linked||0}</td><td>${rr.purchases_detected||0}</td>`+
-                         `<td>${rr.purchases_unlinked||0}</td>`;
+                         `<td>${rr.purchases_unlinked||0}</td><td>${btn}</td>`;
           tb.appendChild(tr);
+        }
+        // attach cancel handlers
+        for(const b of document.querySelectorAll('.btn-cancel')){
+          b.addEventListener('click', async (e)=>{
+            const id = e.currentTarget.getAttribute('data-id');
+            if(!confirm(`#${id} çalıştırmayı iptal etmek istiyor musunuz?`)) return;
+            try{
+              const r = await fetch(`/ig/ai/process/run/${id}/cancel`, { method: 'POST' });
+              if(!r.ok){ const t = await r.text(); alert('İptal hatası: ' + t); return; }
+              refreshRuns();
+            }catch(err){ alert('Ağ hatası: ' + err); }
+          });
         }
       }catch{}
     }
+    refreshRuns();
     setInterval(refreshRuns, 10000);
   </script>
 </body>

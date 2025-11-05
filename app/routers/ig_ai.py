@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, HTTPException
 from sqlalchemy import text
 
 from ..db import get_session
-from ..services.queue import enqueue
+from ..services.queue import enqueue, delete_job
 
 
 router = APIRouter(prefix="/ig/ai", tags=["instagram-ai"])
@@ -15,31 +15,9 @@ router = APIRouter(prefix="/ig/ai", tags=["instagram-ai"])
 
 @router.get("/process")
 def process_page(request: Request):
-    # Load last runs for summary
-    with get_session() as session:
-        rows = session.exec(text("""
-            SELECT id, started_at, completed_at, date_from, date_to, min_age_minutes,
-                   conversations_considered, conversations_processed, orders_linked,
-                   purchases_detected, purchases_unlinked
-            FROM ig_ai_run ORDER BY id DESC LIMIT 20
-        """)).all()
-        runs = []
-        for r in rows:
-            runs.append({
-                "id": getattr(r, "id", r[0]),
-                "started_at": getattr(r, "started_at", r[1]),
-                "completed_at": getattr(r, "completed_at", r[2]),
-                "date_from": getattr(r, "date_from", r[3]),
-                "date_to": getattr(r, "date_to", r[4]),
-                "min_age_minutes": getattr(r, "min_age_minutes", r[5]),
-                "conversations_considered": getattr(r, "conversations_considered", r[6]),
-                "conversations_processed": getattr(r, "conversations_processed", r[7]),
-                "orders_linked": getattr(r, "orders_linked", r[8]),
-                "purchases_detected": getattr(r, "purchases_detected", r[9]),
-                "purchases_unlinked": getattr(r, "purchases_unlinked", r[10]),
-            })
     templates = request.app.state.templates
-    return templates.TemplateResponse("ig_ai_process.html", {"request": request, "runs": runs})
+    # Render immediately; client will fetch runs via /ig/ai/process/runs
+    return templates.TemplateResponse("ig_ai_process.html", {"request": request, "runs": []})
 
 
 @router.post("/process/run")
@@ -78,13 +56,15 @@ def start_process(body: dict):
         run_id = int(getattr(rid_row, "id", rid_row[0]))
 
     # Enqueue background job to process
-    enqueue("ig_ai_process_run", key=str(run_id), payload={
+    job_id = enqueue("ig_ai_process_run", key=str(run_id), payload={
         "run_id": run_id,
         "date_from": date_from.isoformat() if date_from else None,
         "date_to": date_to.isoformat() if date_to else None,
         "min_age_minutes": min_age_minutes,
         "limit": limit,
     })
+    with get_session() as session:
+        session.exec(text("UPDATE ig_ai_run SET job_id=:jid WHERE id=:id").params(jid=int(job_id), id=int(run_id)))
     return {"status": "ok", "run_id": run_id}
 
 
@@ -94,7 +74,7 @@ def list_runs(limit: int = 50):
         nint = int(max(1, min(limit, 200)))
         # Embed LIMIT as a literal integer to avoid driver param binding issues
         rows = session.exec(text(f"""
-            SELECT id, started_at, completed_at, date_from, date_to, min_age_minutes,
+            SELECT id, started_at, completed_at, cancelled_at, job_id, date_from, date_to, min_age_minutes,
                    conversations_considered, conversations_processed, orders_linked,
                    purchases_detected, purchases_unlinked, errors_json
             FROM ig_ai_run ORDER BY id DESC LIMIT {nint}
@@ -105,15 +85,17 @@ def list_runs(limit: int = 50):
                 "id": getattr(r, "id", r[0]),
                 "started_at": getattr(r, "started_at", r[1]),
                 "completed_at": getattr(r, "completed_at", r[2]),
-                "date_from": getattr(r, "date_from", r[3]),
-                "date_to": getattr(r, "date_to", r[4]),
-                "min_age_minutes": getattr(r, "min_age_minutes", r[5]),
-                "conversations_considered": getattr(r, "conversations_considered", r[6]),
-                "conversations_processed": getattr(r, "conversations_processed", r[7]),
-                "orders_linked": getattr(r, "orders_linked", r[8]),
-                "purchases_detected": getattr(r, "purchases_detected", r[9]),
-                "purchases_unlinked": getattr(r, "purchases_unlinked", r[10]),
-                "errors_json": getattr(r, "errors_json", r[11]),
+                "cancelled_at": getattr(r, "cancelled_at", r[3]),
+                "job_id": getattr(r, "job_id", r[4]),
+                "date_from": getattr(r, "date_from", r[5]),
+                "date_to": getattr(r, "date_to", r[6]),
+                "min_age_minutes": getattr(r, "min_age_minutes", r[7]),
+                "conversations_considered": getattr(r, "conversations_considered", r[8]),
+                "conversations_processed": getattr(r, "conversations_processed", r[9]),
+                "orders_linked": getattr(r, "orders_linked", r[10]),
+                "purchases_detected": getattr(r, "purchases_detected", r[11]),
+                "purchases_unlinked": getattr(r, "purchases_unlinked", r[12]),
+                "errors_json": getattr(r, "errors_json", r[13]),
             })
         return {"runs": out}
 
@@ -123,7 +105,7 @@ def run_details(run_id: int):
     with get_session() as session:
         stmt = text(
             """
-            SELECT id, started_at, completed_at, date_from, date_to, min_age_minutes,
+            SELECT id, started_at, completed_at, cancelled_at, job_id, date_from, date_to, min_age_minutes,
                    conversations_considered, conversations_processed, orders_linked,
                    purchases_detected, purchases_unlinked, errors_json
             FROM ig_ai_run WHERE id = :id
@@ -136,16 +118,34 @@ def run_details(run_id: int):
             "id": getattr(row, "id", row[0]),
             "started_at": getattr(row, "started_at", row[1]),
             "completed_at": getattr(row, "completed_at", row[2]),
-            "date_from": getattr(row, "date_from", row[3]),
-            "date_to": getattr(row, "date_to", row[4]),
-            "min_age_minutes": getattr(row, "min_age_minutes", row[5]),
-            "conversations_considered": getattr(row, "conversations_considered", row[6]),
-            "conversations_processed": getattr(row, "conversations_processed", row[7]),
-            "orders_linked": getattr(row, "orders_linked", row[8]),
-            "purchases_detected": getattr(row, "purchases_detected", row[9]),
-            "purchases_unlinked": getattr(row, "purchases_unlinked", row[10]),
-            "errors_json": getattr(row, "errors_json", row[11]),
+            "cancelled_at": getattr(row, "cancelled_at", row[3]),
+            "job_id": getattr(row, "job_id", row[4]),
+            "date_from": getattr(row, "date_from", row[5]),
+            "date_to": getattr(row, "date_to", row[6]),
+            "min_age_minutes": getattr(row, "min_age_minutes", row[7]),
+            "conversations_considered": getattr(row, "conversations_considered", row[8]),
+            "conversations_processed": getattr(row, "conversations_processed", row[9]),
+            "orders_linked": getattr(row, "orders_linked", row[10]),
+            "purchases_detected": getattr(row, "purchases_detected", row[11]),
+            "purchases_unlinked": getattr(row, "purchases_unlinked", row[12]),
+            "errors_json": getattr(row, "errors_json", row[13]),
         }
+
+
+@router.post("/process/run/{run_id}/cancel")
+def cancel_run(run_id: int):
+    with get_session() as session:
+        row = session.exec(text("SELECT job_id FROM ig_ai_run WHERE id=:id").params(id=int(run_id))).first()
+        session.exec(text("UPDATE ig_ai_run SET cancelled_at=CURRENT_TIMESTAMP, completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP) WHERE id=:id").params(id=int(run_id)))
+        jid = None
+        if row:
+            jid = getattr(row, 'job_id', None) if hasattr(row, 'job_id') else (row[0] if isinstance(row, (list, tuple)) else None)
+    try:
+        if jid:
+            delete_job(int(jid))
+    except Exception:
+        pass
+    return {"status": "ok"}
 
 
 @router.post("/process/preview")
