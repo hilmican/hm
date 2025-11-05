@@ -174,7 +174,8 @@
 			if (!canvas) return;
 			const ctx = canvas.getContext('2d');
 			const total = data.reduce((s, r) => s + (r.count || 0), 0) || 1;
-			const colors = ['#60a5fa','#34d399','#fbbf24','#f87171','#a78bfa','#f472b6','#10b981','#f59e0b'];
+			// tuned palette and consistent order: paid, unpaid, refunded, switched, stitched
+			const colors = ['#10b981','#f59e0b','#f87171','#a78bfa','#60a5fa','#34d399','#fbbf24','#f472b6'];
 			let start = -Math.PI/2;
 			data.forEach((r, i) => {
 				const frac = (r.count || 0) / total;
@@ -190,15 +191,10 @@
 			const legend = document.getElementById('statusLegend');
 			if (legend) {
 				const trMap = {
-					'delivered': 'Teslim edildi',
-					'shipped': 'Kargolandı',
-					'pending': 'Bekliyor',
-					'processing': 'İşleniyor',
-					'cancelled': 'İptal',
-					'canceled': 'İptal',
+					'paid': 'Ödendi',
+					'unpaid': 'Ödenmedi',
 					'refunded': 'İade',
 					'switched': 'Değişim',
-					'sitched': 'Birleştirilmiş',
 					'stitched': 'Birleştirilmiş',
 					'unknown': 'Bilinmiyor'
 				};

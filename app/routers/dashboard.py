@@ -48,15 +48,32 @@ def dashboard(request: Request):
 		linked_gross_paid = float(agg.get("linked_gross_paid", 0.0))
 		total_to_collect = max(0.0, float(total_sales) - linked_gross_paid)
 
-		# Order status counts (cached)
-		status_counts = cached_json(
-			"dash:status_counts",
-			ttl,
-			lambda: [
-				{"status": row[0] or "unknown", "count": int(row[1] or 0)}
-				for row in session.exec(text('SELECT COALESCE(status, "unknown") AS s, COUNT(*) FROM "order" GROUP BY s')).all()
-			],
-		)
+
+		# Order status counts (cached) — align with orders table logic:
+		# refunded|switched|stitched are taken from Order.status; else classify as paid/unpaid by payments sum vs total
+		def _compute_status_counts():
+			base = {"paid": 0, "unpaid": 0, "refunded": 0, "switched": 0, "stitched": 0}
+			# counts for explicit statuses
+			rows_explicit = session.exec(text('SELECT status, COUNT(*) FROM "order" WHERE status IN ("refunded","switched","stitched") GROUP BY status')).all()
+			for st, cnt in rows_explicit:
+				if st in ("refunded", "switched", "stitched"):
+					base[str(st)] = int(cnt or 0)
+			# counts for paid/unpaid among the rest
+			row_pu = session.exec(text(
+				'SELECT\n'
+				'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0 THEN 1 ELSE 0 END) AS paid_count,\n'
+				'  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0) THEN 1 ELSE 0 END) AS unpaid_count\n'
+				'FROM "order" o\n'
+				'LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n'
+				'WHERE COALESCE(o.status, "") NOT IN ("refunded","switched","stitched")'
+			)).first() or [0, 0]
+			base["paid"] = int(row_pu[0] or 0)
+			base["unpaid"] = int(row_pu[1] or 0)
+			# return as list in a consistent order
+			order = ["paid", "unpaid", "refunded", "switched", "stitched"]
+			return [{"status": k, "count": base.get(k, 0)} for k in order]
+
+		status_counts = cached_json("dash:status_counts", ttl, _compute_status_counts)
 
 		# Best-selling low stock: all-time best sellers with on-hand <= 5, top 10
 		from ..services.inventory import compute_all_time_sold_map, get_stock_map
