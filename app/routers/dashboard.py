@@ -34,7 +34,7 @@ def dashboard(request: Request):
 					(
 						session.exec(
 							select(func.coalesce(func.sum(Order.total_amount), 0)).where(
-								or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"]))
+								or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"])) )
 							)
 						)
 						.first()
@@ -51,7 +51,7 @@ def dashboard(request: Request):
 					(
 						session.exec(
 							select(func.coalesce(func.sum(Order.shipping_fee), 0)).where(
-								or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"]))
+								or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"])) )
 							)
 						)
 						.first()
