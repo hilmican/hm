@@ -61,10 +61,17 @@ def start_process(body: dict):
 
     # Create run row
     with get_session() as session:
-        row = session.exec(text("""
+        stmt = text(
+            """
             INSERT INTO ig_ai_run(started_at, date_from, date_to, min_age_minutes)
             VALUES (CURRENT_TIMESTAMP, :df, :dt, :age)
-        """)).params(df=date_from.isoformat() if date_from else None, dt=date_to.isoformat() if date_to else None, age=min_age_minutes)
+            """
+        ).bindparams(
+            df=(date_from.isoformat() if date_from else None),
+            dt=(date_to.isoformat() if date_to else None),
+            age=int(min_age_minutes),
+        )
+        session.exec(stmt)
         rid_row = session.exec(text("SELECT last_insert_rowid() AS id")).first()
         if not rid_row:
             raise HTTPException(status_code=500, detail="Could not create run")
@@ -84,12 +91,14 @@ def start_process(body: dict):
 @router.get("/process/runs")
 def list_runs(limit: int = 50):
     with get_session() as session:
-        rows = session.exec(text("""
+        nint = int(max(1, min(limit, 200)))
+        # Embed LIMIT as a literal integer to avoid driver param binding issues
+        rows = session.exec(text(f"""
             SELECT id, started_at, completed_at, date_from, date_to, min_age_minutes,
                    conversations_considered, conversations_processed, orders_linked,
                    purchases_detected, purchases_unlinked, errors_json
-            FROM ig_ai_run ORDER BY id DESC LIMIT :n
-        """)).params(n=int(max(1, min(limit, 200)))).all()
+            FROM ig_ai_run ORDER BY id DESC LIMIT {nint}
+        """)).all()
         out = []
         for r in rows:
             out.append({
@@ -112,12 +121,15 @@ def list_runs(limit: int = 50):
 @router.get("/process/run/{run_id}")
 def run_details(run_id: int):
     with get_session() as session:
-        row = session.exec(text("""
+        stmt = text(
+            """
             SELECT id, started_at, completed_at, date_from, date_to, min_age_minutes,
                    conversations_considered, conversations_processed, orders_linked,
                    purchases_detected, purchases_unlinked, errors_json
             FROM ig_ai_run WHERE id = :id
-        """)).params(id=run_id).first()
+            """
+        ).bindparams(id=int(run_id))
+        row = session.exec(stmt).first()
         if not row:
             raise HTTPException(status_code=404, detail="Run not found")
         return {
