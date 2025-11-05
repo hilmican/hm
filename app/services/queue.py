@@ -36,7 +36,7 @@ def _ensure_job(kind: str, key: str, payload: Optional[dict] = None, max_attempt
 		if dialect == "mysql":
 			stmt = text(
 				"""
-				INSERT INTO jobs(kind, key, run_after, attempts, max_attempts, payload)
+				INSERT INTO `jobs`(`kind`, `key`, `run_after`, `attempts`, `max_attempts`, `payload`)
 				VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
 				ON DUPLICATE KEY UPDATE id = id
 				"""
@@ -49,22 +49,35 @@ def _ensure_job(kind: str, key: str, payload: Optional[dict] = None, max_attempt
 				"""
 			)
 		session.exec(stmt.params(kind=kind, key=key, max_attempts=max_attempts, payload=json.dumps(payload or {})))
-		row = session.exec(
-			text("SELECT id FROM jobs WHERE kind=:kind AND key=:key").params(kind=kind, key=key)
-		).first()
+		# Lookup inserted row by unique key
+		if dialect == "mysql":
+			sel = text("SELECT `id` FROM `jobs` WHERE `kind`=:kind AND `key`=:key")
+		else:
+			sel = text("SELECT id FROM jobs WHERE kind=:kind AND key=:key")
+		row = session.exec(sel.params(kind=kind, key=key)).first()
 		if not row:
 			# As a fallback, create a new unique key by appending timestamp
 			sfx = dt.datetime.utcnow().timestamp()
-			session.exec(
-				text(
+			if dialect == "mysql":
+				ins2 = text(
+					"""
+					INSERT INTO `jobs`(`kind`, `key`, `run_after`, `attempts`, `max_attempts`, `payload`)
+					VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
+					"""
+				)
+			else:
+				ins2 = text(
 					"""
 					INSERT INTO jobs(kind, key, run_after, attempts, max_attempts, payload)
 					VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
 					"""
-				).params(kind=kind, key=f"{key}:{sfx}", max_attempts=max_attempts, payload=json.dumps(payload or {}))
-			)
+				)
+			session.exec(ins2.params(kind=kind, key=f"{key}:{sfx}", max_attempts=max_attempts, payload=json.dumps(payload or {})))
 			# Try get id in a backend-agnostic way
-			row = session.exec(text("SELECT id FROM jobs WHERE kind=:kind AND key=:key").params(kind=kind, key=f"{key}:{sfx}")).first()
+			if dialect == "mysql":
+				row = session.exec(text("SELECT `id` FROM `jobs` WHERE `kind`=:kind AND `key`=:key").params(kind=kind, key=f"{key}:{sfx}")).first()
+			else:
+				row = session.exec(text("SELECT id FROM jobs WHERE kind=:kind AND key=:key").params(kind=kind, key=f"{key}:{sfx}")).first()
 		# Normalize id
 		return int(row.id if hasattr(row, "id") else row[0])  # type: ignore
 

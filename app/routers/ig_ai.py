@@ -207,9 +207,9 @@ def preview_process(body: dict):
         # Messages count within eligible conversations; also count missing timestamps
         sql_msg = (
             "SELECT COUNT(1) AS mc, SUM(CASE WHEN m.timestamp_ms IS NULL THEN 1 ELSE 0 END) AS mt0 "
-            "FROM message m JOIN conversations c ON m.conversation_id = c.convo_id WHERE "
-            + " AND ".join(where)
-            + " AND (m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)"
+            "FROM message m WHERE "
+            "(m.conversation_id IN (SELECT convo_id FROM conversations WHERE " + " AND ".join(where) + ")) "
+            "AND (m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)"
         )
         params_msg = dict(params)
         params_msg["cutoff_ms"] = int(cutoff_ms)
