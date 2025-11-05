@@ -19,6 +19,7 @@ services:
       - MEDIA_ROOT=/app/data/media
       - THUMBS_ROOT=/app/data/thumbs
       - UVICORN_WORKERS=2
+      - "DATABASE_URL=mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
     depends_on:
       - redis
 
@@ -35,6 +36,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - "DATABASE_URL=mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
     volumes:
       - ./:/app
       - ./data:/app/data
@@ -48,6 +50,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - "DATABASE_URL=mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
     volumes:
       - ./:/app
       - ./data:/app/data
@@ -63,6 +66,7 @@ services:
       - MEDIA_ROOT=/app/data/media
       - THUMBS_ROOT=/app/data/thumbs
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - "DATABASE_URL=mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
     volumes:
       - ./:/app
       - ./data:/app/data

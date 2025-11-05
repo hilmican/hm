@@ -125,6 +125,13 @@ def init_db() -> None:
     for attempt in range(1, retries + 1):
         try:
             SQLModel.metadata.create_all(engine)
+            # For non-SQLite backends (e.g., MySQL), we skip SQLite-only migrations
+            try:
+                backend = getattr(engine.url, "get_backend_name", lambda: "")()
+            except Exception:
+                backend = ""
+            if backend != "sqlite":
+                return
             # lightweight migrations for existing SQLite DBs
             with engine.begin() as conn:
                 # Apply SQLite PRAGMAs once at startup if enabled
@@ -149,9 +156,26 @@ def init_db() -> None:
                 except Exception:
                     pass
                 def column_exists(table: str, column: str) -> bool:
-                    rows = conn.exec_driver_sql(f"PRAGMA table_info('{table}')").fetchall()
-                    # PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
-                    return any(r[1] == column for r in rows)
+                    try:
+                        backend = getattr(engine.url, "get_backend_name", lambda: "")()
+                    except Exception:
+                        backend = ""
+                    if backend == "sqlite":
+                        rows = conn.exec_driver_sql(f"PRAGMA table_info('{table}')").fetchall()
+                        # PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
+                        return any(r[1] == column for r in rows)
+                    # MySQL / others: use INFORMATION_SCHEMA when available
+                    try:
+                        dbname = conn.exec_driver_sql("SELECT DATABASE()").fetchone()[0]
+                        q = (
+                            "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS "
+                            "WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME=%s LIMIT 1"
+                        )
+                        res = conn.exec_driver_sql(q, (dbname, table, column)).fetchone()
+                        return bool(res)
+                    except Exception:
+                        # Fallback: assume not exists to avoid crashing during startup
+                        return False
 
                 # Client.height_cm / weight_kg
                 if not column_exists("client", "height_cm"):
