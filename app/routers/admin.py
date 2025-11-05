@@ -111,7 +111,7 @@ def _find_latest_sqlite_backup() -> Optional[str]:
 							seen.add(full)
 							candidates.append(full)
 		# search roots
-		for d in [os.getenv("SQLITE_BACKUP_DIR"), "data/backups", "backups", "data", "/app/data/backups", "/app/data"]:
+		for d in [(os.getenv("SQLITE_BACKUP_DIR") or "dbbackups"), "/app/dbbackups", "data/backups", "backups", "data", "/app/data/backups", "/app/data"]:
 			if d:
 				_gather(d)
 		# sort by mtime desc
