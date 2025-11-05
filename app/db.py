@@ -453,6 +453,11 @@ def init_db() -> None:
                         conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN hydrated_at DATETIME")
                 except Exception:
                     pass
+                # Helpful indexes for IG AI processing
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_conversations_last_message_at ON conversations(last_message_at)")
+                except Exception:
+                    pass
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ig_users_fetched_at ON ig_users(fetched_at)")
                 except Exception:

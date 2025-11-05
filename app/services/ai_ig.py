@@ -93,12 +93,18 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
         # Select eligible conversations by last_message_at and ai_processed_at is NULL
         params: Dict[str, Any] = {"cutoff": cutoff_dt.isoformat(" ")}
         where = ["ai_processed_at IS NULL", "last_message_at <= :cutoff"]
-        if date_from:
-            params["df"] = date_from.isoformat()
-            where.append("date(last_message_at) >= date(:df)")
-        if date_to:
-            params["dt"] = date_to.isoformat()
-            where.append("date(last_message_at) <= date(:dt)")
+        if date_from and date_to and date_from <= date_to:
+            dt_end = date_to + dt.timedelta(days=1)
+            params["df"] = f"{date_from.isoformat()} 00:00:00"
+            params["dte"] = f"{dt_end.isoformat()} 00:00:00"
+            where.append("last_message_at >= :df AND last_message_at < :dte")
+        elif date_from:
+            params["df"] = f"{date_from.isoformat()} 00:00:00"
+            where.append("last_message_at >= :df")
+        elif date_to:
+            dt_end = date_to + dt.timedelta(days=1)
+            params["dte"] = f"{dt_end.isoformat()} 00:00:00"
+            where.append("last_message_at < :dte")
         sql = (
             "SELECT convo_id FROM conversations WHERE " + " AND ".join(where) + " ORDER BY last_message_at DESC LIMIT :lim"
         )
