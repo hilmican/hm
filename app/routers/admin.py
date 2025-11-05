@@ -1,5 +1,6 @@
 import os
 import json
+import sqlite3
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -440,3 +441,115 @@ def fix_message_timestamps(request: Request):
 		"errors": errors[:50],
 	}
 	return templates.TemplateResponse("admin_fix_timestamps.html", {"request": request, **ctx})
+
+
+@router.get("/reimport/raw-json")
+def reimport_raw_json(request: Request, sqlite_path: str | None = None):
+	templates = request.app.state.templates
+	scanned = 0
+	updated = 0
+	missing = 0
+	errors: list[dict[str, Any]] = []
+	path = sqlite_path or os.getenv("SQLITE_PATH", "data/app.db")
+	try:
+		if not os.path.exists(path):
+			raise FileNotFoundError(f"SQLite not found: {path}")
+		with get_session() as session:
+			# Ensure MySQL column types before updates (idempotent)
+			try:
+				conn = session.connection().connection  # raw DBAPI conn
+				# raw_json -> LONGTEXT
+				try:
+					row = session.exec(text(
+						"""
+						SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+						FROM INFORMATION_SCHEMA.COLUMNS
+						WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'raw_json'
+						"""
+					)).first()
+					if row is not None:
+						dtype = str((row[0] if isinstance(row, (list, tuple)) else row)).lower()
+						if dtype in ("varchar", "char", "text", "tinytext", "mediumtext"):
+							session.exec(text("ALTER TABLE message MODIFY COLUMN raw_json LONGTEXT"))
+					except Exception:
+					pass
+				# timestamp_ms -> BIGINT
+				try:
+					row = session.exec(text(
+						"""
+						SELECT DATA_TYPE
+						FROM INFORMATION_SCHEMA.COLUMNS
+						WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'timestamp_ms'
+						"""
+					)).first()
+					if row is not None:
+						dtype = str((row[0] if isinstance(row, (list, tuple)) else row)).lower()
+						if dtype != "bigint":
+							session.exec(text("ALTER TABLE message MODIFY COLUMN timestamp_ms BIGINT"))
+				except Exception:
+					pass
+			except Exception as e:
+				errors.append({"id": None, "error": f"ensure types: {e}"})
+
+			# Open SQLite and stream rows
+			try:
+				con = sqlite3.connect(path)
+				con.row_factory = sqlite3.Row
+			except Exception as e:
+				errors.append({"id": None, "error": f"sqlite open: {e}"})
+				ctx = {"scanned": scanned, "updated": updated, "missing": missing, "error_count": len(errors), "errors": errors[:50], "sqlite_path": path}
+				return templates.TemplateResponse("admin_reimport_raw_json.html", {"request": request, **ctx})
+
+			with con:
+				cur = con.cursor()
+				cur.execute("SELECT ig_message_id, raw_json FROM message WHERE raw_json IS NOT NULL")
+				while True:
+					rows = cur.fetchmany(1000)
+					if not rows:
+						break
+					for r in rows:
+						igid = r["ig_message_id"]
+						raw = r["raw_json"]
+						if not igid or not raw:
+							continue
+						scanned += 1
+						# compute timestamp ms from raw
+						try:
+							obj = json.loads(raw)
+							ts = None
+							if isinstance(obj, dict):
+								val = obj.get("timestamp") or ((obj.get("message") or {}).get("timestamp"))
+								if isinstance(val, (int, float)):
+									ts = int(val if val >= 10_000_000_000 else val * 1000)
+								else:
+									try:
+										s = int(float(str(val)))
+										ts = int(ts if ts >= 10_000_000_000 else ts * 1000)
+									except Exception:
+										ts = None
+						except Exception:
+							ts = None
+						try:
+							if ts is not None:
+								session.exec(text("UPDATE message SET raw_json=:raw, timestamp_ms=:ts WHERE ig_message_id=:igid").params(raw=raw, ts=int(ts), igid=str(igid)))
+							else:
+								session.exec(text("UPDATE message SET raw_json=:raw WHERE ig_message_id=:igid").params(raw=raw, igid=str(igid)))
+							updated += 1
+						except Exception as e:
+							# check if row exists
+							try:
+								row = session.exec(text("SELECT 1 FROM message WHERE ig_message_id=:igid LIMIT 1").params(igid=str(igid))).first()
+								if not row:
+									missing += 1
+								else:
+									errors.append({"id": str(igid), "error": str(e)})
+							except Exception:
+								errors.append({"id": str(igid), "error": str(e)})
+			try:
+				con.close()
+			except Exception:
+				pass
+	except Exception as e:
+		errors.append({"id": None, "error": str(e)})
+	ctx = {"scanned": scanned, "updated": updated, "missing": missing, "error_count": len(errors), "errors": errors[:50], "sqlite_path": path}
+	return templates.TemplateResponse("admin_reimport_raw_json.html", {"request": request, **ctx})

@@ -193,7 +193,7 @@ class Message(SQLModel, table=True):
     text: Optional[str] = None
     attachments_json: Optional[str] = None
     timestamp_ms: Optional[int] = Field(default=None, sa_column=Column(BigInteger))
-    raw_json: Optional[str] = None
+    raw_json: Optional[str] = Field(default=None, sa_column=Column(Text))
     conversation_id: Optional[str] = Field(default=None, index=True)
     direction: Optional[str] = Field(default=None, index=True, description="in|out")
     sender_username: Optional[str] = Field(default=None, index=True)
