@@ -22,6 +22,7 @@ import json
 import os
 import sqlite3
 from typing import Iterable, List, Tuple
+import time
 
 
 def _db_path(cli_override: str | None = None) -> str:
@@ -48,8 +49,15 @@ def _db_path(cli_override: str | None = None) -> str:
 
 def _connect_db(db_path: str | None = None) -> sqlite3.Connection:
     path = _db_path(db_path)
-    conn = sqlite3.connect(path, timeout=float(os.getenv("SQLITE_BUSY_TIMEOUT", "30")))
+    conn = sqlite3.connect(path, timeout=float(os.getenv("SQLITE_BUSY_TIMEOUT", "60")))
     conn.row_factory = sqlite3.Row
+    try:
+        # Helpful pragmas to reduce lock contention
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute(f"PRAGMA busy_timeout={int(float(os.getenv('SQLITE_BUSY_TIMEOUT', '60'))*1000)};")
+    except Exception:
+        pass
     return conn
 
 
@@ -88,31 +96,45 @@ def _select_active_runs(conn: sqlite3.Connection, only_ids: Iterable[int] | None
     return list(cur.fetchall())
 
 
-def _cancel_runs(conn: sqlite3.Connection, rows: List[sqlite3.Row]) -> None:
+def _cancel_runs(conn: sqlite3.Connection, rows: List[sqlite3.Row], *, retries: int = 10, backoff: float = 0.2) -> None:
     cur = conn.cursor()
     # Mark runs cancelled/completed
     ids = [int(r["id"]) for r in rows]
     if ids:
         qmarks = ",".join(["?"] * len(ids))
-        cur.execute(
-            f"UPDATE ig_ai_run SET cancelled_at=CURRENT_TIMESTAMP, completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP) WHERE id IN ({qmarks})",
-            ids,
-        )
+        _exec_retry(cur, f"UPDATE ig_ai_run SET cancelled_at=CURRENT_TIMESTAMP, completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP) WHERE id IN ({qmarks})", ids, retries=retries, backoff=backoff)
     # Delete jobs by id and by (kind,key) fallback
     for r in rows:
         run_id = int(r["id"]) if r["id"] is not None else None
         job_id = int(r["job_id"]) if r["job_id"] is not None else None
         try:
             if job_id:
-                cur.execute("DELETE FROM jobs WHERE id=?", (job_id,))
+                _exec_retry(cur, "DELETE FROM jobs WHERE id=?", (job_id,), retries=retries, backoff=backoff)
         except Exception:
             pass
         try:
             if run_id is not None:
-                cur.execute("DELETE FROM jobs WHERE kind='ig_ai_process_run' AND key=?", (str(run_id),))
+                _exec_retry(cur, "DELETE FROM jobs WHERE kind='ig_ai_process_run' AND key=?", (str(run_id),), retries=retries, backoff=backoff)
         except Exception:
             pass
     conn.commit()
+
+
+def _exec_retry(cur: sqlite3.Cursor, sql: str, params, *, retries: int, backoff: float) -> None:
+    attempt = 0
+    delay = max(0.05, backoff)
+    while True:
+        try:
+            cur.execute(sql, params)
+            return
+        except sqlite3.OperationalError as e:
+            msg = str(e).lower()
+            if ("database is locked" in msg or "busy" in msg) and attempt < retries:
+                time.sleep(delay)
+                delay = min(delay * 1.7, 2.0)
+                attempt += 1
+                continue
+            raise
 
 
 def _purge_redis_messages(rows: List[sqlite3.Row]) -> Tuple[int, int]:
@@ -149,6 +171,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Cancel IG AI processing runs and purge queued jobs")
     ap.add_argument("--runs", nargs="*", type=int, help="Specific run ids to cancel (default: all active)")
     ap.add_argument("--db", type=str, default=None, help="Path to SQLite DB (default auto-detect)")
+    ap.add_argument("--retries", type=int, default=10, help="DB lock retries (default 10)")
+    ap.add_argument("--backoff", type=float, default=0.2, help="Initial backoff seconds (default 0.2)")
     args = ap.parse_args()
 
     conn = _connect_db(args.db)
@@ -158,7 +182,7 @@ def main() -> None:
             print("No active runs found.")
             return
         print(f"Cancelling {len(rows)} run(s): {[int(r['id']) for r in rows]}")
-        _cancel_runs(conn, rows)
+        _cancel_runs(conn, rows, retries=int(args.retries), backoff=float(args.backoff))
         r_removed, r_total = _purge_redis_messages(rows)
         if r_total:
             print(f"Redis queue: removed {r_removed}/{r_total} pending messages for ig_ai_process_run")
