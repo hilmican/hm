@@ -1060,41 +1060,24 @@ def returns_apply(body: dict, request: Request):
 					if not o:
 						errors.append({"row_index": idx, "error": "order_not_found", "order_id": chosen_id})
 					else:
-						# Check if already processed for this order
+						# Check if already processed for this order (restock done or date set previously)
 						already_in = session.exec(select(StockMovement).where(StockMovement.related_order_id == o.id, StockMovement.direction == "in")).first()
-						if already_in is not None or (o.return_or_switch_date is not None):
-							status = "skipped"
-							message = "already_processed"
-							matched_order_id = o.id
-							# still ensure status/date/amount are not duplicated; keep as-is
-							ir = ImportRow(
-								import_run_id=run.id or 0,
-								row_index=idx,
-								row_hash=row_hash,
-								mapped_json=str(rec),
-								status=status,  # type: ignore
-								message=message,
-								matched_client_id=matched_client_id,
-								matched_order_id=matched_order_id,
-							)
-							session.add(ir)
-							continue
-						# restock unless explicitly disabled
-						if not skip_stock:
-							oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
-							for oi in oitems:
-								if oi.item_id is None:
-									continue
-								qty = int(oi.quantity or 0)
-								if qty > 0:
-									adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id)
-						# set status
+						already_processed = (already_in is not None) or (o.return_or_switch_date is not None)
+						# Restock only once: when not previously processed and not explicitly skipped
+						if (not skip_stock) and (not already_processed):
+ 							oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
+ 							for oi in oitems:
+ 								if oi.item_id is None:
+ 									continue
+ 								qty = int(oi.quantity or 0)
+ 								if qty > 0:
+ 									adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id)
+						# Always update order fields from the spreadsheet (status/date/amount)
 						action = (rec.get("action") or "").strip()
 						if action == "refund":
 							o.status = "refunded"
 						elif action == "switch":
 							o.status = "switched"
-						# date and amount
 						ret_date = rec.get("date") or run.data_date
 						o.return_or_switch_date = ret_date
 						try:
@@ -1106,6 +1089,9 @@ def returns_apply(body: dict, request: Request):
 						status = "updated"
 						matched_order_id = o.id
 						updated += 1
+						# Inform via message if this was previously processed
+						if already_processed and (message is None):
+							message = "already_processed"
 				except Exception as _e:
 					errors.append({"row_index": idx, "error": "apply_failed", "detail": str(_e), "order_id": chosen_id})
 			else:
