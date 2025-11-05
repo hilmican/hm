@@ -25,33 +25,33 @@ def dashboard(request: Request):
 		ttl = int(os.getenv("CACHE_TTL_DASHBOARD", "60"))
 		# detect dialect for cross-db SQL where needed
 		backend = session.get_bind().dialect.name if session.get_bind() is not None else "sqlite"
-		agg = cached_json(
-			"dash:totals",
-			ttl,
-			lambda: {
-				# Use ORM for DB-agnostic quoting
-					"total_sales": float(
-						(session.exec(
-							select(func.coalesce(func.sum(Order.total_amount), 0)).where(
-								or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"])) )
-							)
-						).one() or [0])[0]
-					),
-					"net_collected": float((session.exec(select(func.coalesce(func.sum(Payment.net_amount), 0))).one() or [0])[0]),
-					"fee_kom": float((session.exec(select(func.coalesce(func.sum(Payment.fee_komisyon), 0))).one() or [0])[0]),
-					"fee_hiz": float((session.exec(select(func.coalesce(func.sum(Payment.fee_hizmet), 0))).one() or [0])[0]),
-					"fee_iad": float((session.exec(select(func.coalesce(func.sum(Payment.fee_iade), 0))).one() or [0])[0]),
-					"fee_eok": float((session.exec(select(func.coalesce(func.sum(Payment.fee_erken_odeme), 0))).one() or [0])[0]),
-					"fee_kar": float(
-						(session.exec(
-							select(func.coalesce(func.sum(Order.shipping_fee), 0)).where(
-								or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"])) )
-							)
-						).one() or [0])[0]
-					),
-					"linked_gross_paid": float((session.exec(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.order_id.is_not(None))).one() or [0])[0]),
-			},
-		)
+		def _scalar(sel):
+			res = session.exec(sel).one_or_none()
+			if res is None:
+				return 0.0
+			try:
+				return float(res[0])
+			except Exception:
+				try:
+					return float(res)
+				except Exception:
+					return 0.0
+		def _agg():
+			return {
+				"total_sales": _scalar(select(func.coalesce(func.sum(Order.total_amount), 0)).where(
+					or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"])) )
+				)),
+				"net_collected": _scalar(select(func.coalesce(func.sum(Payment.net_amount), 0))),
+				"fee_kom": _scalar(select(func.coalesce(func.sum(Payment.fee_komisyon), 0))),
+				"fee_hiz": _scalar(select(func.coalesce(func.sum(Payment.fee_hizmet), 0))),
+				"fee_iad": _scalar(select(func.coalesce(func.sum(Payment.fee_iade), 0))),
+				"fee_eok": _scalar(select(func.coalesce(func.sum(Payment.fee_erken_odeme), 0))),
+				"fee_kar": _scalar(select(func.coalesce(func.sum(Order.shipping_fee), 0)).where(
+					or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"])) )
+				)),
+				"linked_gross_paid": _scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.order_id.is_not(None))),
+			}
+		agg = cached_json("dash:totals", ttl, _agg)
 		total_sales = float(agg.get("total_sales", 0.0))
 		net_collected = float(agg.get("net_collected", 0.0))
 		fee_kom = float(agg.get("fee_kom", 0.0))
