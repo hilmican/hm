@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, Optional, List, Tuple
+from typing import Dict, Iterable, Optional, List, Tuple, Set
 import ast
 import datetime as dt
 
@@ -28,6 +28,46 @@ def get_stock_map(session: Session) -> Dict[int, int]:
 	ids = [it for it in session.exec(select(Item.id)).all() if it is not None]
 	return compute_on_hand_for_items(session, [i for i in ids if i is not None])
 
+
+
+def compute_all_time_sold_map(session: Session) -> Dict[int, int]:
+	"""Return total sold quantities per item across all time.
+
+	Sums quantities from OrderItem. Also includes fallback counts from legacy
+	Order.item_id rows for orders that have no OrderItem records at all.
+	"""
+	# Base: aggregate from OrderItem
+	rows_oi: List[Tuple[Optional[int], Optional[int]]] = session.exec(
+		select(OrderItem.item_id, func.sum(OrderItem.quantity))
+		.group_by(OrderItem.item_id)
+	).all()
+	sold_map: Dict[int, int] = {int(iid): int(qty or 0) for iid, qty in rows_oi if iid is not None}
+
+	# Determine orders that already have any OrderItem rows
+	orders_with_items: List[Tuple[Optional[int]]] = session.exec(
+		select(OrderItem.order_id).group_by(OrderItem.order_id)
+	).all()
+	orders_with_items_set: Set[int] = {int(oid[0]) for oid in orders_with_items if oid and oid[0] is not None}
+
+	# Fallback: aggregate from Order for orders without OrderItem rows
+	if orders_with_items_set:
+		rows_ord = session.exec(
+			select(Order.item_id, func.sum(Order.quantity))
+			.where((Order.item_id != None) & (~Order.id.in_(orders_with_items_set)))
+			.group_by(Order.item_id)
+		).all()
+	else:
+		rows_ord = session.exec(
+			select(Order.item_id, func.sum(Order.quantity))
+			.where(Order.item_id != None)
+			.group_by(Order.item_id)
+		).all()
+	for iid, qty in rows_ord:
+		if iid is None:
+			continue
+		sold_map[int(iid)] = sold_map.get(int(iid), 0) + int(qty or 0)
+
+	return sold_map
 
 
 def get_or_create_item(session: Session, *, product_id: int, size: Optional[str] = None, color: Optional[str] = None) -> Item:

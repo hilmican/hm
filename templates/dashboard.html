@@ -2,7 +2,7 @@
 <html>
 	<head>
 		<meta charset="utf-8" />
-		<title>Dashboard</title>
+		<title>Yönetim Paneli</title>
 		<style>
 			body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
 			h1 { margin-bottom: 12px; }
@@ -24,23 +24,19 @@
 	</head>
 	<body>
 		{% include "_nav.html" %}
-		<h1>Kargo Management Dashboard</h1>
+		<h1>Kargo Yönetim Paneli</h1>
 		<div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 18px 0;">
 			<div class="card" style="padding:8px 12px;">
-				<strong>Toplam Satis:</strong> {{ '%.2f'|format(total_sales or 0) }}
+				<strong>Toplam Satış:</strong> {{ '%.2f'|format(total_sales or 0) }}
 			</div>
 			<div class="card" style="padding:8px 12px;">
 				<strong>Toplanan (Net):</strong> {{ '%.2f'|format(total_collected or 0) }}
 			</div>
 			<div class="card" style="padding:8px 12px;">
-				<strong>Alinacak:</strong> {{ '%.2f'|format(total_to_collect or 0) }}
+				<strong>Alınacak:</strong> {{ '%.2f'|format(total_to_collect or 0) }}
 			</div>
 			<div class="card" style="padding:8px 12px;">
 				<strong>Toplam Kesintiler:</strong> {{ '%.2f'|format(total_fees or 0) }}
-			</div>
-			<div class="card" style="padding:8px 12px;">
-				<strong>Eslesmeyen Urun Satirlari:</strong> {{ unmatched_count or 0 }}
-				<a href="/import/map?source=bizim&filename=last" style="margin-left:8px">Haritalandir</a>
 			</div>
 		</div>
 		<div class="toolbar">
@@ -51,170 +47,36 @@
 					<option value="returns">returns</option>
 				</select>
 				<input type="file" name="files" multiple accept=".xlsx" required style="margin-left:6px" />
-				<button type="submit" style="margin-left:6px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Upload</button>
+				<button type="submit" style="margin-left:6px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Yükle</button>
 			</form>
 		</div>
 
 		<div id="uploadResult" class="caption"></div>
 		<div class="grid">
 			<div class="card">
-				<h2>Orders (latest 20)</h2>
-				<table>
-					<thead>
-						<tr><th>ID</th><th>Tracking</th><th>Client</th><th>Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Data Date</th><th>Channel</th></tr>
-					</thead>
-					<tbody>
-					{% for o in orders %}
-						{% set rowcls = status_map.get(o.id) if status_map else '' %}
-						<tr class="{{ rowcls }}">
-							<td>{{ o.id }}</td>
-							<td>{{ o.tracking_no }}</td>
-							<td>
-								{% set cname = client_map.get(o.client_id) if client_map else None %}
-								{% if not cname %}
-									{% set ns = namespace(name='') %}
-									{% for c in clients %}{% if c.id == o.client_id %}{% set ns.name = c.name %}{% endif %}{% endfor %}
-									{% set cname = ns.name %}
-								{% endif %}
-								<a href="/clients/{{ o.client_id }}">{{ (cname or '')[:40] }}</a>
-							</td>
-							<td>
-								{% if o.item_id %}
-									{% set iname = item_map.get(o.item_id) if item_map else None %}
-									{% if not iname %}
-										{% set ns2 = namespace(name='') %}
-										{% for it in items %}{% if it.id == o.item_id %}{% set ns2.name = it.name %}{% endif %}{% endfor %}
-										{% set iname = ns2.name %}
-									{% endif %}
-									<a href="/items/table#{{ o.item_id }}">{{ (iname or '')[:40] }}</a>
-								{% endif %}
-							</td>
-							<td>{{ o.quantity }}</td>
-							<td>{{ o.total_amount }}</td>
-							<td>{{ o.shipment_date }}</td>
-							<td>{{ o.data_date }}</td>
-							<td>{{ o.source }}</td>
-						</tr>
-					{% endfor %}
-					</tbody>
-				</table>
-				<div class="caption">Open <a href="/orders/table">/orders/table</a> for full list.</div>
+				<h2>Sipariş Durum Dağılımı</h2>
+				<canvas id="statusPie" width="400" height="260" style="display:block;margin:8px auto;"></canvas>
+				<div id="statusLegend" class="caption" style="padding:8px 16px;"></div>
 			</div>
 
 			<div class="card">
-				<h2>Low Stock (<=5)</h2>
+				<h2>En Çok Satan - Düşük Stok (<=5)</h2>
 				<table>
 					<thead>
-						<tr><th>ID</th><th>SKU</th><th>Name</th><th>On-hand</th></tr>
+						<tr><th>ID</th><th>SKU</th><th>Ürün Adı</th><th>Mevcut Stok</th><th>Satış (Toplam)</th></tr>
 					</thead>
 					<tbody>
-					{% for it, qty in low_stock %}
+					{% for it, onhand, sold in low_stock_best %}
 						<tr>
 							<td>{{ it.id }}</td>
 							<td>{{ it.sku }}</td>
 							<td>{{ it.name }}</td>
-							<td>{{ qty }}</td>
+							<td>{{ onhand }}</td>
+							<td>{{ sold }}</td>
 						</tr>
 					{% endfor %}
 					</tbody>
 				</table>
-			</div>
-
-			<div class="card">
-				<h2>Clients (latest 20)</h2>
-				<table>
-					<thead>
-						<tr><th>ID</th><th>Name</th><th>Phone</th><th>City</th><th>Height</th><th>Weight</th><th>Source</th><th>Created</th></tr>
-					</thead>
-					<tbody>
-					{% for c in clients %}
-						<tr>
-							<td>{{ c.id }}</td>
-							<td>{{ c.name }}</td>
-							<td>{{ c.phone }}</td>
-							<td>{{ c.city }}</td>
-							<td>{{ c.height_cm }}</td>
-							<td>{{ c.weight_kg }}</td>
-							<td>{% if c.id in client_sources %}{{ client_sources[c.id] }}{% endif %}</td>
-							<td>{{ c.created_at }}</td>
-						</tr>
-					{% endfor %}
-					</tbody>
-				</table>
-				<div class="caption">Open <a href="/clients/table">/clients/table</a> for full list.</div>
-			</div>
-
-			<div class="card">
-				<h2>Payments (latest 20)</h2>
-				<table>
-					<thead>
-						<tr>
-							<th>ID</th>
-							<th>Client</th>
-							<th>Order</th>
-							<th>Order Total</th>
-							<th>Paid Amount</th>
-							<th>Fees</th>
-							<th>Net</th>
-							<th>Date</th>
-							<th>Method</th>
-						</tr>
-					</thead>
-					<tbody>
-					{% for p in payments %}
-						<tr>
-							<td>{{ p.id }}</td>
-							<td>
-								{% set cname = client_map.get(p.client_id) if client_map else p.client_id %}
-								<a href="/clients/{{ p.client_id }}">{{ cname }}</a>
-							</td>
-							<td>
-								{% if p.order_id %}
-									{% set onum = order_map.get(p.order_id) if order_map else p.order_id %}
-									<a href="/orders/table#{{ p.order_id }}">{{ onum }}</a>
-								{% endif %}
-							</td>
-							<td>{% if p.order_id and order_total_map %}{{ order_total_map.get(p.order_id, 0) }}{% else %}-{% endif %}</td>
-							<td>{{ p.amount }}</td>
-							<td>
-								{# show itemized fees #}
-								{% set fkom = p.fee_komisyon or 0 %}
-								{% set fhiz = p.fee_hizmet or 0 %}
-								{% set fkar = p.fee_kargo or 0 %}
-								{% set fiad = p.fee_iade or 0 %}
-								{% set feok = p.fee_erken_odeme or 0 %}
-								{% set fsum = (fkom + fhiz + fkar + fiad + feok) %}
-								{{ '%.2f'|format(fsum) }}
-								<span class="caption">(K:{{ '%.2f'|format(fkom) }}, H:{{ '%.2f'|format(fhiz) }}, KG:{{ '%.2f'|format(fkar) }}, I:{{ '%.2f'|format(fiad) }}, E:{{ '%.2f'|format(feok) }})</span>
-							</td>
-							<td>{{ p.net_amount }}</td>
-							<td>{{ p.date }}</td>
-							<td>{{ p.method }}</td>
-						</tr>
-					{% endfor %}
-					</tbody>
-				</table>
-				<div class="caption">Open <a href="/payments/table">/payments/table</a> for full list.</div>
-			</div>
-
-			<div class="card">
-				<h2>Items (latest 20)</h2>
-				<table>
-					<thead>
-						<tr><th>ID</th><th>SKU</th><th>Name</th><th>Unit</th></tr>
-					</thead>
-					<tbody>
-					{% for it in items %}
-						<tr>
-							<td>{{ it.id }}</td>
-							<td>{{ it.sku }}</td>
-							<td>{{ it.name }}</td>
-							<td>{{ it.unit }}</td>
-						</tr>
-					{% endfor %}
-					</tbody>
-				</table>
-				<div class="caption">Open <a href="/items/table">/items/table</a> for full list.</div>
 			</div>
 		</div>
 
@@ -227,20 +89,20 @@
 				try {
 					await fetch('/auth/logout', { method: 'POST' });
 					location.href = '/auth/login';
-				} catch (e) { alert('Logout error'); }
+				} catch (e) { alert('Çıkış hatası'); }
 			});
 		}
 		if (form) {
 			form.addEventListener('submit', async (e) => {
 				e.preventDefault();
 				const data = new FormData(form);
-				result.textContent = 'Uploading...';
+				result.textContent = 'Yükleniyor...';
 				try {
 					const res = await fetch('/import/upload', { method: 'POST', body: data });
-					if (!res.ok) throw new Error('Upload failed');
+					if (!res.ok) throw new Error('Yükleme başarısız');
 					const json = await res.json();
-					console.log('Uploaded files preview', json.files);
-					result.textContent = `Uploaded ${json.files.length} file(s).`;
+					console.log('Yüklenen dosyalar (önizleme)', json.files);
+					result.textContent = `Yüklenen dosya sayısı: ${json.files.length}`;
 					// For 'returns', redirect to interactive review for the first file
 					if (json.source === 'returns' && json.files && json.files.length){
 						const fn = encodeURIComponent(json.files[0].filename);
@@ -255,7 +117,7 @@
                             if (pm.ok) {
                                 const j = await pm.json();
 								if ((j.total_unmatched||0) > 0) {
-									if (confirm(`${j.total_unmatched} eslesmeyen urun bulundu. Haritalandirma ekranina gitmek ister misiniz?`)) {
+									if (confirm(`${j.total_unmatched} eşleşmeyen ürün bulundu. Haritalandırma ekranına gitmek ister misiniz?`)) {
                                         const joined = fnames.map(encodeURIComponent).join(',');
                                         location.href = `/import/map?source=bizim&filename=${joined}`;
                                         return;
@@ -266,7 +128,7 @@
                     }
 
 					// Offer to commit each file sequentially (date prompt only for bizim)
-					if (confirm('Dosyalar yuklendi. Hepsini ice aktarmak ister misiniz?')) {
+					if (confirm('Dosyalar yüklendi. Hepsini içe aktarmak ister misiniz?')) {
 						const totals = { created_orders:0, created_clients:0, created_items:0, created_payments:0, unmatched:0, enriched_orders:0, payments_existing:0, payments_skipped_zero:0 };
 						for (const f of json.files) {
 							let body = { source: json.source, filename: f.filename };
@@ -276,33 +138,77 @@
 								let today = new Date();
 								const pad = (n)=> String(n).padStart(2,'0');
 								const defaultDate = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
-								const input = prompt(`Data date for ${f.filename} (YYYY-MM-DD)`, defaultDate);
+								const input = prompt(`${f.filename} için veri tarihi (YYYY-MM-DD)`, defaultDate);
 								if (!input) { console.log('Skipped commit for', f.filename); continue; }
 								body.data_date = input;
 							}
 							const res2 = await fetch('/import/commit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)});
-							if (!res2.ok) { const t = await res2.text(); throw new Error(`Commit failed for ${f.filename}: ${t}`); }
+							if (!res2.ok) { const t = await res2.text(); throw new Error(`${f.filename} için içe aktarım başarısız: ${t}`); }
 							const j2 = await res2.json();
-							console.group('Commit result for', f.filename);
-							console.log('Summary:', j2);
+							console.group('İçe aktarma sonucu', f.filename);
+							console.log('Özet:', j2);
 							console.groupEnd();
 							for (const k of Object.keys(totals)) { totals[k] += (j2[k] || 0); }
 						}
-						console.group('Aggregate totals');
-						console.log('Siparisler (created/enriched):', totals.created_orders, totals.enriched_orders);
-						console.log('Musteriler created:', totals.created_clients);
-						console.log('Urunler created:', totals.created_items);
-						console.log('Odemeler (created/existing/skipped0):', totals.created_payments, totals.payments_existing, totals.payments_skipped_zero);
-						console.log('Eslesmeyen satirlar:', totals.unmatched);
+						console.group('Toplamlar');
+						console.log('Siparişler (oluşturulan/zenginleştirilen):', totals.created_orders, totals.enriched_orders);
+						console.log('Müşteriler (oluşturulan):', totals.created_clients);
+						console.log('Ürünler (oluşturulan):', totals.created_items);
+						console.log('Ödemeler (oluşturulan/mevcut/0 atlanan):', totals.created_payments, totals.payments_existing, totals.payments_skipped_zero);
+						console.log('Eşleşmeyen satırlar:', totals.unmatched);
 						console.groupEnd();
 						location.reload();
 					}
 				} catch (err) {
 					console.error(err);
-					result.textContent = 'Upload error';
+					result.textContent = 'Yükleme hatası';
 				}
 			});
 		}
+
+		// Simple pie chart without external deps
+		(function(){
+			const data = {{ (order_status_counts or []) | tojson }};
+			if (!data || !data.length) return;
+			const canvas = document.getElementById('statusPie');
+			if (!canvas) return;
+			const ctx = canvas.getContext('2d');
+			const total = data.reduce((s, r) => s + (r.count || 0), 0) || 1;
+			const colors = ['#60a5fa','#34d399','#fbbf24','#f87171','#a78bfa','#f472b6','#10b981','#f59e0b'];
+			let start = -Math.PI/2;
+			data.forEach((r, i) => {
+				const frac = (r.count || 0) / total;
+				const end = start + frac * Math.PI * 2;
+				ctx.beginPath();
+				ctx.moveTo(canvas.width/2, canvas.height/2);
+				ctx.arc(canvas.width/2, canvas.height/2, Math.min(canvas.width, canvas.height)/2 - 8, start, end);
+				ctx.closePath();
+				ctx.fillStyle = colors[i % colors.length];
+				ctx.fill();
+				start = end;
+			});
+			const legend = document.getElementById('statusLegend');
+			if (legend) {
+				const trMap = {
+					'delivered': 'Teslim edildi',
+					'shipped': 'Kargolandı',
+					'pending': 'Bekliyor',
+					'processing': 'İşleniyor',
+					'cancelled': 'İptal',
+					'canceled': 'İptal',
+					'refunded': 'İade',
+					'switched': 'Değişim',
+					'sitched': 'Birleştirilmiş',
+					'stitched': 'Birleştirilmiş',
+					'unknown': 'Bilinmiyor'
+				};
+				const label = (s)=> trMap[String(s||'').toLowerCase()] || (String(s||'').charAt(0).toUpperCase() + String(s||'').slice(1));
+				legend.innerHTML = data.map((r,i)=>`<span style="display:inline-flex;align-items:center;margin-right:12px;">
+					<span style="display:inline-block;width:10px;height:10px;background:${colors[i%colors.length]};border-radius:2px;margin-right:6px;"></span>
+					${label(r.status)}: <strong style="margin-left:4px;">${r.count}</strong>
+				</span>`).join('');
+			}
+		})();
 		</script>
 	</body>
 </html>

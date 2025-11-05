@@ -91,7 +91,7 @@
     const btn = document.getElementById('logoutBtn');
     if (btn) {
       btn.addEventListener('click', async ()=>{
-        try { await fetch('/auth/logout', { method: 'POST' }); location.href = '/auth/login'; } catch(e){ alert('Logout error'); }
+        try { await fetch('/auth/logout', { method: 'POST' }); location.href = '/auth/login'; } catch(e){ alert('Çıkış hatası'); }
       });
     }
     const inv = document.getElementById('invalidateCacheLink');
@@ -100,10 +100,10 @@
         e.preventDefault();
         try {
           const res = await fetch('/admin/cache/invalidate', { method: 'POST' });
-          let msg = 'Cache invalidated';
-          try { const j = await res.json(); if (!res.ok) msg = 'Error: ' + (j && (j.detail||j.error) || res.status); } catch(_e) {}
+          let msg = 'Önbellek temizlendi';
+          try { const j = await res.json(); if (!res.ok) msg = 'Hata: ' + (j && (j.detail||j.error) || res.status); } catch(_e) {}
           alert(msg);
-        } catch(e){ alert('Invalidate error'); }
+        } catch(e){ alert('Temizleme hatası'); }
       });
     }
   })();

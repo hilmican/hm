@@ -48,81 +48,36 @@ def dashboard(request: Request):
 		linked_gross_paid = float(agg.get("linked_gross_paid", 0.0))
 		total_to_collect = max(0.0, float(total_sales) - linked_gross_paid)
 
-		orders = session.exec(select(Order).order_by(Order.id.desc()).limit(20)).all()
-		# fetch only the related clients/items for shown orders (no extra limits)
-		client_ids = sorted({o.client_id for o in orders if o.client_id})
-		item_ids = sorted({o.item_id for o in orders if o.item_id})
-		clients = session.exec(select(Client).where(Client.id.in_(client_ids))).all() if client_ids else []
-		items = session.exec(select(Item).where(Item.id.in_(item_ids))).all() if item_ids else []
-		client_map = {c.id: c.name for c in clients if c.id is not None}
-		item_map = {it.id: it.name for it in items if it.id is not None}
-		payments = session.exec(select(Payment).order_by(Payment.id.desc()).limit(20)).all()
+		# Order status counts (cached)
+		status_counts = cached_json(
+			"dash:status_counts",
+			ttl,
+			lambda: [
+				{"status": row[0] or "unknown", "count": int(row[1] or 0)}
+				for row in session.exec(text('SELECT COALESCE(status, "unknown") AS s, COUNT(*) FROM "order" GROUP BY s')).all()
+			],
+		)
 
-		# Build order maps from the loaded orders; extend with any orders referenced by payments
-		order_map: dict[int, str] = {o.id: o.tracking_no for o in orders if o.id is not None}
-		order_total_map: dict[int, float] = {o.id: float(o.total_amount or 0.0) for o in orders if o.id is not None}
-		p_client_ids = sorted({p.client_id for p in payments if p.client_id and p.client_id not in client_map})
-		p_order_ids = sorted({p.order_id for p in payments if p.order_id and p.order_id not in order_map})
-		if p_client_ids:
-			extra_clients = session.exec(select(Client).where(Client.id.in_(p_client_ids))).all()
-			for ec in extra_clients:
-				if ec.id is not None:
-					client_map[ec.id] = ec.name
-		if p_order_ids:
-			extra_orders = session.exec(select(Order).where(Order.id.in_(p_order_ids))).all()
-			for eo in extra_orders:
-				if eo.id is not None:
-					order_map[eo.id] = eo.tracking_no
-					order_total_map[eo.id] = float(eo.total_amount or 0.0)
-
-		# compute paid/unpaid flags for shown orders using TahsilatTutari (Payment.amount)
-		order_ids = [o.id for o in orders if o.id]
-		pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
-		paid_map: dict[int, float] = {}
-		for p in pays:
-			if p.order_id is None:
+		# Best-selling low stock: all-time best sellers with on-hand <= 5, top 10
+		from ..services.inventory import compute_all_time_sold_map, get_stock_map
+		sold_map = compute_all_time_sold_map(session)
+		stock_map_all = get_stock_map(session)
+		candidates = [
+			(iid, sold_map.get(iid, 0), int(stock_map_all.get(iid, 0)))
+			for iid in sold_map.keys()
+			if int(stock_map_all.get(iid, 0)) <= 5 and int(sold_map.get(iid, 0)) > 0
+		]
+		candidates.sort(key=lambda t: t[1], reverse=True)
+		top_ids = [iid for iid, _sold, _onhand in candidates[:50]]  # fetch up to 50 to map names, then slice to 10
+		items_top = session.exec(select(Item).where(Item.id.in_(top_ids))).all() if top_ids else []
+		item_map = {it.id: it for it in items_top if it.id is not None}
+		low_stock_best = []
+		for iid, sold, onhand in candidates:
+			if iid not in item_map:
 				continue
-			paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
-		status_map: dict[int, str] = {}
-		for o in orders:
-			oid = o.id or 0
-			total = float(o.total_amount or 0.0)
-			paid = paid_map.get(oid, 0.0)
-			status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
-
-		# Build source filename mappings using ImportRow -> ImportRun
-		client_ids = [c.id for c in clients if c.id]
-		order_ids = [o.id for o in orders if o.id]
-		client_rows = session.exec(select(ImportRow).where(ImportRow.matched_client_id.in_(client_ids))).all() if client_ids else []
-		order_rows = session.exec(select(ImportRow).where(ImportRow.matched_order_id.in_(order_ids))).all() if order_ids else []
-		run_ids = {r.import_run_id for r in client_rows + order_rows}
-		runs = session.exec(select(ImportRun).where(ImportRun.id.in_(run_ids))).all() if run_ids else []
-		run_id_to_filename = {r.id: r.filename for r in runs if r.id is not None}
-
-		client_sources: dict[int, str] = {}
-		for r in client_rows:
-			if r.matched_client_id:
-				client_sources[r.matched_client_id] = run_id_to_filename.get(r.import_run_id, "")
-
-		order_sources: dict[int, str] = {}
-		for r in order_rows:
-			if r.matched_order_id:
-				order_sources[r.matched_order_id] = run_id_to_filename.get(r.import_run_id, "")
-
-		item_sources: dict[int, str] = {}
-		for o in orders:
-			if o.item_id and o.id and o.id in order_sources:
-				item_sources[o.item_id] = order_sources[o.id]
-
-		# Unmatched mapping count removed to avoid extra DB work
-		unmatched_count = 0
-		low_stock = session.exec(select(Item).order_by(Item.id.asc()).limit(50)).all()
-		# compute on-hand for first 50
-		from ..services.inventory import compute_on_hand_for_items
-		stock_map = compute_on_hand_for_items(session, [it.id for it in low_stock if it.id])
-		low_stock_pairs = [(it, stock_map.get(it.id or 0, 0)) for it in low_stock]
-		low_stock_pairs.sort(key=lambda t: t[1])
-		low_stock_pairs = [p for p in low_stock_pairs if p[1] <= 5][:10]
+			low_stock_best.append((item_map[iid], onhand, sold))
+			if len(low_stock_best) >= 10:
+				break
 
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
@@ -133,19 +88,7 @@ def dashboard(request: Request):
 				"total_collected": net_collected,
 				"total_to_collect": total_to_collect,
 				"total_fees": total_fees,
-				"clients": clients,
-				"items": items,
-				"orders": orders,
-				"payments": payments,
-				"client_map": client_map,
-				"item_map": item_map,
-				"order_map": order_map,
-				"order_total_map": order_total_map,
-				"client_sources": client_sources,
-				"order_sources": order_sources,
-				"item_sources": item_sources,
-				"status_map": status_map,
-				"unmatched_count": unmatched_count,
-				"low_stock": low_stock_pairs,
+				"order_status_counts": status_counts,
+				"low_stock_best": low_stock_best,
 			},
 		)
