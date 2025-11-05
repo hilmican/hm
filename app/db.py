@@ -216,6 +216,24 @@ def init_db() -> None:
                             )
                         except Exception:
                             pass
+                        # Ensure conversations.ai_processed_at exists for IG AI
+                        try:
+                            row = conn.exec_driver_sql(
+                                """
+                                SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversations' AND COLUMN_NAME = 'ai_processed_at'
+                                LIMIT 1
+                                """
+                            ).fetchone()
+                            if not row:
+                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_processed_at DATETIME NULL")
+                            # Best-effort index
+                            try:
+                                conn.exec_driver_sql("CREATE INDEX idx_conversations_ai_processed ON conversations(ai_processed_at)")
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
                 return
             # lightweight migrations for existing SQLite DBs
             with engine.begin() as conn:
