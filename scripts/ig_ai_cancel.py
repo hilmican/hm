@@ -98,26 +98,27 @@ def _select_active_runs(conn: sqlite3.Connection, only_ids: Iterable[int] | None
 
 def _cancel_runs(conn: sqlite3.Connection, rows: List[sqlite3.Row], *, retries: int = 10, backoff: float = 0.2) -> None:
     cur = conn.cursor()
-    # Mark runs cancelled/completed
-    ids = [int(r["id"]) for r in rows]
-    if ids:
-        qmarks = ",".join(["?"] * len(ids))
-        _exec_retry(cur, f"UPDATE ig_ai_run SET cancelled_at=CURRENT_TIMESTAMP, completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP) WHERE id IN ({qmarks})", ids, retries=retries, backoff=backoff)
-    # Delete jobs by id and by (kind,key) fallback
+    # Process one run at a time to reduce lock contention
     for r in rows:
         run_id = int(r["id"]) if r["id"] is not None else None
         job_id = int(r["job_id"]) if r["job_id"] is not None else None
+        if run_id is None:
+            continue
+        # Mark cancelled/completed
+        _begin_immediate(conn, retries=retries, backoff=backoff)
+        _exec_retry(cur, "UPDATE ig_ai_run SET cancelled_at=CURRENT_TIMESTAMP, completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP) WHERE id=?", (run_id,), retries=retries, backoff=backoff)
+        # Delete queued job by id
         try:
             if job_id:
                 _exec_retry(cur, "DELETE FROM jobs WHERE id=?", (job_id,), retries=retries, backoff=backoff)
         except Exception:
             pass
+        # Delete by (kind,key) fallback
         try:
-            if run_id is not None:
-                _exec_retry(cur, "DELETE FROM jobs WHERE kind='ig_ai_process_run' AND key=?", (str(run_id),), retries=retries, backoff=backoff)
+            _exec_retry(cur, "DELETE FROM jobs WHERE kind='ig_ai_process_run' AND key=?", (str(run_id),), retries=retries, backoff=backoff)
         except Exception:
             pass
-    conn.commit()
+        conn.commit()
 
 
 def _exec_retry(cur: sqlite3.Cursor, sql: str, params, *, retries: int, backoff: float) -> None:
@@ -134,6 +135,27 @@ def _exec_retry(cur: sqlite3.Cursor, sql: str, params, *, retries: int, backoff:
                 delay = min(delay * 1.7, 2.0)
                 attempt += 1
                 continue
+            raise
+
+
+def _begin_immediate(conn: sqlite3.Connection, *, retries: int, backoff: float) -> None:
+    """Acquire a write lock quickly using BEGIN IMMEDIATE with retries."""
+    attempt = 0
+    delay = max(0.05, backoff)
+    while True:
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            return
+        except sqlite3.OperationalError as e:
+            msg = str(e).lower()
+            if ("database is locked" in msg or "busy" in msg) and attempt < retries:
+                time.sleep(delay)
+                delay = min(delay * 1.7, 2.0)
+                attempt += 1
+                continue
+            # If we already have a transaction, ignore
+            if "cannot start a transaction within a transaction" in msg:
+                return
             raise
 
 
