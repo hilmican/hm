@@ -206,7 +206,7 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                 # Also back-fill order.ig_conversation_id if linked
                 if linked_order_id and cid:
                     session.exec(
-                        _text('UPDATE "order" SET ig_conversation_id = COALESCE(ig_conversation_id, :cid) WHERE id=:oid')
+                    _text('UPDATE `order` SET ig_conversation_id = COALESCE(ig_conversation_id, :cid) WHERE id=:oid')
                     ).params(cid=cid, oid=int(linked_order_id))
                 processed += 1
             except Exception as pe:
