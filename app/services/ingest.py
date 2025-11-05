@@ -316,6 +316,8 @@ def handle(raw_event_id: int) -> int:
 										)).params(id=int(mid), adid=ad_id, link=ad_link, title=ad_title, ref=referral_json_val)
 						except Exception:
 							pass
+				except Exception:
+					pass
 		return inserted
 
 

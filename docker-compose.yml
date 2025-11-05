@@ -18,6 +18,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - MEDIA_ROOT=/app/data/media
       - THUMBS_ROOT=/app/data/thumbs
+      - UVICORN_WORKERS=2
     depends_on:
       - redis
 

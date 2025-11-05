@@ -20,4 +20,4 @@ RUN mkdir -p /app/data
 
 EXPOSE 8388
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8388"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8388", "--workers", "2"]

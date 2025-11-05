@@ -5,4 +5,4 @@ cd "$(dirname "$0")/.."
 if [ -d .venv ]; then
 	. .venv/bin/activate
 fi
-exec uvicorn app.main:app --host 127.0.0.1 --port 8388 --reload
+exec uvicorn app.main:app --host 0.0.0.0 --port 8388 --workers "${UVICORN_WORKERS:-2}"
