@@ -64,11 +64,20 @@
     const form = document.getElementById('runForm');
     const msg = document.getElementById('runMsg');
     form?.addEventListener('submit', async () => {
-      msg.textContent = 'Çalıştırma başlatılıyor...';
+      msg.textContent = 'Önizleme alınıyor...';
       const fd = new FormData(form);
       const body = Object.fromEntries(fd.entries());
       for (const k of ['min_age_minutes','limit']) { if (body[k]) body[k] = Number(body[k]); }
       try {
+        // Preview first to show counts
+        const p = await fetch('/ig/ai/process/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!p.ok) { const t = await p.text(); throw new Error(t); }
+        const prev = await p.json();
+        const proceed = confirm(`Seçilen aralıkta ${prev.eligible_conversations} konuşma ve ${prev.messages_in_scope} mesaj işlenecek.\n` +
+                               (prev.messages_without_timestamp ? `${prev.messages_without_timestamp} mesajın zaman damgası yok.\n` : '') +
+                               `Devam etmek istiyor musunuz?`);
+        if (!proceed) { msg.textContent = 'İşlem iptal edildi.'; return; }
+        msg.textContent = 'Çalıştırma başlatılıyor...';
         const r = await fetch('/ig/ai/process/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!r.ok) { const t = await r.text(); throw new Error(t); }
         const data = await r.json();

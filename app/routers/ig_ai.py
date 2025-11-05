@@ -148,3 +148,60 @@ def run_details(run_id: int):
         }
 
 
+@router.post("/process/preview")
+def preview_process(body: dict):
+    # Parse inputs like start_process, but only compute counts
+    date_from_s: Optional[str] = (body or {}).get("date_from")
+    date_to_s: Optional[str] = (body or {}).get("date_to")
+    min_age_minutes: int = int((body or {}).get("min_age_minutes") or 60)
+
+    def _parse_date(v: Optional[str]) -> Optional[dt.date]:
+        try:
+            return dt.date.fromisoformat(str(v)) if v else None
+        except Exception:
+            return None
+
+    date_from = _parse_date(date_from_s)
+    date_to = _parse_date(date_to_s)
+
+    # Compute cutoff
+    now = dt.datetime.utcnow()
+    cutoff_dt = now - dt.timedelta(minutes=max(0, min_age_minutes))
+    # For message timestamp_ms comparisons (ms since epoch)
+    cutoff_ms = int(cutoff_dt.timestamp() * 1000)
+
+    with get_session() as session:
+        # Conversations count with same eligibility as processor
+        where = ["ai_processed_at IS NULL", "last_message_at <= :cutoff"]
+        params: dict[str, object] = {"cutoff": cutoff_dt.isoformat(" ")}
+        if date_from:
+            params["df"] = date_from.isoformat()
+            where.append("date(last_message_at) >= date(:df)")
+        if date_to:
+            params["dt"] = date_to.isoformat()
+            where.append("date(last_message_at) <= date(:dt)")
+        sql_conv = "SELECT COUNT(1) AS c FROM conversations WHERE " + " AND ".join(where)
+        rowc = session.exec(text(sql_conv)).params(**params).first()
+        conv_count = int((getattr(rowc, "c", None) if rowc is not None else 0) or (rowc[0] if rowc else 0) or 0)
+
+        # Messages count within eligible conversations; also count missing timestamps
+        sql_msg = (
+            "SELECT COUNT(1) AS mc, SUM(CASE WHEN m.timestamp_ms IS NULL THEN 1 ELSE 0 END) AS mt0 "
+            "FROM message m JOIN conversations c ON m.conversation_id = c.convo_id WHERE "
+            + " AND ".join(where)
+            + " AND (m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)"
+        )
+        params_msg = dict(params)
+        params_msg["cutoff_ms"] = int(cutoff_ms)
+        rowm = session.exec(text(sql_msg)).params(**params_msg).first()
+        msg_count = int((getattr(rowm, "mc", None) if rowm is not None else 0) or (rowm[0] if rowm else 0) or 0)
+        msg_ts_missing = int((getattr(rowm, "mt0", None) if rowm is not None else 0) or (rowm[1] if rowm and len(rowm) > 1 else 0) or 0)
+
+    return {
+        "eligible_conversations": conv_count,
+        "messages_in_scope": msg_count,
+        "messages_without_timestamp": msg_ts_missing,
+        "cutoff": cutoff_dt.isoformat(),
+    }
+
+
