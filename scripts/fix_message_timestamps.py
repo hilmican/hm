@@ -1,9 +1,8 @@
 import json
 import os
-from typing import Optional, Tuple
+from typing import Optional
 
-from sqlmodel import SQLModel, create_engine
-from sqlalchemy import text
+from sqlmodel import create_engine
 
 
 def _extract_ts_ms(raw: Optional[str]) -> Optional[int]:
@@ -27,11 +26,15 @@ def _extract_ts_ms(raw: Optional[str]) -> Optional[int]:
             return None
         # accept int, float, or numeric string
         if isinstance(cand, (int, float)):
-            return int(cand)
-        s = str(cand)
-        if s.isdigit():
-            return int(s)
-        return None
+            val = float(cand)
+        else:
+            s = str(cand).strip()
+            if s.replace(".", "", 1).isdigit():
+                val = float(s)
+            else:
+                return None
+        # normalize to milliseconds
+        return int(val if val >= 10_000_000_000 else val * 1000)
     except Exception:
         return None
 
@@ -41,30 +44,10 @@ def main() -> None:
     if not db_url:
         raise SystemExit("DATABASE_URL or MYSQL_URL is required")
     engine = create_engine(db_url, pool_pre_ping=True)
-    # Ensure metadata is loaded (Message model etc.)
-    try:
-        import app.models  # noqa: F401
-        SQLModel.metadata.create_all(engine)
-    except Exception:
-        pass
 
     fixed = 0
     scanned = 0
     with engine.begin() as conn:
-        # upgrade column type proactively (idempotent)
-        try:
-            row = conn.exec_driver_sql(
-                """
-                SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'timestamp_ms'
-                """
-            ).fetchone()
-            if row is not None and str(row[0]).lower() != "bigint":
-                conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN timestamp_ms BIGINT")
-        except Exception:
-            pass
-
-        # Fetch candidate rows: INT clamp value or NULL
         rows = conn.exec_driver_sql(
             "SELECT id, raw_json FROM message WHERE timestamp_ms IS NULL OR timestamp_ms >= 2147480000"
         ).fetchall()
