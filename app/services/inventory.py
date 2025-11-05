@@ -44,10 +44,10 @@ def compute_all_time_sold_map(session: Session) -> Dict[int, int]:
 	sold_map: Dict[int, int] = {int(iid): int(qty or 0) for iid, qty in rows_oi if iid is not None}
 
 	# Determine orders that already have any OrderItem rows
-	orders_with_items: List[Tuple[Optional[int]]] = session.exec(
+	orders_with_items: List[Optional[int]] = session.exec(
 		select(OrderItem.order_id).group_by(OrderItem.order_id)
 	).all()
-	orders_with_items_set: Set[int] = {int(oid[0]) for oid in orders_with_items if oid and oid[0] is not None}
+	orders_with_items_set: Set[int] = {int(oid) for oid in orders_with_items if oid is not None}
 
 	# Fallback: aggregate from Order for orders without OrderItem rows
 	if orders_with_items_set:
