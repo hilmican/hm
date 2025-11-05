@@ -247,7 +247,27 @@ def init_db() -> None:
                                 colkey = str(row[0] or '').lower()
                                 extra = str(row[1] or '').lower()
                                 if 'auto_increment' not in extra:
-                                    conn.exec_driver_sql("ALTER TABLE `jobs` MODIFY COLUMN `id` INT NOT NULL AUTO_INCREMENT, ADD PRIMARY KEY (`id`)")
+                                    # Try a series of compatible ALTERs across MySQL variants
+                                    try:
+                                        conn.exec_driver_sql("ALTER TABLE `jobs` MODIFY COLUMN `id` INT NOT NULL")
+                                    except Exception:
+                                        pass
+                                    try:
+                                        conn.exec_driver_sql("ALTER TABLE `jobs` DROP PRIMARY KEY")
+                                    except Exception:
+                                        pass
+                                    try:
+                                        conn.exec_driver_sql("ALTER TABLE `jobs` CHANGE `id` `id` INT NOT NULL AUTO_INCREMENT")
+                                    except Exception:
+                                        # Fallback single-step
+                                        try:
+                                            conn.exec_driver_sql("ALTER TABLE `jobs` MODIFY COLUMN `id` INT NOT NULL AUTO_INCREMENT")
+                                        except Exception:
+                                            pass
+                                    try:
+                                        conn.exec_driver_sql("ALTER TABLE `jobs` ADD PRIMARY KEY (`id`)")
+                                    except Exception:
+                                        pass
                         except Exception:
                             pass
                         try:
