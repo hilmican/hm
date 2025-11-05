@@ -56,7 +56,7 @@
                 </div>
               {% endfor %}
             {% endif %}
-            <div class="meta">{{ m.timestamp_ms }}
+            <div class="meta"><span class="ts" data-ts="{{ m.timestamp_ms or '' }}">{{ m.timestamp_ms }}</span>
               {% if m.ad_id or m.ad_link or m.ad_title %}
                 · Replied to an ad{% if m.ad_title or m.ad_id %}: {{ m.ad_title or m.ad_id }}{% endif %}
                 {% if m.ad_link %}
@@ -80,6 +80,17 @@
       </form>
     </div>
     <script>
+      function fmtTs(){
+        const nodes = document.querySelectorAll('.ts');
+        for(const el of nodes){
+          const v = el.getAttribute('data-ts');
+          const ms = Number(v||0);
+          if(ms>0){ const d = new Date(ms); el.textContent = d.toLocaleString(); }
+          else { el.textContent = '-'; }
+        }
+      }
+      fmtTs();
+
       const btn = document.getElementById('refresh');
       btn?.addEventListener('click', async () => {
         btn.disabled = true; btn.textContent = 'Refreshing...';

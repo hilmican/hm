@@ -449,6 +449,14 @@ async def send_message(conversation_id: str, body: dict):
             direction="out",
         )
         session.add(row)
+        # update conversations.last_message_at using this timestamp
+        try:
+            from datetime import datetime as _dt
+            ts_iso = _dt.utcfromtimestamp(int(now_ms/1000)).strftime('%Y-%m-%d %H:%M:%S')
+            from sqlalchemy import text as _text
+            session.exec(_text("UPDATE conversations SET last_message_at=:ts WHERE convo_id=:cid").params(ts=ts_iso, cid=conv_id))
+        except Exception:
+            pass
     try:
         await notify_new_message({"type": "ig_message", "conversation_id": conv_id, "text": text_val, "timestamp_ms": now_ms})
     except Exception:

@@ -38,7 +38,7 @@
               {% endif %}
             {% endif %}
           </div>
-          <div class="meta">{{ m.timestamp_ms }} · {{ (m.text or '')[:120] }}</div>
+          <div class="meta"><span class="ts" data-ts="{{ m.timestamp_ms or '' }}">{{ m.timestamp_ms }}</span> · {{ (m.text or '')[:120] }}</div>
         </div>
       {% endfor %}
       {% if not conversations %}
@@ -57,6 +57,17 @@
           location.reload();
         } catch (e) { alert('Refresh error'); }
       });
+
+      function fmtTs(){
+        const nodes = document.querySelectorAll('.ts');
+        for(const el of nodes){
+          const v = el.getAttribute('data-ts');
+          const ms = Number(v||0);
+          if(ms>0){ const d = new Date(ms); el.textContent = d.toLocaleString(); }
+          else { el.textContent = '-'; }
+        }
+      }
+      fmtTs();
 
       // Live updates via WebSocket
       let wsConnected = false;
