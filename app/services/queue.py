@@ -2,6 +2,8 @@ import os
 import json
 import datetime as dt
 from typing import Any, Optional, Tuple
+import time
+import sqlite3
 
 from redis import Redis
 from sqlalchemy import text
@@ -54,15 +56,33 @@ def _ensure_job(kind: str, key: str, payload: Optional[dict] = None, max_attempt
 
 
 def enqueue(kind: str, key: str, payload: Optional[dict] = None, max_attempts: int = 8) -> int:
-	job_id = _ensure_job(kind=kind, key=key, payload=payload, max_attempts=max_attempts)
-	msg = json.dumps({"id": job_id, "kind": kind, "key": key})
-	_get_redis().lpush(f"jobs:{kind}", msg)
-	# track enqueue time for latency metrics
-	try:
-		queue_enqueue_time_add(kind, job_id)
-	except Exception:
-		pass
-	return job_id
+    # Robust against transient SQLite writer locks
+    attempts = 0
+    backoff = 0.2
+    last_err: Exception | None = None
+    while attempts < 6:
+        try:
+            job_id = _ensure_job(kind=kind, key=key, payload=payload, max_attempts=max_attempts)
+            msg = json.dumps({"id": job_id, "kind": kind, "key": key})
+            _get_redis().lpush(f"jobs:{kind}", msg)
+            try:
+                queue_enqueue_time_add(kind, job_id)
+            except Exception:
+                pass
+            return job_id
+        except Exception as e:
+            last_err = e
+            msg = str(e).lower()
+            is_locked = isinstance(e, sqlite3.OperationalError) or ("database is locked" in msg)
+            if not is_locked:
+                raise
+            attempts += 1
+            time.sleep(backoff)
+            backoff = min(backoff * 1.7, 2.0)
+    # If we exhaust retries, re-raise the last error
+    if last_err:
+        raise last_err
+    raise RuntimeError("enqueue failed: unknown error")
 
 
 def delete_job(job_id: int) -> None:
