@@ -131,6 +131,39 @@ def init_db() -> None:
             except Exception:
                 backend = ""
             if backend != "sqlite":
+                # Minimal MySQL-safe migrations
+                if backend == "mysql":
+                    with engine.begin() as conn:
+                        # Up-size potentially long text fields
+                        try:
+                            row = conn.exec_driver_sql(
+                                """
+                                SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                                FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'importrow' AND COLUMN_NAME = 'mapped_json'
+                                """
+                            ).fetchone()
+                            if row is not None:
+                                dtype = str(row[0]).lower()
+                                maxlen = row[1]
+                                if dtype in ("varchar", "char") or dtype == "text":
+                                    conn.exec_driver_sql("ALTER TABLE importrow MODIFY COLUMN mapped_json LONGTEXT")
+                        except Exception:
+                            pass
+                        try:
+                            row = conn.exec_driver_sql(
+                                """
+                                SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                                FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'importrow' AND COLUMN_NAME = 'message'
+                                """
+                            ).fetchone()
+                            if row is not None:
+                                dtype = str(row[0]).lower()
+                                if dtype in ("varchar", "char"):
+                                    conn.exec_driver_sql("ALTER TABLE importrow MODIFY COLUMN message TEXT")
+                        except Exception:
+                            pass
                 return
             # lightweight migrations for existing SQLite DBs
             with engine.begin() as conn:

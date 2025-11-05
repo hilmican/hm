@@ -2,7 +2,7 @@ import datetime as dt
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import UniqueConstraint, Text, Column
 
 
 class Client(SQLModel, table=True):
@@ -136,9 +136,9 @@ class ImportRow(SQLModel, table=True):
     import_run_id: int = Field(foreign_key="importrun.id")
     row_index: int
     row_hash: str = Field(index=True)
-    mapped_json: str
+    mapped_json: str = Field(sa_column=Column(Text))
     status: str = Field(index=True, description="created|updated|skipped|unmatched|error")
-    message: Optional[str] = None
+    message: Optional[str] = Field(default=None, sa_column=Column(Text))
     matched_client_id: Optional[int] = Field(default=None, foreign_key="client.id")
     matched_order_id: Optional[int] = Field(default=None, foreign_key="order.id")
 
