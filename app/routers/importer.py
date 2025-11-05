@@ -1123,13 +1123,11 @@ def returns_apply(body: dict, request: Request):
 			session.add(ir)
 		# Invalidate caches
 		bump_namespace()
-		if errors:
-			# Return 400 with details so UI can show the error and allow correction
-			raise HTTPException(status_code=400, detail={
-				"message": "Some rows failed to apply",
-				"run_id": run.id or 0,
-				"updated": updated,
-				"unmatched": unmatched,
-				"errors": errors,
-			})
-		return {"status": "ok", "run_id": run.id or 0, "updated": updated, "unmatched": unmatched}
+		# Always return 200 to allow partial success; include errors for client display
+		return {
+			"status": "ok",
+			"run_id": run.id or 0,
+			"updated": updated,
+			"unmatched": unmatched,
+			"errors": errors,
+		}

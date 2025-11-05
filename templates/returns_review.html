@@ -67,6 +67,9 @@
       try{
         const r = await fetch('/import/returns/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: '{{ filename }}', data_date: dataDate, skip_stock: skipStock, selections: sels }) });
         if (!r.ok){ const t = await r.text(); alert('Hata: ' + t); return; }
+        const data = await r.json().catch(() => ({}));
+        const msg = `Uygulama tamamlandı. Güncellenen: ${data.updated ?? 0}, Eşleşmeyen: ${data.unmatched ?? 0}` + ((data.errors && data.errors.length) ? `, Hatalı: ${data.errors.length}` : '');
+        alert(msg);
         location.href = '/orders/table';
       }catch(e){ alert('Ağ hatası'); }
     }
