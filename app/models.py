@@ -53,6 +53,8 @@ class Order(SQLModel, table=True):
     status: Optional[str] = Field(default=None, index=True)
     notes: Optional[str] = None
     source: str = Field(index=True, description="bizim|kargo")
+    # Link to Instagram conversation id (e.g., "dm:<ig_user_id>")
+    ig_conversation_id: Optional[str] = Field(default=None, index=True)
 
 
 class OrderItem(SQLModel, table=True):

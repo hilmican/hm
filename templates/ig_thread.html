@@ -21,7 +21,13 @@
       <a href="/ig/inbox">← Back to Inbox</a>
       <button id="refresh">Refresh</button>
     </div>
-    <h2>Conversation {{ other_label or conversation_id }} {% if other_label %}<a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ other_label[1:] }}">profile ↗</a>{% endif %}</h2>
+    <h2>
+      Conversation {{ other_label or conversation_id }}
+      {% if other_label %}<a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ other_label[1:] }}">profile ↗</a>{% endif %}
+      {% if contact_name or contact_phone %}
+        <div class="meta">{{ contact_name or '' }}{% if contact_name and contact_phone %} · {% endif %}{{ contact_phone or '' }}</div>
+      {% endif %}
+    </h2>
     <div id="thread">
       {% for m in messages %}
         <div class="msg {{ m.direction or 'in' }}">

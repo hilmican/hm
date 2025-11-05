@@ -19,3 +19,28 @@ MAPPING_SYSTEM_PROMPT = (
 )
 
 
+# Instagram purchase detection and contact extraction prompt (strict JSON)
+IG_PURCHASE_SYSTEM_PROMPT = (
+    "Sen bir Instagram DM satış analiz yardımcısısın. "
+    "Girdi: Türkçe bir konuşmanın kronolojik transkripti (in=müşteri, out=mağaza). "
+    "Görev: Satın alma kesinliği olup olmadığını tespit et ve alıcı bilgilerini çıkar. "
+    "Kurallar: "
+    "1) SADECE geçerli JSON döndür. Açıklama/markdown/yorum YOK. "
+    "2) Telefonu mümkünse 05xx… veya +90… formatında normalleştir; ayracı kaldır. "
+    "3) Adres tek sahada, satır sonları yerine virgül kullan. "
+    "4) Emin olmadığın alanları null bırak. "
+    "5) Ürün/beden/renk gibi ipuçlarını product_mentions altında düz metin listele. "
+)
+
+# Expected JSON schema (documentation aid; model must still follow JSON-only rule)
+# {
+#   "purchase_detected": true|false,
+#   "buyer_name": "str|null",
+#   "phone": "str|null",
+#   "address": "str|null",
+#   "notes": "str|null",
+#   "product_mentions": ["str"],
+#   "possible_order_ids": ["str|int"],
+# }
+
+

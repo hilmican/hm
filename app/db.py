@@ -118,6 +118,14 @@ def init_db() -> None:
                 except Exception:
                     pass
 
+                # Order.ig_conversation_id (TEXT)
+                if not column_exists("order", "ig_conversation_id"):
+                    conn.exec_driver_sql('ALTER TABLE "order" ADD COLUMN ig_conversation_id TEXT')
+                try:
+                    conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_order_ig_conversation_id ON "order"(ig_conversation_id)')
+                except Exception:
+                    pass
+
                 # ImportRow.row_hash index for dedup/idempotency (best-effort)
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_importrow_row_hash ON importrow(row_hash)")
@@ -277,6 +285,39 @@ def init_db() -> None:
                     )
                     """
                 )
+                # Ensure conversations AI/contact columns exist (idempotent ALTERs)
+                try:
+                    rows = conn.exec_driver_sql("PRAGMA table_info('conversations')").fetchall()
+                    have = {r[1] for r in rows}
+                    add_cols: list[tuple[str, str]] = []
+                    if 'contact_name' not in have:
+                        add_cols.append(("contact_name", "TEXT"))
+                    if 'contact_phone' not in have:
+                        add_cols.append(("contact_phone", "TEXT"))
+                    if 'contact_address' not in have:
+                        add_cols.append(("contact_address", "TEXT"))
+                    if 'ai_status' not in have:
+                        add_cols.append(("ai_status", "TEXT"))
+                    if 'ai_json' not in have:
+                        add_cols.append(("ai_json", "TEXT"))
+                    if 'ai_processed_at' not in have:
+                        add_cols.append(("ai_processed_at", "DATETIME"))
+                    if 'linked_order_id' not in have:
+                        add_cols.append(("linked_order_id", "INTEGER"))
+                    if 'ai_run_id' not in have:
+                        add_cols.append(("ai_run_id", "INTEGER"))
+                    for name, typ in add_cols:
+                        try:
+                            conn.exec_driver_sql(f"ALTER TABLE conversations ADD COLUMN {name} {typ}")
+                        except Exception:
+                            pass
+                    # helpful indexes
+                    try:
+                        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_conversations_ai_processed ON conversations(ai_processed_at)")
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
                 # attachments table (1..N per message)
                 conn.exec_driver_sql(
                     """
@@ -310,6 +351,25 @@ def init_db() -> None:
                         max_attempts INTEGER NOT NULL DEFAULT 8,
                         payload TEXT,
                         UNIQUE (kind, key)
+                    )
+                    """
+                )
+                # ig_ai_run table for batch tracking
+                conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS ig_ai_run (
+                        id INTEGER PRIMARY KEY,
+                        started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        completed_at DATETIME,
+                        date_from DATE,
+                        date_to DATE,
+                        min_age_minutes INTEGER,
+                        conversations_considered INTEGER DEFAULT 0,
+                        conversations_processed INTEGER DEFAULT 0,
+                        orders_linked INTEGER DEFAULT 0,
+                        purchases_detected INTEGER DEFAULT 0,
+                        purchases_unlinked INTEGER DEFAULT 0,
+                        errors_json TEXT
                     )
                     """
                 )

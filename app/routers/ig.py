@@ -214,6 +214,8 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
         # Determine other party id from messages then resolve username
         other_label = None
         other_id = None
+        contact_name = None
+        contact_phone = None
         for mm in msgs:
             try:
                 other_id = (mm.ig_sender_id if (mm.direction or "in") == "in" else mm.ig_recipient_id)
@@ -229,6 +231,18 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                     un = rowu.username if hasattr(rowu, "username") else rowu[0]
                     if un:
                         other_label = f"@{un}"
+            except Exception:
+                pass
+            # Try to fetch contact info from conversations table
+            try:
+                from sqlalchemy import text as _text
+                rowc = session.exec(_text("""
+                    SELECT contact_name, contact_phone FROM conversations
+                    WHERE ig_user_id = :u ORDER BY last_message_at DESC LIMIT 1
+                """).params(u=str(other_id))).first()
+                if rowc:
+                    contact_name = (rowc.contact_name if hasattr(rowc, 'contact_name') else rowc[0]) or None
+                    contact_phone = (rowc.contact_phone if hasattr(rowc, 'contact_phone') else rowc[1]) or None
             except Exception:
                 pass
         # Resolve per-message sender usernames via ig_users only.
@@ -304,7 +318,7 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
         except Exception:
             att_ids_map = {}
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label, "att_map": att_map, "att_ids_map": att_ids_map, "usernames": usernames})
+        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label, "att_map": att_map, "att_ids_map": att_ids_map, "usernames": usernames, "contact_name": contact_name, "contact_phone": contact_phone})
 
 
 @router.get("/media/local/{attachment_id}")

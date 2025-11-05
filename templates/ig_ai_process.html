@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>IG ↔ Orders: AI Processing</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:16px; margin:12px 0; }
+    .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+    input, select { padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; }
+    button { padding:10px 14px; border-radius:8px; border:1px solid #2563eb; background:#2563eb; color:#fff; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:8px 10px; border-bottom:1px solid #f3f4f6; text-align:left; }
+    th { background:#fafafa; }
+    .muted { color:#6b7280; font-size:12px; }
+  </style>
+</head>
+<body>
+  {% include "_nav.html" %}
+  <h2>IG ↔ Orders: AI Processing</h2>
+
+  <div class="card">
+    <h3>Yeni Çalıştırma</h3>
+    <form id="runForm" class="row" onsubmit="return false;">
+      <label>Başlangıç Tarihi <input type="date" name="date_from" /></label>
+      <label>Bitiş Tarihi <input type="date" name="date_to" /></label>
+      <label>Min Yaş (dk) <input type="number" name="min_age_minutes" value="60" min="0" /></label>
+      <label>Limit <input type="number" name="limit" value="200" min="1" max="5000" /></label>
+      <button type="submit">İşle</button>
+    </form>
+    <div id="runMsg" class="muted"></div>
+  </div>
+
+  <div class="card">
+    <h3>Son Çalıştırmalar</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Başladı</th><th>Bitti</th><th>Tarih Aralığı</th><th>Min Yaş</th>
+          <th>Konuşma</th><th>İşlenen</th><th>Bağlandı</th><th>Satın Alma</th><th>Eşleşmeyen</th>
+        </tr>
+      </thead>
+      <tbody id="runsBody">
+        {% for r in runs %}
+        <tr>
+          <td>{{ r.id }}</td>
+          <td>{{ r.started_at }}</td>
+          <td>{{ r.completed_at or '-' }}</td>
+          <td>{{ r.date_from or '-' }} → {{ r.date_to or '-' }}</td>
+          <td>{{ r.min_age_minutes }}</td>
+          <td>{{ r.conversations_considered }}</td>
+          <td>{{ r.conversations_processed }}</td>
+          <td>{{ r.orders_linked }}</td>
+          <td>{{ r.purchases_detected }}</td>
+          <td>{{ r.purchases_unlinked }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="muted">Liste otomatik olarak 5 sn'de bir yenilenir.</div>
+  </div>
+
+  <script>
+    const form = document.getElementById('runForm');
+    const msg = document.getElementById('runMsg');
+    form?.addEventListener('submit', async () => {
+      msg.textContent = 'Çalıştırma başlatılıyor...';
+      const fd = new FormData(form);
+      const body = Object.fromEntries(fd.entries());
+      for (const k of ['min_age_minutes','limit']) { if (body[k]) body[k] = Number(body[k]); }
+      try {
+        const r = await fetch('/ig/ai/process/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!r.ok) { const t = await r.text(); throw new Error(t); }
+        const data = await r.json();
+        msg.textContent = 'Çalıştırma kuyruğa alındı. Run ID: ' + data.run_id;
+      } catch (e) { msg.textContent = 'Hata: ' + e; }
+    });
+
+    async function refreshRuns(){
+      try{
+        const r = await fetch('/ig/ai/process/runs?limit=20');
+        if(!r.ok) return;
+        const data = await r.json();
+        const tb = document.getElementById('runsBody');
+        tb.innerHTML = '';
+        for(const rr of (data.runs||[])){
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${rr.id}</td><td>${rr.started_at||''}</td><td>${rr.completed_at||'-'}</td>`+
+                         `<td>${rr.date_from||'-'} → ${rr.date_to||'-'}</td><td>${rr.min_age_minutes||''}</td>`+
+                         `<td>${rr.conversations_considered||0}</td><td>${rr.conversations_processed||0}</td>`+
+                         `<td>${rr.orders_linked||0}</td><td>${rr.purchases_detected||0}</td>`+
+                         `<td>${rr.purchases_unlinked||0}</td>`;
+          tb.appendChild(tr);
+        }
+      }catch{}
+    }
+    setInterval(refreshRuns, 5000);
+  </script>
+</body>
+</html>
+
+

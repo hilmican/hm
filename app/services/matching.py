@@ -7,6 +7,8 @@ from sqlmodel import select
 from sqlalchemy import or_, and_
 
 from ..models import Client, Order
+from ..utils.normalize import normalize_phone, normalize_text
+import datetime as dt
 
 
 def score_candidate(row: dict[str, Any], client: Client) -> int:
@@ -81,3 +83,61 @@ def find_recent_placeholder_kargo_for_client(session, client_id: int, days: int 
         .order_by(Order.shipment_date.desc().nullslast(), Order.id.desc())
     ).all()
     return rows[0] if rows else None
+
+
+def _orders_for_client_in_window(session, client_id: int, date_from: dt.date | None, date_to: dt.date | None) -> list[Order]:
+    q = select(Order).where(Order.client_id == client_id)
+    if date_from and date_to:
+        q = q.where(
+            or_(
+                and_(Order.shipment_date.is_not(None), Order.shipment_date >= date_from, Order.shipment_date <= date_to),
+                and_(Order.data_date.is_not(None), Order.data_date >= date_from, Order.data_date <= date_to),
+            )
+        )
+    return session.exec(q.order_by(Order.id.desc())).all()
+
+
+def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: dt.date | None, date_to: dt.date | None) -> int | None:
+    """Given extracted buyer info from IG, attempt to link to a single existing order.
+
+    Strategy:
+    1) If phone present, find client by normalized phone; if exactly one client and exactly one order in window, link it.
+    2) Else fuzzy match client by buyer_name/address; if one strong candidate and one order in window, link it.
+    """
+    phone = normalize_phone(extracted.get("phone"))
+    buyer_name = (extracted.get("buyer_name") or "").strip()
+    addr = (extracted.get("address") or "").strip()
+
+    # 1) Phone-based client match
+    client_by_phone: Client | None = None
+    if phone:
+        try:
+            candidates = session.exec(select(Client).where(Client.phone.is_not(None))).all()
+        except Exception:
+            candidates = []
+        matches = []
+        for c in candidates:
+            ph = normalize_phone(c.phone)
+            if ph and (ph == phone or (len(phone) >= 7 and phone.endswith(ph[-7:]) or ph.endswith(phone[-7:]))):
+                matches.append(c)
+        if len(matches) == 1:
+            client_by_phone = matches[0]
+            orders = _orders_for_client_in_window(session, int(client_by_phone.id), date_from, date_to) if client_by_phone.id else []
+            if len(orders) == 1:
+                return int(orders[0].id)
+
+    # 2) Fuzzy name/address match
+    row = {"name": buyer_name, "address": addr, "city": ""}
+    candidates = session.exec(select(Client)).all()
+    best: tuple[Client, int] | None = None
+    for c in candidates:
+        sc = score_candidate(row, c)
+        if best is None or sc > best[1]:
+            best = (c, sc)
+    if best and best[1] >= 80:
+        c = best[0]
+        orders = _orders_for_client_in_window(session, int(c.id), date_from, date_to) if c.id else []
+        if len(orders) == 1:
+            return int(orders[0].id)
+
+    return None
