@@ -399,44 +399,44 @@ def debug_backfill_media(limit: int = 200):
 
 @router.get("/fix/message-timestamps")
 def fix_message_timestamps(request: Request):
-\ttemplates = request.app.state.templates
-\tfixed = 0
-\tskipped = 0
-\terrors: list[dict[str, Any]] = []
-\ttotal = 0
-\twith get_session() as session:
-\t\ttry:
-\t\t\trows = session.exec(
-\t\t\t\tselect(Message).where((Message.timestamp_ms.is_(None)) | (Message.timestamp_ms >= 2147480000))
-\t\t\t).all()
-\t\t\ttotal = len(rows)
-\t\t\tfor msg in rows:
-\t\t\t\ttry:
-\t\t\t\t\traw = msg.raw_json or "{}"
-\t\t\t\t\tdata = json.loads(raw)
-\t\t\t\t\tts = data.get("timestamp")
-\t\t\t\t\tif ts is None:
-\t\t\t\t\t\tskipped += 1
-\t\t\t\t\t\tcontinue
-\t\t\t\t\tif isinstance(ts, (int, float)):
-\t\t\t\t\t\tval = int(ts if ts > 10_000_000_000 else ts * 1000)
-\t\t\t\t\t\tmsg.timestamp_ms = val
-\t\t\t\t\t\tsession.add(msg)
-\t\t\t\t\t\tfixed += 1
-\t\t\t\texcept Exception as e:
-\t\t\t\t\terrors.append({"id": msg.id, "error": str(e)})
-\t\t\ttry:
-\t\t\t\tsession.commit()
-\t\t\texcept Exception as e:
-\t\t\t\t# best-effort commit; surface error
-\t\t\t\terrors.append({"id": None, "error": f"commit: {e}"})
-\t\texcept Exception as e:
-\t\t\terrors.append({"id": None, "error": f"query: {e}"})
-\tctx = {
-\t\t"total": total,
-\t\t"fixed": fixed,
-\t\t"skipped": skipped,
-\t\t"error_count": len(errors),
-\t\t"errors": errors[:50],
-\t}
-\treturn templates.TemplateResponse("admin_fix_timestamps.html", {"request": request, **ctx})
+	templates = request.app.state.templates
+	fixed = 0
+	skipped = 0
+	errors: list[dict[str, Any]] = []
+	total = 0
+	with get_session() as session:
+		try:
+			rows = session.exec(
+				select(Message).where((Message.timestamp_ms.is_(None)) | (Message.timestamp_ms >= 2147480000))
+			).all()
+			total = len(rows)
+			for msg in rows:
+				try:
+					raw = msg.raw_json or "{}"
+					data = json.loads(raw)
+					ts = data.get("timestamp")
+					if ts is None:
+						skipped += 1
+						continue
+					if isinstance(ts, (int, float)):
+						val = int(ts if ts > 10_000_000_000 else ts * 1000)
+						msg.timestamp_ms = val
+						session.add(msg)
+						fixed += 1
+				except Exception as e:
+					errors.append({"id": msg.id, "error": str(e)})
+			try:
+				session.commit()
+			except Exception as e:
+				# best-effort commit; surface error
+				errors.append({"id": None, "error": f"commit: {e}"})
+		except Exception as e:
+			errors.append({"id": None, "error": f"query: {e}"})
+	ctx = {
+		"total": total,
+		"fixed": fixed,
+		"skipped": skipped,
+		"error_count": len(errors),
+		"errors": errors[:50],
+	}
+	return templates.TemplateResponse("admin_fix_timestamps.html", {"request": request, **ctx})
