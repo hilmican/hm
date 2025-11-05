@@ -192,6 +192,30 @@ def init_db() -> None:
                                     conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN raw_json LONGTEXT")
                         except Exception:
                             pass
+                        # Ensure ig_ai_run table exists (MySQL)
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS ig_ai_run (
+                                    id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                                    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                    completed_at DATETIME NULL,
+                                    cancelled_at DATETIME NULL,
+                                    job_id INTEGER NULL,
+                                    date_from DATE NULL,
+                                    date_to DATE NULL,
+                                    min_age_minutes INTEGER NOT NULL DEFAULT 60,
+                                    conversations_considered INTEGER NOT NULL DEFAULT 0,
+                                    conversations_processed INTEGER NOT NULL DEFAULT 0,
+                                    orders_linked INTEGER NOT NULL DEFAULT 0,
+                                    purchases_detected INTEGER NOT NULL DEFAULT 0,
+                                    purchases_unlinked INTEGER NOT NULL DEFAULT 0,
+                                    errors_json LONGTEXT NULL
+                                )
+                                """
+                            )
+                        except Exception:
+                            pass
                 return
             # lightweight migrations for existing SQLite DBs
             with engine.begin() as conn:

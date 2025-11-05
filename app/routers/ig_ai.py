@@ -50,10 +50,24 @@ def start_process(body: dict):
             age=int(min_age_minutes),
         )
         session.exec(stmt)
-        rid_row = session.exec(text("SELECT last_insert_rowid() AS id")).first()
-        if not rid_row:
+        run_id = None
+        # Try MySQL first
+        try:
+            rid_row = session.exec(text("SELECT LAST_INSERT_ID() AS id")).first()
+            if rid_row is not None:
+                run_id = int(getattr(rid_row, "id", rid_row[0]))
+        except Exception:
+            pass
+        # Fallback to SQLite-style
+        if run_id is None:
+            try:
+                rid_row = session.exec(text("SELECT last_insert_rowid() AS id")).first()
+                if rid_row is not None:
+                    run_id = int(getattr(rid_row, "id", rid_row[0]))
+            except Exception:
+                pass
+        if run_id is None:
             raise HTTPException(status_code=500, detail="Could not create run")
-        run_id = int(getattr(rid_row, "id", rid_row[0]))
 
     # Enqueue background job to process
     job_id = enqueue("ig_ai_process_run", key=str(run_id), payload={
@@ -187,7 +201,7 @@ def preview_process(body: dict):
             params["dte"] = f"{dt_end.isoformat()} 00:00:00"
             where.append("last_message_at < :dte")
         sql_conv = "SELECT COUNT(1) AS c FROM conversations WHERE " + " AND ".join(where)
-        rowc = session.exec(text(sql_conv)).params(**params).first()
+        rowc = session.exec(text(sql_conv).params(**params)).first()
         conv_count = int((getattr(rowc, "c", None) if rowc is not None else 0) or (rowc[0] if rowc else 0) or 0)
 
         # Messages count within eligible conversations; also count missing timestamps
@@ -199,7 +213,7 @@ def preview_process(body: dict):
         )
         params_msg = dict(params)
         params_msg["cutoff_ms"] = int(cutoff_ms)
-        rowm = session.exec(text(sql_msg)).params(**params_msg).first()
+        rowm = session.exec(text(sql_msg).params(**params_msg)).first()
         msg_count = int((getattr(rowm, "mc", None) if rowm is not None else 0) or (rowm[0] if rowm else 0) or 0)
         msg_ts_missing = int((getattr(rowm, "mt0", None) if rowm is not None else 0) or (rowm[1] if rowm and len(rowm) > 1 else 0) or 0)
 
