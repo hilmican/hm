@@ -28,15 +28,27 @@ def _get_redis() -> Redis:
 def _ensure_job(kind: str, key: str, payload: Optional[dict] = None, max_attempts: int = 8) -> int:
 	"""Insert into jobs table idempotently (UNIQUE(kind,key)) and return job id."""
 	with get_session() as session:
-		# Try insert-or-ignore, then select id
-		session.exec(
-			text(
+		# Dialect-aware idempotent insert
+		try:
+			dialect = str(session.get_bind().dialect.name)
+		except Exception:
+			dialect = ""
+		if dialect == "mysql":
+			stmt = text(
+				"""
+				INSERT INTO jobs(kind, key, run_after, attempts, max_attempts, payload)
+				VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
+				ON DUPLICATE KEY UPDATE id = id
+				"""
+			)
+		else:
+			stmt = text(
 				"""
 				INSERT OR IGNORE INTO jobs(kind, key, run_after, attempts, max_attempts, payload)
 				VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
 				"""
-			).params(kind=kind, key=key, max_attempts=max_attempts, payload=json.dumps(payload or {}))
-		)
+			)
+		session.exec(stmt.params(kind=kind, key=key, max_attempts=max_attempts, payload=json.dumps(payload or {})))
 		row = session.exec(
 			text("SELECT id FROM jobs WHERE kind=:kind AND key=:key").params(kind=kind, key=key)
 		).first()
@@ -51,7 +63,9 @@ def _ensure_job(kind: str, key: str, payload: Optional[dict] = None, max_attempt
 					"""
 				).params(kind=kind, key=f"{key}:{sfx}", max_attempts=max_attempts, payload=json.dumps(payload or {}))
 			)
-			row = session.exec(text("SELECT last_insert_rowid() as id")).first()
+			# Try get id in a backend-agnostic way
+			row = session.exec(text("SELECT id FROM jobs WHERE kind=:kind AND key=:key").params(kind=kind, key=f"{key}:{sfx}")).first()
+		# Normalize id
 		return int(row.id if hasattr(row, "id") else row[0])  # type: ignore
 
 

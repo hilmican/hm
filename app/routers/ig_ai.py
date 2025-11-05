@@ -217,6 +217,30 @@ def preview_process(body: dict):
         msg_count = int((getattr(rowm, "mc", None) if rowm is not None else 0) or (rowm[0] if rowm else 0) or 0)
         msg_ts_missing = int((getattr(rowm, "mt0", None) if rowm is not None else 0) or (rowm[1] if rowm and len(rowm) > 1 else 0) or 0)
 
+        # Fallbacks when conversations table filters produce 0 due to missing/old data
+        if conv_count == 0:
+            ms_from = None
+            ms_to = None
+            if date_from:
+                ms_from = int(dt.datetime.combine(date_from, dt.time.min).timestamp() * 1000)
+            if date_to:
+                ms_to = int(dt.datetime.combine(date_to + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
+            where_msg = ["m.conversation_id IS NOT NULL", "(m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)"]
+            params_f = {"cutoff_ms": int(cutoff_ms)}
+            if ms_from is not None and ms_to is not None:
+                where_msg.append("(m.timestamp_ms IS NULL OR (m.timestamp_ms >= :ms_from AND m.timestamp_ms < :ms_to))")
+                params_f["ms_from"] = int(ms_from)
+                params_f["ms_to"] = int(ms_to)
+            elif ms_from is not None:
+                where_msg.append("(m.timestamp_ms IS NULL OR m.timestamp_ms >= :ms_from)")
+                params_f["ms_from"] = int(ms_from)
+            elif ms_to is not None:
+                where_msg.append("(m.timestamp_ms IS NULL OR m.timestamp_ms < :ms_to)")
+                params_f["ms_to"] = int(ms_to)
+            sql_conv_fb = "SELECT COUNT(DISTINCT m.conversation_id) AS c FROM message m WHERE " + " AND ".join(where_msg)
+            rowfb = session.exec(text(sql_conv_fb).params(**params_f)).first()
+            conv_count = int((getattr(rowfb, "c", None) if rowfb is not None else 0) or (rowfb[0] if rowfb else 0) or 0)
+
     return {
         "eligible_conversations": conv_count,
         "messages_in_scope": msg_count,
