@@ -89,6 +89,57 @@ def _check_redis() -> Dict[str, Any]:
 		return {"ok": False, "error": str(e)}
 
 
+def _find_latest_sqlite_backup() -> Optional[str]:
+	"""Search common locations for latest valid SQLite backup file.
+
+	Order: $SQLITE_BACKUP_DIR, data/backups, backups, data
+	Valid extensions: .db, .sqlite, .sqlite3
+	Per-candidate validation: PRAGMA integrity_check; presence of message table optional.
+	"""
+	try:
+		candidates: list[str] = []
+		seen: set[str] = set()
+		def _gather(dirpath: str) -> None:
+			if not dirpath or not os.path.isdir(dirpath):
+				return
+			for root, _dirs, files in os.walk(dirpath):
+				for fn in files:
+					low = fn.lower()
+					if low.endswith((".db", ".sqlite", ".sqlite3")):
+						full = os.path.join(root, fn)
+						if full not in seen:
+							seen.add(full)
+							candidates.append(full)
+		# search roots
+		for d in [os.getenv("SQLITE_BACKUP_DIR"), "data/backups", "backups", "data", "/app/data/backups", "/app/data"]:
+			if d:
+				_gather(d)
+		# sort by mtime desc
+		candidates.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0, reverse=True)
+		# validate
+		for p in candidates:
+			try:
+				con = sqlite3.connect(p)
+				try:
+					con.execute("PRAGMA integrity_check;")
+					# quick smoke query best-effort
+					try:
+						con.execute("SELECT 1 FROM message LIMIT 1")
+					except Exception:
+						pass
+					con.close()
+					return p
+				except Exception:
+					try:
+						con.close()
+					except Exception:
+						pass
+					continue
+		return None
+	except Exception:
+		return None
+
+
 @router.get("/version")
 def version() -> Dict[str, Any]:
 	return {"version": _read_git_version() or "unknown"}
@@ -453,7 +504,10 @@ def reimport_raw_json(request: Request, sqlite_path: str | None = None):
 	path = sqlite_path or os.getenv("SQLITE_PATH", "data/app.db")
 	try:
 		if not os.path.exists(path):
-			raise FileNotFoundError(f"SQLite not found: {path}")
+			alt = _find_latest_sqlite_backup()
+			if not alt:
+				raise FileNotFoundError(f"SQLite not found: {path}")
+			path = alt
 		with get_session() as session:
 			# Ensure MySQL column types before updates (idempotent)
 			try:
@@ -491,13 +545,30 @@ def reimport_raw_json(request: Request, sqlite_path: str | None = None):
 				errors.append({"id": None, "error": f"ensure types: {e}"})
 
 			# Open SQLite and stream rows
+			# try main path; if malformed, try latest backup
+			con = None
 			try:
 				con = sqlite3.connect(path)
 				con.row_factory = sqlite3.Row
+				# integrity check
+				try:
+					con.execute("PRAGMA integrity_check;")
+				except Exception as e_ic:
+					raise e_ic
 			except Exception as e:
-				errors.append({"id": None, "error": f"sqlite open: {e}"})
-				ctx = {"scanned": scanned, "updated": updated, "missing": missing, "error_count": len(errors), "errors": errors[:50], "sqlite_path": path}
-				return templates.TemplateResponse("admin_reimport_raw_json.html", {"request": request, **ctx})
+				# fallback to latest backup
+				alt = _find_latest_sqlite_backup()
+				if alt:
+					try:
+						path = alt
+						con = sqlite3.connect(alt)
+						con.row_factory = sqlite3.Row
+					except Exception as e2:
+						errors.append({"id": None, "error": f"sqlite fallback open: {e2}"})
+				else:
+					errors.append({"id": None, "error": f"sqlite open: {e}"})
+					ctx = {"scanned": scanned, "updated": updated, "missing": missing, "error_count": len(errors), "errors": errors[:50], "sqlite_path": path}
+					return templates.TemplateResponse("admin_reimport_raw_json.html", {"request": request, **ctx})
 
 			with con:
 				cur = con.cursor()
