@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Mesaj Zaman Düzelt</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .ok { color: #16a34a; }
+      .bad { color: #dc2626; }
+      .card { border:1px solid #e5e7eb; border-radius:8px; padding:16px; margin:12px 0; }
+      code { background:#f3f4f6; padding:2px 4px; border-radius:4px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #e5e7eb; text-align: left; padding: 8px; font-size: 13px; }
+      th { background: #f9fafb; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h2>Mesaj Zaman Düzelt</h2>
+    <div class="card">
+      <div><strong>Toplam Tarama:</strong> {{ total }}</div>
+      <div><strong>Düzeltilen:</strong> <span class="ok">{{ fixed }}</span></div>
+      <div><strong>Atlanan:</strong> {{ skipped }}</div>
+      <div><strong>Hata Sayısı:</strong> <span class="bad">{{ error_count }}</span></div>
+    </div>
+    {% if errors and errors|length > 0 %}
+    <div class="card">
+      <h3>Hatalar (ilk 50)</h3>
+      <table>
+        <thead>
+          <tr><th>Message ID</th><th>Hata</th></tr>
+        </thead>
+        <tbody>
+          {% for e in errors %}
+          <tr>
+            <td>{{ e.id }}</td>
+            <td><code>{{ e.error }}</code></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </body>
+  </html>
+
+
