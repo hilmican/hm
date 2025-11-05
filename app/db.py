@@ -164,6 +164,18 @@ def init_db() -> None:
                                     conn.exec_driver_sql("ALTER TABLE importrow MODIFY COLUMN message TEXT")
                         except Exception:
                             pass
+                        # Ensure message.timestamp_ms is BIGINT to hold ms since epoch
+                        try:
+                            row = conn.exec_driver_sql(
+                                """
+                                SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'timestamp_ms'
+                                """
+                            ).fetchone()
+                            if row is not None and str(row[0]).lower() != "bigint":
+                                conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN timestamp_ms BIGINT")
+                        except Exception:
+                            pass
                 return
             # lightweight migrations for existing SQLite DBs
             with engine.begin() as conn:
