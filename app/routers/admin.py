@@ -457,7 +457,6 @@ def reimport_raw_json(request: Request, sqlite_path: str | None = None):
 		with get_session() as session:
 			# Ensure MySQL column types before updates (idempotent)
 			try:
-				conn = session.connection().connection  # raw DBAPI conn
 				# raw_json -> LONGTEXT
 				try:
 					row = session.exec(text(
@@ -471,7 +470,7 @@ def reimport_raw_json(request: Request, sqlite_path: str | None = None):
 						dtype = str((row[0] if isinstance(row, (list, tuple)) else row)).lower()
 						if dtype in ("varchar", "char", "text", "tinytext", "mediumtext"):
 							session.exec(text("ALTER TABLE message MODIFY COLUMN raw_json LONGTEXT"))
-					except Exception:
+				except Exception:
 					pass
 				# timestamp_ms -> BIGINT
 				try:
@@ -523,8 +522,9 @@ def reimport_raw_json(request: Request, sqlite_path: str | None = None):
 									ts = int(val if val >= 10_000_000_000 else val * 1000)
 								else:
 									try:
-										s = int(float(str(val)))
-										ts = int(ts if ts >= 10_000_000_000 else ts * 1000)
+										num = float(str(val))
+										ival = int(num)
+										ts = int(ival if ival >= 10_000_000_000 else ival * 1000)
 									except Exception:
 										ts = None
 						except Exception:
