@@ -33,9 +33,9 @@ def daily_report(
 	end: Optional[str] = Query(default=None),
 	date_field: str = Query(default="shipment", regex="^(shipment|data|both)$"),
 ):
-	# default to last 7 days inclusive
+	# default window starts from 2025-10-01 until today
 	today = dt.date.today()
-	default_start = today - dt.timedelta(days=6)
+	default_start = dt.date(2025, 10, 1)
 	start_date = _parse_date_or_default(start, default_start)
 	end_date = _parse_date_or_default(end, today)
 	if end_date < start_date:
@@ -117,6 +117,7 @@ def daily_report(
 		gross_margin = (gross_profit / total_sales) if total_sales > 0 else 0.0
 		aov = (total_sales / order_count) if order_count > 0 else 0.0
 		asp = (total_sales / total_quantity) if total_quantity > 0 else 0.0
+		net_margin = ( (gross_profit - (fee_kom + fee_hiz + fee_kar + fee_iad + fee_eok)) / total_sales ) if total_sales > 0 else 0.0
 
 		# Payments in the period by payment.date (use SQL sums with short cache)
 		ttl = int(os.getenv("CACHE_TTL_REPORTS", "60"))
@@ -297,6 +298,7 @@ def daily_report(
 				},
 				"collection_ratio": collection_ratio,
 				"outstanding": outstanding,
+				"net_margin": net_margin,
 				# breakdowns
 				"by_channel": by_channel,
 				"top_items_by_revenue": top_items_by_revenue,

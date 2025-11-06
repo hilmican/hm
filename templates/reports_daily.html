@@ -74,6 +74,7 @@
             <div class="kpi"><div class="label">Tahsilat Oranı</div><div class="value">{{ '%.1f'|format((collection_ratio or 0)*100) }}%</div></div>
             <div class="kpi"><div class="label">Dönem Siparişlerinde Kalan</div><div class="value">{{ '%.2f'|format(outstanding or 0) }}</div></div>
             <div class="kpi"><div class="label">Net Kâr</div><div class="value">{{ '%.2f'|format(net_profit or 0) }}</div></div>
+            <div class="kpi"><div class="label">Net Marj</div><div class="value">{{ '%.1f'|format((net_margin or 0)*100) }}%</div></div>
             <div class="kpi"><div class="label">Stok Değeri</div><div class="value">{{ '%.2f'|format(inventory_value or 0) }}</div></div>
             <div class="kpi"><div class="label">Stok Kalem Sayısı</div><div class="value">{{ inventory_item_count or 0 }}</div></div>
         </div>
