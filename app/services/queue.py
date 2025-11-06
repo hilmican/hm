@@ -168,7 +168,16 @@ def mark_failed(job_id: int, error: str) -> None:
 
 def get_job(job_id: int) -> Optional[dict]:
 	with get_session() as session:
-		row = session.exec(text("SELECT id, kind, key, run_after, attempts, max_attempts, payload FROM jobs WHERE id=:id").params(id=job_id)).first()
+		# MySQL reserves the word `key`; quote identifiers accordingly
+		try:
+			dialect = str(session.get_bind().dialect.name)
+		except Exception:
+			dialect = ""
+		if dialect == "mysql":
+			qry = "SELECT `id`, `kind`, `key`, `run_after`, `attempts`, `max_attempts`, `payload` FROM `jobs` WHERE `id`=:id"
+		else:
+			qry = "SELECT id, kind, key, run_after, attempts, max_attempts, payload FROM jobs WHERE id=:id"
+		row = session.exec(text(qry).params(id=job_id)).first()
 		if not row:
 			return None
 		# row can be RowMapping or tuple depending on driver; normalize
