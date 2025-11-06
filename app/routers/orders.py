@@ -517,11 +517,18 @@ async def edit_order_apply(order_id: int, request: Request):
         return str(form.get(name) or "").strip()
     # parse combobox inputs: expect leading numeric id
     def _parse_id(val: str) -> Optional[int]:
-        if not val:
+        s = (val or "").strip()
+        if not s:
             return None
-        num = "".join(ch for ch in val if ch.isdigit())
+        # take only the first token before '|' to avoid concatenating phone numbers
+        first = s.split("|", 1)[0].strip()
+        # extract leading digits only
         try:
-            return int(num) if num else None
+            import re as _re
+            m = _re.match(r"^(\d+)", first)
+            if not m:
+                return None
+            return int(m.group(1))
         except Exception:
             return None
     client_val = _get("client")
@@ -669,6 +676,10 @@ async def edit_order_apply(order_id: int, request: Request):
                     pass
         # compare and set fields
         if new_client_id and new_client_id != o.client_id:
+            # validate client exists
+            cexists = session.exec(select(Client).where(Client.id == new_client_id)).first()
+            if not cexists:
+                raise HTTPException(status_code=400, detail="Client not found")
             changes["client_id"] = [o.client_id, new_client_id]
             o.client_id = new_client_id  # type: ignore
         if (not items_changed) and new_item_id and new_item_id != (o.item_id or None):
