@@ -142,7 +142,17 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
     return out
 
 
-def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[dt.date], min_age_minutes: int = 60, limit: int = 200, reprocess: bool = False) -> Dict[str, Any]:
+def process_run(
+    *,
+    run_id: int,
+    date_from: Optional[dt.date],
+    date_to: Optional[dt.date],
+    min_age_minutes: int = 60,
+    limit: int = 200,
+    reprocess: bool = False,
+    conversation_id: Optional[str] = None,
+    debug_run_id: Optional[int] = None,
+) -> Dict[str, Any]:
     """Process eligible conversations for a run id and persist results.
 
     Returns counters summary.
@@ -220,10 +230,23 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
             params["dte"] = f"{dt_end.isoformat()} 00:00:00"
             where.append("last_message_at < :dte")
         # Embed LIMIT as a literal to avoid MySQL driver quirks with bound LIMIT
-        sql = (
-            "SELECT convo_id FROM conversations WHERE " + " AND ".join(where) + f" ORDER BY last_message_at DESC LIMIT {int(limit)}"
-        )
-        rows = session.exec(_text(sql).params(**params)).all()
+        if conversation_id:
+            where_single = list(where) + ["convo_id = :single"]
+            params_single = dict(params)
+            params_single["single"] = conversation_id
+            sql = (
+                "SELECT convo_id FROM conversations WHERE "
+                + " AND ".join(where_single)
+                + f" ORDER BY last_message_at DESC LIMIT {int(limit)}"
+            )
+            rows = session.exec(_text(sql).params(**params_single)).all()
+        else:
+            sql = (
+                "SELECT convo_id FROM conversations WHERE "
+                + " AND ".join(where)
+                + f" ORDER BY last_message_at DESC LIMIT {int(limit)}"
+            )
+            rows = session.exec(_text(sql).params(**params)).all()
         convo_ids = [r.convo_id if hasattr(r, "convo_id") else r[0] for r in rows]
         considered = len(convo_ids)
         # Fallback: if conversations table yields 0, select distinct conversation_id

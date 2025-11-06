@@ -243,6 +243,7 @@ def init_db() -> None:
                                     id INTEGER PRIMARY KEY AUTO_INCREMENT,
                                     conversation_id VARCHAR(128) NOT NULL,
                                     job_id INTEGER NULL,
+                                    ai_run_id INTEGER NULL,
                                     status VARCHAR(32) NOT NULL DEFAULT 'pending',
                                     ai_model VARCHAR(128) NULL,
                                     system_prompt LONGTEXT NULL,
@@ -256,7 +257,8 @@ def init_db() -> None:
                                     completed_at DATETIME NULL,
                                     INDEX idx_ig_ai_debug_convo (conversation_id),
                                     INDEX idx_ig_ai_debug_status (status),
-                                    INDEX idx_ig_ai_debug_job (job_id)
+                                    INDEX idx_ig_ai_debug_job (job_id),
+                                    INDEX idx_ig_ai_debug_run (ai_run_id)
                                 )
                                 """
                             )

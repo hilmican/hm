@@ -251,6 +251,7 @@ class IGAiDebugRun(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     conversation_id: str = Field(index=True)
     job_id: Optional[int] = Field(default=None, index=True)
+    ai_run_id: Optional[int] = Field(default=None, index=True)
     status: str = Field(default="pending", index=True)
     ai_model: Optional[str] = Field(default=None)
     system_prompt: Optional[str] = Field(default=None, sa_column=Column(Text))
