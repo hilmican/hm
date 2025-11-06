@@ -267,26 +267,64 @@ def debug_conversation(request: Request, conversation_id: str, limit: int = 25):
 @router.post("/inbox/{conversation_id}/debug/run")
 def trigger_debug_conversation(conversation_id: str):
     with get_session() as session:
+        # 1) Create a debug run row (UI anchor)
         run = IGAiDebugRun(conversation_id=conversation_id, status="queued")
         session.add(run)
         session.flush()
         debug_id = int(run.id or 0)
+
+        # 2) Create a corresponding ig_ai_run row to collect summary stats
+        try:
+            from sqlalchemy import text as _text
+
+            session.exec(
+                _text(
+                    """
+                    INSERT INTO ig_ai_run(started_at, date_from, date_to, min_age_minutes)
+                    VALUES (CURRENT_TIMESTAMP, NULL, NULL, :age)
+                    """
+                ).params(age=0)
+            )
+            run_id = None
+            # MySQL LAST_INSERT_ID
+            try:
+                rid_row = session.exec(_text("SELECT LAST_INSERT_ID() AS id")).first()
+                if rid_row is not None:
+                    run_id = int(getattr(rid_row, "id", rid_row[0]))
+            except Exception:
+                pass
+            # SQLite fallback
+            if run_id is None:
+                try:
+                    rid_row = session.exec(_text("SELECT last_insert_rowid() AS id")).first()
+                    if rid_row is not None:
+                        run_id = int(getattr(rid_row, "id", rid_row[0]))
+                except Exception:
+                    pass
+            if run_id is None:
+                raise RuntimeError("Could not create ig_ai_run")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"create_ai_run_failed: {e}")
+
+        # 3) Enqueue processing job with real run_id and debug_run_id
         try:
             payload = {
-                "run_id": debug_id,
+                "run_id": run_id,
                 "date_from": None,
                 "date_to": None,
                 "min_age_minutes": 0,
-                "limit": 1,
+                "limit": 200,
                 "reprocess": False,
                 "conversation_id": conversation_id,
                 "debug_run_id": debug_id,
             }
-            job_id = enqueue("ig_ai_process_run", key=str(debug_id), payload=payload)
+            job_id = enqueue("ig_ai_process_run", key=str(run_id), payload=payload)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"enqueue_failed: {e}")
+
+        # 4) Link debug row to ai_run and persist job id
         run.job_id = job_id
-        run.ai_run_id = debug_id
+        run.ai_run_id = run_id
         session.add(run)
         session.commit()
     return RedirectResponse(url=f"/ig/inbox/{conversation_id}/debug", status_code=HTTP_303_SEE_OTHER)
