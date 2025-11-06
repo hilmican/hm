@@ -172,11 +172,10 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
             dt_end = date_to + dt.timedelta(days=1)
             params["dte"] = f"{dt_end.isoformat()} 00:00:00"
             where.append("last_message_at < :dte")
+        # Embed LIMIT as a literal to avoid MySQL driver quirks with bound LIMIT
         sql = (
-            "SELECT convo_id FROM conversations WHERE " + " AND ".join(where) + " ORDER BY last_message_at DESC LIMIT :lim"
+            "SELECT convo_id FROM conversations WHERE " + " AND ".join(where) + f" ORDER BY last_message_at DESC LIMIT {int(limit)}"
         )
-        params["lim"] = int(limit)
-        # Important: bind parameters on the TextClause, not on the Result
         rows = session.exec(_text(sql).params(**params)).all()
         convo_ids = [r.convo_id if hasattr(r, "convo_id") else r[0] for r in rows]
         considered = len(convo_ids)
@@ -365,7 +364,11 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                 rid=run_id,
             )
         except Exception:
-            pass
+            # Fallback: at least mark completion timestamp
+            try:
+                session.exec(_text("UPDATE ig_ai_run SET completed_at=CURRENT_TIMESTAMP WHERE id=:rid").params(rid=run_id))
+            except Exception:
+                pass
     try:
         log.info(
             "ig_ai run done rid=%s considered=%s processed=%s linked=%s purchases=%s unlinked=%s errors=%s",
