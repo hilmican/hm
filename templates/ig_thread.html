@@ -13,12 +13,14 @@
       .meta { color:#6b7280; font-size:12px; margin-top:4px; }
       button { background:#2563eb; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; }
       a { color:#2563eb; text-decoration:none; }
+      .toolbar .action { border:1px solid #2563eb; border-radius:6px; padding:6px 10px; font-size:13px; }
     </style>
   </head>
   <body>
     {% include "_nav.html" %}
     <div class="toolbar">
       <a href="/ig/inbox">← Back to Inbox</a>
+      <a class="action" href="/ig/inbox/{{ conversation_id }}/debug" title="AI Debug">AI Debug</a>
       <button id="refresh">Refresh</button>
     </div>
   <div style="margin-top:18px">

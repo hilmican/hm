@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>IG AI Debug {{ conversation_id }}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background:#f8fafc; }
+      .toolbar { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px; align-items:center; }
+      .toolbar a { color:#2563eb; text-decoration:none; font-size:14px; }
+      .toolbar form { margin:0; }
+      button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:10px 14px; cursor:pointer; font-size:14px; }
+      button:hover { background:#1d4ed8; }
+      .card { background:#fff; border-radius:12px; border:1px solid #e5e7eb; padding:18px; margin-bottom:18px; box-shadow:0 1px 2px rgba(15,23,42,0.08); }
+      .card h3 { margin:0 0 8px 0; color:#111827; }
+      .meta { color:#6b7280; font-size:13px; margin-bottom:10px; display:flex; flex-wrap:wrap; gap:10px; }
+      .meta span { white-space:nowrap; }
+      pre { background:#0b1021; color:#e5e7eb; padding:12px; border-radius:8px; overflow:auto; max-height:320px; font-size:13px; line-height:1.45; }
+      h4 { margin:16px 0 6px 0; color:#1f2937; }
+      .empty { background:#fff; border-radius:12px; border:1px dashed #cbd5f5; padding:32px; text-align:center; color:#6b7280; }
+      .status-badge { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:12px; }
+      .status-pending { background:#fef3c7; color:#92400e; }
+      .status-running { background:#dbeafe; color:#1d4ed8; }
+      .status-completed { background:#dcfce7; color:#047857; }
+      .status-failed { background:#fee2e2; color:#b91c1c; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <div class="toolbar">
+      <a href="/ig/inbox/{{ conversation_id }}">← Back to Conversation</a>
+      <form method="post" action="/ig/inbox/{{ conversation_id }}/debug/run">
+        <button type="submit">Yeni Debug Çalıştır</button>
+      </form>
+    </div>
+    <h2>AI Debug · {{ conversation_id }}</h2>
+    {% if not runs %}
+      <div class="empty">Henüz debug çalışması bulunmuyor. Yeni bir debug çalıştırarak AI çıktısını inceleyebilirsiniz.</div>
+    {% endif %}
+    {% for entry in runs %}
+      {% set run = entry.run %}
+      <div class="card">
+        <h3>Çalışma #{{ run.id }}</h3>
+        <div class="meta">
+          <span class="status-badge status-{{ run.status }}">Durum: {{ run.status }}</span>
+          <span>Oluşturuldu: {{ run.created_at }}</span>
+          {% if run.started_at %}<span>Başladı: {{ run.started_at }}</span>{% endif %}
+          {% if run.completed_at %}<span>Bitti: {{ run.completed_at }}</span>{% endif %}
+          {% if run.job_id %}<span>Job ID: {{ run.job_id }}</span>{% endif %}
+          {% if run.ai_model %}<span>Model: {{ run.ai_model }}</span>{% endif %}
+        </div>
+        {% if run.error_message %}
+          <h4>Hata Mesajı</h4>
+          <pre>{{ run.error_message }}</pre>
+        {% endif %}
+        {% if run.system_prompt %}
+          <h4>System Prompt</h4>
+          <pre>{{ run.system_prompt }}</pre>
+        {% endif %}
+        {% if run.user_prompt %}
+          <h4>User Prompt</h4>
+          <pre>{{ run.user_prompt }}</pre>
+        {% endif %}
+        {% if run.raw_response %}
+          <h4>Ham AI Yanıtı</h4>
+          <pre>{{ run.raw_response }}</pre>
+        {% endif %}
+        {% if entry.extracted_pretty %}
+          <h4>Çözümlenen JSON</h4>
+          <pre>{{ entry.extracted_pretty }}</pre>
+        {% endif %}
+        {% if entry.logs_pretty %}
+          <h4>İşlem Logları</h4>
+          <pre>{{ entry.logs_pretty }}</pre>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </body>
+</html>
+
