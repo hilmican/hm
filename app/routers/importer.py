@@ -5,7 +5,7 @@ import re
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from sqlmodel import select
 
-from ..db import get_session, reset_db, DB_PATH
+from ..db import get_session, reset_db, DB_PATH, engine
 from ..models import Client, Item, Order, Payment, ImportRun, ImportRow, StockMovement, Product, OrderItem
 from ..services.importer import read_bizim_file, read_kargo_file, read_returns_file
 from ..services.importer.committers import process_kargo_row, process_bizim_row
@@ -27,12 +27,26 @@ BIZIM_DIR = PROJECT_ROOT / "bizimexcellerimiz"
 KARGO_DIR = PROJECT_ROOT / "kargocununexcelleri"
 IADE_DIR = PROJECT_ROOT / "iadeler"
 
+def _is_sqlite_backend() -> bool:
+	try:
+		backend = getattr(engine.url, "get_backend_name", lambda: "")()
+	except Exception:
+		backend = ""
+	return backend == "sqlite"
+
+
 def _backup_db_snapshot(tag: str | None = None) -> None:
     """Create a timestamped backup of the SQLite database and sidecar files.
 
     Backups are stored under PROJECT_ROOT/dbbackups with name app-YYYYMMDD-HHMMSS[-tag].db
     Sidecar files (-wal, -shm) are copied if present.
     """
+	# Only perform snapshotting when running on SQLite
+	try:
+		if not _is_sqlite_backend():
+			return
+	except Exception:
+		return
     try:
         from datetime import datetime as _dt
         import shutil as _shutil
@@ -382,8 +396,12 @@ def import_map(source: str, filename: str, request: Request):
 def commit_import(body: dict, request: Request):
 	if not request.session.get("uid"):
 		raise HTTPException(status_code=401, detail="Unauthorized")
-	# Always take a DB snapshot before a commit run
-	_backup_db_snapshot(tag="commit")
+	# Always take a DB snapshot before a commit run (SQLite only)
+	try:
+		if _is_sqlite_backend():
+			_backup_db_snapshot(tag="commit")
+	except Exception:
+		pass
 	source = body.get("source")
 	filename = body.get("filename")
 	filenames = body.get("filenames")
@@ -447,6 +465,13 @@ def commit_import(body: dict, request: Request):
 			records_loc = read_kargo_file(str(file_path_loc))
 		else:
 			records_loc = read_returns_file(str(file_path_loc))
+		# Diagnostics: log file and records count
+		try:
+			print("[IMPORT COMMIT] file:", fn, "source:", source, "records:", len(records_loc), "path:", str(file_path_loc))
+			if source == "bizim" and records_loc:
+				print("[IMPORT COMMIT] first mapped:", records_loc[0])
+		except Exception:
+			pass
 		with get_session() as session:
 			run = ImportRun(source=source, filename=fn)
 			# set data_date
@@ -483,6 +508,12 @@ def commit_import(body: dict, request: Request):
 			returns_processed_cnt = 0
 			returns_skipped_cnt = 0
 			returns_unmatched_cnt = 0
+			# row-level status counters
+			rows_created_cnt = 0
+			rows_skipped_cnt = 0
+			rows_unmatched_cnt = 0
+			rows_error_cnt = 0
+			rows_duplicate_cnt = 0
 
 			for idx, rec in enumerate(records_loc):
 				# guard and normalize basic fields
@@ -505,6 +536,7 @@ def commit_import(body: dict, request: Request):
 					)
 					session.add(ir)
 					run.unmatched_count += 0
+					rows_skipped_cnt += 1
 					continue
 				row_hash = compute_row_hash(rec)
 				# idempotency: skip duplicate rows by row_hash
@@ -522,6 +554,7 @@ def commit_import(body: dict, request: Request):
 					)
 					session.add(ir)
 					run.unmatched_count += 0
+					rows_duplicate_cnt += 1
 					continue
 				status = "created"
 				message = None
@@ -721,11 +754,21 @@ def commit_import(body: dict, request: Request):
 				session.add(ir)
 				if status == "unmatched":
 					run.unmatched_count += 1
+				# bump row-level counters
+				if status == "created":
+					rows_created_cnt += 1
+				elif status == "skipped":
+					rows_skipped_cnt += 1
+				elif status == "unmatched":
+					rows_unmatched_cnt += 1
+				elif status == "error":
+					rows_error_cnt += 1
 
 			run.row_count = len(records_loc)
 			# snapshot response before leaving session context to avoid DetachedInstanceError
 			summary_loc = {
 				"run_id": run.id or 0,
+				"row_count": run.row_count,
 				"created_orders": run.created_orders,
 				"created_clients": run.created_clients,
 				"created_items": run.created_items,
@@ -737,6 +780,11 @@ def commit_import(body: dict, request: Request):
 				"returns_processed": returns_processed_cnt,
 				"returns_skipped": returns_skipped_cnt,
 				"returns_unmatched": returns_unmatched_cnt,
+				"rows_created": rows_created_cnt,
+				"rows_skipped": rows_skipped_cnt,
+				"rows_unmatched": rows_unmatched_cnt,
+				"rows_error": rows_error_cnt,
+				"rows_duplicates": rows_duplicate_cnt,
 			}
 			try:
 				print("[IMPORT COMMIT] summary:", summary_loc)
@@ -752,6 +800,7 @@ def commit_import(body: dict, request: Request):
 			file_list = [str(x) for x in filenames]
 		agg = {
 			"runs": [],
+			"row_count": 0,
 			"created_orders": 0,
 			"created_clients": 0,
 			"created_items": 0,
@@ -760,12 +809,17 @@ def commit_import(body: dict, request: Request):
 			"enriched_orders": 0,
 			"payments_existing": 0,
 			"payments_skipped_zero": 0,
+			"rows_created": 0,
+			"rows_skipped": 0,
+			"rows_unmatched": 0,
+			"rows_error": 0,
+			"rows_duplicates": 0,
 		}
 		for fn in file_list:
 			dd = (data_dates_map.get(fn) if isinstance(data_dates_map, dict) else None) or data_date_raw
 			res = _commit_single(fn, dd)
 			agg["runs"].append({"filename": fn, **res})
-			for k in ("created_orders","created_clients","created_items","created_payments","unmatched","enriched_orders","payments_existing","payments_skipped_zero"):
+			for k in ("row_count","created_orders","created_clients","created_items","created_payments","unmatched","enriched_orders","payments_existing","payments_skipped_zero","rows_created","rows_skipped","rows_unmatched","rows_error","rows_duplicates"):
 				agg[k] += (res.get(k) or 0)
 		# Invalidate all cached reads after commit
 		bump_namespace()
@@ -883,8 +937,12 @@ async def upload_excel(
 		raise HTTPException(status_code=400, detail="source must be 'bizim', 'kargo' or 'returns'")
 	folder = BIZIM_DIR if source == "bizim" else (KARGO_DIR if source == "kargo" else IADE_DIR)
 	folder.mkdir(parents=True, exist_ok=True)
-	# DB snapshot before accepting new import files
-	_backup_db_snapshot(tag="upload")
+	# DB snapshot before accepting new import files (SQLite only)
+	try:
+		if _is_sqlite_backend():
+			_backup_db_snapshot(tag="upload")
+	except Exception:
+		pass
 
 	# unify inputs: accept either 'files' (multiple) or single 'file'
 	uploads: List[UploadFile] = []

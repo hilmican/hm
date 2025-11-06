@@ -4,6 +4,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .db import init_db
+from .db import engine as _db_engine
 from .services.ai import AIClient
 from .routers import dashboard, importer, clients, items, orders, payments, reconcile, auth
 from .routers import reports
@@ -33,6 +34,12 @@ def create_app() -> FastAPI:
 	@app.on_event("startup")
 	def _startup() -> None:
 		init_db()
+		# Log DB backend once for sanity
+		try:
+			_backend = getattr(_db_engine.url, "get_backend_name", lambda: "")()
+			print(f"[DB] backend: {_backend}")
+		except Exception:
+			pass
 		# Init AI client (optional)
 		try:
 			app.state.ai = AIClient()
