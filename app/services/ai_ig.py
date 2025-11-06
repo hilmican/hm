@@ -42,7 +42,7 @@ def _format_transcript(messages: List[Any], max_chars: int = 15000) -> str:
     return txt
 
 
-def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Optional[int] = None) -> Dict[str, Any]:
+def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Optional[int] = None, include_meta: bool = False) -> Dict[str, Any]:
     """Run AI over a single conversation to detect purchase and extract contacts.
 
     Returns a dict with keys: purchase_detected, buyer_name, phone, address, notes,
@@ -100,7 +100,15 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
             })
     except Exception:
         pass
-    data = client.generate_json(system_prompt=IG_PURCHASE_SYSTEM_PROMPT, user_prompt=user_prompt)
+    if include_meta:
+        data, raw_response = client.generate_json(
+            system_prompt=IG_PURCHASE_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            include_raw=True,
+        )
+    else:
+        data = client.generate_json(system_prompt=IG_PURCHASE_SYSTEM_PROMPT, user_prompt=user_prompt)
+        raw_response = None
     try:
         if run_id is not None:
             ai_run_log(int(run_id), "info", "ai_response", {
@@ -124,6 +132,13 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
         "product_mentions": data.get("product_mentions") or [],
         "possible_order_ids": data.get("possible_order_ids") or [],
     }
+    if include_meta:
+        out["meta"] = {
+            "ai_model": client.model,
+            "system_prompt": IG_PURCHASE_SYSTEM_PROMPT,
+            "user_prompt": user_prompt,
+            "raw_response": raw_response,
+        }
     return out
 
 

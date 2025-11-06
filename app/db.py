@@ -235,6 +235,33 @@ def init_db() -> None:
                             )
                         except Exception:
                             pass
+                        # Dedicated debug runs per conversation
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS ig_ai_debug_run (
+                                    id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                                    conversation_id VARCHAR(128) NOT NULL,
+                                    job_id INTEGER NULL,
+                                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                                    ai_model VARCHAR(128) NULL,
+                                    system_prompt LONGTEXT NULL,
+                                    user_prompt LONGTEXT NULL,
+                                    raw_response LONGTEXT NULL,
+                                    extracted_json LONGTEXT NULL,
+                                    logs_json LONGTEXT NULL,
+                                    error_message LONGTEXT NULL,
+                                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                    started_at DATETIME NULL,
+                                    completed_at DATETIME NULL,
+                                    INDEX idx_ig_ai_debug_convo (conversation_id),
+                                    INDEX idx_ig_ai_debug_status (status),
+                                    INDEX idx_ig_ai_debug_job (job_id)
+                                )
+                                """
+                            )
+                        except Exception:
+                            pass
                         # Ensure ig_accounts table exists (MySQL) used by enrichers
                         try:
                             conn.exec_driver_sql(

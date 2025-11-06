@@ -246,6 +246,24 @@ class IGUser(SQLModel, table=True):
     fetch_error: Optional[str] = None
 
 
+class IGAiDebugRun(SQLModel, table=True):
+    __tablename__ = "ig_ai_debug_run"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    conversation_id: str = Field(index=True)
+    job_id: Optional[int] = Field(default=None, index=True)
+    status: str = Field(default="pending", index=True)
+    ai_model: Optional[str] = Field(default=None)
+    system_prompt: Optional[str] = Field(default=None, sa_column=Column(Text))
+    user_prompt: Optional[str] = Field(default=None, sa_column=Column(Text))
+    raw_response: Optional[str] = Field(default=None, sa_column=Column(Text))
+    extracted_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+    logs_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+    error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+    started_at: Optional[dt.datetime] = Field(default=None, index=True)
+    completed_at: Optional[dt.datetime] = Field(default=None, index=True)
+
+
 class Job(SQLModel, table=True):
     __tablename__ = "jobs"
     id: Optional[int] = Field(default=None, primary_key=True)

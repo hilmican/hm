@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple, Union
 import json
 import os
 
@@ -42,6 +42,10 @@ class AIClient:
     def enabled(self) -> bool:
         return self._enabled
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     def generate_json(
         self,
         *,
@@ -50,7 +54,8 @@ class AIClient:
         temperature: float = 0.2,
         max_output_tokens: int | None = None,
         extra_messages: Optional[list[dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
+        include_raw: bool = False,
+    ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], str]]:
         if not self._enabled or not self._client:
             raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")
 
@@ -95,7 +100,7 @@ class AIClient:
         except Exception:
             pass
         try:
-            return json.loads(txt)
+            data = json.loads(txt)
         except Exception:
             # Robust repairs for occasional non-strict JSON replies
             cleaned = txt.strip().strip("` ")
@@ -110,12 +115,15 @@ class AIClient:
                     import re as _re
                     # Remove trailing commas before } or ]
                     segment = _re.sub(r",\s*([}\]])", r"\1", segment)
-                    return json.loads(segment)
+                    data = json.loads(segment)
+                    if include_raw:
+                        return data, txt
+                    return data
             except Exception:
                 pass
             # Final fallback: return empty, with warnings including raw text (truncated)
             raw_full = cleaned if 'cleaned' in locals() else txt
-            return {
+            data = {
                 "products_to_create": [],
                 "mappings_to_create": [],
                 "notes": None,
@@ -124,5 +132,11 @@ class AIClient:
                     f"AI raw: {raw_full}"
                 ],
             }
+            if include_raw:
+                return data, txt
+            return data
+        if include_raw:
+            return data, txt
+        return data
 
 
