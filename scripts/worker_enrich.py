@@ -21,109 +21,122 @@ logging.basicConfig(level=logging.INFO)
 
 
 def main() -> None:
-	log.info("worker_enrich starting pid=%s host=%s", os.getpid(), socket.gethostname())
-	# Log Redis connectivity and queue depths at startup for diagnostics
-	try:
-		from app.services.queue import _get_redis
-		r = _get_redis()
-		pong = r.ping()
-		llen_ai = int(r.llen("jobs:ig_ai_process_run"))
-		llen_eu = int(r.llen("jobs:enrich_user"))
-		llen_ep = int(r.llen("jobs:enrich_page"))
-		log.info(
-			"redis ok=%s url=%s qdepth ig_ai=%s enrich_user=%s enrich_page=%s",
-			bool(pong), os.getenv("REDIS_URL"), llen_ai, llen_eu, llen_ep,
-		)
-	except Exception as e:
-		log.warning("redis diag failed: %s", e)
-	while True:
-		# heartbeat when idle too
-		try:
-			record_heartbeat("enrich", os.getpid(), socket.gethostname())
-		except Exception:
-			pass
-		log.debug("waiting for jobs: enrich_user|enrich_page|ig_ai_process_run")
-		job = dequeue("enrich_user", timeout=1) or dequeue("enrich_page", timeout=1) or dequeue("ig_ai_process_run", timeout=1)
-		if not job:
-			time.sleep(0.25)
-			continue
-		jid = int(job["id"])  # type: ignore
-		kind = job.get("kind")
-		payload = job.get("payload") or {}
-		try:
-			log.info("dequeued jid=%s kind=%s key=%s", jid, kind, job.get("key"))
-		except Exception:
-			pass
+    log.info("worker_enrich starting pid=%s host=%s", os.getpid(), socket.gethostname())
+    # Log Redis connectivity and queue depths at startup for diagnostics
+    try:
+        from app.services.queue import _get_redis
+
+        r = _get_redis()
+        pong = r.ping()
+        llen_ai = int(r.llen("jobs:ig_ai_process_run"))
+        llen_eu = int(r.llen("jobs:enrich_user"))
+        llen_ep = int(r.llen("jobs:enrich_page"))
+        log.info(
+            "redis ok=%s url=%s qdepth ig_ai=%s enrich_user=%s enrich_page=%s",
+            bool(pong), os.getenv("REDIS_URL"), llen_ai, llen_eu, llen_ep,
+        )
+    except Exception as e:
+        log.warning("redis diag failed: %s", e)
+    while True:
+        # heartbeat when idle too
+        try:
+            record_heartbeat("enrich", os.getpid(), socket.gethostname())
+        except Exception:
+            pass
+        log.debug("waiting for jobs: enrich_user|enrich_page|ig_ai_process_run")
+        job = dequeue("enrich_user", timeout=1) or dequeue("enrich_page", timeout=1) or dequeue("ig_ai_process_run", timeout=1)
+        if not job:
+            time.sleep(0.25)
+            continue
+        jid = int(job["id"])  # type: ignore
+        kind = job.get("kind")
+        payload = job.get("payload") or {}
+        try:
+            log.info("dequeued jid=%s kind=%s key=%s", jid, kind, job.get("key"))
+        except Exception:
+            pass
         try:
             if kind == "enrich_user":
-				uid = str(payload.get("ig_user_id") or job.get("key"))
-				asyncio.run(enrich_user(uid))
-				try:
-					increment_counter("enrich_user", 1)
-					increment_counter("enrich_success", 1)
-				except Exception:
-					pass
-			elif kind == "enrich_page":
-				gid = str(payload.get("igba_id") or job.get("key"))
-				asyncio.run(enrich_page(gid))
-				try:
-					increment_counter("enrich_page", 1)
-					increment_counter("enrich_success", 1)
-				except Exception:
-					pass
+                uid = str(payload.get("ig_user_id") or job.get("key"))
+                asyncio.run(enrich_user(uid))
+                try:
+                    increment_counter("enrich_user", 1)
+                    increment_counter("enrich_success", 1)
+                except Exception:
+                    pass
+            elif kind == "enrich_page":
+                gid = str(payload.get("igba_id") or job.get("key"))
+                asyncio.run(enrich_page(gid))
+                try:
+                    increment_counter("enrich_page", 1)
+                    increment_counter("enrich_success", 1)
+                except Exception:
+                    pass
             elif kind == "ig_ai_process_run":
-				payload = payload or {}
-				rid = int(payload.get("run_id") or 0) or int(job.get("key") or 0)
-				df = payload.get("date_from")
-				dtv = payload.get("date_to")
-				age = int(payload.get("min_age_minutes") or 60)
-				lim = int(payload.get("limit") or 200)
-				rep = bool(payload.get("reprocess") not in (False, 0, "0", "false", "False", None))
-				try:
-					log.info("ig_ai start rid=%s date_from=%s date_to=%s min_age=%s limit=%s reprocess=%s", rid, df, dtv, age, lim, rep)
-				except Exception:
-					pass
-				ai_run_log(rid, "info", "worker_start", {"date_from": df, "date_to": dtv, "min_age_minutes": age, "limit": lim, "reprocess": rep})
-				dfp = None
-				dtp = None
-				try:
-					if df:
-						import datetime as _dt
-						dfp = _dt.date.fromisoformat(str(df))
-				except Exception:
-					dfp = None
-				try:
-					if dtv:
-						import datetime as _dt
-						dtp = _dt.date.fromisoformat(str(dtv))
-				except Exception:
-					dtp = None
-				res = ig_ai_process_run(run_id=rid, date_from=dfp, date_to=dtp, min_age_minutes=age, limit=lim, reprocess=rep)
-				try:
-					log.info(
-						"ig_ai done rid=%s considered=%s processed=%s linked=%s purchases=%s unlinked=%s errors=%s",
-						rid,
-						int(res.get("considered", 0)),
-						int(res.get("processed", 0)),
-						int(res.get("linked", 0)),
-						int(res.get("purchases", 0)),
-						int(res.get("purchases_unlinked", 0)),
-						len(res.get("errors", []) if isinstance(res.get("errors"), list) else []),
-					)
-				except Exception:
-					pass
-				ai_run_log(rid, "info", "worker_done", {
-					"considered": int(res.get("considered", 0)),
-					"processed": int(res.get("processed", 0)),
-					"linked": int(res.get("linked", 0)),
-					"purchases": int(res.get("purchases", 0)),
-					"unlinked": int(res.get("purchases_unlinked", 0)),
-					"errors": len(res.get("errors", []) if isinstance(res.get("errors"), list) else []),
-				})
-				try:
-					increment_counter("ig_ai_process_run", 1)
-				except Exception:
-					pass
+                payload = payload or {}
+                rid = int(payload.get("run_id") or 0) or int(job.get("key") or 0)
+                df = payload.get("date_from")
+                dtv = payload.get("date_to")
+                age = int(payload.get("min_age_minutes") or 60)
+                lim = int(payload.get("limit") or 200)
+                rep = bool(payload.get("reprocess") not in (False, 0, "0", "false", "False", None))
+                try:
+                    log.info("ig_ai start rid=%s date_from=%s date_to=%s min_age=%s limit=%s reprocess=%s", rid, df, dtv, age, lim, rep)
+                except Exception:
+                    pass
+                ai_run_log(
+                    rid,
+                    "info",
+                    "worker_start",
+                    {"date_from": df, "date_to": dtv, "min_age_minutes": age, "limit": lim, "reprocess": rep},
+                )
+                dfp = None
+                dtp = None
+                try:
+                    if df:
+                        import datetime as _dt
+
+                        dfp = _dt.date.fromisoformat(str(df))
+                except Exception:
+                    dfp = None
+                try:
+                    if dtv:
+                        import datetime as _dt
+
+                        dtp = _dt.date.fromisoformat(str(dtv))
+                except Exception:
+                    dtp = None
+                res = ig_ai_process_run(run_id=rid, date_from=dfp, date_to=dtp, min_age_minutes=age, limit=lim, reprocess=rep)
+                try:
+                    log.info(
+                        "ig_ai done rid=%s considered=%s processed=%s linked=%s purchases=%s unlinked=%s errors=%s",
+                        rid,
+                        int(res.get("considered", 0)),
+                        int(res.get("processed", 0)),
+                        int(res.get("linked", 0)),
+                        int(res.get("purchases", 0)),
+                        int(res.get("purchases_unlinked", 0)),
+                        len(res.get("errors", []) if isinstance(res.get("errors"), list) else []),
+                    )
+                except Exception:
+                    pass
+                ai_run_log(
+                    rid,
+                    "info",
+                    "worker_done",
+                    {
+                        "considered": int(res.get("considered", 0)),
+                        "processed": int(res.get("processed", 0)),
+                        "linked": int(res.get("linked", 0)),
+                        "purchases": int(res.get("purchases", 0)),
+                        "unlinked": int(res.get("purchases_unlinked", 0)),
+                        "errors": len(res.get("errors", []) if isinstance(res.get("errors"), list) else []),
+                    },
+                )
+                try:
+                    increment_counter("ig_ai_process_run", 1)
+                except Exception:
+                    pass
             elif kind == "ig_ai_debug_convo":
                 debug_run_id = int(payload.get("debug_run_id") or job.get("key") or 0)
                 logs: list[dict[str, Any]] = []
@@ -155,7 +168,11 @@ def main() -> None:
                     session.add(run_row)
                     session.commit()
                     conversation_id = run_row.conversation_id
-                _append_log("info", "debug_run_started", {"debug_run_id": debug_run_id, "conversation_id": conversation_id})
+                _append_log(
+                    "info",
+                    "debug_run_started",
+                    {"debug_run_id": debug_run_id, "conversation_id": conversation_id},
+                )
 
                 try:
                     result = analyze_conversation(conversation_id, include_meta=True)
@@ -192,16 +209,16 @@ def main() -> None:
                             session.commit()
                     raise
             else:
-				delete_job(jid); continue
-			log.info("enrich ok jid=%s kind=%s", jid, kind)
-			delete_job(jid)
-		except Exception as e:
-			log.warning("enrich fail jid=%s kind=%s err=%s", jid, kind, e)
-			increment_attempts(jid)
-			time.sleep(1)
+                delete_job(jid)
+                continue
+            log.info("enrich ok jid=%s kind=%s", jid, kind)
+            delete_job(jid)
+        except Exception as e:
+            log.warning("enrich fail jid=%s kind=%s err=%s", jid, kind, e)
+            increment_attempts(jid)
+            time.sleep(1)
 
 
 if __name__ == "__main__":
-	main()
-
+    main()
 
