@@ -8,6 +8,7 @@ from sqlalchemy import or_, and_
 
 from ..models import Client, Order
 from ..utils.normalize import normalize_phone, normalize_text
+from .monitoring import ai_run_log
 import datetime as dt
 
 
@@ -120,7 +121,7 @@ def _choose_best_order(orders: list[Order]) -> Order | None:
     return top_order
 
 
-def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: dt.date | None, date_to: dt.date | None) -> int | None:
+def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: dt.date | None, date_to: dt.date | None, run_id: int | None = None) -> int | None:
     """Given extracted buyer info from IG, attempt to link to a single existing order.
 
     Strategy:
@@ -150,6 +151,18 @@ def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: 
 
     price_num = _price_num(price_val)
 
+    try:
+        if run_id is not None:
+            ai_run_log(int(run_id), "debug", "link_start", {
+                "phone_input": extracted.get("phone"),
+                "digits": phone_digits,
+                "last10": phone_last10,
+                "buyer_name": buyer_name,
+                "has_price": price_val is not None,
+            })
+    except Exception:
+        pass
+
     # 1) Phone-based client match
     client_by_phone: Client | None = None
     if phone_last10:
@@ -166,6 +179,14 @@ def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: 
             c_last10 = ph_digits[-10:] if len(ph_digits) >= 10 else ph_digits
             if (c_last10 and c_last10 == phone_last10) or (phone_last10 in ph_digits):
                 matches.append(c)
+        try:
+            if run_id is not None:
+                ai_run_log(int(run_id), "debug", "phone_match_candidates", {
+                    "candidates_scanned": len(candidates),
+                    "matches": [int(c.id) for c in matches if c.id],
+                })
+        except Exception:
+            pass
         # If exactly one client matches by phone, try to link order
         if len(matches) == 1:
             client_by_phone = matches[0]
@@ -197,6 +218,15 @@ def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: 
                         best_order = top_o
             if best_order is None:
                 best_order = _choose_best_order(orders)
+            try:
+                if run_id is not None:
+                    ai_run_log(int(run_id), "debug", "order_choice_after_phone_single", {
+                        "orders": [int(o.id) for o in orders if o.id],
+                        "chosen": (int(best_order.id) if (best_order and best_order.id is not None) else None),
+                        "used_price": price_num is not None,
+                    })
+            except Exception:
+                pass
             if best_order and best_order.id is not None:
                 return int(best_order.id)
         # If multiple clients matched by phone substring, try to disambiguate by having orders in window
@@ -231,6 +261,15 @@ def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: 
                         best_pair = (c, o)
                         best_delta = d
                 if best_pair is not None and best_pair[1].id is not None:
+                    try:
+                        if run_id is not None:
+                            ai_run_log(int(run_id), "debug", "order_choice_after_phone_multi", {
+                                "viable": [int(o.id) for _, o in viable if o.id],
+                                "chosen": int(best_pair[1].id),
+                                "price": price_num,
+                            })
+                    except Exception:
+                        pass
                     return int(best_pair[1].id)
 
     # 2) Exact slug/name key match before fuzzy
@@ -250,6 +289,14 @@ def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: 
                     orders = _orders_for_client_in_window(session, int(exact_candidates[0].id), date_from, date_to) if exact_candidates[0].id else []
                     best_order = _choose_best_order(orders)
                     if best_order and best_order.id is not None:
+                        try:
+                            if run_id is not None:
+                                ai_run_log(int(run_id), "debug", "name_key_match_linked", {
+                                    "client_id": int(exact_candidates[0].id) if exact_candidates[0].id else None,
+                                    "order_id": int(best_order.id),
+                                })
+                        except Exception:
+                            pass
                         return int(best_order.id)
         except Exception:
             pass

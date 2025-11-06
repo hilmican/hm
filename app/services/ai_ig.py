@@ -12,6 +12,7 @@ from ..models import Message
 from .ai import AIClient
 from .prompts import IG_PURCHASE_SYSTEM_PROMPT
 from .monitoring import ai_run_log
+from ..utils.normalize import normalize_phone
 import logging
 
 
@@ -399,14 +400,25 @@ def process_run(
         buyer_name_clean = _clean_field(data.get("buyer_name"))
         phone_clean = _clean_field(data.get("phone"))
         address_clean = _clean_field(data.get("address"))
+        # Normalize phone to digits and reduce to last 10
+        phone_digits = normalize_phone(phone_clean)
+        phone_last10 = phone_digits[-10:] if len(phone_digits) >= 10 else phone_digits
         data["buyer_name"] = buyer_name_clean
-        data["phone"] = phone_clean
+        data["phone"] = phone_last10 or None
         data["address"] = address_clean
+        try:
+            ai_run_log(run_id, "debug", "normalize_phone", {
+                "phone_input": phone_clean,
+                "digits": phone_digits,
+                "last10": phone_last10,
+            }) if run_id is not None else None
+        except Exception:
+            pass
         if bool(data.get("purchase_detected")):
             purchases += 1
             try:
                 with get_session() as session:
-                    linked_order_id = link_order_for_extraction(session, data, date_from=date_from, date_to=date_to)
+                    linked_order_id = link_order_for_extraction(session, data, date_from=date_from, date_to=date_to, run_id=run_id)
             except Exception as le:
                 errors.append(f"{cid}: match_err {le}")
                 linked_order_id = None
