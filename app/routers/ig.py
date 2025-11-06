@@ -367,20 +367,22 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                 linked_order_id = (row_convo.linked_order_id if hasattr(row_convo, "linked_order_id") else row_convo[3]) or None
                 ai_status = (row_convo.ai_status if hasattr(row_convo, "ai_status") else row_convo[4]) or None
                 ai_json = (row_convo.ai_json if hasattr(row_convo, "ai_json") else row_convo[5]) or None
-                # Fallback: if ai_json missing on conversation, show latest historical result
-                if not ai_json:
-                    try:
-                        row_hist = session.exec(
-                            _text(
-                                "SELECT ai_json FROM ig_ai_result WHERE convo_id=:cid ORDER BY id DESC LIMIT 1"
-                            ).params(cid=str(conversation_id))
-                        ).first()
-                        if row_hist:
-                            ai_json = (row_hist.ai_json if hasattr(row_hist, "ai_json") else row_hist[0]) or None
-                    except Exception:
-                        pass
         except Exception:
             pass
+
+        # Fallback: even if conversations row is missing or ai_json empty, try latest historical result
+        if not ai_json:
+            try:
+                from sqlalchemy import text as _text
+                row_hist = session.exec(
+                    _text(
+                        "SELECT ai_json FROM ig_ai_result WHERE convo_id=:cid ORDER BY id DESC LIMIT 1"
+                    ).params(cid=str(conversation_id))
+                ).first()
+                if row_hist:
+                    ai_json = (row_hist.ai_json if hasattr(row_hist, "ai_json") else row_hist[0]) or None
+            except Exception:
+                pass
         for mm in msgs:
             try:
                 other_id = (mm.ig_sender_id if (mm.direction or "in") == "in" else mm.ig_recipient_id)
