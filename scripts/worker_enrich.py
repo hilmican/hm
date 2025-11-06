@@ -17,6 +17,20 @@ logging.basicConfig(level=logging.INFO)
 
 def main() -> None:
 	log.info("worker_enrich starting pid=%s host=%s", os.getpid(), socket.gethostname())
+	# Log Redis connectivity and queue depths at startup for diagnostics
+	try:
+		from app.services.queue import _get_redis
+		r = _get_redis()
+		pong = r.ping()
+		llen_ai = int(r.llen("jobs:ig_ai_process_run"))
+		llen_eu = int(r.llen("jobs:enrich_user"))
+		llen_ep = int(r.llen("jobs:enrich_page"))
+		log.info(
+			"redis ok=%s url=%s qdepth ig_ai=%s enrich_user=%s enrich_page=%s",
+			bool(pong), os.getenv("REDIS_URL"), llen_ai, llen_eu, llen_ep,
+		)
+	except Exception as e:
+		log.warning("redis diag failed: %s", e)
 	while True:
 		# heartbeat when idle too
 		try:

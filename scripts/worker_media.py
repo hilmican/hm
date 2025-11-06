@@ -15,6 +15,15 @@ logging.basicConfig(level=logging.INFO)
 
 def main() -> None:
 	log.info("worker_media starting pid=%s host=%s", os.getpid(), socket.gethostname())
+	# Redis diag at startup
+	try:
+		from app.services.queue import _get_redis
+		r = _get_redis()
+		pong = r.ping()
+		llen = int(r.llen("jobs:fetch_media"))
+		log.info("redis ok=%s url=%s qdepth fetch_media=%s", bool(pong), os.getenv("REDIS_URL"), llen)
+	except Exception as e:
+		log.warning("redis diag failed: %s", e)
 	while True:
 		# heartbeat when idle
 		try:
