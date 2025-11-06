@@ -6,7 +6,7 @@ import asyncio
 from app.services.queue import dequeue, delete_job, increment_attempts
 from app.services.enrichers import enrich_user, enrich_page
 from app.services.ai_ig import process_run as ig_ai_process_run
-from app.services.monitoring import record_heartbeat, increment_counter
+from app.services.monitoring import record_heartbeat, increment_counter, ai_run_log
 import os
 import socket
 
@@ -57,6 +57,7 @@ def main() -> None:
 					log.info("ig_ai start rid=%s date_from=%s date_to=%s min_age=%s limit=%s", rid, df, dtv, age, lim)
 				except Exception:
 					pass
+				ai_run_log(rid, "info", "worker_start", {"date_from": df, "date_to": dtv, "min_age_minutes": age, "limit": lim})
 				dfp = None
 				dtp = None
 				try:
@@ -85,6 +86,14 @@ def main() -> None:
 					)
 				except Exception:
 					pass
+				ai_run_log(rid, "info", "worker_done", {
+					"considered": int(res.get("considered", 0)),
+					"processed": int(res.get("processed", 0)),
+					"linked": int(res.get("linked", 0)),
+					"purchases": int(res.get("purchases", 0)),
+					"unlinked": int(res.get("purchases_unlinked", 0)),
+					"errors": len(res.get("errors", []) if isinstance(res.get("errors"), list) else []),
+				})
 				try:
 					increment_counter("ig_ai_process_run", 1)
 				except Exception:

@@ -6,6 +6,7 @@ import time
 import sqlite3
 
 from redis import Redis
+from redis.exceptions import TimeoutError as RedisTimeoutError, ConnectionError as RedisConnectionError
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
@@ -21,8 +22,15 @@ def _get_redis() -> Redis:
 	if _redis_client is not None:
 		return _redis_client
 	url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-	# Redis-py supports URL in from_url
-	_redis_client = Redis.from_url(url, decode_responses=True)
+	# Redis-py supports URL in from_url; set short timeouts to fail fast
+	socket_timeout = float(os.getenv("REDIS_SOCKET_TIMEOUT", "0.5"))
+	socket_connect_timeout = float(os.getenv("REDIS_CONNECT_TIMEOUT", "0.5"))
+	_redis_client = Redis.from_url(
+		url,
+		decode_responses=True,
+		socket_timeout=socket_timeout,
+		socket_connect_timeout=socket_connect_timeout,
+	)
 	return _redis_client
 
 
@@ -116,8 +124,11 @@ def enqueue(kind: str, key: str, payload: Optional[dict] = None, max_attempts: i
     while attempts < 6:
         try:
             job_id = _ensure_job(kind=kind, key=key, payload=payload, max_attempts=max_attempts)
-            msg = json.dumps({"id": job_id, "kind": kind, "key": key})
-            _get_redis().lpush(f"jobs:{kind}", msg)
+			msg = json.dumps({"id": job_id, "kind": kind, "key": key})
+			try:
+				_get_redis().lpush(f"jobs:{kind}", msg)
+			except (RedisTimeoutError, RedisConnectionError) as re:
+				raise RuntimeError(f"queue unavailable: {re}")
             try:
                 queue_enqueue_time_add(kind, job_id)
             except Exception:

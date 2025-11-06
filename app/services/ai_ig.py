@@ -10,6 +10,7 @@ from ..db import get_session
 from ..models import Message
 from .ai import AIClient
 from .prompts import IG_PURCHASE_SYSTEM_PROMPT
+from .monitoring import ai_run_log
 import logging
 
 
@@ -128,6 +129,13 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
         )
     except Exception:
         pass
+    ai_run_log(run_id, "info", "run_start", {
+        "date_from": (date_from.isoformat() if date_from else None),
+        "date_to": (date_to.isoformat() if date_to else None),
+        "min_age_minutes": int(min_age_minutes),
+        "limit": int(limit),
+        "considered": int(considered),
+    })
 
     # Helper to check cancellation flag quickly
     def _is_cancelled() -> bool:
@@ -163,9 +171,11 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                 log.debug("ig_ai analyzing convo=%s", cid)
             except Exception:
                 pass
+            ai_run_log(run_id, "debug", "analyze_start", {"conversation_id": cid})
             data = analyze_conversation(cid)
         except Exception as e:
             errors.append(f"{cid}: {e}")
+            ai_run_log(run_id, "error", "analyze_error", {"conversation_id": cid, "error": str(e)})
             # persist error status so we don't spin forever; keep ai_json for debugging
             with get_session() as session:
                 try:
@@ -195,6 +205,7 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                     log.info("ig_ai convo=%s purchase=1 linked_order_id=%s", cid, int(linked_order_id))
                 except Exception:
                     pass
+                ai_run_log(run_id, "info", "purchase_linked", {"conversation_id": cid, "order_id": int(linked_order_id)})
             else:
                 purchases_unlinked += 1
                 status = "ambiguous"
@@ -202,11 +213,13 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                     log.info("ig_ai convo=%s purchase=1 linked_order_id=null", cid)
                 except Exception:
                     pass
+                ai_run_log(run_id, "info", "purchase_unlinked", {"conversation_id": cid})
         else:
             try:
                 log.debug("ig_ai convo=%s purchase=0", cid)
             except Exception:
                 pass
+            ai_run_log(run_id, "debug", "no_purchase", {"conversation_id": cid})
 
         with get_session() as session:
             try:
@@ -244,6 +257,7 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                 processed += 1
             except Exception as pe:
                 errors.append(f"{cid}: persist_err {pe}")
+                ai_run_log(run_id, "error", "persist_error", {"conversation_id": cid, "error": str(pe)})
 
         # cancellation check between items
         if _is_cancelled():
@@ -291,6 +305,14 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
         )
     except Exception:
         pass
+    ai_run_log(run_id, "info", "run_done", {
+        "considered": int(considered),
+        "processed": int(processed),
+        "linked": int(linked),
+        "purchases": int(purchases),
+        "unlinked": int(purchases_unlinked),
+        "errors": len(errors),
+    })
 
     return {
         "considered": considered,

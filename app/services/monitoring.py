@@ -153,3 +153,41 @@ def get_queue_stats(kinds: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     return out
 
 
+
+def ai_run_log(run_id: int, level: str, message: str, fields: Optional[Dict[str, Any]] = None, ttl_seconds: int = 7 * 24 * 60 * 60) -> None:
+    """Append a structured log line for an IG AI run into Redis (ring buffer)."""
+    try:
+        r = _get_redis()
+        key = f"logs:ig_ai:{int(run_id)}"
+        entry = {
+            "ts": _now_ts(),
+            "level": str(level).lower(),
+            "message": message,
+            "fields": (fields or {}),
+        }
+        data = json.dumps(entry, ensure_ascii=False)
+        with r.pipeline() as p:
+            p.lpush(key, data)
+            p.ltrim(key, 0, 2000)
+            p.expire(key, ttl_seconds)
+            p.execute()
+    except Exception:
+        # Logging must never crash the pipeline
+        pass
+
+
+def get_ai_run_logs(run_id: int, limit: int = 200) -> List[Dict[str, Any]]:
+    try:
+        r = _get_redis()
+        key = f"logs:ig_ai:{int(run_id)}"
+        n = max(1, min(int(limit), 2000))
+        items = r.lrange(key, 0, n - 1)
+        out: List[Dict[str, Any]] = []
+        for it in reversed(items):  # newest at head -> reverse to chronological
+            try:
+                out.append(json.loads(it))
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return []

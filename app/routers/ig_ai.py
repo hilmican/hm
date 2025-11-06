@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from ..db import get_session
 from ..services.queue import enqueue, delete_job
+from ..services.monitoring import get_ai_run_logs
 
 
 router = APIRouter(prefix="/ig/ai", tags=["instagram-ai"])
@@ -259,5 +260,12 @@ def preview_process(body: dict):
         "messages_without_timestamp": msg_ts_missing,
         "cutoff": cutoff_dt.isoformat(),
     }
+
+
+@router.get("/run/{run_id}/logs")
+def run_logs(run_id: int, limit: int = 200):
+    n = int(max(1, min(limit, 2000)))
+    logs = get_ai_run_logs(int(run_id), n)
+    return {"logs": logs}
 
 

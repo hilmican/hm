@@ -32,6 +32,16 @@
   </div>
 
   <div class="card">
+    <h3>Çalıştırma Logları</h3>
+    <div class="row">
+      <label>Run ID <input type="number" id="logsRunId" min="1" /></label>
+      <button id="btnWatch">Watch Logs</button>
+      <button id="btnStop" style="background:#6b7280;border-color:#6b7280">Stop</button>
+    </div>
+    <pre id="logsBox" style="background:#0b1021;color:#e5e7eb; padding:12px; border-radius:8px; height:300px; overflow:auto; white-space:pre-wrap;"></pre>
+  </div>
+
+  <div class="card">
     <h3>Son Çalıştırmalar</h3>
     <table>
       <thead>
@@ -82,6 +92,9 @@
         if (!r.ok) { const t = await r.text(); throw new Error(t); }
         const data = await r.json();
         msg.textContent = 'Çalıştırma kuyruğa alındı. Run ID: ' + data.run_id;
+        // Auto-start logs for this run
+        document.getElementById('logsRunId').value = String(data.run_id);
+        startWatch();
       } catch (e) { msg.textContent = 'Hata: ' + e; }
     });
 
@@ -119,6 +132,40 @@
     }
     refreshRuns();
     setInterval(refreshRuns, 10000);
+
+    let watchTimer = null;
+    let lastRendered = 0;
+    async function fetchLogs(){
+      const rid = document.getElementById('logsRunId').value;
+      if(!rid) return;
+      try{
+        const r = await fetch(`/ig/ai/run/${rid}/logs?limit=500`);
+        if(!r.ok) return;
+        const data = await r.json();
+        const logs = data.logs || [];
+        const box = document.getElementById('logsBox');
+        // Only re-render if new entries
+        if(logs.length !== lastRendered){
+          lastRendered = logs.length;
+          box.textContent = logs.map(l => {
+            const ts = l.ts ? new Date(l.ts*1000).toISOString() : '';
+            const lvl = (l.level||'').toUpperCase();
+            const msg = l.message || '';
+            const f = l.fields ? JSON.stringify(l.fields) : '';
+            return `${ts} [${lvl}] ${msg} ${f}`;
+          }).join('\n');
+          box.scrollTop = box.scrollHeight;
+        }
+      }catch{}
+    }
+    function startWatch(){
+      if(watchTimer) clearInterval(watchTimer);
+      fetchLogs();
+      watchTimer = setInterval(fetchLogs, 2000);
+    }
+    function stopWatch(){ if(watchTimer) { clearInterval(watchTimer); watchTimer=null; } }
+    document.getElementById('btnWatch').addEventListener('click', startWatch);
+    document.getElementById('btnStop').addEventListener('click', stopWatch);
   </script>
 </body>
 </html>
