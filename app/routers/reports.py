@@ -117,7 +117,7 @@ def daily_report(
 		gross_margin = (gross_profit / total_sales) if total_sales > 0 else 0.0
 		aov = (total_sales / order_count) if order_count > 0 else 0.0
 		asp = (total_sales / total_quantity) if total_quantity > 0 else 0.0
-		net_margin = ( (gross_profit - (fee_kom + fee_hiz + fee_kar + fee_iad + fee_eok)) / total_sales ) if total_sales > 0 else 0.0
+		# net_margin is computed later after fees are loaded
 
 		# Payments in the period by payment.date (use SQL sums with short cache)
 		ttl = int(os.getenv("CACHE_TTL_REPORTS", "60"))
@@ -148,6 +148,7 @@ def daily_report(
 		total_fees = fee_kom + fee_hiz + fee_kar + fee_iad + fee_eok
 		net_profit = gross_profit - total_fees
 		collection_ratio = (gross_collected / total_sales) if total_sales > 0 else 0.0
+		net_margin = (net_profit / total_sales) if total_sales > 0 else 0.0
 
 		# Outstanding for period: payments linked to these orders (regardless of payment date)
 		order_ids = [o.id for o in orders if o.id]
