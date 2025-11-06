@@ -53,6 +53,10 @@ def main() -> None:
 				dtv = payload.get("date_to")
 				age = int(payload.get("min_age_minutes") or 60)
 				lim = int(payload.get("limit") or 200)
+				try:
+					log.info("ig_ai start rid=%s date_from=%s date_to=%s min_age=%s limit=%s", rid, df, dtv, age, lim)
+				except Exception:
+					pass
 				dfp = None
 				dtp = None
 				try:
@@ -67,7 +71,20 @@ def main() -> None:
 						dtp = _dt.date.fromisoformat(str(dtv))
 				except Exception:
 					dtp = None
-				ig_ai_process_run(run_id=rid, date_from=dfp, date_to=dtp, min_age_minutes=age, limit=lim)
+				res = ig_ai_process_run(run_id=rid, date_from=dfp, date_to=dtp, min_age_minutes=age, limit=lim)
+				try:
+					log.info(
+						"ig_ai done rid=%s considered=%s processed=%s linked=%s purchases=%s unlinked=%s errors=%s",
+						rid,
+						int(res.get("considered", 0)),
+						int(res.get("processed", 0)),
+						int(res.get("linked", 0)),
+						int(res.get("purchases", 0)),
+						int(res.get("purchases_unlinked", 0)),
+						len(res.get("errors", []) if isinstance(res.get("errors"), list) else []),
+					)
+				except Exception:
+					pass
 				try:
 					increment_counter("ig_ai_process_run", 1)
 				except Exception:

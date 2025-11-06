@@ -10,6 +10,10 @@ from ..db import get_session
 from ..models import Message
 from .ai import AIClient
 from .prompts import IG_PURCHASE_SYSTEM_PROMPT
+import logging
+
+
+log = logging.getLogger("ig_ai.process")
 
 
 def _format_transcript(messages: List[Message], max_chars: int = 15000) -> str:
@@ -112,6 +116,18 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
         rows = session.exec(_text(sql)).params(**params).all()
         convo_ids = [r.convo_id if hasattr(r, "convo_id") else r[0] for r in rows]
         considered = len(convo_ids)
+    try:
+        log.info(
+            "ig_ai run start rid=%s df=%s dt=%s min_age=%s limit=%s considered=%s",
+            run_id,
+            (date_from.isoformat() if date_from else None),
+            (date_to.isoformat() if date_to else None),
+            int(min_age_minutes),
+            int(limit),
+            considered,
+        )
+    except Exception:
+        pass
 
     # Helper to check cancellation flag quickly
     def _is_cancelled() -> bool:
@@ -143,6 +159,10 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
 
     for cid in convo_ids:
         try:
+            try:
+                log.debug("ig_ai analyzing convo=%s", cid)
+            except Exception:
+                pass
             data = analyze_conversation(cid)
         except Exception as e:
             errors.append(f"{cid}: {e}")
@@ -171,9 +191,22 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
             if linked_order_id:
                 linked += 1
                 status = "ok"
+                try:
+                    log.info("ig_ai convo=%s purchase=1 linked_order_id=%s", cid, int(linked_order_id))
+                except Exception:
+                    pass
             else:
                 purchases_unlinked += 1
                 status = "ambiguous"
+                try:
+                    log.info("ig_ai convo=%s purchase=1 linked_order_id=null", cid)
+                except Exception:
+                    pass
+        else:
+            try:
+                log.debug("ig_ai convo=%s purchase=0", cid)
+            except Exception:
+                pass
 
         with get_session() as session:
             try:
@@ -245,6 +278,19 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
             )
         except Exception:
             pass
+    try:
+        log.info(
+            "ig_ai run done rid=%s considered=%s processed=%s linked=%s purchases=%s unlinked=%s errors=%s",
+            run_id,
+            considered,
+            processed,
+            linked,
+            purchases,
+            purchases_unlinked,
+            len(errors),
+        )
+    except Exception:
+        pass
 
     return {
         "considered": considered,
