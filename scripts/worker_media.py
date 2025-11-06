@@ -14,12 +14,14 @@ logging.basicConfig(level=logging.INFO)
 
 
 def main() -> None:
+	log.info("worker_media starting pid=%s host=%s", os.getpid(), socket.gethostname())
 	while True:
 		# heartbeat when idle
 		try:
 			record_heartbeat("media", os.getpid(), socket.gethostname())
 		except Exception:
 			pass
+		log.debug("waiting for jobs: fetch_media")
 		job = dequeue("fetch_media", timeout=5)
 		if not job:
 			time.sleep(0.25)
@@ -27,6 +29,10 @@ def main() -> None:
 		jid = int(job["id"])  # type: ignore
 		payload = job.get("payload") or {}
 		att_id = int(payload.get("attachment_id") or 0)
+		try:
+			log.info("dequeued jid=%s kind=%s key=%s", jid, job.get("kind"), job.get("key"))
+		except Exception:
+			pass
 		# Backward compatibility: allow key format message_id:position
 		if not att_id:
 			key = job.get("key") or ""

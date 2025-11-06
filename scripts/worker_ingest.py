@@ -20,6 +20,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 def main() -> None:
+	log.info("worker_ingest starting pid=%s host=%s", os.getpid(), socket.gethostname())
 	while True:
 		# heartbeat even when idle
 		try:
@@ -27,6 +28,7 @@ def main() -> None:
 		except Exception:
 			pass
 		# Prefer ingest jobs; if none, try hydrate jobs
+		log.debug("waiting for jobs: ingest|hydrate_conversation")
 		job = dequeue("ingest", timeout=1) or dequeue("hydrate_conversation", timeout=1)
 		if not job:
 			time.sleep(0.25)
@@ -34,6 +36,10 @@ def main() -> None:
 		jid = int(job["id"])  # type: ignore
 		payload = job.get("payload") or {}
 		kind = job.get("kind")
+		try:
+			log.info("dequeued jid=%s kind=%s key=%s", jid, kind, job.get("key"))
+		except Exception:
+			pass
 		raw_id = int(payload.get("raw_event_id") or 0)
 		try:
 			if kind == "ingest":

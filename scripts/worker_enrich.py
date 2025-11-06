@@ -16,12 +16,14 @@ logging.basicConfig(level=logging.INFO)
 
 
 def main() -> None:
+	log.info("worker_enrich starting pid=%s host=%s", os.getpid(), socket.gethostname())
 	while True:
 		# heartbeat when idle too
 		try:
 			record_heartbeat("enrich", os.getpid(), socket.gethostname())
 		except Exception:
 			pass
+		log.debug("waiting for jobs: enrich_user|enrich_page|ig_ai_process_run")
 		job = dequeue("enrich_user", timeout=1) or dequeue("enrich_page", timeout=1) or dequeue("ig_ai_process_run", timeout=1)
 		if not job:
 			time.sleep(0.25)
@@ -29,6 +31,10 @@ def main() -> None:
 		jid = int(job["id"])  # type: ignore
 		kind = job.get("kind")
 		payload = job.get("payload") or {}
+		try:
+			log.info("dequeued jid=%s kind=%s key=%s", jid, kind, job.get("key"))
+		except Exception:
+			pass
 		try:
 			if kind == "enrich_user":
 				uid = str(payload.get("ig_user_id") or job.get("key"))
