@@ -127,30 +127,67 @@ def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: 
     1) If phone present, find client by normalized phone; if exactly one client and exactly one order in window, link it.
     2) Else fuzzy match client by buyer_name/address; if one strong candidate and one order in window, link it.
     """
-    phone = normalize_phone(extracted.get("phone"))
+    phone_digits = normalize_phone(extracted.get("phone"))
+    phone_last10 = phone_digits[-10:] if len(phone_digits) >= 10 else phone_digits
     buyer_name = (extracted.get("buyer_name") or "").strip()
     addr = (extracted.get("address") or "").strip()
 
     # 1) Phone-based client match
     client_by_phone: Client | None = None
-    if phone:
+    if phone_last10:
         try:
             candidates = session.exec(select(Client).where(Client.phone.is_not(None))).all()
         except Exception:
             candidates = []
         matches = []
         for c in candidates:
-            ph = normalize_phone(c.phone)
-            if ph and (ph == phone or (len(phone) >= 7 and phone.endswith(ph[-7:]) or ph.endswith(phone[-7:]))):
+            ph_digits = normalize_phone(c.phone)
+            if not ph_digits:
+                continue
+            # Prefer exact last-10 match, else allow substring contains
+            c_last10 = ph_digits[-10:] if len(ph_digits) >= 10 else ph_digits
+            if (c_last10 and c_last10 == phone_last10) or (phone_last10 in ph_digits):
                 matches.append(c)
+        # If exactly one client matches by phone, try to link order
         if len(matches) == 1:
             client_by_phone = matches[0]
             orders = _orders_for_client_in_window(session, int(client_by_phone.id), date_from, date_to) if client_by_phone.id else []
             best_order = _choose_best_order(orders)
             if best_order and best_order.id is not None:
                 return int(best_order.id)
+        # If multiple clients matched by phone substring, try to disambiguate by having orders in window
+        if len(matches) > 1:
+            viable: list[tuple[Client, Order]] = []
+            for c in matches:
+                orders = _orders_for_client_in_window(session, int(c.id), date_from, date_to) if c.id else []
+                best_order = _choose_best_order(orders)
+                if best_order and best_order.id is not None:
+                    viable.append((c, best_order))
+            if len(viable) == 1:
+                return int(viable[0][1].id) if viable[0][1].id is not None else None
 
-    # 2) Fuzzy name/address match
+    # 2) Exact slug/name key match before fuzzy
+    if buyer_name:
+        try:
+            from ..utils.normalize import normalize_key
+
+            buyer_key = normalize_key(buyer_name)
+            if buyer_key:
+                clients = session.exec(select(Client)).all()
+                exact_candidates: list[Client] = []
+                for c in clients:
+                    c_key = normalize_key(c.name)
+                    if c_key and c_key == buyer_key:
+                        exact_candidates.append(c)
+                if len(exact_candidates) == 1:
+                    orders = _orders_for_client_in_window(session, int(exact_candidates[0].id), date_from, date_to) if exact_candidates[0].id else []
+                    best_order = _choose_best_order(orders)
+                    if best_order and best_order.id is not None:
+                        return int(best_order.id)
+        except Exception:
+            pass
+
+    # 3) Fuzzy name/address match
     row = {"name": buyer_name, "address": addr, "city": ""}
     candidates = session.exec(select(Client)).all()
     best: tuple[Client, int] | None = None

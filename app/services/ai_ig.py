@@ -86,7 +86,9 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
     )
     user_prompt = (
         "Aşağıda bir DM konuşması transkripti var. \n"
-        "Lütfen kesin satın alma olup olmadığını belirle ve bilgileri çıkar.\n\n"
+        "Lütfen kesin satın alma olup olmadığını belirle ve bilgileri çıkar.\n"
+        "Bu çıktı dışa aktarım için kullanılacaktır; satın alma varsa alıcı ad-soyad, telefon ve adresi konuşmanın TÜMÜNDE dikkatle ara ve mümkünse doldur.\n"
+        "Uydurma yapma; metinde yoksa null bırak.\n\n"
         f"Şema: {schema_hint}\n\n"
         f"Transkript:\n{transcript}"
     )

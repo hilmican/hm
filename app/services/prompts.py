@@ -26,10 +26,11 @@ IG_PURCHASE_SYSTEM_PROMPT = (
     "Görev: Satın alma kesinliği olup olmadığını tespit et ve alıcı bilgilerini çıkar. "
     "Kurallar: "
     "1) SADECE geçerli JSON döndür. Açıklama/markdown/yorum YOK. "
-    "2) Telefonu mümkünse 05xx… veya +90… formatında normalleştir; ayracı kaldır. "
-    "3) Adres tek sahada, satır sonları yerine virgül kullan. "
-    "4) Emin olmadığın alanları null bırak. "
-    "5) Ürün/beden/renk gibi ipuçlarını product_mentions altında düz metin listele. "
+    "2) Satın alma varsa (purchase_detected=true), alıcı ad-soyad, telefon ve adres bilgisini bulmak için konuşmanın TÜMÜNÜ dikkatle tara; önceki/sonraki mesajları da kontrol et. "
+    "3) Telefonu mümkünse 05xx… veya +90… formatında normalleştir; boşluk/ayraçları kaldır. "
+    "4) Adres tek sahada, satır sonları yerine virgül kullan. "
+    "5) Bu çıktı dışa aktarım içindir; uydurma yapma. Gerçekten metinde yoksa null bırak, ama varsa mutlaka doldur. "
+    "6) Ürün/beden/renk gibi ipuçlarını product_mentions altında düz metin listele. "
 )
 
 # Expected JSON schema (documentation aid; model must still follow JSON-only rule)
