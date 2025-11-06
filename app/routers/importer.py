@@ -540,16 +540,24 @@ def commit_import(body: dict, request: Request):
 					rows_skipped_cnt += 1
 					continue
 				row_hash = compute_row_hash(rec)
-				# idempotency: skip duplicate rows by row_hash
-				existing_ir = session.exec(select(ImportRow).where(ImportRow.row_hash == row_hash)).first()
+				# idempotency: skip duplicate rows only when a prior run already produced/matched an order
+				existing_ir = session.exec(select(ImportRow).where(ImportRow.row_hash == row_hash).order_by(ImportRow.id.desc())).first()
+				skip_due_to_duplicate = False
 				if existing_ir:
+					try:
+						prev_status = str(existing_ir.status or "").lower()
+						# Skip when a previous import created/updated/merged or matched an order
+						skip_due_to_duplicate = (existing_ir.matched_order_id is not None) or (prev_status in ("created","updated","merged"))
+					except Exception:
+						skip_due_to_duplicate = False
+				if skip_due_to_duplicate:
 					ir = ImportRow(
 						import_run_id=run.id or 0,
 						row_index=idx,
 						row_hash=row_hash,
 						mapped_json=str(rec),
 						status="skipped",  # type: ignore
-						message="duplicate row",
+						message="duplicate row (already processed)",
 						matched_client_id=existing_ir.matched_client_id,
 						matched_order_id=existing_ir.matched_order_id,
 					)
