@@ -7,6 +7,7 @@ import sqlite3
 
 from redis import Redis
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from ..db import get_session
 from .monitoring import queue_enqueue_time_add, queue_enqueue_time_remove
@@ -48,7 +49,32 @@ def _ensure_job(kind: str, key: str, payload: Optional[dict] = None, max_attempt
 				VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
 				"""
 			)
-		session.exec(stmt.params(kind=kind, key=key, max_attempts=max_attempts, payload=json.dumps(payload or {})))
+		# Execute insert, with MySQL-specific self-heal for missing AUTO_INCREMENT on id
+		try:
+			session.exec(stmt.params(kind=kind, key=key, max_attempts=max_attempts, payload=json.dumps(payload or {})))
+		except OperationalError as e:
+			msg = str(e).lower()
+			needs_auto_inc = (
+				(dialect == "mysql") and (
+					"doesn't have a default value" in msg or "does not have a default value" in msg
+				)
+			)
+			if needs_auto_inc:
+				# Best-effort MySQL fixups to ensure jobs.id is AUTO_INCREMENT primary key
+				for sql in (
+					"ALTER TABLE `jobs` MODIFY COLUMN `id` INT NOT NULL",
+					"ALTER TABLE `jobs` DROP PRIMARY KEY",
+					"ALTER TABLE `jobs` CHANGE `id` `id` INT NOT NULL AUTO_INCREMENT",
+					"ALTER TABLE `jobs` ADD PRIMARY KEY (`id`)",
+				):
+					try:
+						session.exec(text(sql))
+					except Exception:
+						pass
+				# Retry the insert once after attempting to fix schema
+				session.exec(stmt.params(kind=kind, key=key, max_attempts=max_attempts, payload=json.dumps(payload or {})))
+			else:
+				raise
 		# Lookup inserted row by unique key
 		if dialect == "mysql":
 			sel = text("SELECT `id` FROM `jobs` WHERE `kind`=:kind AND `key`=:key")
