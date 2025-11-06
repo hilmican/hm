@@ -302,8 +302,8 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                     session.exec(
                         _text(
                             "UPDATE conversations SET ai_status=:s, ai_json=:j, ai_processed_at=CURRENT_TIMESTAMP, ai_run_id=:rid WHERE convo_id=:cid"
-                        )
-                    ).params(s="error", j=json.dumps({"error": str(e)}), rid=run_id, cid=cid)
+                        ).params(s="error", j=json.dumps({"error": str(e)}), rid=run_id, cid=cid)
+                    )
                 except Exception:
                     pass
             continue
@@ -359,22 +359,22 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                           ai_run_id = :rid
                         WHERE convo_id = :cid
                         """
+                    ).params(
+                        name=(data.get("buyer_name") or None),
+                        phone=(data.get("phone") or None),
+                        addr=(data.get("address") or None),
+                        st=status,
+                        js=json.dumps(data, ensure_ascii=False),
+                        oid=linked_order_id,
+                        rid=run_id,
+                        cid=cid,
                     )
-                ).params(
-                    name=(data.get("buyer_name") or None),
-                    phone=(data.get("phone") or None),
-                    addr=(data.get("address") or None),
-                    st=status,
-                    js=json.dumps(data, ensure_ascii=False),
-                    oid=linked_order_id,
-                    rid=run_id,
-                    cid=cid,
                 )
                 # Also back-fill order.ig_conversation_id if linked
                 if linked_order_id and cid:
                     session.exec(
-                    _text('UPDATE `order` SET ig_conversation_id = COALESCE(ig_conversation_id, :cid) WHERE id=:oid')
-                    ).params(cid=cid, oid=int(linked_order_id))
+                        _text('UPDATE `order` SET ig_conversation_id = COALESCE(ig_conversation_id, :cid) WHERE id=:oid').params(cid=cid, oid=int(linked_order_id))
+                    )
                 # Optional: write history row
                 try:
                     session.exec(
@@ -383,8 +383,8 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                             INSERT INTO ig_ai_result(convo_id, run_id, status, ai_json, linked_order_id, created_at)
                             VALUES(:cid, :rid, :st, :js, :oid, CURRENT_TIMESTAMP)
                             """
-                        )
-                    ).params(cid=cid, rid=run_id, st=status, js=json.dumps(data, ensure_ascii=False), oid=linked_order_id)
+                        ).params(cid=cid, rid=run_id, st=status, js=json.dumps(data, ensure_ascii=False), oid=linked_order_id)
+                    )
                 except Exception:
                     pass
                 processed += 1
@@ -415,15 +415,15 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                       errors_json = :err
                     WHERE id = :rid
                     """
+                ).params(
+                    cns=considered,
+                    prs=processed,
+                    lnk=linked,
+                    pur=purchases,
+                    pun=purchases_unlinked,
+                    err=json.dumps(errors, ensure_ascii=False) if errors else None,
+                    rid=run_id,
                 )
-            ).params(
-                cns=considered,
-                prs=processed,
-                lnk=linked,
-                pur=purchases,
-                pun=purchases_unlinked,
-                err=json.dumps(errors, ensure_ascii=False) if errors else None,
-                rid=run_id,
             )
         except Exception:
             # Fallback: at least mark completion timestamp
