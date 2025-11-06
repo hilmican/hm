@@ -11,10 +11,10 @@ import sqlite3
 DB_PATH = Path("data/app.db")
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# Allow overriding DB via env (e.g., MySQL)
+# Require explicit database URL; no implicit SQLite fallback
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("MYSQL_URL")
 if not DATABASE_URL:
-    DATABASE_URL = f"sqlite:///{DB_PATH}"
+    raise RuntimeError("DATABASE_URL (or MYSQL_URL) must be set; SQLite fallback is disabled")
 
 if DATABASE_URL.startswith("mysql+") or DATABASE_URL.startswith("mysql://"):
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
