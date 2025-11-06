@@ -112,6 +112,11 @@
                 <option value="refunded" {{ 'selected' if status == 'refunded' else '' }}>Kirmizi (Iade)</option>
                 <option value="switched" {{ 'selected' if status == 'switched' else '' }}>Kahverengi (Degisim)</option>
             </select>
+            <select name="ig_linked">
+                <option value="" {{ 'selected' if not ig_linked else '' }}>IG: Hepsi</option>
+                <option value="linked" {{ 'selected' if ig_linked == 'linked' else '' }}>IG Bağlı</option>
+                <option value="unlinked" {{ 'selected' if ig_linked == 'unlinked' else '' }}>IG Bağsız</option>
+            </select>
             <button class="btn" type="submit">Filtrele</button>
             <a class="link-muted" href="/orders/table">Temizle</a>
         </form>
@@ -140,7 +145,13 @@
             {% set rowcls = status_map.get(o.id) if status_map else '' %}
             <tr class="{{ rowcls }}">
                 <td><a href="/orders/{{ o.id }}/edit" title="Düzenle #{{ o.id }}">{{ o.id }}</a></td>
-                <td class="tracking">{{ o.tracking_no or '-' }}</td>
+                <td class="tracking" data-sort="{{ o.tracking_no or '' }}">
+                    {% if o.tracking_no %}
+                        <span title="{{ o.tracking_no }}">{{ (o.tracking_no or '')[:6] }}</span>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
                 <td class="client">
                     {% set cname = client_map.get(o.client_id) if client_map else o.client_id %}
                     <a href="/clients/{{ o.client_id }}">{{ (cname or '')[:40] }}</a>
@@ -159,18 +170,15 @@
                 <td>{{ o.source }}</td>
                 <td>
                     {% if o.ig_conversation_id %}
-                        <a href="/ig/inbox/{{ o.ig_conversation_id }}">{{ o.ig_conversation_id }}</a>
+                        <a class="icon-btn" title="IG Konuşma" aria-label="IG Konuşma" href="/ig/inbox/{{ o.ig_conversation_id }}">
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 2h10a5 5 0 0 1 5 5v6a5 5 0 0 1-5 5h-3l-4 4v-4H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z"></path></svg>
+                        </a>
                     {% else %}
                         -
                     {% endif %}
                 </td>
                 <td>
                     <div class="icon-actions">
-                        {% if o.ig_conversation_id %}
-                        <a class="icon-btn" title="IG Konuşma" aria-label="IG Konuşma" href="/ig/inbox/{{ o.ig_conversation_id }}">
-                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 2h10a5 5 0 0 1 5 5v6a5 5 0 0 1-5 5h-3l-4 4v-4H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z"></path></svg>
-                        </a>
-                        {% endif %}
                         <button class="icon-btn warn" title="İade" aria-label="İade" onclick="refund({{ o.id }})">
                             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5l-5 5 5 5V5z"></path><path d="M9 7h5a5 5 0 1 1 0 10H9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
                         </button>

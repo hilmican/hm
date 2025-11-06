@@ -52,6 +52,7 @@ def list_orders_table(
     source: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
     preset: Optional[str] = Query(default=None),
+    ig_linked: Optional[str] = Query(default=None, regex="^(linked|unlinked)?$"),
 ):
     def _parse_date_or_default(value: Optional[str], fallback: dt.date) -> dt.date:
         try:
@@ -110,6 +111,13 @@ def list_orders_table(
         # Optional source filter (bizim|kargo) — ignored for quicksearch presets
         if (preset not in ("overdue_unpaid_7", "all")) and source in ("bizim", "kargo"):
             q = q.where(Order.source == source)
+
+        # Optional IG linked filter on the SQL side when possible
+        if ig_linked == "linked":
+            from sqlalchemy import not_
+            q = q.where(Order.ig_conversation_id.is_not(None))
+        elif ig_linked == "unlinked":
+            q = q.where(Order.ig_conversation_id.is_(None))
 
         rows = session.exec(q).all()
 
@@ -218,6 +226,7 @@ def list_orders_table(
                 "date_field": date_field,
                 "source": source,
                 "status": status,
+                "ig_linked": ig_linked,
                 # current preset
                 "preset": preset,
             },
