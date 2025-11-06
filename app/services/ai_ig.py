@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from typing import Any, Dict, Optional, Tuple, List
+import os
 
 from sqlmodel import select
 
@@ -31,7 +32,7 @@ def _format_transcript(messages: List[Message], max_chars: int = 15000) -> str:
     return txt
 
 
-def analyze_conversation(conversation_id: str, *, limit: int = 200) -> Dict[str, Any]:
+def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Optional[int] = None) -> Dict[str, Any]:
     """Run AI over a single conversation to detect purchase and extract contacts.
 
     Returns a dict with keys: purchase_detected, buyer_name, phone, address, notes,
@@ -48,6 +49,15 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200) -> Dict[str,
             .limit(min(max(limit, 1), 500))
         ).all()
     transcript = _format_transcript(msgs)
+    # Log context preparation
+    try:
+        ai_run_log(int(run_id), "debug", "prepare_context", {
+            "conversation_id": conversation_id,
+            "messages": len(msgs),
+            "transcript_len": len(transcript),
+        }) if run_id is not None else None
+    except Exception:
+        pass
     schema_hint = (
         '{"purchase_detected": true|false, "buyer_name": "str|null", "phone": "str|null", '
         '"address": "str|null", "notes": "str|null", "product_mentions": ["str"], '
@@ -59,7 +69,28 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200) -> Dict[str,
         f"Şema: {schema_hint}\n\n"
         f"Transkript:\n{transcript}"
     )
+    # Optional prompt logging (truncated) when enabled
+    try:
+        if os.getenv("AI_LOG_PROMPT", "0") not in ("0", "false", "False", "") and run_id is not None:
+            ai_run_log(int(run_id), "debug", "ai_prompt", {
+                "system_prompt": IG_PURCHASE_SYSTEM_PROMPT[:800],
+                "user_prompt": user_prompt[:1200],
+                "conversation_id": conversation_id,
+            })
+    except Exception:
+        pass
     data = client.generate_json(system_prompt=IG_PURCHASE_SYSTEM_PROMPT, user_prompt=user_prompt)
+    try:
+        if run_id is not None:
+            ai_run_log(int(run_id), "info", "ai_response", {
+                "conversation_id": conversation_id,
+                "purchase_detected": bool(data.get("purchase_detected")),
+                "has_phone": bool(data.get("phone")),
+                "has_address": bool(data.get("address")),
+                "mentions": len(data.get("product_mentions") or []),
+            })
+    except Exception:
+        pass
     if not isinstance(data, dict):
         raise RuntimeError("AI returned non-dict JSON")
     # Normalize keys presence
@@ -168,12 +199,12 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
 
     for cid in convo_ids:
         try:
-            try:
-                log.debug("ig_ai analyzing convo=%s", cid)
-            except Exception:
-                pass
-            ai_run_log(run_id, "debug", "analyze_start", {"conversation_id": cid})
-            data = analyze_conversation(cid)
+        try:
+            log.debug("ig_ai analyzing convo=%s", cid)
+        except Exception:
+            pass
+        ai_run_log(run_id, "debug", "analyze_start", {"conversation_id": cid})
+        data = analyze_conversation(cid, limit=limit, run_id=run_id)
         except Exception as e:
             errors.append(f"{cid}: {e}")
             ai_run_log(run_id, "error", "analyze_error", {"conversation_id": cid, "error": str(e)})
@@ -224,6 +255,7 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
 
         with get_session() as session:
             try:
+                ai_run_log(run_id, "debug", "persist_start", {"conversation_id": cid, "status": status, "linked_order_id": linked_order_id})
                 # Persist conversations fields
                 session.exec(
                     _text(
@@ -256,8 +288,10 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                     _text('UPDATE `order` SET ig_conversation_id = COALESCE(ig_conversation_id, :cid) WHERE id=:oid')
                     ).params(cid=cid, oid=int(linked_order_id))
                 processed += 1
+                ai_run_log(run_id, "info", "persist_done", {"conversation_id": cid, "status": status, "linked_order_id": linked_order_id})
             except Exception as pe:
                 errors.append(f"{cid}: persist_err {pe}")
+                ai_run_log(run_id, "error", "persist_error", {"conversation_id": cid, "error": str(pe)})
                 ai_run_log(run_id, "error", "persist_error", {"conversation_id": cid, "error": str(pe)})
 
         # cancellation check between items
