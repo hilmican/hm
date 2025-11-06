@@ -580,6 +580,20 @@ async def edit_order_apply(order_id: int, request: Request):
             if new_items_map != old_items_map:
                 items_changed = True
                 changes["items"] = [old_items_map, new_items_map]
+                # validate all incoming item ids exist before mutating state
+                try:
+                    from ..models import Item as _Item
+                    existing = session.exec(_select(_Item).where(_Item.id.in_(list(new_items_map.keys())))).all()
+                    existing_ids = {int(it.id) for it in existing if it.id is not None}
+                    missing_ids = [int(i) for i in new_items_map.keys() if int(i) not in existing_ids]
+                    if missing_ids:
+                        raise HTTPException(status_code=400, detail=f"Unknown item_id(s): {missing_ids}")
+                except HTTPException:
+                    # bubble up validation error
+                    raise
+                except Exception:
+                    # fall back to runtime FK error if validation unexpectedly fails
+                    pass
                 # remove existing order items
                 for oi in cur_items:
                     session.delete(oi)
@@ -622,6 +636,10 @@ async def edit_order_apply(order_id: int, request: Request):
             changes["client_id"] = [o.client_id, new_client_id]
             o.client_id = new_client_id  # type: ignore
         if (not items_changed) and new_item_id and new_item_id != (o.item_id or None):
+            # validate target item exists to avoid FK violation on autoflush
+            it_exists = session.exec(select(Item).where(Item.id == new_item_id)).first()
+            if not it_exists:
+                raise HTTPException(status_code=400, detail="Item not found")
             changes["item_id"] = [o.item_id, new_item_id]
             o.item_id = new_item_id
         if new_tracking != (o.tracking_no or None):
