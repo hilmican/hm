@@ -317,8 +317,19 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                         att_ids_map.setdefault(mid, []).append(int(att_id))
         except Exception:
             att_ids_map = {}
+        # Fetch latest AI extraction for this conversation if available
+        ai_json = None
+        ai_status = None
+        try:
+            from sqlalchemy import text as _text
+            rowai = session.exec(_text("SELECT ai_status, ai_json FROM conversations WHERE convo_id=:cid LIMIT 1").params(cid=str(conversation_id))).first()
+            if rowai:
+                ai_status = (rowai.ai_status if hasattr(rowai, 'ai_status') else rowai[0]) or None
+                ai_json = (rowai.ai_json if hasattr(rowai, 'ai_json') else rowai[1]) or None
+        except Exception:
+            ai_json = None
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label, "att_map": att_map, "att_ids_map": att_ids_map, "usernames": usernames, "contact_name": contact_name, "contact_phone": contact_phone})
+        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label, "att_map": att_map, "att_ids_map": att_ids_map, "usernames": usernames, "contact_name": contact_name, "contact_phone": contact_phone, "ai_status": ai_status, "ai_json": ai_json})
 
 
 @router.get("/media/local/{attachment_id}")

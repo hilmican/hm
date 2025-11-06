@@ -26,6 +26,7 @@
       <label>Bitiş Tarihi <input type="date" name="date_to" /></label>
       <label>Min Yaş (dk) <input type="number" name="min_age_minutes" value="60" min="0" /></label>
       <label>Limit <input type="number" name="limit" value="200" min="1" max="5000" /></label>
+      <label><input type="checkbox" name="reprocess" value="1" /> Daha önce işlenenleri tekrar işle</label>
       <button type="submit">İşle</button>
     </form>
     <div id="runMsg" class="muted"></div>
@@ -77,6 +78,7 @@
       msg.textContent = 'Önizleme alınıyor...';
       const fd = new FormData(form);
       const body = Object.fromEntries(fd.entries());
+      body.reprocess = !!fd.get('reprocess');
       for (const k of ['min_age_minutes','limit']) { if (body[k]) body[k] = Number(body[k]); }
       try {
         // Preview first to show counts

@@ -106,7 +106,7 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
     return out
 
 
-def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[dt.date], min_age_minutes: int = 60, limit: int = 200) -> Dict[str, Any]:
+def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[dt.date], min_age_minutes: int = 60, limit: int = 200, reprocess: bool = False) -> Dict[str, Any]:
     """Process eligible conversations for a run id and persist results.
 
     Returns counters summary.
@@ -126,6 +126,37 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
     errors: List[str] = []
 
     with get_session() as session:
+        # Optional reprocess: clear processed markers for in-scope conversations
+        if reprocess:
+            try:
+                params_clear: Dict[str, Any] = {"cutoff": cutoff_dt.isoformat(" ")}
+                where_clear = ["last_message_at <= :cutoff"]
+                if date_from and date_to and date_from <= date_to:
+                    dt_end = date_to + dt.timedelta(days=1)
+                    params_clear["df"] = f"{date_from.isoformat()} 00:00:00"
+                    params_clear["dte"] = f"{dt_end.isoformat()} 00:00:00"
+                    where_clear.append("last_message_at >= :df AND last_message_at < :dte")
+                elif date_from:
+                    params_clear["df"] = f"{date_from.isoformat()} 00:00:00"
+                    where_clear.append("last_message_at >= :df")
+                elif date_to:
+                    dt_end = date_to + dt.timedelta(days=1)
+                    params_clear["dte"] = f"{dt_end.isoformat()} 00:00:00"
+                    where_clear.append("last_message_at < :dte")
+                sql_clear = (
+                    "UPDATE conversations SET ai_processed_at=NULL, ai_status=NULL, ai_run_id=NULL, linked_order_id=NULL "
+                    "WHERE " + " AND ".join(where_clear)
+                )
+                rc = session.exec(_text(sql_clear).params(**params_clear)).rowcount
+                try:
+                    ai_run_log(run_id, "info", "reprocess_clear", {"cleared": int(rc or 0)})
+                except Exception:
+                    pass
+            except Exception as e:
+                try:
+                    ai_run_log(run_id, "error", "reprocess_clear_error", {"error": str(e)})
+                except Exception:
+                    pass
         # Select eligible conversations by last_message_at and ai_processed_at is NULL
         params: Dict[str, Any] = {"cutoff": cutoff_dt.isoformat(" ")}
         where = ["ai_processed_at IS NULL", "last_message_at <= :cutoff"]
@@ -198,13 +229,9 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
         }
 
     for cid in convo_ids:
-        try:
-        try:
-            log.debug("ig_ai analyzing convo=%s", cid)
-        except Exception:
-            pass
         ai_run_log(run_id, "debug", "analyze_start", {"conversation_id": cid})
-        data = analyze_conversation(cid, limit=limit, run_id=run_id)
+        try:
+            data = analyze_conversation(cid, limit=limit, run_id=run_id)
         except Exception as e:
             errors.append(f"{cid}: {e}")
             ai_run_log(run_id, "error", "analyze_error", {"conversation_id": cid, "error": str(e)})
@@ -287,6 +314,18 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                     session.exec(
                     _text('UPDATE `order` SET ig_conversation_id = COALESCE(ig_conversation_id, :cid) WHERE id=:oid')
                     ).params(cid=cid, oid=int(linked_order_id))
+                # Optional: write history row
+                try:
+                    session.exec(
+                        _text(
+                            """
+                            INSERT INTO ig_ai_result(convo_id, run_id, status, ai_json, linked_order_id, created_at)
+                            VALUES(:cid, :rid, :st, :js, :oid, CURRENT_TIMESTAMP)
+                            """
+                        )
+                    ).params(cid=cid, rid=run_id, st=status, js=json.dumps(data, ensure_ascii=False), oid=linked_order_id)
+                except Exception:
+                    pass
                 processed += 1
                 ai_run_log(run_id, "info", "persist_done", {"conversation_id": cid, "status": status, "linked_order_id": linked_order_id})
             except Exception as pe:

@@ -216,6 +216,25 @@ def init_db() -> None:
                             )
                         except Exception:
                             pass
+                        # Optional history of AI results per conversation/run
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS ig_ai_result (
+                                    id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                                    convo_id VARCHAR(128) NOT NULL,
+                                    run_id INTEGER NOT NULL,
+                                    status VARCHAR(32) NULL,
+                                    ai_json LONGTEXT NULL,
+                                    linked_order_id INTEGER NULL,
+                                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                    INDEX idx_ig_ai_res_convo (convo_id),
+                                    INDEX idx_ig_ai_res_run (run_id)
+                                )
+                                """
+                            )
+                        except Exception:
+                            pass
                         # Ensure ig_accounts table exists (MySQL) used by enrichers
                         try:
                             conn.exec_driver_sql(
@@ -628,6 +647,20 @@ def init_db() -> None:
                     """
                 )
                 # Ensure columns exist for older DBs
+                # Optional: history of AI results per conversation/run (SQLite)
+                conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS ig_ai_result (
+                        id INTEGER PRIMARY KEY,
+                        convo_id TEXT NOT NULL,
+                        run_id INTEGER NOT NULL,
+                        status TEXT,
+                        ai_json TEXT,
+                        linked_order_id INTEGER,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
                 try:
                     rows = conn.exec_driver_sql("PRAGMA table_info('ig_ai_run')").fetchall()
                     have = {r[1] for r in rows}

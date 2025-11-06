@@ -28,6 +28,7 @@ def start_process(body: dict):
     date_to_s: Optional[str] = (body or {}).get("date_to")
     min_age_minutes: int = int((body or {}).get("min_age_minutes") or 60)
     limit: int = int((body or {}).get("limit") or 200)
+    reprocess: bool = bool((body or {}).get("reprocess") not in (False, 0, "0", "false", "False", None))
 
     def _parse_date(v: Optional[str]) -> Optional[dt.date]:
         try:
@@ -77,6 +78,7 @@ def start_process(body: dict):
         "date_to": date_to.isoformat() if date_to else None,
         "min_age_minutes": min_age_minutes,
         "limit": limit,
+        "reprocess": reprocess,
     })
     with get_session() as session:
         session.exec(text("UPDATE ig_ai_run SET job_id=:jid WHERE id=:id").params(jid=int(job_id), id=int(run_id)))

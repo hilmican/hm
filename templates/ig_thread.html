@@ -21,6 +21,11 @@
       <a href="/ig/inbox">← Back to Inbox</a>
       <button id="refresh">Refresh</button>
     </div>
+  <div style="margin-top:18px">
+    <h3>AI Çıktısı</h3>
+    {% if ai_status %}<div class="meta">Durum: {{ ai_status }}</div>{% endif %}
+    <pre id="aiBox" style="background:#0b1021;color:#e5e7eb; padding:12px; border-radius:8px; max-height:300px; overflow:auto; white-space:pre-wrap;">{{ ai_json or 'Henüz AI verisi yok.' }}</pre>
+  </div>
     <h2>
       Conversation {{ other_label or conversation_id }}
       {% if other_label %}<a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ other_label[1:] }}">profile ↗</a>{% endif %}
