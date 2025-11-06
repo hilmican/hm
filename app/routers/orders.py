@@ -559,6 +559,8 @@ async def edit_order_apply(order_id: int, request: Request):
         item_ids_arr = _getlist("item_ids[]")
         qtys_arr = _getlist("qtys[]")
         new_items_map: dict[int, int] = {}
+        # keep raw mapping to help resolve by SKU if id not found
+        raw_by_parsed: dict[int, list[tuple[str, int]]] = {}
         if item_ids_arr and qtys_arr and (len(item_ids_arr) == len(qtys_arr)):
             for s_iid, s_qty in zip(item_ids_arr, qtys_arr):
                 iid = _parse_id(str(s_iid))
@@ -569,6 +571,7 @@ async def edit_order_apply(order_id: int, request: Request):
                 if iid is None or qv <= 0:
                     continue
                 new_items_map[iid] = new_items_map.get(iid, 0) + qv
+                raw_by_parsed.setdefault(iid, []).append((str(s_iid), int(qv)))
         if new_items_map:
             from sqlmodel import select as _select
             cur_items = session.exec(_select(OrderItem).where(OrderItem.order_id == order_id)).all()
@@ -586,8 +589,41 @@ async def edit_order_apply(order_id: int, request: Request):
                     existing = session.exec(_select(_Item).where(_Item.id.in_(list(new_items_map.keys())))).all()
                     existing_ids = {int(it.id) for it in existing if it.id is not None}
                     missing_ids = [int(i) for i in new_items_map.keys() if int(i) not in existing_ids]
+                    # Attempt to resolve missing ids by SKU from "id | sku | name" display strings
                     if missing_ids:
-                        raise HTTPException(status_code=400, detail=f"Unknown item_id(s): {missing_ids}")
+                        resolved: dict[int, int] = {}
+                        for mid in list(missing_ids):
+                            raws = raw_by_parsed.get(int(mid), [])
+                            # take first raw to resolve; quantities are aggregated below
+                            sku_candidate = None
+                            for raw_val, _q in raws:
+                                parts = [p.strip() for p in str(raw_val).split("|")]
+                                if len(parts) >= 2:
+                                    sku_candidate = parts[1]
+                                    break
+                            if sku_candidate:
+                                it2 = session.exec(_select(_Item).where(_Item.sku == sku_candidate)).first()
+                                if it2 and it2.id is not None:
+                                    resolved[int(mid)] = int(it2.id)
+                        # apply resolutions
+                        for old_id, new_id in resolved.items():
+                            qty_sum = new_items_map.pop(int(old_id), 0)
+                            if qty_sum:
+                                new_items_map[int(new_id)] = new_items_map.get(int(new_id), 0) + int(qty_sum)
+                        # recompute missing after resolution
+                        existing = session.exec(_select(_Item).where(_Item.id.in_(list(new_items_map.keys())))).all()
+                        existing_ids = {int(it.id) for it in existing if it.id is not None}
+                        missing_ids = [int(i) for i in new_items_map.keys() if int(i) not in existing_ids]
+                    if missing_ids:
+                        # include raw hints if available
+                        missing_hints = []
+                        for mid in missing_ids:
+                            raws = raw_by_parsed.get(int(mid), [])
+                            if raws:
+                                missing_hints.append(f"{mid} ({raws[0][0]})")
+                            else:
+                                missing_hints.append(str(mid))
+                        raise HTTPException(status_code=400, detail=f"Unknown item_id(s): {missing_hints}")
                 except HTTPException:
                     # bubble up validation error
                     raise
@@ -636,10 +672,21 @@ async def edit_order_apply(order_id: int, request: Request):
             changes["client_id"] = [o.client_id, new_client_id]
             o.client_id = new_client_id  # type: ignore
         if (not items_changed) and new_item_id and new_item_id != (o.item_id or None):
-            # validate target item exists to avoid FK violation on autoflush
+            # validate target item exists to avoid FK violation on autoflush.
+            # If missing, attempt to resolve by SKU from combobox value "id | sku | name".
             it_exists = session.exec(select(Item).where(Item.id == new_item_id)).first()
             if not it_exists:
-                raise HTTPException(status_code=400, detail="Item not found")
+                # try resolving by SKU
+                parts = [p.strip() for p in (item_val or "").split("|")]
+                sku = parts[1] if len(parts) >= 2 else None
+                if sku:
+                    it2 = session.exec(select(Item).where(Item.sku == sku)).first()
+                    if it2 and it2.id is not None:
+                        new_item_id = int(it2.id)
+                    else:
+                        raise HTTPException(status_code=400, detail="Item not found")
+                else:
+                    raise HTTPException(status_code=400, detail="Item not found")
             changes["item_id"] = [o.item_id, new_item_id]
             o.item_id = new_item_id
         if new_tracking != (o.tracking_no or None):
