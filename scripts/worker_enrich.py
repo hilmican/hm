@@ -2,13 +2,18 @@
 import time
 import logging
 import asyncio
+import json
+import datetime as dt
+from typing import Any, Optional
 
 from app.services.queue import dequeue, delete_job, increment_attempts
 from app.services.enrichers import enrich_user, enrich_page
-from app.services.ai_ig import process_run as ig_ai_process_run
+from app.services.ai_ig import process_run as ig_ai_process_run, analyze_conversation
 from app.services.monitoring import record_heartbeat, increment_counter, ai_run_log
 import os
 import socket
+from app.db import get_session
+from app.models import IGAiDebugRun
 
 
 log = logging.getLogger("worker.enrich")
@@ -49,8 +54,8 @@ def main() -> None:
 			log.info("dequeued jid=%s kind=%s key=%s", jid, kind, job.get("key"))
 		except Exception:
 			pass
-		try:
-			if kind == "enrich_user":
+        try:
+            if kind == "enrich_user":
 				uid = str(payload.get("ig_user_id") or job.get("key"))
 				asyncio.run(enrich_user(uid))
 				try:
@@ -66,7 +71,7 @@ def main() -> None:
 					increment_counter("enrich_success", 1)
 				except Exception:
 					pass
-			elif kind == "ig_ai_process_run":
+            elif kind == "ig_ai_process_run":
 				payload = payload or {}
 				rid = int(payload.get("run_id") or 0) or int(job.get("key") or 0)
 				df = payload.get("date_from")
@@ -119,7 +124,74 @@ def main() -> None:
 					increment_counter("ig_ai_process_run", 1)
 				except Exception:
 					pass
-			else:
+            elif kind == "ig_ai_debug_convo":
+                debug_run_id = int(payload.get("debug_run_id") or job.get("key") or 0)
+                logs: list[dict[str, Any]] = []  # type: ignore[type-arg]
+
+                def _append_log(level: str, message: str, extra: Optional[dict[str, Any]] = None) -> None:
+                    entry = {
+                        "ts": dt.datetime.utcnow().isoformat(),
+                        "level": level,
+                        "message": message,
+                    }
+                    if extra:
+                        entry["extra"] = extra
+                    logs.append(entry)
+
+                if not debug_run_id:
+                    _append_log("error", "missing_debug_run_id", {"job_id": jid})
+                    delete_job(jid)
+                    continue
+
+                with get_session() as session:
+                    run_row = session.get(IGAiDebugRun, debug_run_id)
+                    if not run_row:
+                        _append_log("error", "debug_run_not_found", {"debug_run_id": debug_run_id})
+                        delete_job(jid)
+                        continue
+                    run_row.status = "running"
+                    run_row.job_id = jid
+                    run_row.started_at = dt.datetime.utcnow()
+                    session.add(run_row)
+                    session.commit()
+                    conversation_id = run_row.conversation_id
+                _append_log("info", "debug_run_started", {"debug_run_id": debug_run_id, "conversation_id": conversation_id})
+
+                try:
+                    result = analyze_conversation(conversation_id, include_meta=True)
+                    meta = result.get("meta") or {}
+                    _append_log("info", "analysis_completed", {"debug_run_id": debug_run_id})
+                    with get_session() as session:
+                        run_row = session.get(IGAiDebugRun, debug_run_id)
+                        if run_row:
+                            run_row.status = "completed"
+                            run_row.completed_at = dt.datetime.utcnow()
+                            run_row.ai_model = meta.get("ai_model")
+                            run_row.system_prompt = meta.get("system_prompt")
+                            run_row.user_prompt = meta.get("user_prompt")
+                            run_row.raw_response = meta.get("raw_response")
+                            run_row.extracted_json = json.dumps(result, ensure_ascii=False)
+                            run_row.logs_json = json.dumps(logs, ensure_ascii=False)
+                            run_row.error_message = None
+                            session.add(run_row)
+                            session.commit()
+                    try:
+                        increment_counter("ig_ai_debug_convo", 1)
+                    except Exception:
+                        pass
+                except Exception as dbg_err:
+                    _append_log("error", "analysis_failed", {"error": str(dbg_err)})
+                    with get_session() as session:
+                        run_row = session.get(IGAiDebugRun, debug_run_id)
+                        if run_row:
+                            run_row.status = "failed"
+                            run_row.error_message = str(dbg_err)
+                            run_row.completed_at = dt.datetime.utcnow()
+                            run_row.logs_json = json.dumps(logs, ensure_ascii=False)
+                            session.add(run_row)
+                            session.commit()
+                    raise
+            else:
 				delete_job(jid); continue
 			log.info("enrich ok jid=%s kind=%s", jid, kind)
 			delete_job(jid)
