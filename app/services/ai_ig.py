@@ -18,12 +18,22 @@ import logging
 log = logging.getLogger("ig_ai.process")
 
 
-def _format_transcript(messages: List[Message], max_chars: int = 15000) -> str:
+def _format_transcript(messages: List[Any], max_chars: int = 15000) -> str:
     parts: List[str] = []
     for m in messages:
-        role = (m.direction or "in").lower()
-        ts = m.timestamp_ms or 0
-        txt = (m.text or "").strip()
+        # Support SQLModel instances or plain dicts
+        try:
+            role = ((m.direction if hasattr(m, "direction") else (m.get("direction") if isinstance(m, dict) else "in")) or "in").lower()
+        except Exception:
+            role = "in"
+        try:
+            ts = (m.timestamp_ms if hasattr(m, "timestamp_ms") else (m.get("timestamp_ms") if isinstance(m, dict) else 0)) or 0
+        except Exception:
+            ts = 0
+        try:
+            txt = ((m.text if hasattr(m, "text") else (m.get("text") if isinstance(m, dict) else "")) or "").strip()
+        except Exception:
+            txt = ""
         parts.append(f"[{role}] {ts}: {txt}")
     txt = "\n".join(parts)
     # trim to model budget if needed
@@ -48,7 +58,18 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
             .order_by(Message.timestamp_ms.asc())
             .limit(min(max(limit, 1), 500))
         ).all()
-    transcript = _format_transcript(msgs)
+        # Serialize messages into simple dicts to avoid detached/lazy load issues
+        simple_msgs: List[Dict[str, Any]] = []
+        for m in msgs:
+            try:
+                simple_msgs.append({
+                    "direction": (m.direction or "in"),
+                    "timestamp_ms": (m.timestamp_ms or 0),
+                    "text": (m.text or ""),
+                })
+            except Exception:
+                continue
+    transcript = _format_transcript(simple_msgs)
     # Log context preparation
     try:
         ai_run_log(int(run_id), "debug", "prepare_context", {
@@ -143,11 +164,22 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                     dt_end = date_to + dt.timedelta(days=1)
                     params_clear["dte"] = f"{dt_end.isoformat()} 00:00:00"
                     where_clear.append("last_message_at < :dte")
-                sql_clear = (
-                    "UPDATE conversations SET ai_processed_at=NULL, ai_status=NULL, ai_run_id=NULL, linked_order_id=NULL "
-                    "WHERE " + " AND ".join(where_clear)
-                )
-                rc = session.exec(_text(sql_clear).params(**params_clear)).rowcount
+                set_cols_full = "ai_processed_at=NULL, ai_status=NULL, ai_run_id=NULL, linked_order_id=NULL"
+                set_cols_nostatus = "ai_processed_at=NULL, ai_run_id=NULL, linked_order_id=NULL"
+                sql_clear_full = ("UPDATE conversations SET " + set_cols_full + " WHERE " + " AND ".join(where_clear))
+                sql_clear_nostatus = ("UPDATE conversations SET " + set_cols_nostatus + " WHERE " + " AND ".join(where_clear))
+                rc = None
+                try:
+                    rc = session.exec(_text(sql_clear_full).params(**params_clear)).rowcount
+                except Exception as e:
+                    # If ai_status column is missing, retry without it
+                    if "Unknown column 'ai_status'" in str(e):
+                        try:
+                            rc = session.exec(_text(sql_clear_nostatus).params(**params_clear)).rowcount
+                        except Exception:
+                            rc = 0
+                    else:
+                        raise
                 try:
                     ai_run_log(run_id, "info", "reprocess_clear", {"cleared": int(rc or 0)})
                 except Exception:
