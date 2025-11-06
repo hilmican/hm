@@ -126,7 +126,7 @@ def main() -> None:
 					pass
             elif kind == "ig_ai_debug_convo":
                 debug_run_id = int(payload.get("debug_run_id") or job.get("key") or 0)
-                logs: list[dict[str, Any]] = []  # type: ignore[type-arg]
+                logs: list[dict[str, Any]] = []
 
                 def _append_log(level: str, message: str, extra: Optional[dict[str, Any]] = None) -> None:
                     entry = {

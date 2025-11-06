@@ -35,3 +35,7 @@ kargocununexcelleri
 app.db
 .DS_Store
 data/test_app.db
+data/debug_pkg2.db
+data/debug_pkg.db
+data/app.db-wal
+data/app.db-shm

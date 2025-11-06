@@ -2,16 +2,18 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi import WebSocket, WebSocketDisconnect
 import logging
 from sqlmodel import select
+from typing import Any
 
 from ..db import get_session
-from ..models import Message
+from ..models import Message, IGAiDebugRun
 from sqlmodel import select
 from ..services.instagram_api import sync_latest_conversations
 from ..services.queue import enqueue
 from ..services.instagram_api import _get_base_token_and_id, GRAPH_VERSION
 import json
 from pathlib import Path
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
+from starlette.status import HTTP_303_SEE_OTHER
 import time
 import httpx
 import os
@@ -198,6 +200,61 @@ async def ws_inbox(websocket: WebSocket):
             connections.discard(websocket)
         except Exception:
             pass
+
+
+@router.get("/inbox/{conversation_id}/debug")
+def debug_conversation(request: Request, conversation_id: str, limit: int = 25):
+    templates = request.app.state.templates
+    n = max(1, min(int(limit or 25), 100))
+    with get_session() as session:
+        runs = session.exec(
+            select(IGAiDebugRun)
+            .where(IGAiDebugRun.conversation_id == conversation_id)
+            .order_by(IGAiDebugRun.id.desc())
+            .limit(n)
+        ).all()
+    formatted: list[dict[str, Any]] = []  # type: ignore[type-arg]
+    for run in runs:
+        try:
+            extracted_obj = json.loads(run.extracted_json) if run.extracted_json else None
+        except Exception:
+            extracted_obj = None
+        try:
+            logs_obj = json.loads(run.logs_json) if run.logs_json else None
+        except Exception:
+            logs_obj = None
+        formatted.append({
+            "run": run,
+            "extracted": extracted_obj,
+            "extracted_pretty": json.dumps(extracted_obj, ensure_ascii=False, indent=2) if extracted_obj else None,
+            "logs": logs_obj,
+            "logs_pretty": json.dumps(logs_obj, ensure_ascii=False, indent=2) if logs_obj else None,
+        })
+    return templates.TemplateResponse(
+        "ig_debug.html",
+        {
+            "request": request,
+            "conversation_id": conversation_id,
+            "runs": formatted,
+        },
+    )
+
+
+@router.post("/inbox/{conversation_id}/debug/run")
+def trigger_debug_conversation(conversation_id: str):
+    with get_session() as session:
+        run = IGAiDebugRun(conversation_id=conversation_id, status="queued")
+        session.add(run)
+        session.flush()
+        debug_id = int(run.id or 0)
+        try:
+            job_id = enqueue("ig_ai_debug_convo", key=str(debug_id), payload={"debug_run_id": debug_id})
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"enqueue_failed: {e}")
+        run.job_id = job_id
+        session.add(run)
+        session.commit()
+    return RedirectResponse(url=f"/ig/inbox/{conversation_id}/debug", status_code=HTTP_303_SEE_OTHER)
 
 
 @router.get("/inbox/{conversation_id}")
