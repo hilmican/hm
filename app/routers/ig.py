@@ -213,6 +213,29 @@ def debug_conversation(request: Request, conversation_id: str, limit: int = 25):
             .order_by(IGAiDebugRun.id.desc())
             .limit(n)
         ).all()
+        ai_run_meta: dict[int, dict[str, Any]] = {}
+        run_ids = [int(r.ai_run_id) for r in runs if r.ai_run_id]
+        if run_ids:
+            from sqlalchemy import text as _text
+
+            placeholders = ",".join([":p" + str(i) for i in range(len(run_ids))])
+            params = {"p" + str(i): run_ids[i] for i in range(len(run_ids))}
+            rows = session.exec(
+                _text(
+                    f"SELECT id, started_at, completed_at, errors_json, conversations_considered, conversations_processed, purchases_detected, purchases_unlinked FROM ig_ai_run WHERE id IN ({placeholders})"
+                ).params(**params)
+            ).all()
+            for row in rows:
+                rid = row.id if hasattr(row, "id") else row[0]
+                ai_run_meta[int(rid)] = {
+                    "started_at": getattr(row, "started_at", None) if hasattr(row, "started_at") else row[1],
+                    "completed_at": getattr(row, "completed_at", None) if hasattr(row, "completed_at") else row[2],
+                    "errors_json": getattr(row, "errors_json", None) if hasattr(row, "errors_json") else row[3],
+                    "considered": getattr(row, "conversations_considered", None) if hasattr(row, "conversations_considered") else row[4],
+                    "processed": getattr(row, "conversations_processed", None) if hasattr(row, "conversations_processed") else row[5],
+                    "purchases": getattr(row, "purchases_detected", None) if hasattr(row, "purchases_detected") else row[6],
+                    "unlinked": getattr(row, "purchases_unlinked", None) if hasattr(row, "purchases_unlinked") else row[7],
+                }
     formatted: list[dict[str, Any]] = []  # type: ignore[type-arg]
     for run in runs:
         try:
@@ -229,6 +252,7 @@ def debug_conversation(request: Request, conversation_id: str, limit: int = 25):
             "extracted_pretty": json.dumps(extracted_obj, ensure_ascii=False, indent=2) if extracted_obj else None,
             "logs": logs_obj,
             "logs_pretty": json.dumps(logs_obj, ensure_ascii=False, indent=2) if logs_obj else None,
+            "ai_run": ai_run_meta.get(int(run.ai_run_id)) if run.ai_run_id else None,
         })
     return templates.TemplateResponse(
         "ig_debug.html",
@@ -248,10 +272,21 @@ def trigger_debug_conversation(conversation_id: str):
         session.flush()
         debug_id = int(run.id or 0)
         try:
-            job_id = enqueue("ig_ai_debug_convo", key=str(debug_id), payload={"debug_run_id": debug_id})
+            payload = {
+                "run_id": debug_id,
+                "date_from": None,
+                "date_to": None,
+                "min_age_minutes": 0,
+                "limit": 1,
+                "reprocess": False,
+                "conversation_id": conversation_id,
+                "debug_run_id": debug_id,
+            }
+            job_id = enqueue("ig_ai_process_run", key=str(debug_id), payload=payload)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"enqueue_failed: {e}")
         run.job_id = job_id
+        run.ai_run_id = debug_id
         session.add(run)
         session.commit()
     return RedirectResponse(url=f"/ig/inbox/{conversation_id}/debug", status_code=HTTP_303_SEE_OTHER)
