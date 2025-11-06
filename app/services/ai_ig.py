@@ -179,6 +179,36 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
         rows = session.exec(_text(sql).params(**params)).all()
         convo_ids = [r.convo_id if hasattr(r, "convo_id") else r[0] for r in rows]
         considered = len(convo_ids)
+        # Fallback: if conversations table yields 0, select distinct conversation_id
+        # from messages by timestamp window so we can still process
+        if considered == 0:
+            try:
+                cutoff_ms = int(cutoff_dt.timestamp() * 1000)
+                msg_where = ["(m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)", "m.conversation_id IS NOT NULL"]
+                msg_params: Dict[str, Any] = {"cutoff_ms": int(cutoff_ms)}
+                if date_from and date_to and date_from <= date_to:
+                    ms_from = int(dt.datetime.combine(date_from, dt.time.min).timestamp() * 1000)
+                    ms_to = int(dt.datetime.combine(date_to + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
+                    msg_where.append("(m.timestamp_ms IS NULL OR (m.timestamp_ms >= :ms_from AND m.timestamp_ms < :ms_to))")
+                    msg_params["ms_from"] = int(ms_from)
+                    msg_params["ms_to"] = int(ms_to)
+                elif date_from:
+                    ms_from = int(dt.datetime.combine(date_from, dt.time.min).timestamp() * 1000)
+                    msg_where.append("(m.timestamp_ms IS NULL OR m.timestamp_ms >= :ms_from)")
+                    msg_params["ms_from"] = int(ms_from)
+                elif date_to:
+                    ms_to = int(dt.datetime.combine(date_to + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
+                    msg_where.append("(m.timestamp_ms IS NULL OR m.timestamp_ms < :ms_to)")
+                    msg_params["ms_to"] = int(ms_to)
+                sql_msg = (
+                    "SELECT DISTINCT m.conversation_id FROM message m WHERE " + " AND ".join(msg_where) + f" ORDER BY 1 DESC LIMIT {int(limit)}"
+                )
+                rows_m = session.exec(_text(sql_msg).params(**msg_params)).all()
+                convo_ids = [r.conversation_id if hasattr(r, "conversation_id") else r[0] for r in rows_m]
+                considered = len(convo_ids)
+                ai_run_log(run_id, "info", "fallback_candidates", {"count": int(considered)})
+            except Exception as e:
+                ai_run_log(run_id, "error", "fallback_error", {"error": str(e)})
     try:
         log.info(
             "ig_ai run start rid=%s df=%s dt=%s min_age=%s limit=%s considered=%s",
