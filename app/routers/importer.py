@@ -69,10 +69,10 @@ def _backup_db_snapshot(tag: str | None = None) -> None:
 			except Exception:
 				pass
 	except Exception as _e:
-	try:
-		print("[DB BACKUP] failed:", _e)
-	except Exception:
-		pass
+		try:
+			print("[DB BACKUP] failed:", _e)
+		except Exception:
+			pass
 def parse_item_details(text: str | None) -> tuple[str, int | None, int | None, list[str]]:
 	"""Extract base item name, height(cm), weight(kg), and extra notes.
 
