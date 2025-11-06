@@ -22,14 +22,16 @@ def _get_redis() -> Redis:
 	if _redis_client is not None:
 		return _redis_client
 	url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-	# Redis-py supports URL in from_url; set short timeouts to fail fast
-	socket_timeout = float(os.getenv("REDIS_SOCKET_TIMEOUT", "0.5"))
+	# Redis-py supports URL in from_url; allow blocking ops (BRPOP) without premature read timeout
+	sto_s = os.getenv("REDIS_SOCKET_TIMEOUT")
+	socket_timeout = float(sto_s) if (sto_s is not None and sto_s != "") else None
 	socket_connect_timeout = float(os.getenv("REDIS_CONNECT_TIMEOUT", "0.5"))
 	_redis_client = Redis.from_url(
 		url,
 		decode_responses=True,
-		socket_timeout=socket_timeout,
+		socket_timeout=socket_timeout,  # None -> no read timeout; BRPOP can block up to its own timeout
 		socket_connect_timeout=socket_connect_timeout,
+		retry_on_timeout=True,
 	)
 	return _redis_client
 
@@ -190,7 +192,10 @@ def get_job(job_id: int) -> Optional[dict]:
 
 def dequeue(kind: str, timeout: int = 5) -> Optional[dict]:
 	"""Blocking pop a job message and hydrate from DB."""
-	res: Optional[Tuple[str, str]] = _get_redis().brpop([f"jobs:{kind}"], timeout=timeout)  # type: ignore
+	try:
+		res: Optional[Tuple[str, str]] = _get_redis().brpop([f"jobs:{kind}"], timeout=timeout)  # type: ignore
+	except (RedisTimeoutError, RedisConnectionError):
+		return None
 	if not res:
 		return None
 	_, msg = res
