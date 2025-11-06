@@ -29,8 +29,9 @@ IG_PURCHASE_SYSTEM_PROMPT = (
     "2) Satın alma varsa (purchase_detected=true), alıcı ad-soyad, telefon ve adres bilgisini bulmak için konuşmanın TÜMÜNÜ dikkatle tara; önceki/sonraki mesajları da kontrol et. "
     "3) Telefonu mümkünse 05xx… veya +90… formatında normalleştir; boşluk/ayraçları kaldır. "
     "4) Adres tek sahada, satır sonları yerine virgül kullan. "
-    "5) Bu çıktı dışa aktarım içindir; uydurma yapma. Gerçekten metinde yoksa null bırak, ama varsa mutlaka doldur. "
-    "6) Ürün/beden/renk gibi ipuçlarını product_mentions altında düz metin listele. "
+    "5) Fiyatı da çıkar: anlaşılmış nihai toplam bedeli TL cinsinden 'price' alanına sayı olarak yaz. Birden çok fiyat geçerse en mantıklı son fiyatı seç. "
+    "6) Bu çıktı dışa aktarım içindir; uydurma yapma. Gerçekten metinde yoksa null bırak, ama varsa mutlaka doldur. "
+    "7) Ürün/beden/renk gibi ipuçlarını product_mentions altında düz metin listele. "
 )
 
 # Expected JSON schema (documentation aid; model must still follow JSON-only rule)

@@ -82,7 +82,7 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
     schema_hint = (
         '{"purchase_detected": true|false, "buyer_name": "str|null", "phone": "str|null", '
         '"address": "str|null", "notes": "str|null", "product_mentions": ["str"], '
-        '"possible_order_ids": ["str"]}'
+        '"possible_order_ids": ["str"], "price": 0|null}'
     )
     user_prompt = (
         "Aşağıda bir DM konuşması transkripti var. \n"
@@ -125,6 +125,25 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
     if not isinstance(data, dict):
         raise RuntimeError("AI returned non-dict JSON")
     # Normalize keys presence
+    def _parse_price(val: Any) -> Optional[float]:
+        if val is None:
+            return None
+        try:
+            if isinstance(val, (int, float)):
+                return float(val)
+            s = str(val)
+            # keep digits and separators, then normalize comma to dot
+            import re
+            cleaned = re.sub(r"[^0-9,\.]", "", s)
+            cleaned = cleaned.replace(",", ".")
+            if cleaned.count(".") > 1:
+                # collapse extra dots: keep first, drop others
+                first = cleaned.find(".")
+                cleaned = cleaned[: first + 1] + cleaned[first + 1 :].replace(".", "")
+            return float(cleaned) if cleaned else None
+        except Exception:
+            return None
+
     out: Dict[str, Any] = {
         "purchase_detected": bool(data.get("purchase_detected", False)),
         "buyer_name": data.get("buyer_name"),
@@ -133,6 +152,7 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
         "notes": data.get("notes"),
         "product_mentions": data.get("product_mentions") or [],
         "possible_order_ids": data.get("possible_order_ids") or [],
+        "price": _parse_price(data.get("price")),
     }
     if include_meta:
         out["meta"] = {

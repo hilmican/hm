@@ -131,6 +131,24 @@ def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: 
     phone_last10 = phone_digits[-10:] if len(phone_digits) >= 10 else phone_digits
     buyer_name = (extracted.get("buyer_name") or "").strip()
     addr = (extracted.get("address") or "").strip()
+    price_val = extracted.get("price")
+
+    def _price_num(v: Any) -> float | None:
+        if v is None:
+            return None
+        try:
+            if isinstance(v, (int, float)):
+                return float(v)
+            s = str(v)
+            import re
+            cleaned = re.sub(r"[^0-9,\.]", "", s).replace(",", ".")
+            if not cleaned:
+                return None
+            return float(cleaned)
+        except Exception:
+            return None
+
+    price_num = _price_num(price_val)
 
     # 1) Phone-based client match
     client_by_phone: Client | None = None
@@ -152,7 +170,33 @@ def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: 
         if len(matches) == 1:
             client_by_phone = matches[0]
             orders = _orders_for_client_in_window(session, int(client_by_phone.id), date_from, date_to) if client_by_phone.id else []
-            best_order = _choose_best_order(orders)
+            best_order = None
+            if price_num is not None and orders:
+                # choose order by closest amount to extracted price
+                def _order_amount(o: Order) -> float | None:
+                    if o.total_amount is not None:
+                        return float(o.total_amount)
+                    amt = 0.0
+                    if o.unit_price is not None and o.quantity is not None:
+                        amt += float(o.unit_price) * float(o.quantity)
+                    if o.shipping_fee is not None:
+                        amt += float(o.shipping_fee)
+                    return amt or None
+                scored: list[tuple[Order, float]] = []
+                for o in orders:
+                    oa = _order_amount(o)
+                    if oa is None:
+                        continue
+                    scored.append((o, abs(oa - float(price_num))))
+                if scored:
+                    scored.sort(key=lambda t: t[1])
+                    top_o, top_delta = scored[0]
+                    # accept within reasonable tolerance (<= 50 TL or <= 8%)
+                    tol = max(50.0, 0.08 * float(price_num))
+                    if top_delta <= tol:
+                        best_order = top_o
+            if best_order is None:
+                best_order = _choose_best_order(orders)
             if best_order and best_order.id is not None:
                 return int(best_order.id)
         # If multiple clients matched by phone substring, try to disambiguate by having orders in window
@@ -165,6 +209,29 @@ def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: 
                     viable.append((c, best_order))
             if len(viable) == 1:
                 return int(viable[0][1].id) if viable[0][1].id is not None else None
+            if len(viable) > 1 and price_num is not None:
+                # multiple viable: use price to pick best
+                def _order_amount(o: Order) -> float | None:
+                    if o.total_amount is not None:
+                        return float(o.total_amount)
+                    amt = 0.0
+                    if o.unit_price is not None and o.quantity is not None:
+                        amt += float(o.unit_price) * float(o.quantity)
+                    if o.shipping_fee is not None:
+                        amt += float(o.shipping_fee)
+                    return amt or None
+                best_pair = None
+                best_delta = None
+                for c, o in viable:
+                    oa = _order_amount(o)
+                    if oa is None:
+                        continue
+                    d = abs(oa - float(price_num))
+                    if best_pair is None or d < float(best_delta):
+                        best_pair = (c, o)
+                        best_delta = d
+                if best_pair is not None and best_pair[1].id is not None:
+                    return int(best_pair[1].id)
 
     # 2) Exact slug/name key match before fuzzy
     if buyer_name:
