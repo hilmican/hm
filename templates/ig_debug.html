@@ -46,8 +46,21 @@
           {% if run.started_at %}<span>Başladı: {{ run.started_at }}</span>{% endif %}
           {% if run.completed_at %}<span>Bitti: {{ run.completed_at }}</span>{% endif %}
           {% if run.job_id %}<span>Job ID: {{ run.job_id }}</span>{% endif %}
+          {% if run.ai_run_id %}<span>AI Run ID: {{ run.ai_run_id }}</span>{% endif %}
           {% if run.ai_model %}<span>Model: {{ run.ai_model }}</span>{% endif %}
         </div>
+        {% if entry.ai_run %}
+          <div class="meta" style="margin-top:-6px;">
+            <span>AI Çalışması: Başladı {{ entry.ai_run.started_at }}</span>
+            {% if entry.ai_run.completed_at %}<span>Bitti {{ entry.ai_run.completed_at }}</span>{% endif %}
+            <span>Conversations: {{ entry.ai_run.considered }}/{{ entry.ai_run.processed }}</span>
+            <span>Satın Alma: {{ entry.ai_run.purchases }} · Unlinked: {{ entry.ai_run.unlinked }}</span>
+          </div>
+          {% if entry.ai_run.errors_json %}
+            <h4>Run Errors</h4>
+            <pre>{{ entry.ai_run.errors_json }}</pre>
+          {% endif %}
+        {% endif %}
         {% if run.error_message %}
           <h4>Hata Mesajı</h4>
           <pre>{{ run.error_message }}</pre>

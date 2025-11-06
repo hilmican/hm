@@ -216,42 +216,40 @@ def process_run(
                     pass
         # Select eligible conversations by last_message_at and ai_processed_at is NULL
         params: Dict[str, Any] = {"cutoff": cutoff_dt.isoformat(" ")}
-        where = ["ai_processed_at IS NULL", "last_message_at <= :cutoff"]
-        if date_from and date_to and date_from <= date_to:
-            dt_end = date_to + dt.timedelta(days=1)
-            params["df"] = f"{date_from.isoformat()} 00:00:00"
-            params["dte"] = f"{dt_end.isoformat()} 00:00:00"
-            where.append("last_message_at >= :df AND last_message_at < :dte")
-        elif date_from:
-            params["df"] = f"{date_from.isoformat()} 00:00:00"
-            where.append("last_message_at >= :df")
-        elif date_to:
-            dt_end = date_to + dt.timedelta(days=1)
-            params["dte"] = f"{dt_end.isoformat()} 00:00:00"
-            where.append("last_message_at < :dte")
-        # Embed LIMIT as a literal to avoid MySQL driver quirks with bound LIMIT
         if conversation_id:
-            where_single = list(where) + ["convo_id = :single"]
-            params_single = dict(params)
-            params_single["single"] = conversation_id
-            sql = (
-                "SELECT convo_id FROM conversations WHERE "
-                + " AND ".join(where_single)
-                + f" ORDER BY last_message_at DESC LIMIT {int(limit)}"
-            )
-            rows = session.exec(_text(sql).params(**params_single)).all()
+            sql = "SELECT convo_id FROM conversations WHERE convo_id = :single LIMIT 1"
+            row = session.exec(_text(sql).params(single=conversation_id)).first()
+            if row:
+                cid_val = row.convo_id if hasattr(row, "convo_id") else row[0]
+                convo_ids = [str(cid_val)]
+            else:
+                convo_ids = [conversation_id]
+            considered = len(convo_ids)
         else:
+            where = ["ai_processed_at IS NULL", "last_message_at <= :cutoff"]
+            if date_from and date_to and date_from <= date_to:
+                dt_end = date_to + dt.timedelta(days=1)
+                params["df"] = f"{date_from.isoformat()} 00:00:00"
+                params["dte"] = f"{dt_end.isoformat()} 00:00:00"
+                where.append("last_message_at >= :df AND last_message_at < :dte")
+            elif date_from:
+                params["df"] = f"{date_from.isoformat()} 00:00:00"
+                where.append("last_message_at >= :df")
+            elif date_to:
+                dt_end = date_to + dt.timedelta(days=1)
+                params["dte"] = f"{dt_end.isoformat()} 00:00:00"
+                where.append("last_message_at < :dte")
             sql = (
                 "SELECT convo_id FROM conversations WHERE "
                 + " AND ".join(where)
                 + f" ORDER BY last_message_at DESC LIMIT {int(limit)}"
             )
             rows = session.exec(_text(sql).params(**params)).all()
-        convo_ids = [r.convo_id if hasattr(r, "convo_id") else r[0] for r in rows]
-        considered = len(convo_ids)
+            convo_ids = [r.convo_id if hasattr(r, "convo_id") else r[0] for r in rows]
+            considered = len(convo_ids)
         # Fallback: if conversations table yields 0, select distinct conversation_id
         # from messages by timestamp window so we can still process
-        if considered == 0:
+        if not conversation_id and considered == 0:
             try:
                 cutoff_ms = int(cutoff_dt.timestamp() * 1000)
                 msg_where = ["(m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)", "m.conversation_id IS NOT NULL"]
@@ -327,10 +325,13 @@ def process_run(
             "errors": errors,
         }
 
+    debug_entries: list[dict[str, Any]] = []
+    include_meta = bool(debug_run_id)
+
     for cid in convo_ids:
         ai_run_log(run_id, "debug", "analyze_start", {"conversation_id": cid})
         try:
-            data = analyze_conversation(cid, limit=limit, run_id=run_id)
+            data = analyze_conversation(cid, limit=limit, run_id=run_id, include_meta=include_meta)
         except Exception as e:
             errors.append(f"{cid}: {e}")
             ai_run_log(run_id, "error", "analyze_error", {"conversation_id": cid, "error": str(e)})
@@ -344,6 +345,12 @@ def process_run(
                     )
                 except Exception:
                     pass
+            if include_meta and conversation_id and cid == conversation_id:
+                debug_entries.append({
+                    "conversation_id": cid,
+                    "status": "error",
+                    "error": str(e),
+                })
             continue
 
         def _clean_field(val: Any) -> Optional[str]:
@@ -357,6 +364,13 @@ def process_run(
                 return stripped or None
             except Exception:
                 return None
+
+        meta_info = None
+        if include_meta and isinstance(data, dict):
+            meta_info = data.get("meta")
+            if isinstance(data, dict):
+                data = dict(data)
+                data.pop("meta", None)
 
         status = "no_purchase"
         linked_order_id: Optional[int] = None
@@ -455,6 +469,16 @@ def process_run(
             errors.append("cancelled")
             break
 
+        if include_meta and conversation_id and cid == conversation_id:
+            debug_entries.append({
+                "conversation_id": cid,
+                "status": status,
+                "linked_order_id": linked_order_id,
+                "result": data,
+                "meta": meta_info,
+                "errors": list(errors),
+            })
+
     # Update run row
     with get_session() as session:
         try:
@@ -509,7 +533,7 @@ def process_run(
         "errors": len(errors),
     })
 
-    return {
+    result_summary: Dict[str, Any] = {
         "considered": considered,
         "processed": processed,
         "linked": linked,
@@ -517,5 +541,9 @@ def process_run(
         "purchases_unlinked": purchases_unlinked,
         "errors": errors,
     }
+    if debug_entries:
+        result_summary["debug_entries"] = debug_entries
+
+    return result_summary
 
 
