@@ -80,7 +80,7 @@ def find_recent_placeholder_kargo_for_client(session, client_id: int, days: int 
             Order.status == "placeholder",
             or_(Order.shipment_date == None, Order.shipment_date >= cutoff),
         )
-        .order_by(Order.shipment_date.desc().nullslast(), Order.id.desc())
+        .order_by(Order.shipment_date.is_(None), Order.shipment_date.desc(), Order.id.desc())
     ).all()
     return rows[0] if rows else None
 
