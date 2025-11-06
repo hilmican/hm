@@ -216,6 +216,21 @@ def init_db() -> None:
                             )
                         except Exception:
                             pass
+                        # Ensure ig_accounts table exists (MySQL) used by enrichers
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS ig_accounts (
+                                    igba_id VARCHAR(64) PRIMARY KEY,
+                                    username TEXT NULL,
+                                    name TEXT NULL,
+                                    profile_pic_url TEXT NULL,
+                                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                )
+                                """
+                            )
+                        except Exception:
+                            pass
                         # Ensure conversations.ai_processed_at exists for IG AI
                         try:
                             row = conn.exec_driver_sql(

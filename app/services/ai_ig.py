@@ -114,7 +114,8 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
             "SELECT convo_id FROM conversations WHERE " + " AND ".join(where) + " ORDER BY last_message_at DESC LIMIT :lim"
         )
         params["lim"] = int(limit)
-        rows = session.exec(_text(sql)).params(**params).all()
+        # Important: bind parameters on the TextClause, not on the Result
+        rows = session.exec(_text(sql).params(**params)).all()
         convo_ids = [r.convo_id if hasattr(r, "convo_id") else r[0] for r in rows]
         considered = len(convo_ids)
     try:
