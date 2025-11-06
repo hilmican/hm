@@ -73,11 +73,12 @@ def main() -> None:
 				dtv = payload.get("date_to")
 				age = int(payload.get("min_age_minutes") or 60)
 				lim = int(payload.get("limit") or 200)
+				rep = bool(payload.get("reprocess") not in (False, 0, "0", "false", "False", None))
 				try:
-					log.info("ig_ai start rid=%s date_from=%s date_to=%s min_age=%s limit=%s", rid, df, dtv, age, lim)
+					log.info("ig_ai start rid=%s date_from=%s date_to=%s min_age=%s limit=%s reprocess=%s", rid, df, dtv, age, lim, rep)
 				except Exception:
 					pass
-				ai_run_log(rid, "info", "worker_start", {"date_from": df, "date_to": dtv, "min_age_minutes": age, "limit": lim})
+				ai_run_log(rid, "info", "worker_start", {"date_from": df, "date_to": dtv, "min_age_minutes": age, "limit": lim, "reprocess": rep})
 				dfp = None
 				dtp = None
 				try:
@@ -92,7 +93,7 @@ def main() -> None:
 						dtp = _dt.date.fromisoformat(str(dtv))
 				except Exception:
 					dtp = None
-				res = ig_ai_process_run(run_id=rid, date_from=dfp, date_to=dtp, min_age_minutes=age, limit=lim)
+				res = ig_ai_process_run(run_id=rid, date_from=dfp, date_to=dtp, min_age_minutes=age, limit=lim, reprocess=rep)
 				try:
 					log.info(
 						"ig_ai done rid=%s considered=%s processed=%s linked=%s purchases=%s unlinked=%s errors=%s",
