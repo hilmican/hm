@@ -94,7 +94,30 @@ def _orders_for_client_in_window(session, client_id: int, date_from: dt.date | N
                 and_(Order.data_date.is_not(None), Order.data_date >= date_from, Order.data_date <= date_to),
             )
         )
-    return session.exec(q.order_by(Order.id.desc())).all()
+    rows = session.exec(q.order_by(Order.id.desc())).all()
+    return rows
+
+
+def _order_priority(order: Order) -> tuple[int, dt.date, dt.date, int]:
+    src_score = 1 if (order.source or "").lower() == "bizim" else 0
+    data_date = order.data_date or dt.date.min
+    ship_date = order.shipment_date or dt.date.min
+    # prefer whichever date is more recent
+    best_date = data_date if data_date >= ship_date else ship_date
+    return (src_score, best_date, ship_date, int(order.id or 0))
+
+
+def _choose_best_order(orders: list[Order]) -> Order | None:
+    if not orders:
+        return None
+    scored = sorted(((o, _order_priority(o)) for o in orders), key=lambda item: item[1], reverse=True)
+    top_order, top_score = scored[0]
+    if len(scored) == 1:
+        return top_order
+    second_score = scored[1][1]
+    if top_score == second_score:
+        return None
+    return top_order
 
 
 def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: dt.date | None, date_to: dt.date | None) -> int | None:
@@ -123,8 +146,9 @@ def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: 
         if len(matches) == 1:
             client_by_phone = matches[0]
             orders = _orders_for_client_in_window(session, int(client_by_phone.id), date_from, date_to) if client_by_phone.id else []
-            if len(orders) == 1:
-                return int(orders[0].id)
+            best_order = _choose_best_order(orders)
+            if best_order and best_order.id is not None:
+                return int(best_order.id)
 
     # 2) Fuzzy name/address match
     row = {"name": buyer_name, "address": addr, "city": ""}
@@ -137,7 +161,8 @@ def link_order_for_extraction(session, extracted: dict[str, Any], *, date_from: 
     if best and best[1] >= 80:
         c = best[0]
         orders = _orders_for_client_in_window(session, int(c.id), date_from, date_to) if c.id else []
-        if len(orders) == 1:
-            return int(orders[0].id)
+        best_order = _choose_best_order(orders)
+        if best_order and best_order.id is not None:
+            return int(best_order.id)
 
     return None

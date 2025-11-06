@@ -308,8 +308,26 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                     pass
             continue
 
+        def _clean_field(val: Any) -> Optional[str]:
+            if val is None:
+                return None
+            try:
+                if isinstance(val, str):
+                    stripped = val.strip()
+                    return stripped or None
+                stripped = str(val).strip()
+                return stripped or None
+            except Exception:
+                return None
+
         status = "no_purchase"
         linked_order_id: Optional[int] = None
+        buyer_name_clean = _clean_field(data.get("buyer_name"))
+        phone_clean = _clean_field(data.get("phone"))
+        address_clean = _clean_field(data.get("address"))
+        data["buyer_name"] = buyer_name_clean
+        data["phone"] = phone_clean
+        data["address"] = address_clean
         if bool(data.get("purchase_detected")):
             purchases += 1
             try:
@@ -349,9 +367,9 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                     _text(
                         """
                         UPDATE conversations SET
-                          contact_name = COALESCE(contact_name, :name),
-                          contact_phone = COALESCE(contact_phone, :phone),
-                          contact_address = COALESCE(contact_address, :addr),
+                          contact_name = COALESCE(NULLIF(TRIM(contact_name), ''), :name),
+                          contact_phone = COALESCE(NULLIF(TRIM(contact_phone), ''), :phone),
+                          contact_address = COALESCE(NULLIF(TRIM(contact_address), ''), :addr),
                           ai_status = :st,
                           ai_json = :js,
                           ai_processed_at = CURRENT_TIMESTAMP,
@@ -360,9 +378,9 @@ def process_run(*, run_id: int, date_from: Optional[dt.date], date_to: Optional[
                         WHERE convo_id = :cid
                         """
                     ).params(
-                        name=(data.get("buyer_name") or None),
-                        phone=(data.get("phone") or None),
-                        addr=(data.get("address") or None),
+                        name=buyer_name_clean,
+                        phone=phone_clean,
+                        addr=address_clean,
                         st=status,
                         js=json.dumps(data, ensure_ascii=False),
                         oid=linked_order_id,

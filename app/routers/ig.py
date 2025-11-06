@@ -216,6 +216,29 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
         other_id = None
         contact_name = None
         contact_phone = None
+        contact_address = None
+        linked_order_id = None
+        ai_status = None
+        ai_json = None
+        try:
+            from sqlalchemy import text as _text
+            row_convo = session.exec(
+                _text(
+                    """
+                    SELECT contact_name, contact_phone, contact_address, linked_order_id, ai_status, ai_json
+                    FROM conversations WHERE convo_id=:cid LIMIT 1
+                    """
+                ).params(cid=str(conversation_id))
+            ).first()
+            if row_convo:
+                contact_name = (row_convo.contact_name if hasattr(row_convo, "contact_name") else row_convo[0]) or None
+                contact_phone = (row_convo.contact_phone if hasattr(row_convo, "contact_phone") else row_convo[1]) or None
+                contact_address = (row_convo.contact_address if hasattr(row_convo, "contact_address") else row_convo[2]) or None
+                linked_order_id = (row_convo.linked_order_id if hasattr(row_convo, "linked_order_id") else row_convo[3]) or None
+                ai_status = (row_convo.ai_status if hasattr(row_convo, "ai_status") else row_convo[4]) or None
+                ai_json = (row_convo.ai_json if hasattr(row_convo, "ai_json") else row_convo[5]) or None
+        except Exception:
+            pass
         for mm in msgs:
             try:
                 other_id = (mm.ig_sender_id if (mm.direction or "in") == "in" else mm.ig_recipient_id)
@@ -237,12 +260,25 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
             try:
                 from sqlalchemy import text as _text
                 rowc = session.exec(_text("""
-                    SELECT contact_name, contact_phone FROM conversations
+                    SELECT contact_name, contact_phone, contact_address, linked_order_id
+                    FROM conversations
                     WHERE ig_user_id = :u ORDER BY last_message_at DESC LIMIT 1
                 """).params(u=str(other_id))).first()
                 if rowc:
-                    contact_name = (rowc.contact_name if hasattr(rowc, 'contact_name') else rowc[0]) or None
-                    contact_phone = (rowc.contact_phone if hasattr(rowc, 'contact_phone') else rowc[1]) or None
+                    if contact_name is None:
+                        contact_name = (rowc.contact_name if hasattr(rowc, 'contact_name') else rowc[0]) or None
+                    if contact_phone is None:
+                        contact_phone = (rowc.contact_phone if hasattr(rowc, 'contact_phone') else rowc[1]) or None
+                    if contact_address is None:
+                        contact_address = (rowc.contact_address if hasattr(rowc, 'contact_address') else rowc[2]) or None
+                    if linked_order_id is None:
+                        val = rowc.linked_order_id if hasattr(rowc, 'linked_order_id') else None
+                        if val is None:
+                            try:
+                                val = rowc[3]
+                            except Exception:
+                                val = None
+                        linked_order_id = val or None
             except Exception:
                 pass
         # Resolve per-message sender usernames via ig_users only.
@@ -317,19 +353,25 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                         att_ids_map.setdefault(mid, []).append(int(att_id))
         except Exception:
             att_ids_map = {}
-        # Fetch latest AI extraction for this conversation if available
-        ai_json = None
-        ai_status = None
-        try:
-            from sqlalchemy import text as _text
-            rowai = session.exec(_text("SELECT ai_status, ai_json FROM conversations WHERE convo_id=:cid LIMIT 1").params(cid=str(conversation_id))).first()
-            if rowai:
-                ai_status = (rowai.ai_status if hasattr(rowai, 'ai_status') else rowai[0]) or None
-                ai_json = (rowai.ai_json if hasattr(rowai, 'ai_json') else rowai[1]) or None
-        except Exception:
-            ai_json = None
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_thread.html", {"request": request, "conversation_id": conversation_id, "messages": msgs, "other_label": other_label, "att_map": att_map, "att_ids_map": att_ids_map, "usernames": usernames, "contact_name": contact_name, "contact_phone": contact_phone, "ai_status": ai_status, "ai_json": ai_json})
+        return templates.TemplateResponse(
+            "ig_thread.html",
+            {
+                "request": request,
+                "conversation_id": conversation_id,
+                "messages": msgs,
+                "other_label": other_label,
+                "att_map": att_map,
+                "att_ids_map": att_ids_map,
+                "usernames": usernames,
+                "contact_name": contact_name,
+                "contact_phone": contact_phone,
+                "contact_address": contact_address,
+                "linked_order_id": linked_order_id,
+                "ai_status": ai_status,
+                "ai_json": ai_json,
+            },
+        )
 
 
 @router.get("/media/local/{attachment_id}")

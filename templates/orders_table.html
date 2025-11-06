@@ -125,14 +125,14 @@
     <h2>Siparisler</h2>
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th class="tracking">Takip</th><th class="client">Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>I/D Tarihi</th><th>Kanali</th><th></th></tr>
+            <tr><th>ID</th><th class="tracking">Takip</th><th class="client">Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>I/D Tarihi</th><th>Kanali</th><th>IG DM</th><th></th></tr>
             <tr>
                 <th colspan="4" style="text-align:right">Toplamlar:</th>
                 <th data-type="num">{{ sum_qty }}</th>
                 <th data-type="num">{{ '%.2f'|format(sum_total or 0) }}</th>
                 <th data-type="num">{{ '%.2f'|format(sum_cost or 0) }}</th>
                 <th data-type="num">{{ '%.2f'|format(sum_shipping or 0) }}</th>
-                <th colspan="5"></th>
+                <th colspan="6"></th>
             </tr>
         </thead>
         <tbody>
@@ -157,6 +157,13 @@
                 <td>{{ o.data_date }}</td>
                 <td>{{ o.return_or_switch_date }}</td>
                 <td>{{ o.source }}</td>
+                <td>
+                    {% if o.ig_conversation_id %}
+                        <a href="/ig/inbox/{{ o.ig_conversation_id }}">{{ o.ig_conversation_id }}</a>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
                 <td>
                     <div class="icon-actions">
                         {% if o.ig_conversation_id %}

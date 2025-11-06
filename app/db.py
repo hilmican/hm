@@ -250,22 +250,78 @@ def init_db() -> None:
                             )
                         except Exception:
                             pass
-                        # Ensure conversations.ai_processed_at exists for IG AI
+                        # Ensure conversations AI/contact columns exist for IG AI
                         try:
-                            row = conn.exec_driver_sql(
+                            rows = conn.exec_driver_sql(
                                 """
-                                SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversations' AND COLUMN_NAME = 'ai_processed_at'
-                                LIMIT 1
+                                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversations'
                                 """
-                            ).fetchone()
-                            if not row:
+                            ).fetchall()
+                            have_cols = {str(r[0]).lower() for r in rows or []}
+                            if 'contact_name' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN contact_name TEXT NULL")
+                            if 'contact_phone' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN contact_phone TEXT NULL")
+                            if 'contact_address' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN contact_address TEXT NULL")
+                            if 'ai_status' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_status VARCHAR(32) NULL")
+                            if 'ai_json' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_json LONGTEXT NULL")
+                            if 'ai_processed_at' not in have_cols:
                                 conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_processed_at DATETIME NULL")
-                            # Best-effort index
+                            if 'linked_order_id' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN linked_order_id INTEGER NULL")
+                            if 'ai_run_id' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_run_id INTEGER NULL")
+                            # Helpful indexes
                             try:
                                 conn.exec_driver_sql("CREATE INDEX idx_conversations_ai_processed ON conversations(ai_processed_at)")
                             except Exception:
                                 pass
+                            try:
+                                conn.exec_driver_sql("CREATE INDEX idx_conversations_linked_order ON conversations(linked_order_id)")
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+                        # Ensure `order`.ig_conversation_id exists for linking back to IG threads
+                        try:
+                            rows = conn.exec_driver_sql(
+                                """
+                                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order'
+                                """
+                            ).fetchall()
+                            have_cols = {str(r[0]).lower() for r in rows or []}
+                            if 'ig_conversation_id' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE `order` ADD COLUMN ig_conversation_id VARCHAR(128) NULL")
+                            try:
+                                conn.exec_driver_sql("CREATE INDEX idx_order_ig_conversation_id ON `order`(ig_conversation_id)")
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+                        # Normalize blank strings to NULL so COALESCE logic behaves consistently
+                        try:
+                            conn.exec_driver_sql("UPDATE conversations SET contact_name=NULL WHERE contact_name=''")
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql("UPDATE conversations SET contact_phone=NULL WHERE contact_phone=''")
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql("UPDATE conversations SET contact_address=NULL WHERE contact_address=''")
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql("UPDATE conversations SET ai_json=NULL WHERE ai_json=''")
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql("UPDATE `order` SET ig_conversation_id=NULL WHERE ig_conversation_id=''")
                         except Exception:
                             pass
                         # Ensure jobs.id is AUTO_INCREMENT and unique(kind,key) exists (MySQL)

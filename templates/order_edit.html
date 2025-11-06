@@ -18,6 +18,14 @@
 <body>
     {% include "_nav.html" %}
     <h2>Order #{{ order.id }} Düzenle</h2>
+    {% if order.ig_conversation_id %}
+    <div class="card" style="margin-bottom:12px; padding:12px;">
+        <div style="font-size:13px; color:#374151;">
+            <strong>Instagram Konuşması:</strong>
+            <a href="/ig/inbox/{{ order.ig_conversation_id }}" target="_blank" rel="noopener" style="color:#2563eb;">{{ order.ig_conversation_id }}</a>
+        </div>
+    </div>
+    {% endif %}
     <div class="card">
         <form method="post" action="/orders/{{ order.id }}/edit">
             <div class="row">
