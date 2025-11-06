@@ -277,6 +277,37 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
     date_hint = rec.get("shipment_date") or run.data_date
     if date_hint:
         existing_order = find_order_by_client_and_date(session, client.id, date_hint)
+
+    # Order-level idempotency: if an existing Bizim order for the same client/date
+    # matches the chosen item and basic amounts/quantity, treat this as a duplicate
+    # re-processing and do not create a new order.
+    try:
+        if date_hint and matched_client_id is not None and chosen_item_id is not None:
+            from sqlmodel import select as _select
+            from ...models import Order as _Order
+            candidates = session.exec(
+                _select(_Order)
+                .where(
+                    _Order.client_id == matched_client_id,
+                    (_Order.shipment_date == date_hint) | (_Order.data_date == date_hint),
+                    _Order.source == "bizim",
+                )
+                .order_by(_Order.id.desc())
+            ).all()
+            for cand in candidates:
+                try:
+                    same_item = (cand.item_id == chosen_item_id)
+                    qty_match = (rec.get("quantity") is None) or (int(rec.get("quantity") or 0) == int(cand.quantity or 0))
+                    amt_match = (rec.get("total_amount") is None) or (float(rec.get("total_amount") or 0.0) == float(cand.total_amount or 0.0))
+                    if same_item and qty_match and amt_match:
+                        status = "skipped"
+                        message = "duplicate bizim row (order exists)"
+                        matched_order_id = cand.id
+                        return status, message, matched_client_id, matched_order_id
+                except Exception:
+                    continue
+    except Exception:
+        pass
     chosen_item_id = created_items[0][0].id if created_items else None
     can_merge_into_existing = False
     if existing_order:
@@ -325,6 +356,28 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                     placeholder.notes = item_name_raw
             matched_order_id = placeholder.id
         else:
+            # Final guard: if a Bizim order already exists for this client/date/item, skip creating new
+            try:
+                if date_hint and matched_client_id is not None and chosen_item_id is not None:
+                    from sqlmodel import select as _select
+                    from ...models import Order as _Order
+                    dup = session.exec(
+                        _select(_Order)
+                        .where(
+                            _Order.client_id == matched_client_id,
+                            (_Order.shipment_date == date_hint) | (_Order.data_date == date_hint),
+                            _Order.source == "bizim",
+                            _Order.item_id == chosen_item_id,
+                        )
+                        .order_by(_Order.id.desc())
+                    ).first()
+                    if dup:
+                        status = "skipped"
+                        message = "duplicate bizim row (order exists)"
+                        matched_order_id = dup.id
+                        return status, message, matched_client_id, matched_order_id
+            except Exception:
+                pass
             order = Order(
                 tracking_no=rec.get("tracking_no"),
                 client_id=client.id,  # type: ignore
