@@ -35,43 +35,44 @@ def _is_sqlite_backend() -> bool:
 	return backend == "sqlite"
 
 
-def _backup_db_snapshot(tag: str | None = None) -> None:
-    """Create a timestamped backup of the SQLite database and sidecar files.
 
-    Backups are stored under PROJECT_ROOT/dbbackups with name app-YYYYMMDD-HHMMSS[-tag].db
-    Sidecar files (-wal, -shm) are copied if present.
-    """
+def _backup_db_snapshot(tag: str | None = None) -> None:
+	"""Create a timestamped backup of the SQLite database and sidecar files.
+
+	Backups are stored under PROJECT_ROOT/dbbackups with name app-YYYYMMDD-HHMMSS[-tag].db
+	Sidecar files (-wal, -shm) are copied if present.
+	"""
 	# Only perform snapshotting when running on SQLite
 	try:
 		if not _is_sqlite_backend():
 			return
 	except Exception:
 		return
-    try:
-        from datetime import datetime as _dt
-        import shutil as _shutil
-        bdir = PROJECT_ROOT / "dbbackups"
-        bdir.mkdir(parents=True, exist_ok=True)
-        ts = _dt.utcnow().strftime("%Y%m%d-%H%M%S")
-        suffix = f"-{tag}" if tag else ""
-        dst = bdir / f"app-{ts}{suffix}.db"
-        src = DB_PATH
-        if src.exists():
-            _shutil.copy2(src, dst)
-            # sidecars
-            for suf in ("-wal", "-shm"):
-                side = Path(str(src) + suf)
-                if side.exists():
-                    _shutil.copy2(side, Path(str(dst) + suf))
-            try:
-                print("[DB BACKUP] snapshot created:", dst)
-            except Exception:
-                pass
-    except Exception as _e:
-        try:
-            print("[DB BACKUP] failed:", _e)
-        except Exception:
-            pass
+	try:
+		from datetime import datetime as _dt
+		import shutil as _shutil
+		bdir = PROJECT_ROOT / "dbbackups"
+		bdir.mkdir(parents=True, exist_ok=True)
+		ts = _dt.utcnow().strftime("%Y%m%d-%H%M%S")
+		suffix = f"-{tag}" if tag else ""
+		dst = bdir / f"app-{ts}{suffix}.db"
+		src = DB_PATH
+		if src.exists():
+			_shutil.copy2(src, dst)
+			# sidecars
+			for suf in ("-wal", "-shm"):
+				side = Path(str(src) + suf)
+				if side.exists():
+					_shutil.copy2(side, Path(str(dst) + suf))
+			try:
+				print("[DB BACKUP] snapshot created:", dst)
+			except Exception:
+				pass
+	except Exception as _e:
+	try:
+		print("[DB BACKUP] failed:", _e)
+	except Exception:
+		pass
 def parse_item_details(text: str | None) -> tuple[str, int | None, int | None, list[str]]:
 	"""Extract base item name, height(cm), weight(kg), and extra notes.
 
