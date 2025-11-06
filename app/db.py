@@ -780,15 +780,15 @@ def init_db() -> None:
 
 @contextmanager
 def get_session() -> Iterator[Session]:
-	session = Session(engine)
-	try:
-		yield session
-		session.commit()
-	except Exception:
-		session.rollback()
-		raise
-	finally:
-		session.close()
+    session = Session(engine, expire_on_commit=False)
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def reset_db() -> None:
