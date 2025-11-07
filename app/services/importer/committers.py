@@ -49,10 +49,13 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
         if rec.get("alici_kodu"):
             cur = order.notes or None
             ak = f"AliciKodu:{rec.get('alici_kodu')}"
-            order.notes = f"{cur} | {ak}" if cur else ak
+            if not cur or (ak not in cur):
+                order.notes = f"{cur} | {ak}" if cur else ak
         if rec.get("notes"):
             cur = order.notes or None
-            order.notes = f"{cur} | {rec.get('notes')}" if cur else rec.get("notes")
+            note_val = str(rec.get("notes") or "").strip()
+            if note_val and (not cur or (note_val not in cur)):
+                order.notes = f"{cur} | {note_val}" if cur else note_val
     else:
         # resolve client by unique key (name + optional surname + phone)
         new_uq = client_unique_key(rec.get("name"), rec.get("phone"))

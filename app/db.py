@@ -212,6 +212,21 @@ def init_db() -> None:
                                     conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN raw_json LONGTEXT")
                         except Exception:
                             pass
+                        # Ensure order.notes is LONGTEXT to prevent overflow from appended notes
+                        try:
+                            row = conn.exec_driver_sql(
+                                """
+                                SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                                FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'notes'
+                                """
+                            ).fetchone()
+                            if row is not None:
+                                dtype = str(row[0]).lower()
+                                if dtype in ("varchar", "char", "text", "tinytext", "mediumtext"):
+                                    conn.exec_driver_sql("ALTER TABLE `order` MODIFY COLUMN notes LONGTEXT NULL")
+                        except Exception:
+                            pass
                         # Ensure ig_ai_run table exists (MySQL)
                         try:
                             conn.exec_driver_sql(
