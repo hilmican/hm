@@ -6,6 +6,7 @@ import datetime as dt
 
 from sqlmodel import Session, select
 from sqlalchemy import func, case, delete
+from sqlalchemy.exc import IntegrityError
 
 from ..models import Item, StockMovement, Product, ImportRow, ImportRun, Order, OrderItem
 from .mapping import find_or_create_variant, resolve_mapping
@@ -172,7 +173,12 @@ def recalc_orders_from_mappings(session: Session, *, product_id: Optional[int] =
                         if prod is None:
                             prod = Product(name=base, slug=pslug)
                             session.add(prod)
-                            session.flush()
+                            try:
+                                session.flush()
+                            except IntegrityError:
+                                # concurrent create; rollback and re-fetch
+                                session.rollback()
+                                prod = session.exec(_select(Product).where(Product.slug == pslug)).first()
                     it = find_or_create_variant(session, product=prod, size=out.size, color=out.color)  # type: ignore
                     if it and (it.status or "") == "inactive":
                         it = None
@@ -192,7 +198,12 @@ def recalc_orders_from_mappings(session: Session, *, product_id: Optional[int] =
             if not it:
                 it = Item(sku=sku, name=base)
                 session.add(it)
-                session.flush()
+                try:
+                    session.flush()
+                except IntegrityError:
+                    # concurrent create; rollback and re-fetch
+                    session.rollback()
+                    it = session.exec(_select(Item).where(Item.sku == sku)).first()
             qty_base = int(rec.get("quantity") or 1)
             if qty_base > 0 and it:
                 items_out.append((it, qty_base))
