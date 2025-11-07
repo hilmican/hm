@@ -130,6 +130,7 @@
 					// Offer to commit each file sequentially (date prompt only for bizim)
 					if (confirm('Dosyalar yüklendi. Hepsini içe aktarmak ister misiniz?')) {
 						const totals = { created_orders:0, created_clients:0, created_items:0, created_payments:0, unmatched:0, enriched_orders:0, payments_existing:0, payments_skipped_zero:0 };
+						const runIds = [];
 						for (const f of json.files) {
 							let body = { source: json.source, filename: f.filename };
 							// returns are handled via interactive review; skip commit here
@@ -149,15 +150,14 @@
 							console.log('Özet:', j2);
 							console.groupEnd();
 							for (const k of Object.keys(totals)) { totals[k] += (j2[k] || 0); }
+							if (j2.run_id) { runIds.push(j2.run_id); }
 						}
-						console.group('Toplamlar');
-						console.log('Siparişler (oluşturulan/zenginleştirilen):', totals.created_orders, totals.enriched_orders);
-						console.log('Müşteriler (oluşturulan):', totals.created_clients);
-						console.log('Ürünler (oluşturulan):', totals.created_items);
-						console.log('Ödemeler (oluşturulan/mevcut/0 atlanan):', totals.created_payments, totals.payments_existing, totals.payments_skipped_zero);
-						console.log('Eşleşmeyen satırlar:', totals.unmatched);
-						console.groupEnd();
-						location.reload();
+						if (runIds.length) {
+							const q = encodeURIComponent(runIds.join(','));
+							location.href = `/import/result?run_ids=${q}`;
+						} else {
+							location.reload();
+						}
 					}
 				} catch (err) {
 					console.error(err);

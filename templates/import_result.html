@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>İçe Aktarım Sonuçları</title>
+		<style>
+			body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+			h1 { margin-bottom: 12px; }
+			.card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+			.card h2 { margin: 0; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
+			.grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+			@media (min-width: 1000px) { .grid { grid-template-columns: 1fr 1fr; } }
+			table { width: 100%; border-collapse: collapse; }
+			th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+			th { background: #fafafa; position: sticky; top: 0; }
+			.badge { display:inline-block; padding:3px 6px; border-radius:6px; font-size:12px; background:#eef2ff; color:#1d4ed8; }
+		</style>
+	</head>
+	<body>
+		{% include "_nav.html" %}
+		<h1>İçe Aktarım Sonuçları</h1>
+		<div class="card">
+			<h2>Özet</h2>
+			<div style="padding:12px 16px; display:flex; flex-wrap:wrap; gap:10px;">
+				<div><strong>Toplam Satır:</strong> {{ totals.row_count }}</div>
+				<div><strong>Başarılı Satırlar:</strong> {{ totals.rows_created }}</div>
+				<div><strong>Hatalı:</strong> {{ totals.rows_error }}</div>
+				<div><strong>Eşleşmeyen:</strong> {{ totals.rows_unmatched }}</div>
+				<div><strong>Atlanan:</strong> {{ totals.rows_skipped }}</div>
+				<div><strong>Kopya:</strong> {{ totals.rows_duplicates }}</div>
+			</div>
+		</div>
+		<div class="grid">
+			<div class="card">
+				<h2>Oluşturulan Varlıklar</h2>
+				<table>
+					<tbody>
+						<tr><th>Müşteriler</th><td>{{ totals.created_clients }}</td></tr>
+						<tr><th>Ürünler</th><td>{{ totals.created_items }}</td></tr>
+						<tr><th>Siparişler</th><td>{{ totals.created_orders }}</td></tr>
+						<tr><th>Ödemeler</th><td>{{ totals.created_payments }}</td></tr>
+					</tbody>
+				</table>
+			</div>
+			<div class="card">
+				<h2>Çalıştırmalar</h2>
+				<table>
+					<thead>
+						<tr><th>ID</th><th>Kaynak</th><th>Dosya</th><th>Satır</th><th>Müşteri</th><th>Ürün</th><th>Sipariş</th><th>Ödeme</th><th>Eşleşmeyen</th></tr>
+					</thead>
+					<tbody>
+						{% for r in runs %}
+						<tr>
+							<td>{{ r.id }}</td>
+							<td>{{ r.source }}</td>
+							<td>{{ r.filename }}</td>
+							<td>{{ r.row_count }}</td>
+							<td>{{ r.created_clients }}</td>
+							<td>{{ r.created_items }}</td>
+							<td>{{ r.created_orders }}</td>
+							<td>{{ r.created_payments }}</td>
+							<td>{{ r.unmatched }}</td>
+						</tr>
+						{% endfor %}
+					</tbody>
+				</table>
+			</div>
+		</div>
+		<div class="card">
+			<h2>Başarısız Satırlar (ilk {{ failures|length }})</h2>
+			<table>
+				<thead>
+					<tr><th>Run</th><th>Satır #</th><th>Durum</th><th>Mesaj</th><th>Client</th><th>Order</th><th>Detay</th></tr>
+				</thead>
+				<tbody>
+					{% for f in failures %}
+					<tr>
+						<td>{{ f.run_id }}</td>
+						<td>{{ f.row_index }}</td>
+						<td><span class="badge">{{ f.status }}</span></td>
+						<td>{{ f.message }}</td>
+						<td>{{ f.matched_client_id or '' }}</td>
+						<td>{{ f.matched_order_id or '' }}</td>
+						<td style="max-width:520px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="{{ f.mapped_json }}">{{ f.mapped_json }}</td>
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+		<div style="margin-top:16px;">
+			<a href="/dashboard" style="text-decoration:none; padding:8px 12px; border:1px solid #ddd; border-radius:6px;">Panoya Dön</a>
+		</div>
+	</body>
+</html>
+
+

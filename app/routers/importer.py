@@ -1052,6 +1052,100 @@ def returns_review(filename: str, request: Request):
 	)
 
 
+@router.get("/import/result", response_class=HTMLResponse)
+def import_result(run_ids: str, request: Request):
+    if not request.session.get("uid"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        ids = [int(x) for x in (run_ids or "").split(",") if str(x).strip()]
+    except Exception:
+        raise HTTPException(status_code=400, detail="run_ids must be comma-separated integers")
+    if not ids:
+        raise HTTPException(status_code=400, detail="run_ids required")
+    with get_session() as session:
+        runs = session.exec(select(ImportRun).where(ImportRun.id.in_(ids)).order_by(ImportRun.id.desc())).all()
+        if not runs:
+            raise HTTPException(status_code=404, detail="No runs found")
+        totals = {
+            "row_count": 0,
+            "created_orders": 0,
+            "created_clients": 0,
+            "created_items": 0,
+            "created_payments": 0,
+            "unmatched": 0,
+            "enriched_orders": 0,
+            "payments_existing": 0,
+            "payments_skipped_zero": 0,
+            "rows_created": 0,
+            "rows_skipped": 0,
+            "rows_unmatched": 0,
+            "rows_error": 0,
+            "rows_duplicates": 0,
+        }
+        for r in runs:
+            totals["row_count"] += int(r.row_count or 0)
+            totals["created_orders"] += int(r.created_orders or 0)
+            totals["created_clients"] += int(r.created_clients or 0)
+            totals["created_items"] += int(r.created_items or 0)
+            totals["created_payments"] += int(r.created_payments or 0)
+            totals["unmatched"] += int(r.unmatched_count or 0)
+        # Aggregate row-level counters from ImportRow
+        from sqlmodel import select as _select
+        rows = session.exec(
+            _select(ImportRow).where(ImportRow.import_run_id.in_(ids))
+        ).all()
+        for ir in rows:
+            st = (ir.status or "").lower()
+            if st == "created":
+                totals["rows_created"] += 1
+            elif st == "skipped":
+                totals["rows_skipped"] += 1
+            elif st == "unmatched":
+                totals["rows_unmatched"] += 1
+            elif st == "error":
+                totals["rows_error"] += 1
+            elif st == "duplicate":
+                totals["rows_duplicates"] += 1
+        # Failures: show errors and unmatched rows (limit 200)
+        failures: list[dict] = []
+        for ir in rows:
+            st = (ir.status or "").lower()
+            if st in ("error", "unmatched"):
+                if len(failures) >= 200:
+                    break
+                failures.append({
+                    "run_id": ir.import_run_id,
+                    "row_index": ir.row_index,
+                    "status": ir.status,
+                    "message": ir.message,
+                    "matched_client_id": ir.matched_client_id,
+                    "matched_order_id": ir.matched_order_id,
+                    "mapped_json": ir.mapped_json,
+                })
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "import_result.html",
+            {
+                "request": request,
+                "run_ids": ids,
+                "runs": [{
+                    "id": r.id,
+                    "source": r.source,
+                    "filename": r.filename,
+                    "row_count": r.row_count,
+                    "created_clients": r.created_clients,
+                    "created_orders": r.created_orders,
+                    "created_items": r.created_items,
+                    "created_payments": r.created_payments,
+                    "unmatched": r.unmatched_count,
+                    "data_date": r.data_date,
+                } for r in runs],
+                "totals": totals,
+                "failures": failures,
+            },
+        )
+
+
 @router.post("/returns/apply")
 def returns_apply(body: dict, request: Request):
 	if not request.session.get("uid"):
