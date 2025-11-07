@@ -11,7 +11,7 @@ from sqlmodel import select
 from ..db import get_session
 from ..services.queue import _get_redis
 from ..services.queue import enqueue
-from ..models import Message
+from ..models import Message, Client, Order
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -171,6 +171,41 @@ def status_page(request: Request):
 		"redis": _check_redis(),
 	}
 	return templates.TemplateResponse("admin_status.html", {"request": request, **ctx})
+
+
+@router.post("/clients/merge")
+def merge_clients(source_id: int, target_id: int):
+    """Manually merge/link two clients.
+
+    - Reassign all orders from source -> target
+    - Mark source as merged into target
+    """
+    if not source_id or not target_id or source_id == target_id:
+        raise HTTPException(status_code=400, detail="Invalid source/target")
+    with get_session() as session:
+        source = session.get(Client, source_id)
+        target = session.get(Client, target_id)
+        if not source or not target:
+            raise HTTPException(status_code=404, detail="Client not found")
+        # reassign orders
+        reassigned = 0
+        try:
+            rows = session.exec(select(Order).where(Order.client_id == source_id)).all()
+            for o in rows:
+                o.client_id = target_id
+                session.add(o)
+                reassigned += 1
+        except Exception:
+            pass
+        # mark source merged
+        source.merged_into_client_id = target_id
+        source.status = "merged"
+        session.add(source)
+        try:
+            session.commit()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"merge failed: {e}")
+        return {"status": "ok", "reassigned_orders": reassigned, "source_id": source_id, "target_id": target_id}
 
 
 @router.post("/cache/invalidate")

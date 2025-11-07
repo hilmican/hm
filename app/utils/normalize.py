@@ -67,15 +67,17 @@ def client_name_key(name: Any) -> str:
     return normalize_key(name)
 
 
-def client_unique_key(name: Any, phone: Any) -> str:
-    """Primary client key based on normalized name only.
+def client_unique_key(name: Any, phone: Any, surname: Any | None = None) -> str:
+    """Compute client unique key from available parts.
 
-    We intentionally ignore phone here to avoid creating duplicates when one
-    source lacks phone or has formatting differences. Phone can still be used
-    for secondary matching outside of the unique key.
+    Join normalized parts in order: name, surname, phone. Skip missing parts and
+    join with a single underscore, without producing extra underscores.
     """
-    n = client_name_key(name)
-    return n
+    name_norm = client_name_key(name)
+    surname_norm = client_name_key(surname) if surname else ''
+    phone_norm = normalize_phone(phone)
+    parts = [p for p in [name_norm, surname_norm, phone_norm] if p]
+    return "_".join(parts)
 
 
 def legacy_client_unique_key(name: Any, phone: Any) -> str:

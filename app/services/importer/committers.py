@@ -5,7 +5,7 @@ from typing import Tuple, Optional, List
 from sqlmodel import select
 
 from ...models import Client, Order, Payment, Item, Product, StockMovement, OrderItem
-from ...utils.normalize import client_unique_key, legacy_client_unique_key
+from ...utils.normalize import client_unique_key
 from ...utils.slugify import slugify
 from ..matching import (
     find_order_by_tracking,
@@ -54,14 +54,11 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             cur = order.notes or None
             order.notes = f"{cur} | {rec.get('notes')}" if cur else rec.get("notes")
     else:
-        # resolve client by unique key
+        # resolve client by unique key (name + optional surname + phone)
         new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
-        old_uq = legacy_client_unique_key(rec.get("name"), rec.get("phone"))
         client = None
         if new_uq:
             client = session.exec(select(Client).where(Client.unique_key == new_uq)).first()
-        if not client and old_uq:
-            client = session.exec(select(Client).where(Client.unique_key == old_uq)).first()
         if not client:
             client = Client(
                 name=rec.get("name") or "",
@@ -183,12 +180,9 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
 
         # resolve or create client
         new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
-        old_uq = legacy_client_unique_key(rec.get("name"), rec.get("phone"))
         client = None
         if new_uq:
             client = session.exec(select(Client).where(Client.unique_key == new_uq)).first()
-        if not client and old_uq:
-            client = session.exec(select(Client).where(Client.unique_key == old_uq)).first()
         if not client:
             client = Client(
                 name=(rec.get("name") or ""),

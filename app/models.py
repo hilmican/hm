@@ -17,6 +17,7 @@ class Client(SQLModel, table=True):
     height_cm: Optional[int] = Field(default=None, description="Client height in centimeters")
     weight_kg: Optional[int] = Field(default=None, description="Client weight in kilograms")
     unique_key: Optional[str] = Field(default=None, index=True, unique=True)
+    merged_into_client_id: Optional[int] = Field(default=None, foreign_key="client.id", index=True)
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
