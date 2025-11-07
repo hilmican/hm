@@ -204,6 +204,16 @@ def list_orders_table(
                     acc += float(item_cost_map.get(int(iid), 0.0)) * int(qty or 0)
                 cost_map[int(oid)] = round(acc, 2)
 
+        # Filter for high cost ratio (>= 70% of Toplam)
+        if preset == "high_cost_70":
+            def _high_cost(o: Order) -> bool:
+                total = float(o.total_amount or 0.0)
+                if total <= 0.0:
+                    return False
+                cost = float(cost_map.get(o.id or 0, 0.0))
+                return cost >= 0.7 * total
+            rows = [o for o in rows if _high_cost(o)]
+
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "orders_table.html",
@@ -378,6 +388,42 @@ def export_orders(
                 paid = paid_map.get(o.id or 0, 0.0)
                 return paid <= 0.0
             rows = [o for o in rows if _is_overdue_unpaid(o)]
+        # Build cost_map similar to table for high_cost filtering
+        from sqlmodel import select as _select
+        cost_map: dict[int, float] = {}
+        for o in rows:
+            if o.total_cost is not None:
+                cost_map[o.id or 0] = float(o.total_cost or 0.0)
+        missing_ids = [o.id for o in rows if (o.id and (o.id not in cost_map))]
+        if missing_ids:
+            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id.in_(missing_ids))).all()
+            order_item_map: dict[int, list[tuple[int, int]]] = {}
+            item_ids_needed: set[int] = set()
+            for oi in oitems:
+                if oi.order_id is None or oi.item_id is None:
+                    continue
+                order_item_map.setdefault(int(oi.order_id), []).append((int(oi.item_id), int(oi.quantity or 0)))
+                item_ids_needed.add(int(oi.item_id))
+            item_cost_map: dict[int, float] = {}
+            if item_ids_needed:
+                cost_items = session.exec(_select(Item).where(Item.id.in_(sorted(item_ids_needed)))).all()
+                for it in cost_items:
+                    if it.id is not None:
+                        item_cost_map[int(it.id)] = float(it.cost or 0.0)
+            for oid in missing_ids:
+                acc = 0.0
+                for (iid, qty) in order_item_map.get(int(oid), []):
+                    acc += float(item_cost_map.get(int(iid), 0.0)) * int(qty or 0)
+                cost_map[int(oid)] = round(acc, 2)
+        # Apply high_cost_70 preset if requested
+        if preset == "high_cost_70":
+            def _high_cost(o: Order) -> bool:
+                total = float(o.total_amount or 0.0)
+                if total <= 0.0:
+                    return False
+                cost = float(cost_map.get(o.id or 0, 0.0))
+                return cost >= 0.7 * total
+            rows = [o for o in rows if _high_cost(o)]
         # client names
         client_ids = sorted({o.client_id for o in rows if o.client_id})
         clients = session.exec(select(Item).where(Item.id == 0)).all()  # no-op to keep types

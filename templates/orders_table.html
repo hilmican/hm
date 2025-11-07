@@ -123,6 +123,7 @@
         <span class="pill">{{ rows|length }} siparis</span>
         <button class="btn primary" onclick="recalc()">Tazele</button>
         <button class="btn" onclick="presetOverdue7()">7 gün+ ödeme yok</button>
+        <button class="btn" onclick="presetHighCost70()">Maliyet ≥ %70</button>
         <button class="btn" onclick="presetAll()">Tüm siparişler</button>
         <button class="btn" onclick="exportExcel()">Excel'e aktar</button>
         <a class="btn" href="/orders/duplicates">Potansiyel Çiftler</a>
@@ -257,6 +258,13 @@
         const startStr = `2000-01-01`;
         params.set('start', startStr);
         params.set('end', endStr);
+        window.location.href = '/orders/table?' + params.toString();
+    }
+
+    function presetHighCost70(){
+        const params = new URLSearchParams();
+        params.set('preset','high_cost_70');
+        params.set('date_field','both');
         window.location.href = '/orders/table?' + params.toString();
     }
 
