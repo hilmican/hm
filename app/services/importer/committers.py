@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Tuple, Optional, List
 
 from sqlmodel import select
+from sqlalchemy import func
 
 from ...models import Client, Order, Payment, Item, Product, StockMovement, OrderItem
-from ...utils.normalize import client_unique_key
+from ...utils.normalize import client_unique_key, client_name_key
 from ...utils.slugify import slugify
 from ..matching import (
     find_order_by_tracking,
@@ -62,6 +63,28 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
         client = None
         if new_uq:
             client = session.exec(select(Client).where(Client.unique_key == new_uq)).first()
+
+        # When phone is missing and strict match fails, fall back to name-only matching
+        if (client is None) and (not rec.get("phone")):
+            name_raw = (rec.get("name") or "").strip()
+            if name_raw:
+                # Try unique_key prefix match using normalized name key
+                try:
+                    nkey = client_name_key(name_raw)
+                    if nkey:
+                        cands = session.exec(select(Client).where(Client.unique_key.like(f"{nkey}%"))).all()
+                        if len(cands) == 1:
+                            client = cands[0]
+                except Exception:
+                    pass
+                # If ambiguous, try exact case-insensitive name equality
+                if client is None:
+                    try:
+                        c2 = session.exec(select(Client).where(func.lower(Client.name) == func.lower(name_raw))).all()
+                        if len(c2) == 1:
+                            client = c2[0]
+                    except Exception:
+                        pass
         if not client:
             client = Client(
                 name=rec.get("name") or "",
@@ -75,7 +98,8 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             session.flush()
             run.created_clients += 1
         else:
-            if new_uq and client.unique_key != new_uq:
+            # Avoid downgrading an existing client's unique_key to a name-only key from kargo rows
+            if new_uq and client.unique_key != new_uq and rec.get("phone"):
                 client.unique_key = new_uq
             updated = False
             for f in ("phone", "address", "city"):
