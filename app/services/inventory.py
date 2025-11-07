@@ -5,7 +5,7 @@ import ast
 import datetime as dt
 
 from sqlmodel import Session, select
-from sqlalchemy import func, case
+from sqlalchemy import func, case, delete
 
 from ..models import Item, StockMovement, Product, ImportRow, ImportRun, Order, OrderItem
 from .mapping import find_or_create_variant, resolve_mapping
@@ -245,14 +245,16 @@ def recalc_orders_from_mappings(session: Session, *, product_id: Optional[int] =
             outs_recreated += sum(agg.values())
             continue
 
-        for oi in existing_items:
-            session.delete(oi)
-        mvs = session.exec(_select(StockMovement).where(
-            StockMovement.related_order_id == oid
-        )).all()
-        for mv in mvs:
-            if (mv.direction or "out") == "out" and (mv.related_order_id == oid):
-                session.delete(mv)
+        # Delete existing "out" stock movements for this order in bulk
+        session.exec(
+            delete(StockMovement).where(
+                (StockMovement.related_order_id == oid) & (StockMovement.direction == "out")
+            )
+        )
+        # Delete existing OrderItem rows for this order in bulk
+        session.exec(
+            delete(OrderItem).where(OrderItem.order_id == oid)
+        )
 
         for iid, qty in agg.items():
             session.add(OrderItem(order_id=oid, item_id=iid, quantity=int(qty)))
