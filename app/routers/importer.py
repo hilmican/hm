@@ -1052,7 +1052,7 @@ def returns_review(filename: str, request: Request):
 	)
 
 
-@router.get("/import/result", response_class=HTMLResponse)
+@router.get("/result", response_class=HTMLResponse)
 def import_result(run_ids: str, request: Request):
     if not request.session.get("uid"):
         raise HTTPException(status_code=401, detail="Unauthorized")
