@@ -33,7 +33,12 @@
             {% for r, outs in rows %}
             <tr>
                 <td>{{ r.id }}</td>
-                <td><input data-id="{{ r.id }}" data-field="source_pattern" value="{{ r.source_pattern }}" style="width:220px" /></td>
+                <td>
+                    <input data-id="{{ r.id }}" data-field="source_pattern" value="{{ r.source_pattern }}" style="width:220px" />
+                    <div class="slugRow" style="font-size:12px;color:#6b7280;margin-top:4px;">
+                        slug: <code class="patSlug"></code>
+                    </div>
+                </td>
                 <td>
                     <select data-id="{{ r.id }}" data-field="match_mode">
                         <option value="exact" {% if r.match_mode=='exact' %}selected{% endif %}>exact</option>
@@ -90,6 +95,28 @@
         const q = v ? ('?pattern=' + encodeURIComponent(v)) : '';
         location.href = '/mappings/table' + q;
     });
+
+    // client-side slugify mirroring server behavior (NFKD, strip diacritics, drop non-ASCII, non-alnum -> '-')
+    function slugifyClient(value){
+        try{
+            let s = String(value || '');
+            s = s.normalize('NFD');
+            s = s.replace(/[\u0300-\u036f]/g, ''); // remove combining marks
+            s = s.replace(/[\u0100-\uFFFF]/g, ''); // drop remaining non-ASCII (e.g., Turkish dotless ı)
+            s = s.replace(/[^a-zA-Z0-9]+/g, '-');
+            s = s.replace(/^-+|-+$/g, '');
+            return s.toLowerCase() || 'item';
+        }catch(_e){ return 'item'; }
+    }
+
+    // populate and live-update slug under each pattern input
+    for (const inp of document.querySelectorAll('input[data-field="source_pattern"]')){
+        const slugEl = inp.parentElement.querySelector('.patSlug');
+        if (slugEl){ slugEl.textContent = slugifyClient(inp.value); }
+        inp.addEventListener('input', ()=>{
+            if (slugEl){ slugEl.textContent = slugifyClient(inp.value); }
+        });
+    }
     for (const btn of document.querySelectorAll('.saveRule')){
         btn.addEventListener('click', async (e)=>{
             const id = e.target.getAttribute('data-id');
