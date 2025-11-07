@@ -135,14 +135,7 @@
 							let body = { source: json.source, filename: f.filename };
 							// returns are handled via interactive review; skip commit here
 							if (json.source === 'returns') { continue; }
-							if (json.source === 'bizim') {
-								let today = new Date();
-								const pad = (n)=> String(n).padStart(2,'0');
-								const defaultDate = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
-								const input = prompt(`${f.filename} için veri tarihi (YYYY-MM-DD)`, defaultDate);
-								if (!input) { console.log('Skipped commit for', f.filename); continue; }
-								body.data_date = input;
-							}
+						// For 'bizim', data_date will be derived from filename (first 10 chars)
 							const res2 = await fetch('/import/commit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)});
 							if (!res2.ok) { const t = await res2.text(); throw new Error(`${f.filename} için içe aktarım başarısız: ${t}`); }
 							const j2 = await res2.json();

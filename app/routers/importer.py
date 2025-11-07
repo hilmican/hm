@@ -484,6 +484,15 @@ def commit_import(body: dict, request: Request):
 						run.data_date = _dt.date.fromisoformat(dd_raw)
 					except Exception:
 						raise HTTPException(status_code=400, detail="Invalid data_date; expected YYYY-MM-DD")
+				else:
+					# Derive from filename: first 10 characters expected to be YYYY-MM-DD
+					try:
+						import datetime as _dt
+						prefix = str(fn)[:10]
+						run.data_date = _dt.date.fromisoformat(prefix)
+					except Exception:
+						# Leave as None if filename doesn't contain a valid ISO date
+						pass
 			elif source == "kargo":  # derive from records' shipment_date
 				try:
 					import datetime as _dt
@@ -1226,13 +1235,13 @@ def returns_apply(body: dict, request: Request):
 						already_processed = (already_in is not None) or (o.return_or_switch_date is not None)
 						# Restock only once: when not previously processed and not explicitly skipped
 						if (not skip_stock) and (not already_processed):
- 							oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
- 							for oi in oitems:
- 								if oi.item_id is None:
- 									continue
- 								qty = int(oi.quantity or 0)
- 								if qty > 0:
- 									adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id)
+							oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
+							for oi in oitems:
+								if oi.item_id is None:
+									continue
+								qty = int(oi.quantity or 0)
+								if qty > 0:
+									adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id)
 						# Always update order fields from the spreadsheet (status/date/amount)
 						action = (rec.get("action") or "").strip()
 						if action == "refund":
