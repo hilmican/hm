@@ -134,6 +134,26 @@ def init_db() -> None:
                 # Minimal MySQL-safe migrations
                 if backend == "mysql":
                     with engine.begin() as conn:
+                        # Ensure client.merged_into_client_id exists
+                        try:
+                            row = conn.exec_driver_sql(
+                                """
+                                SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'client' AND COLUMN_NAME = 'merged_into_client_id'
+                                LIMIT 1
+                                """
+                            ).fetchone()
+                            if row is None:
+                                try:
+                                    conn.exec_driver_sql("ALTER TABLE client ADD COLUMN merged_into_client_id INT NULL")
+                                except Exception:
+                                    pass
+                                try:
+                                    conn.exec_driver_sql("CREATE INDEX idx_client_merged_into ON client(merged_into_client_id)")
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                         # Up-size potentially long text fields
                         try:
                             row = conn.exec_driver_sql(
