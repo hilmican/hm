@@ -204,6 +204,12 @@ def list_orders_table(
                     acc += float(item_cost_map.get(int(iid), 0.0)) * int(qty or 0)
                 cost_map[int(oid)] = round(acc, 2)
 
+        # For refunded/switched orders, force cost to zero for display/aggregates
+        for o in rows:
+            if (o.status or "") in ("refunded", "switched", "stitched"):
+                if o.id is not None:
+                    cost_map[int(o.id)] = 0.0
+
         # Filter for high cost ratio (>= 70% of Toplam)
         if preset == "high_cost_70":
             def _high_cost(o: Order) -> bool:
@@ -253,13 +259,16 @@ def recalc_financials():
             # shipping from toplam; zero totals => base only
             amt = float(o.total_amount or 0.0)
             o.shipping_fee = compute_shipping_fee(amt)
-            # cost from order items * item.cost
-            total_cost = 0.0
-            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == (o.id or 0))).all()
-            for oi in oitems:
-                it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
-                total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
-            o.total_cost = round(total_cost, 2)
+            # cost from order items * item.cost (zero if refunded/switched)
+            if (o.status or "") in ("refunded", "switched", "stitched"):
+                o.total_cost = 0.0
+            else:
+                total_cost = 0.0
+                oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == (o.id or 0))).all()
+                for oi in oitems:
+                    it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
+                    total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
+                o.total_cost = round(total_cost, 2)
             updated += 1
         return {"status": "ok", "orders_updated": updated}
 
@@ -272,6 +281,11 @@ def recalc_costs():
         updated = 0
         for o in rows:
             if not o.id:
+                continue
+            if (o.status or "") in ("refunded", "switched", "stitched"):
+                if o.total_cost != 0.0:
+                    o.total_cost = 0.0
+                    updated += 1
                 continue
             oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
             total_cost = 0.0
@@ -303,6 +317,11 @@ def refund_order(order_id: int):
                 adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order_id)
         o.status = "refunded"
         o.return_or_switch_date = dt.date.today()
+        # cost should be zero for refunds
+        try:
+            o.total_cost = 0.0
+        except Exception:
+            pass
         return {"status": "ok"}
 
 
@@ -415,6 +434,11 @@ def export_orders(
                 for (iid, qty) in order_item_map.get(int(oid), []):
                     acc += float(item_cost_map.get(int(iid), 0.0)) * int(qty or 0)
                 cost_map[int(oid)] = round(acc, 2)
+        # Force zero cost for refunded/switched orders
+        for o in rows:
+            if (o.status or "") in ("refunded", "switched", "stitched"):
+                if o.id is not None:
+                    cost_map[int(o.id)] = 0.0
         # Apply high_cost_70 preset if requested
         if preset == "high_cost_70":
             def _high_cost(o: Order) -> bool:
@@ -481,6 +505,11 @@ def switch_order(order_id: int):
                 adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order_id)
         o.status = "switched"
         o.return_or_switch_date = dt.date.today()
+        # cost should be zero for switches
+        try:
+            o.total_cost = 0.0
+        except Exception:
+            pass
         return {"status": "ok"}
 
 
@@ -710,14 +739,17 @@ async def edit_order_apply(order_id: int, request: Request):
                 if total_qty_sum != int(o.quantity or 0):
                     changes["quantity"] = [o.quantity, total_qty_sum]
                     o.quantity = total_qty_sum
-                # recompute total_cost
+                # recompute total_cost (zero if refunded/switched)
                 try:
                     from ..models import Item as _Item
-                    total_cost = 0.0
-                    for iid, qv in new_items_map.items():
-                        it = session.exec(_select(_Item).where(_Item.id == int(iid))).first()
-                        total_cost += float(qv) * float((it.cost or 0.0) if it else 0.0)
-                    o.total_cost = round(total_cost, 2)
+                    if (o.status or "") in ("refunded", "switched", "stitched"):
+                        o.total_cost = 0.0
+                    else:
+                        total_cost = 0.0
+                        for iid, qv in new_items_map.items():
+                            it = session.exec(_select(_Item).where(_Item.id == int(iid))).first()
+                            total_cost += float(qv) * float((it.cost or 0.0) if it else 0.0)
+                        o.total_cost = round(total_cost, 2)
                 except Exception:
                     pass
         # compare and set fields

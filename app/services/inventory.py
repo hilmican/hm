@@ -267,12 +267,15 @@ def recalc_orders_from_mappings(session: Session, *, product_id: Optional[int] =
             pass
 
         try:
-            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == oid)).all()
-            total_cost = 0.0
-            for oi in oitems:
-                it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
-                total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
-            order.total_cost = round(total_cost, 2)
+            if (order.status or "") in ("refunded", "switched", "stitched"):
+                order.total_cost = 0.0
+            else:
+                oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == oid)).all()
+                total_cost = 0.0
+                for oi in oitems:
+                    it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
+                    total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
+                order.total_cost = round(total_cost, 2)
         except Exception:
             pass
 
