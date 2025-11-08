@@ -46,23 +46,43 @@ async def notify_new_message(event: dict) -> None:
 
 
 @router.get("/inbox")
-async def inbox(request: Request, limit: int = 25):
+async def inbox(request: Request, limit: int = 25, q: str | None = None):
     with get_session() as session:
         # Fetch only lightweight columns for recent messages to reduce IO
         from sqlalchemy import text as _text
         sample_n = max(50, min(int(limit or 25) * 8, 400))
-        rows_raw = session.exec(
-            _text(
-                """
-                SELECT conversation_id, timestamp_ms, text, sender_username, direction,
-                       ig_sender_id, ig_recipient_id, ad_link, ad_title
-                FROM message
-                WHERE conversation_id IS NOT NULL
-                ORDER BY timestamp_ms DESC
-                LIMIT :n
-                """
-            ).params(n=int(sample_n))
-        ).all()
+        if q and isinstance(q, str) and q.strip():
+            qq = f"%{q.lower().strip()}%"
+            rows_raw = session.exec(
+                _text(
+                    """
+                    SELECT conversation_id, timestamp_ms, text, sender_username, direction,
+                           ig_sender_id, ig_recipient_id, ad_link, ad_title
+                    FROM message
+                    WHERE conversation_id IS NOT NULL
+                      AND (
+                        (text IS NOT NULL AND LOWER(text) LIKE :qq)
+                        OR (sender_username IS NOT NULL AND LOWER(sender_username) LIKE :qq)
+                        OR (ad_title IS NOT NULL AND LOWER(ad_title) LIKE :qq)
+                      )
+                    ORDER BY timestamp_ms DESC
+                    LIMIT :n
+                    """
+                ).params(qq=qq, n=int(sample_n))
+            ).all()
+        else:
+            rows_raw = session.exec(
+                _text(
+                    """
+                    SELECT conversation_id, timestamp_ms, text, sender_username, direction,
+                           ig_sender_id, ig_recipient_id, ad_link, ad_title
+                    FROM message
+                    WHERE conversation_id IS NOT NULL
+                    ORDER BY timestamp_ms DESC
+                    LIMIT :n
+                    """
+                ).params(n=int(sample_n))
+            ).all()
         # Normalize rows into dicts for template use
         rows = []
         for r in rows_raw:
@@ -169,7 +189,7 @@ async def inbox(request: Request, limit: int = 25):
             if (ad_link or ad_title) and cid not in ad_map:
                 ad_map[cid] = {"link": ad_link, "title": ad_title}
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "ad_map": ad_map})
+        return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "ad_map": ad_map, "q": (q or "")})
 
 
 @router.post("/inbox/refresh")

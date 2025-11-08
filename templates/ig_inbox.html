@@ -17,6 +17,11 @@
     {% include "_nav.html" %}
     <h1>Instagram Gelen Kutusu</h1>
     <div class="toolbar">
+      <form method="get" action="/ig/inbox" style="display:flex;gap:8px;align-items:center;">
+        <input type="text" name="q" placeholder="Mesajlarda ara..." value="{{ q or '' }}" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;min-width:280px" />
+        <button type="submit">Ara</button>
+        <a href="/ig/inbox" class="meta" style="margin-left:6px">Temizle</a>
+      </form>
       <button id="refresh">Yenile</button>
     </div>
     <div id="list">
