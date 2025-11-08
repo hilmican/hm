@@ -22,3 +22,22 @@ def data_deletion(request: Request):
 	return templates.TemplateResponse("data_deletion.html", {"request": request})
 
 
+# Backward/short aliases
+@router.get("/privacy")
+def privacy_short(request: Request):
+	templates = request.app.state.templates
+	return templates.TemplateResponse("privacy.html", {"request": request})
+
+
+@router.get("/terms")
+def terms_short(request: Request):
+	templates = request.app.state.templates
+	return templates.TemplateResponse("terms.html", {"request": request})
+
+
+@router.get("/data_deletion")
+@router.get("/data-deletion")
+def data_deletion_short(request: Request):
+	templates = request.app.state.templates
+	return templates.TemplateResponse("data_deletion.html", {"request": request})
+
