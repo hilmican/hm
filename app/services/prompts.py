@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 # Centralized prompts for AI mapping
+#
 # NOTE (prompt versioning):
 # - When you change any prompt here, copy the previous version into
 #   app/services/prompts_archive/ with a dated filename, e.g.
 #   2025-11-08-IG_PURCHASE_SYSTEM_PROMPT-v1.txt
 # - This convention allows us to review historical prompt strategies.
+#
+# Hot-reload convention:
+# - Prompts can be overridden at runtime via text files without restarting workers.
+# - For IG purchase: env IG_PURCHASE_PROMPT_FILE or default app/services/prompts/IG_PURCHASE_SYSTEM_PROMPT.txt
+# - The loader caches by mtime and re-reads when the file changes.
+import os
+from pathlib import Path
+import time
 
 MAPPING_SYSTEM_PROMPT = (
     "Sen bir stok ve sipariş eşleştirme yardımcısısın. "
@@ -22,6 +31,57 @@ MAPPING_SYSTEM_PROMPT = (
     "6) SADECE geçerli JSON döndür. Açıklama, markdown, kod bloğu veya yorum ekleme. "
     "7) JSON dışına çıkma. Tüm alanları çift tırnaklı yaz. Virgül ve köşeli/normal parantezleri doğru kapat. "
 )
+
+
+# --- Hot-reloadable loader ----------------------------------------------------
+_PROMPT_CACHE: dict[str, tuple[str, float]] = {}
+_PROMPT_LAST_CHECK: dict[str, float] = {}
+
+
+def _read_file_text(path: Path) -> str | None:
+	try:
+		return path.read_text(encoding="utf-8")
+	except Exception:
+		return None
+
+
+def get_ig_purchase_prompt() -> str:
+	"""
+	Return the current IG purchase detection system prompt.
+	- If a prompt file is present, use it with mtime-based cache.
+	- Else, fall back to the in-code default IG_PURCHASE_SYSTEM_PROMPT.
+	"""
+	key = "ig_purchase"
+	now = time.time()
+	refresh_sec = float(os.getenv("PROMPT_REFRESH_SECONDS", "5"))
+	# throttle stat calls
+	if key in _PROMPT_CACHE and (now - _PROMPT_LAST_CHECK.get(key, 0.0) < max(1.0, refresh_sec)):
+		return _PROMPT_CACHE[key][0]
+	_PROMPT_LAST_CHECK[key] = now
+	# resolve file path
+	custom_path = os.getenv("IG_PURCHASE_PROMPT_FILE")
+	if custom_path:
+		p = Path(custom_path)
+	else:
+		p = Path("app/services/prompts/IG_PURCHASE_SYSTEM_PROMPT.txt")
+	try:
+		if p.exists():
+			mt = p.stat().st_mtime
+			cached = _PROMPT_CACHE.get(key)
+			if (not cached) or (mt != cached[1]):
+				txt = _read_file_text(p)
+				if txt and txt.strip():
+					_PROMPT_CACHE[key] = (txt, mt)
+					return txt
+			# unchanged -> return cached
+			if cached:
+				return cached[0]
+	except Exception:
+		# ignore file/permission errors; fall back to constant
+		pass
+	# fallback
+	_PROMPT_CACHE[key] = (IG_PURCHASE_SYSTEM_PROMPT, _PROMPT_CACHE.get(key, (None, 0.0))[1] if _PROMPT_CACHE.get(key) else 0.0)  # type: ignore[arg-type]
+	return IG_PURCHASE_SYSTEM_PROMPT
 
 
 # Instagram purchase detection and contact extraction prompt (strict JSON)

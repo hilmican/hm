@@ -10,7 +10,7 @@ from sqlmodel import select
 from ..db import get_session
 from ..models import Message
 from .ai import AIClient
-from .prompts import IG_PURCHASE_SYSTEM_PROMPT
+from .prompts import get_ig_purchase_prompt
 from .monitoring import ai_run_log
 from ..utils.normalize import normalize_phone
 import logging
@@ -96,8 +96,9 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
     # Optional prompt logging (truncated) when enabled
     try:
         if os.getenv("AI_LOG_PROMPT", "0") not in ("0", "false", "False", "") and run_id is not None:
+            system_prompt_now = get_ig_purchase_prompt()
             ai_run_log(int(run_id), "debug", "ai_prompt", {
-                "system_prompt": IG_PURCHASE_SYSTEM_PROMPT[:800],
+                "system_prompt": system_prompt_now[:800],
                 "user_prompt": user_prompt[:1200],
                 "conversation_id": conversation_id,
             })
@@ -105,12 +106,12 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
         pass
     if include_meta:
         data, raw_response = client.generate_json(
-            system_prompt=IG_PURCHASE_SYSTEM_PROMPT,
+            system_prompt=get_ig_purchase_prompt(),
             user_prompt=user_prompt,
             include_raw=True,
         )
     else:
-        data = client.generate_json(system_prompt=IG_PURCHASE_SYSTEM_PROMPT, user_prompt=user_prompt)
+        data = client.generate_json(system_prompt=get_ig_purchase_prompt(), user_prompt=user_prompt)
         raw_response = None
     try:
         if run_id is not None:
