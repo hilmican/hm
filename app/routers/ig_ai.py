@@ -191,25 +191,38 @@ def preview_process(body: dict):
     cutoff_ms = int(cutoff_dt.timestamp() * 1000)
 
     with get_session() as session:
-        # Conversations count with same eligibility as processor (ai_process_time aware)
-        where = ["last_message_at <= :cutoff"]
-        if not reprocess:
-            where.append("(ai_process_time IS NULL OR last_message_at > ai_process_time)")
-        params: dict[str, object] = {"cutoff": cutoff_dt.isoformat(" ")}
+        # Conversations count derived from messages grouped by conversation_id, filtered by ai_conversations.ai_process_time
+        cutoff_ms = int(cutoff_dt.timestamp() * 1000)
+        msg_where = ["m.conversation_id IS NOT NULL", "(m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)"]
+        msg_params: dict[str, object] = {"cutoff_ms": int(cutoff_ms)}
         if date_from and date_to and date_from <= date_to:
-            dt_end = date_to + dt.timedelta(days=1)
-            params["df"] = f"{date_from.isoformat()} 00:00:00"
-            params["dte"] = f"{dt_end.isoformat()} 00:00:00"
-            where.append("last_message_at >= :df AND last_message_at < :dte")
+            ms_from = int(dt.datetime.combine(date_from, dt.time.min).timestamp() * 1000)
+            ms_to = int(dt.datetime.combine(date_to + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
+            msg_where.append("(m.timestamp_ms IS NULL OR (m.timestamp_ms >= :ms_from AND m.timestamp_ms < :ms_to))")
+            msg_params["ms_from"] = int(ms_from)
+            msg_params["ms_to"] = int(ms_to)
         elif date_from:
-            params["df"] = f"{date_from.isoformat()} 00:00:00"
-            where.append("last_message_at >= :df")
+            ms_from = int(dt.datetime.combine(date_from, dt.time.min).timestamp() * 1000)
+            msg_where.append("(m.timestamp_ms IS NULL OR m.timestamp_ms >= :ms_from)")
+            msg_params["ms_from"] = int(ms_from)
         elif date_to:
-            dt_end = date_to + dt.timedelta(days=1)
-            params["dte"] = f"{dt_end.isoformat()} 00:00:00"
-            where.append("last_message_at < :dte")
-        sql_conv = "SELECT COUNT(1) AS c FROM conversations WHERE " + " AND ".join(where)
-        rowc = session.exec(text(sql_conv).params(**params)).first()
+            ms_to = int(dt.datetime.combine(date_to + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
+            msg_where.append("(m.timestamp_ms IS NULL OR m.timestamp_ms < :ms_to)")
+            msg_params["ms_to"] = int(ms_to)
+        try:
+            backend = getattr(session.get_bind().engine.url, "get_backend_name", lambda: "")()
+        except Exception:
+            backend = ""
+        ts_expr = "COALESCE(UNIX_TIMESTAMP(ac.ai_process_time),0)*1000" if backend == "mysql" else "COALESCE(strftime('%s', ac.ai_process_time),0)*1000"
+        sql_conv = (
+            "SELECT COUNT(1) AS c FROM ("
+            " SELECT m.conversation_id, MAX(COALESCE(m.timestamp_ms,0)) AS last_ts"
+            " FROM message m WHERE " + " AND ".join(msg_where) +
+            " GROUP BY m.conversation_id"
+            ") t LEFT JOIN ai_conversations ac ON ac.convo_id = t.conversation_id "
+            + ("WHERE (ac.ai_process_time IS NULL OR t.last_ts > " + ts_expr + ")" if not reprocess else "")
+        )
+        rowc = session.exec(text(sql_conv).params(**msg_params)).first()
         conv_count = int((getattr(rowc, "c", None) if rowc is not None else 0) or (rowc[0] if rowc else 0) or 0)
 
         # Messages count by timestamp window only (robust even if conversation links are missing)

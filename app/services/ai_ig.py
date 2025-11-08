@@ -249,29 +249,41 @@ def process_run(
                 convo_ids = [conversation_id]
             considered = len(convo_ids)
         else:
-            where = ["last_message_at <= :cutoff"]
+            # Build candidate conversations from messages table (DB-agnostic)
+            cutoff_ms = int(cutoff_dt.timestamp() * 1000)
+            msg_where = ["m.conversation_id IS NOT NULL", "(m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)"]
+            msg_params: Dict[str, Any] = {"cutoff_ms": int(cutoff_ms)}
             if date_from and date_to and date_from <= date_to:
-                dt_end = date_to + dt.timedelta(days=1)
-                params["df"] = f"{date_from.isoformat()} 00:00:00"
-                params["dte"] = f"{dt_end.isoformat()} 00:00:00"
-                where.append("last_message_at >= :df AND last_message_at < :dte")
+                ms_from = int(dt.datetime.combine(date_from, dt.time.min).timestamp() * 1000)
+                ms_to = int(dt.datetime.combine(date_to + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
+                msg_where.append("(m.timestamp_ms IS NULL OR (m.timestamp_ms >= :ms_from AND m.timestamp_ms < :ms_to))")
+                msg_params["ms_from"] = int(ms_from)
+                msg_params["ms_to"] = int(ms_to)
             elif date_from:
-                params["df"] = f"{date_from.isoformat()} 00:00:00"
-                where.append("last_message_at >= :df")
+                ms_from = int(dt.datetime.combine(date_from, dt.time.min).timestamp() * 1000)
+                msg_where.append("(m.timestamp_ms IS NULL OR m.timestamp_ms >= :ms_from)")
+                msg_params["ms_from"] = int(ms_from)
             elif date_to:
-                dt_end = date_to + dt.timedelta(days=1)
-                params["dte"] = f"{dt_end.isoformat()} 00:00:00"
-                where.append("last_message_at < :dte")
-            # When not reprocessing, only process conversations that have new messages since last AI process time
-            if not reprocess:
-                where.append("(ai_process_time IS NULL OR last_message_at > ai_process_time)")
-            sql = (
-                "SELECT convo_id FROM conversations WHERE "
-                + " AND ".join(where)
-                + f" ORDER BY last_message_at DESC LIMIT {int(limit)}"
+                ms_to = int(dt.datetime.combine(date_to + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
+                msg_where.append("(m.timestamp_ms IS NULL OR m.timestamp_ms < :ms_to)")
+                msg_params["ms_to"] = int(ms_to)
+            # Determine backend for UNIX timestamp conversion
+            try:
+                backend = getattr(session.get_bind().engine.url, "get_backend_name", lambda: "")()
+            except Exception:
+                backend = ""
+            ts_expr = "COALESCE(UNIX_TIMESTAMP(ac.ai_process_time),0)*1000" if backend == "mysql" else "COALESCE(strftime('%s', ac.ai_process_time),0)*1000"
+            sql_msg = (
+                "SELECT t.conversation_id FROM ("
+                " SELECT m.conversation_id, MAX(COALESCE(m.timestamp_ms,0)) AS last_ts"
+                " FROM message m WHERE " + " AND ".join(msg_where) +
+                " GROUP BY m.conversation_id"
+                ") t LEFT JOIN ai_conversations ac ON ac.convo_id = t.conversation_id "
+                + ("WHERE (ac.ai_process_time IS NULL OR t.last_ts > " + ts_expr + ") " if not reprocess else " ")
+                + f"ORDER BY t.last_ts DESC LIMIT {int(limit)}"
             )
-            rows = session.exec(_text(sql).params(**params)).all()
-            convo_ids = [r.convo_id if hasattr(r, "convo_id") else r[0] for r in rows]
+            rows = session.exec(_text(sql_msg).params(**msg_params)).all()
+            convo_ids = [r.conversation_id if hasattr(r, "conversation_id") else r[0] for r in rows]
             considered = len(convo_ids)
         # Fallback: if conversations table yields 0, select distinct conversation_id
         # from messages by timestamp window so we can still process
@@ -502,6 +514,33 @@ def process_run(
                     session.exec(
                         _text('UPDATE `order` SET ig_conversation_id = COALESCE(ig_conversation_id, :cid) WHERE id=:oid').params(cid=cid, oid=int(linked_order_id))
                     )
+                # Update ai_conversations watermark/status (vendor-neutral via upsert-like two-step)
+                try:
+                    session.exec(
+                        _text(
+                            """
+                            INSERT INTO ai_conversations(convo_id, ai_process_time, ai_status, ai_json, linked_order_id)
+                            VALUES(:cid, CURRENT_TIMESTAMP, :st, :js, :oid)
+                            """
+                        ).params(cid=cid, st=status, js=json.dumps(data, ensure_ascii=False), oid=linked_order_id)
+                    )
+                except Exception:
+                    # Fallback to UPDATE when row exists
+                    try:
+                        session.exec(
+                            _text(
+                                """
+                                UPDATE ai_conversations
+                                SET ai_process_time=CURRENT_TIMESTAMP,
+                                    ai_status=:st,
+                                    ai_json=:js,
+                                    linked_order_id=COALESCE(linked_order_id, :oid)
+                                WHERE convo_id=:cid
+                                """
+                            ).params(cid=cid, st=status, js=json.dumps(data, ensure_ascii=False), oid=linked_order_id)
+                        )
+                    except Exception:
+                        pass
                 # Optional: write history row
                 try:
                     session.exec(

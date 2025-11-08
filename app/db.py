@@ -382,6 +382,23 @@ def init_db() -> None:
                                 pass
                         except Exception:
                             pass
+                        # Lightweight table for AI processing state keyed by message.conversation_id
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS ai_conversations (
+                                    convo_id VARCHAR(128) PRIMARY KEY,
+                                    ai_process_time DATETIME NULL,
+                                    ai_status VARCHAR(32) NULL,
+                                    ai_json LONGTEXT NULL,
+                                    linked_order_id INTEGER NULL,
+                                    INDEX idx_ai_conv_time (ai_process_time),
+                                    INDEX idx_ai_conv_linked (linked_order_id)
+                                )
+                                """
+                            )
+                        except Exception:
+                            pass
                         # Message timestamp and composite index to accelerate counts and latest-per-conversation lookups
                         try:
                             conn.exec_driver_sql("CREATE INDEX idx_message_ts ON message(timestamp_ms)")
@@ -700,6 +717,22 @@ def init_db() -> None:
                     )
                     """
                 )
+                # ai_conversations table for AI processing watermark keyed by message.conversation_id
+                conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS ai_conversations (
+                        convo_id TEXT PRIMARY KEY,
+                        ai_process_time DATETIME,
+                        ai_status TEXT,
+                        ai_json TEXT,
+                        linked_order_id INTEGER
+                    )
+                    """
+                )
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_conv_time ON ai_conversations(ai_process_time)")
+                except Exception:
+                    pass
                 # Ensure conversations AI/contact columns exist (idempotent ALTERs)
                 try:
                     rows = conn.exec_driver_sql("PRAGMA table_info('conversations')").fetchall()
