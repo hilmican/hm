@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException
 from sqlalchemy import text
 from sqlmodel import select
+import datetime as dt
 
 from ..db import get_session
 from ..services.queue import enqueue, delete_job
@@ -270,6 +271,154 @@ def run_logs(run_id: int, limit: int = 200):
     n = int(max(1, min(limit, 2000)))
     logs = get_ai_run_logs(int(run_id), n)
     return {"logs": logs}
+
+
+@router.get("/link-suggest")
+def link_suggest_page(request: Request, start: str | None = None, end: str | None = None, limit: int = 200):
+    """Suggest linking orders to IG conversations by matching client phone in conversations/messages.
+
+    - Only orders without ig_conversation_id
+    - Default date window: last 7 days
+    - Date criterion: shipment_date if present else data_date
+    """
+    n = int(max(1, min(limit or 200, 1000)))
+    def _parse_date(s: str | None) -> dt.date | None:
+        try:
+            return dt.date.fromisoformat(str(s)) if s else None
+        except Exception:
+            return None
+    today = dt.date.today()
+    start_d = _parse_date(start) or (today - dt.timedelta(days=7))
+    end_d = _parse_date(end) or today
+    if end_d < start_d:
+        start_d, end_d = end_d, start_d
+    from ..models import Order, Client, Item
+    with get_session() as session:
+        # Orders without link in date window
+        rows = session.exec(
+            select(Order, Client, Item)
+            .where(Order.ig_conversation_id.is_(None))
+            .where(
+                (
+                    ((Order.shipment_date.is_not(None)) & (Order.shipment_date >= start_d) & (Order.shipment_date <= end_d))
+                    | ((Order.shipment_date.is_(None)) & (Order.data_date.is_not(None)) & (Order.data_date >= start_d) & (Order.data_date <= end_d))
+                )
+            )
+            .where(Order.client_id == Client.id)
+            .where((Order.item_id.is_(None)) | (Order.item_id == Item.id))
+            .order_by(Order.id.desc())
+            .limit(n)
+        ).all()
+        suggestions: list[dict] = []
+        for o, c, it in rows:
+            phone = (c.phone or "").strip() if c.phone else ""
+            # normalize digits, prefer last 10
+            digits = "".join([ch for ch in phone if ch.isdigit()])
+            last10 = digits[-10:] if len(digits) >= 10 else digits
+            convo_id = None
+            msg_preview = None
+            # Try conversations.contact_phone first
+            try:
+                if last10:
+                    rowc = session.exec(
+                        text(
+                            """
+                            SELECT convo_id, contact_phone
+                            FROM conversations
+                            WHERE contact_phone IS NOT NULL AND REPLACE(REPLACE(REPLACE(contact_phone,' ',''),'-',''),'+','') LIKE :p
+                            ORDER BY last_message_at DESC LIMIT 1
+                            """
+                        ).params(p=f"%{last10}%")
+                    ).first()
+                    if rowc:
+                        convo_id = rowc.convo_id if hasattr(rowc, "convo_id") else rowc[0]
+            except Exception:
+                pass
+            # Fallback: search messages.text for digits
+            if (convo_id is None) and last10:
+                try:
+                    rowm = session.exec(
+                        text(
+                            """
+                            SELECT conversation_id, text, timestamp_ms
+                            FROM message
+                            WHERE text IS NOT NULL AND REPLACE(REPLACE(REPLACE(text,' ',''),'-',''),'+','') LIKE :p
+                            ORDER BY COALESCE(timestamp_ms,0) DESC LIMIT 1
+                            """
+                        ).params(p=f"%{last10}%")
+                    ).first()
+                    if rowm:
+                        convo_id = rowm.conversation_id if hasattr(rowm, "conversation_id") else rowm[0]
+                        msg_preview = rowm.text if hasattr(rowm, "text") else (rowm[1] if len(rowm) > 1 else None)
+                except Exception:
+                    pass
+            suggestions.append({
+                "order_id": int(o.id or 0),
+                "client_id": int(c.id or 0),
+                "client_name": c.name,
+                "client_phone": phone,
+                "item_name": (it.name if it else None),
+                "total": float(o.total_amount or 0.0) if o.total_amount is not None else None,
+                "date": (o.shipment_date or o.data_date),
+                "convo_id": convo_id,
+                "msg_preview": msg_preview,
+            })
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        "ig_link_suggest.html",
+        {"request": request, "rows": suggestions, "start": start_d, "end": end_d},
+    )
+
+
+@router.post("/link-suggest/apply")
+async def link_suggest_apply(request: Request):
+    """Apply linking selections from the UI."""
+    form = await request.form()
+    # Expect arrays: sel[] (order_id strings), and conv[order_id]=convo_id
+    selected = form.getlist("sel[]") if hasattr(form, "getlist") else []
+    # Build conv map
+    conv_map: dict[int, str] = {}
+    try:
+        for k, v in form.multi_items():  # type: ignore[attr-defined]
+            if str(k).startswith("conv[") and str(k).endswith("]"):
+                try:
+                    oid = int(str(k)[5:-1])
+                    conv_map[oid] = str(v)
+                except Exception:
+                    continue
+    except Exception:
+        # fallback: scan all keys
+        for k in form.keys():  # type: ignore
+            if str(k).startswith("conv[") and str(k).endswith("]"):
+                try:
+                    val = form.get(k)  # type: ignore
+                    oid = int(str(k)[5:-1])
+                    conv_map[oid] = str(val or "")
+                except Exception:
+                    continue
+    updated = 0
+    with get_session() as session:
+        from ..models import Order
+        for s in selected:
+            try:
+                oid = int(s)
+            except Exception:
+                continue
+            cv = conv_map.get(oid)
+            if not cv:
+                continue
+            o = session.exec(select(Order).where(Order.id == oid)).first()
+            if not o:
+                continue
+            if not o.ig_conversation_id:
+                o.ig_conversation_id = str(cv)
+                session.add(o)
+            try:
+                session.exec(text("UPDATE conversations SET linked_order_id=:oid WHERE convo_id=:cid").params(oid=int(oid), cid=str(cv)))
+            except Exception:
+                pass
+            updated += 1
+    return {"status": "ok", "linked": updated}
 
 
 @router.get("/unlinked")

@@ -1,0 +1,77 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Konuşma Bağlama Önerileri</title>
+		<style>
+			body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+			h1 { margin-bottom: 12px; }
+			.toolbar { display:flex; gap:8px; align-items:center; margin-bottom: 12px; }
+			input[type="date"] { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; }
+			button { padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; background: #f8fafc; }
+			table { width: 100%; border-collapse: collapse; }
+			th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; vertical-align: top; }
+			th { background: #fafafa; position: sticky; top: 0; }
+			.split { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+			.card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; background:#fafafa; }
+			.small { color:#6b7280; font-size:12px; }
+			.link { color:#1d4ed8; text-decoration:none; }
+			.row { border:1px solid #eef2ff; border-radius:8px; padding:10px; margin:8px 0; background:#fff; }
+		</style>
+	</head>
+	<body>
+		{% include "_nav.html" %}
+		<h1>Konuşma Bağlama Önerileri</h1>
+		<form method="get" action="/ig/ai/link-suggest" class="toolbar">
+			<label>Tarih:</label>
+			<input type="date" name="start" value="{{ start }}" />
+			<span>—</span>
+			<input type="date" name="end" value="{{ end }}" />
+			<button type="submit">Filtrele</button>
+			<a class="link" href="/ig/ai/link-suggest" style="margin-left:8px;">Son 7 Gün</a>
+		</form>
+
+		<form id="applyForm" method="post" action="/ig/ai/link-suggest/apply">
+			{% for r in rows %}
+			<div class="row">
+				<div class="split">
+					<div class="card">
+						<div><strong>Sipariş #{{ r.order_id }}</strong></div>
+						<div class="small">Tarih: {{ r.date }}</div>
+						<div class="small">Toplam: {{ r.total if r.total is not none else '-' }}</div>
+						<div style="margin-top:8px;">
+							<div><strong>{{ r.client_name }}</strong></div>
+							<div class="small">{{ r.client_phone or '' }}</div>
+						</div>
+						<div style="margin-top:8px;">
+							<div class="small">Ürün/Varyant:</div>
+							<div>{{ r.item_name or '-' }}</div>
+						</div>
+					</div>
+					<div class="card">
+						{% if r.convo_id %}
+							<div style="display:flex;align-items:center;gap:12px;">
+								<label><input type="checkbox" name="sel[]" value="{{ r.order_id }}" /> Bağla</label>
+								<a class="link" href="/ig/inbox/{{ r.convo_id }}" target="_blank">{{ r.convo_id }}</a>
+							</div>
+							<input type="hidden" name="conv[{{ r.order_id }}]" value="{{ r.convo_id }}" />
+							<div style="margin-top:8px;">
+								<div class="small">Mesaj:</div>
+								<div class="small" style="max-width:520px; white-space:pre-wrap;">{{ r.msg_preview or '—' }}</div>
+							</div>
+						{% else %}
+							<div class="small">Öneri bulunamadı (telefon yok ya da eşleşme yok)</div>
+						{% endif %}
+					</div>
+				</div>
+			</div>
+			{% endfor %}
+
+			<div style="margin-top:12px;">
+				<button type="submit">Seçilenleri Bağla</button>
+			</div>
+		</form>
+	</body>
+	</html>
+
+
