@@ -7,7 +7,7 @@ from sqlalchemy import or_, and_, text
 import os
 
 from ..db import get_session
-from ..models import Order, Payment, Item, Client, ImportRun, StockMovement, OrderItem
+from ..models import Order, Payment, Item, Client, ImportRun, StockMovement, OrderItem, Cost
 from ..services.shipping import compute_shipping_fee
 from ..services.inventory import get_stock_map
 from ..services.cache import cached_json
@@ -112,6 +112,18 @@ def daily_report(
 					# fallback to single-item orders if present
 					acc = float(item_map[o.item_id].cost or 0.0) * int(o.quantity or 0)
 				total_cost += acc
+
+		# Add overhead/operational costs from Cost table within the period
+		try:
+			extra_costs_row = session.exec(
+				text("SELECT SUM(COALESCE(amount,0)) FROM cost WHERE date IS NOT NULL AND date >= :s AND date <= :e").bindparams(
+					s=start_date, e=end_date
+				)
+			).first()
+			period_costs = float((extra_costs_row or [0])[0] or 0.0)
+		except Exception:
+			period_costs = 0.0
+		total_cost += period_costs
 
 		gross_profit = total_sales - total_cost
 		gross_margin = (gross_profit / total_sales) if total_sales > 0 else 0.0
