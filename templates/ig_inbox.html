@@ -27,7 +27,7 @@
             {% if labels.get(m.conversation_id) %}
               <a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ labels.get(m.conversation_id)[1:] }}">profil ↗</a>
             {% endif %}
-            <a class="meta-link" href="/ig/inbox/{{ m.conversation_id }}/debug" title="AI Debug">AI Debug</a>
+            <a class="meta-link" href="/ig/inbox/{{ m.conversation_id }}/debug" title="AI Hata Ayıklama">AI Hata Ayıklama</a>
             {% if ad_map.get(m.conversation_id) %}
               {% set ad = ad_map.get(m.conversation_id) %}
               {% if ad.link %}
