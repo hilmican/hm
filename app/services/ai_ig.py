@@ -159,7 +159,7 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
     if include_meta:
         out["meta"] = {
             "ai_model": client.model,
-            "system_prompt": IG_PURCHASE_SYSTEM_PROMPT,
+            "system_prompt": get_ig_purchase_prompt(),
             "user_prompt": user_prompt,
             "raw_response": raw_response,
         }
