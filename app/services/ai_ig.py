@@ -459,7 +459,14 @@ def process_run(
             pass
         # Enforce minimum contact info for purchase: at least one of (name, phone, address)
         has_min_contact = bool((buyer_name_clean and buyer_name_clean.strip()) or (phone_last10 and len(phone_last10) >= 7) or (address_clean and address_clean.strip()))
-        if bool(data.get("purchase_detected")) and has_min_contact:
+        effective_purchase = bool(data.get("purchase_detected")) and has_min_contact
+        # Reflect enforcement into debug/result payload so single-debug shows the final decision
+        if not effective_purchase:
+            try:
+                data["purchase_detected"] = False
+            except Exception:
+                pass
+        if effective_purchase:
             purchases += 1
             try:
                 with get_session() as session:
