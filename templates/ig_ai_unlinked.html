@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Bağlanmamış Satın Alımlar</title>
+		<style>
+			body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+			h1 { margin-bottom: 12px; }
+			.toolbar { display:flex; gap:8px; align-items:center; margin-bottom: 12px; }
+			input[type="text"] { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; min-width: 300px; }
+			button { padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; background: #f8fafc; }
+			table { width:100%; border-collapse: collapse; }
+			th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; vertical-align: top; }
+			th { background: #fafafa; position: sticky; top: 0; }
+			.small { color:#6b7280; font-size:12px; }
+			.flex { display:flex; gap:8px; align-items:center; }
+			.bind-box { display:none; background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:8px; margin-top:6px; }
+			.result { border:1px solid #e5e7eb; border-radius:6px; padding:6px 8px; margin:4px 0; display:flex; justify-content:space-between; gap:12px; }
+			.badge { display:inline-block; padding:2px 6px; border-radius:6px; background:#eef2ff; color:#1d4ed8; font-size:12px; }
+			.link { color:#1d4ed8; text-decoration:none; }
+		</style>
+	</head>
+	<body>
+		{% include "_nav.html" %}
+		<h1>Bağlanmamış Satın Alımlar</h1>
+		<div class="toolbar">
+			<form method="get" action="/ig/ai/unlinked" class="flex">
+				<input type="text" name="q" placeholder="Ad, soyad veya telefon" value="{{ q or '' }}" />
+				<button type="submit">Ara</button>
+				<a class="link" href="/ig/ai/unlinked" style="margin-left:8px;">Temizle</a>
+			</form>
+		</div>
+
+		<table>
+			<thead>
+				<tr>
+					<th>Konuşma</th>
+					<th>Kişi</th>
+					<th>AI Çıktısı</th>
+					<th>Bağla</th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for r in rows %}
+				<tr>
+					<td>
+						<div><a class="link" href="/ig/inbox/{{ r.convo_id }}" target="_blank">{{ r.convo_id }}</a></div>
+						<div class="small">{{ r.last_message_at }}</div>
+						<div class="small">Durum: <span class="badge">{{ r.ai_status or 'unknown' }}</span></div>
+					</td>
+					<td>
+						<div><strong>{{ r.contact_name or '-' }}</strong></div>
+						<div class="small">{{ r.contact_phone or '' }}</div>
+						<div class="small" style="max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ r.contact_address or '' }}</div>
+					</td>
+					<td>
+						{% set ai = r.ai_json %}
+						{% if ai %}
+							<pre class="small" style="max-width:520px; white-space:pre-wrap;">{{ ai }}</pre>
+						{% else %}
+							<div class="small">—</div>
+						{% endif %}
+					</td>
+					<td>
+						<div class="flex">
+							<input type="text" placeholder="Ad/Telefon ara" id="q-{{ r.convo_id }}" />
+							<button onclick="searchOrders('{{ r.convo_id }}')">Ara</button>
+						</div>
+						<div class="bind-box" id="box-{{ r.convo_id }}">
+							<div class="small">Sonuçlar:</div>
+							<div id="res-{{ r.convo_id }}"></div>
+						</div>
+					</td>
+				</tr>
+				{% endfor %}
+			</tbody>
+		</table>
+
+		<script>
+		async function searchOrders(convoId){
+			const q = document.getElementById('q-'+convoId).value.trim();
+			if (!q) { alert('Arama terimi girin'); return; }
+			try {
+				const res = await fetch(`/ig/ai/unlinked/search?q=${encodeURIComponent(q)}`);
+				if (!res.ok) { throw new Error('Arama hatası'); }
+				const json = await res.json();
+				const box = document.getElementById('box-'+convoId);
+				const cont = document.getElementById('res-'+convoId);
+				box.style.display = 'block';
+				cont.innerHTML = '';
+				(json.results || []).forEach(r=>{
+					const div = document.createElement('div');
+					div.className = 'result';
+					div.innerHTML = `
+						<div>
+							<div><strong>#${r.order_id}</strong> — ${r.client_name || ''} (${r.client_phone || ''})</div>
+							<div class="small">Tarih: ${r.shipment_date || r.data_date || '-'} — Toplam: ${r.total ?? '-'}</div>
+							<div class="small">Kaynak: ${r.source || '-'}</div>
+						</div>
+						<div>
+							<button onclick="bindConv('${convoId}', ${r.order_id})">Bağla</button>
+						</div>
+					`;
+					cont.appendChild(div);
+				});
+				if (!(json.results || []).length){
+					cont.innerHTML = '<div class=\"small\">Sonuç yok</div>';
+				}
+			} catch(e){
+				alert('Arama başarısız: '+e.message);
+			}
+		}
+		async function bindConv(convoId, orderId){
+			if (!confirm(`#${orderId} ile bağlansın mı?`)) return;
+			try {
+				const res = await fetch('/ig/ai/unlinked/bind', {
+					method:'POST',
+					headers:{'Content-Type':'application/json'},
+					body: JSON.stringify({ conversation_id: convoId, order_id: orderId })
+				});
+				if (!res.ok){
+					const t = await res.text();
+					throw new Error(t);
+				}
+				alert('Bağlandı');
+				location.href = `/ig/inbox/${encodeURIComponent(convoId)}`;
+			} catch(e){
+				alert('Bağlama hatası: '+e.message);
+			}
+		}
+		</script>
+	</body>
+</html>
+
+

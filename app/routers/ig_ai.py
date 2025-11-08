@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Request, HTTPException
 from sqlalchemy import text
+from sqlmodel import select
 
 from ..db import get_session
 from ..services.queue import enqueue, delete_job
@@ -269,5 +270,105 @@ def run_logs(run_id: int, limit: int = 200):
     n = int(max(1, min(limit, 2000)))
     logs = get_ai_run_logs(int(run_id), n)
     return {"logs": logs}
+
+
+@router.get("/unlinked")
+def unlinked_purchases(request: Request, q: str | None = None, limit: int = 200):
+    """List conversations where a purchase was detected but not linked to an order."""
+    n = int(max(1, min(limit or 200, 1000)))
+    where = ["(ai_status = 'ambiguous' OR (ai_status IS NULL AND linked_order_id IS NULL))", "linked_order_id IS NULL"]
+    params: dict[str, object] = {}
+    if q:
+        # Search in contact_name, contact_phone or ai_json
+        where.append("(LOWER(COALESCE(contact_name,'')) LIKE :qq OR COALESCE(contact_phone,'') LIKE :qp OR LOWER(COALESCE(ai_json,'')) LIKE :qa)")
+        qs = f"%{q.lower()}%"
+        params.update({"qq": qs, "qa": qs, "qp": f"%{q}%"} )
+    sql = (
+        "SELECT convo_id, contact_name, contact_phone, contact_address, ai_status, ai_json, linked_order_id, last_message_at "
+        "FROM conversations WHERE " + " AND ".join(where) + " ORDER BY last_message_at DESC, convo_id DESC"
+    )
+    with get_session() as session:
+        rows = session.exec(text(sql).params(**params)).all()
+        items = []
+        for r in rows[:n]:
+            try:
+                items.append({
+                    "convo_id": getattr(r, "convo_id", r[0]),
+                    "contact_name": getattr(r, "contact_name", r[1]),
+                    "contact_phone": getattr(r, "contact_phone", r[2]),
+                    "contact_address": getattr(r, "contact_address", r[3]),
+                    "ai_status": getattr(r, "ai_status", r[4]),
+                    "ai_json": getattr(r, "ai_json", r[5]),
+                    "linked_order_id": getattr(r, "linked_order_id", r[6]),
+                    "last_message_at": getattr(r, "last_message_at", r[7]) if len(r) > 7 else None,
+                })
+            except Exception:
+                continue
+    templates = request.app.state.templates
+    return templates.TemplateResponse("ig_ai_unlinked.html", {"request": request, "rows": items, "q": q or ""})
+
+
+@router.get("/unlinked/search")
+def search_orders(q: str, limit: int = 20):
+    """Search orders by client name or phone digits."""
+    if not q or not isinstance(q, str):
+        raise HTTPException(status_code=400, detail="q required")
+    q = q.strip()
+    from ..models import Client, Order
+    with get_session() as session:
+        # Normalize phone digits
+        phone_digits = "".join([c for c in q if c.isdigit()])
+        # Build base query
+        qry = select(Order, Client).where(Order.client_id == Client.id)
+        if phone_digits:
+            qry = qry.where((Client.phone.is_not(None)) & (Client.phone.contains(phone_digits)))
+        else:
+            from sqlalchemy import func as _func
+            qry = qry.where(_func.lower(Client.name).like(f"%{q.lower()}%"))
+        rows = session.exec(qry.order_by(Order.id.desc()).limit(max(1, min(limit, 50)))).all()
+        out = []
+        for o, c in rows:
+            out.append({
+                "order_id": int(o.id or 0),
+                "client_id": int(c.id or 0),
+                "client_name": c.name,
+                "client_phone": c.phone,
+                "total": float(o.total_amount or 0.0) if o.total_amount is not None else None,
+                "shipment_date": o.shipment_date.isoformat() if o.shipment_date else None,
+                "data_date": o.data_date.isoformat() if o.data_date else None,
+                "source": o.source,
+            })
+        return {"results": out}
+
+
+@router.post("/unlinked/bind")
+def bind_conversation(body: dict):
+    """Bind a conversation to an order: sets conversations.linked_order_id and order.ig_conversation_id if empty."""
+    convo_id = (body or {}).get("conversation_id")
+    order_id = (body or {}).get("order_id")
+    if not convo_id or not order_id:
+        raise HTTPException(status_code=400, detail="conversation_id and order_id required")
+    try:
+        oid = int(order_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="order_id must be integer")
+    with get_session() as session:
+        # Ensure order exists
+        from ..models import Order
+        row = session.exec(select(Order).where(Order.id == oid)).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Order not found")
+        # Update conversations and order
+        try:
+            session.exec(text("UPDATE conversations SET linked_order_id=:oid WHERE convo_id=:cid").params(oid=oid, cid=str(convo_id)))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"link_failed: {e}")
+        try:
+            if not row.ig_conversation_id:
+                row.ig_conversation_id = str(convo_id)
+                session.add(row)
+        except Exception:
+            pass
+    return {"status": "ok"}
 
 
