@@ -170,11 +170,14 @@ def list_orders_table(
         shipping_map: dict[int, float] = {}
         for o in rows:
             oid = o.id or 0
+            # Compute full shipping including 20% tax for display
+            pre_tax = None
             if o.shipping_fee is not None:
-                shipping_map[oid] = float(o.shipping_fee or 0.0)
+                pre_tax = float(o.shipping_fee or 0.0)
             else:
                 amt = float(o.total_amount or 0.0)
-                shipping_map[oid] = compute_shipping_fee(amt)
+                pre_tax = compute_shipping_fee(amt)
+            shipping_map[oid] = round(float(pre_tax or 0.0) * 1.20, 2)
 
         # Use stored total_cost; if missing, compute via batch-loaded OrderItems and Items
         from sqlmodel import select as _select

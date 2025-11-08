@@ -153,7 +153,10 @@ def daily_report(
 		# Shipping fee for KPIs: prefer stored per-order shipping fee; fallback to computed by toplam
 		order_shipping_map = {}
 		for o in orders:
-			order_shipping_map[o.id or 0] = float((o.shipping_fee if o.shipping_fee is not None else compute_shipping_fee(float(o.total_amount or 0.0))) or 0.0)
+			# Compute pre-tax fee, then add 20% tax
+			pre_tax = float((o.shipping_fee if o.shipping_fee is not None else compute_shipping_fee(float(o.total_amount or 0.0))) or 0.0)
+			with_tax = round(pre_tax * 1.20, 2)
+			order_shipping_map[o.id or 0] = with_tax
 		fee_kar = sum(order_shipping_map.get(o.id or 0, 0.0) for o in orders)
 		fee_iad = float(pay_sums.get("iad", 0.0))
 		fee_eok = float(pay_sums.get("eok", 0.0))
