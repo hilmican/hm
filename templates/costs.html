@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Maliyetler</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      h1 { margin-bottom: 12px; }
+      .toolbar { display:flex; gap:12px; align-items:flex-end; margin:14px 0; flex-wrap:wrap; }
+      .btn { background:#2563eb; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer }
+      input[type=date], input[type=text], input[type=number], select { padding:6px 8px; border:1px solid #ddd; border-radius:6px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+      th { background: #fafafa; position: sticky; top: 0; }
+      .grid { display:grid; grid-template-columns: 1fr; gap:18px; }
+      @media (min-width: 1100px) { .grid { grid-template-columns: 1fr 1fr; } }
+      .card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background:#fff; }
+      .card h2 { margin: 0; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
+      .card .body { padding: 12px 16px; }
+      .row { display:flex; gap:12px; flex-wrap:wrap; }
+      .field { display:block; }
+      .field label { display:block; font-size:12px; color:#374151; margin-bottom:4px; }
+      .muted { color:#6b7280; font-size:12px; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>Maliyetler</h1>
+
+    <form class="toolbar" method="get" action="/costs">
+      <div>
+        <label style="display:block;font-size:12px;color:#374151">Başlangıç</label>
+        <input type="date" name="start" value="{{ start }}" />
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:#374151">Bitiş</label>
+        <input type="date" name="end" value="{{ end }}" />
+      </div>
+      <div>
+        <button class="btn" type="submit">Uygula</button>
+      </div>
+    </form>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Yeni Maliyet Ekle</h2>
+        <div class="body">
+          <form method="post" action="/costs/add" class="row">
+            <div class="field">
+              <label>Tür</label>
+              <select name="type_id" required>
+                {% for t in types %}
+                  <option value="{{ t.id }}">{{ t.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label>Tutar</label>
+              <input type="number" step="0.01" name="amount" required />
+            </div>
+            <div class="field">
+              <label>Tarih</label>
+              <input type="date" name="date" value="{{ today }}" />
+            </div>
+            <div class="field" style="min-width:280px; flex:1">
+              <label>Detay</label>
+              <input type="text" name="details" placeholder="örn. Kampanya X reklamları" />
+            </div>
+            {% if start %}<input type="hidden" name="start" value="{{ start }}"/>{% endif %}
+            {% if end %}<input type="hidden" name="end" value="{{ end }}"/>{% endif %}
+            <div style="align-self:flex-end">
+              <button class="btn" type="submit">Kaydet</button>
+            </div>
+          </form>
+          <div class="muted" style="margin-top:8px;">Tarih boş bırakılırsa bugün kabul edilir.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Maliyet Türü Ekle</h2>
+        <div class="body">
+          <form method="post" action="/costs/add-type" class="row">
+            <div class="field">
+              <label>Tür Adı</label>
+              <input type="text" name="name" placeholder="örn. Reklam, Kira, Diğer" required />
+            </div>
+            {% if start %}<input type="hidden" name="start" value="{{ start }}"/>{% endif %}
+            {% if end %}<input type="hidden" name="end" value="{{ end }}"/>{% endif %}
+            <div style="align-self:flex-end">
+              <button class="btn" type="submit">Ekle</button>
+            </div>
+          </form>
+          <div class="muted" style="margin-top:8px;">Liste seçeneğine anında eklenir.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h2>Geçmiş Maliyetler</h2>
+      <div class="body" style="padding:0">
+        <table>
+          <thead>
+            <tr>
+              <th>Tarih</th>
+              <th>Tür</th>
+              <th>Tutar</th>
+              <th>Detay</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td>{{ r.date }}</td>
+              <td>{{ type_map.get(r.type_id) or r.type_id }}</td>
+              <td>{{ '%.2f'|format(r.amount or 0) }}</td>
+              <td>{{ r.details or '' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>
+
+

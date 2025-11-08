@@ -277,3 +277,18 @@ class Job(SQLModel, table=True):
     payload: Optional[str] = None
 
     __table_args__ = (UniqueConstraint("kind", "key", name="uq_jobs_kind_key"),)
+
+
+class CostType(SQLModel, table=True):
+	id: Optional[int] = Field(default=None, primary_key=True)
+	name: str = Field(index=True, unique=True, description="Type name, e.g., Ads, Rent, Shipping supplies")
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class Cost(SQLModel, table=True):
+	id: Optional[int] = Field(default=None, primary_key=True)
+	type_id: int = Field(foreign_key="costtype.id", index=True)
+	amount: float
+	date: Optional[dt.date] = Field(default=None, index=True)
+	details: Optional[str] = Field(default=None, sa_column=Column(Text))
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
