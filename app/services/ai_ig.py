@@ -213,8 +213,9 @@ def process_run(
                     dt_end = date_to + dt.timedelta(days=1)
                     params_clear["dte"] = f"{dt_end.isoformat()} 00:00:00"
                     where_clear.append("last_message_at < :dte")
-                set_cols_full = "ai_processed_at=NULL, ai_status=NULL, ai_run_id=NULL, linked_order_id=NULL"
-                set_cols_nostatus = "ai_processed_at=NULL, ai_run_id=NULL, linked_order_id=NULL"
+                # IMPORTANT: do NOT clear linked_order_id on reprocess; preserve manual links
+                set_cols_full = "ai_processed_at=NULL, ai_status=NULL, ai_run_id=NULL"
+                set_cols_nostatus = "ai_processed_at=NULL, ai_run_id=NULL"
                 sql_clear_full = ("UPDATE conversations SET " + set_cols_full + " WHERE " + " AND ".join(where_clear))
                 sql_clear_nostatus = ("UPDATE conversations SET " + set_cols_nostatus + " WHERE " + " AND ".join(where_clear))
                 rc = None
