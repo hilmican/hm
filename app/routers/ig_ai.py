@@ -225,8 +225,8 @@ def preview_process(body: dict):
         rowc = session.exec(text(sql_conv).params(**msg_params)).first()
         conv_count = int((getattr(rowc, "c", None) if rowc is not None else 0) or (rowc[0] if rowc else 0) or 0)
 
-        # Messages count by timestamp window only (robust even if conversation links are missing)
-        msg_where = ["(m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)"]
+        # Messages count aligned with eligibility: only messages newer than ai_process_time when not reprocessing
+        msg_where = ["m.conversation_id IS NOT NULL", "COALESCE(m.timestamp_ms,0) <= :cutoff_ms"]
         msg_params = {"cutoff_ms": int(cutoff_ms)}
         if date_from and date_to and date_from <= date_to:
             ms_from = int(dt.datetime.combine(date_from, dt.time.min).timestamp() * 1000)
@@ -243,8 +243,10 @@ def preview_process(body: dict):
             msg_where.append("(m.timestamp_ms IS NULL OR m.timestamp_ms < :ms_to)")
             msg_params["ms_to"] = int(ms_to)
         sql_msg = (
-            "SELECT COUNT(1) AS mc, SUM(CASE WHEN m.timestamp_ms IS NULL THEN 1 ELSE 0 END) AS mt0 FROM message m WHERE "
+            "SELECT COUNT(1) AS mc, SUM(CASE WHEN m.timestamp_ms IS NULL THEN 1 ELSE 0 END) AS mt0 "
+            "FROM message m LEFT JOIN ai_conversations ac ON ac.convo_id = m.conversation_id WHERE "
             + " AND ".join(msg_where)
+            + (f" AND (ac.ai_process_time IS NULL OR COALESCE(m.timestamp_ms,0) > {ts_expr})" if not reprocess else "")
         )
         rowm = session.exec(text(sql_msg).params(**msg_params)).first()
         msg_count = int((getattr(rowm, "mc", None) if rowm is not None else 0) or (rowm[0] if rowm else 0) or 0)
