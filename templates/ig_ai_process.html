@@ -176,11 +176,12 @@
           const tr = document.createElement('tr');
           const cancelCell = rr.cancelled_at ? rr.cancelled_at : '-';
           const btn = (!rr.completed_at && !rr.cancelled_at) ? `<button data-id="${rr.id}" class="btn-cancel" title="İptal">İptal</button>` : '';
+          const resultsLink = `<a href="/ig/ai/process/run/${rr.id}/results" target="_blank">Detaylar</a>`;
           tr.innerHTML = `<td>${rr.id}</td><td>${rr.started_at||''}</td><td>${rr.completed_at||'-'}</td><td>${cancelCell}</td>`+
                          `<td>${rr.date_from||'-'} → ${rr.date_to||'-'}</td><td>${rr.min_age_minutes||''}</td>`+
                          `<td>${rr.conversations_considered||0}</td><td>${rr.conversations_processed||0}</td>`+
                          `<td>${rr.orders_linked||0}</td><td>${rr.purchases_detected||0}</td>`+
-                         `<td>${rr.purchases_unlinked||0}</td><td>${btn}</td>`;
+                         `<td>${rr.purchases_unlinked||0}</td><td>${btn} ${resultsLink}</td>`;
           tb.appendChild(tr);
         }
         // attach cancel handlers

@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AI Çalıştırma Sonuçları #{{ run_id }}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      h1 { margin-bottom: 12px; }
+      table { width:100%; border-collapse: collapse; }
+      th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; vertical-align: top; }
+      th { background: #fafafa; position: sticky; top: 0; }
+      .muted { color:#6b7280; font-size:12px; }
+      .pill { display:inline-block; padding:2px 6px; border-radius: 12px; border: 1px solid #d1d5db; font-size:12px; }
+      .ok { background:#ecfdf5; color:#065f46; border-color:#a7f3d0; }
+      .amb { background:#fff7ed; color:#9a3412; border-color:#fed7aa; }
+      .np { background:#f1f5f9; color:#0f172a; border-color:#cbd5e1; }
+      a { color:#2563eb; text-decoration:none; }
+      pre { white-space: pre-wrap; max-width:620px; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>AI Çalıştırma Sonuçları <span class="muted">#{{ run_id }}</span></h1>
+    <div class="muted" style="margin:8px 0 16px 0;">
+      <a href="/ig/ai/process">← AI İşleme</a>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Konuşma</th>
+          <th>Durum</th>
+          <th>Kişi</th>
+          <th>AI Çıktısı (özet)</th>
+          <th>Bağlantı</th>
+          <th>Detay</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        {% set st = (r.status or 'unknown') %}
+        <tr>
+          <td>
+            <div><a href="/ig/inbox/{{ r.convo_id }}" target="_blank">{{ r.convo_id }}</a></div>
+            <div class="muted">Son Mesaj: {% if r.last_ts %}{{ r.last_ts }}{% else %}-{% endif %}</div>
+          </td>
+          <td>
+            <span class="pill {% if st=='ok' %}ok{% elif st=='ambiguous' %}amb{% else %}np{% endif %}">{{ st }}</span>
+          </td>
+          <td>
+            <div>{{ r.contact_name or '-' }}</div>
+            <div class="muted">{{ r.contact_phone or '' }}</div>
+          </td>
+          <td>
+            {% set ai = r.ai_json %}
+            {% if ai %}
+              <pre class="muted">{{ (ai or '')[:320] }}{% if (ai or '')|length > 320 %}…{% endif %}</pre>
+            {% else %}
+              <div class="muted">—</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if r.linked_order_id %}
+              <a href="/orders/{{ r.linked_order_id }}/edit" target="_blank">#{{ r.linked_order_id }}</a>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            <a href="/ig/ai/process/run/{{ run_id }}/result/{{ r.convo_id }}">Detay</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </body>
+</html>
+
+

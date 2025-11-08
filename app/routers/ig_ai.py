@@ -291,6 +291,118 @@ def run_logs(run_id: int, limit: int = 200):
     return {"logs": logs}
 
 
+@router.get("/process/run/{run_id}/results")
+def run_results(request: Request, run_id: int, limit: int = 200):
+    """List per-conversation results for a given AI run."""
+    n = int(max(1, min(limit or 200, 1000)))
+    sql = (
+        "SELECT r.convo_id, r.status, r.linked_order_id, r.ai_json, r.created_at, "
+        "       MAX(COALESCE(m.timestamp_ms,0)) AS last_ts, c.contact_name, c.contact_phone "
+        "FROM ig_ai_result r "
+        "LEFT JOIN conversations c ON c.convo_id = r.convo_id "
+        "LEFT JOIN message m ON m.conversation_id = r.convo_id "
+        "WHERE r.run_id = :rid "
+        "GROUP BY r.convo_id, r.status, r.linked_order_id, r.ai_json, r.created_at, c.contact_name, c.contact_phone "
+        "ORDER BY last_ts DESC, r.convo_id DESC "
+        "LIMIT :lim"
+    )
+    with get_session() as session:
+        rows = session.exec(text(sql).params(rid=int(run_id), lim=int(n))).all()
+        items: list[dict] = []
+        for r in rows:
+            try:
+                items.append({
+                    "convo_id": getattr(r, "convo_id", r[0]),
+                    "status": getattr(r, "status", r[1]),
+                    "linked_order_id": getattr(r, "linked_order_id", r[2]),
+                    "ai_json": getattr(r, "ai_json", r[3]),
+                    "created_at": getattr(r, "created_at", r[4]),
+                    "last_ts": getattr(r, "last_ts", r[5]),
+                    "contact_name": getattr(r, "contact_name", r[6]) if len(r) > 6 else None,
+                    "contact_phone": getattr(r, "contact_phone", r[7]) if len(r) > 7 else None,
+                })
+            except Exception:
+                continue
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        "ig_ai_run_results.html",
+        {"request": request, "run_id": int(run_id), "rows": items},
+    )
+
+
+@router.get("/process/run/{run_id}/result/{convo_id}")
+def run_result_detail(request: Request, run_id: int, convo_id: str, limit: int = 120):
+    """Detail view for a conversation result in a given run, including recent messages and bind UI."""
+    n = int(max(20, min(limit or 120, 500)))
+    with get_session() as session:
+        # latest result for run+convo
+        row = session.exec(
+            text(
+                """
+                SELECT id, status, ai_json, linked_order_id, created_at
+                FROM ig_ai_result
+                WHERE run_id=:rid AND convo_id=:cid
+                ORDER BY id DESC LIMIT 1
+                """
+            ).params(rid=int(run_id), cid=str(convo_id))
+        ).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Result not found for this run/conversation")
+        res = {
+            "id": getattr(row, "id", row[0]),
+            "status": getattr(row, "status", row[1]),
+            "ai_json": getattr(row, "ai_json", row[2]),
+            "linked_order_id": getattr(row, "linked_order_id", row[3]),
+            "created_at": getattr(row, "created_at", row[4]) if len(row) > 4 else None,
+        }
+        # messages (chronological)
+        msgs = session.exec(
+            text(
+                """
+                SELECT timestamp_ms, direction, text
+                FROM message
+                WHERE conversation_id=:cid
+                ORDER BY COALESCE(timestamp_ms,0) ASC, rowid ASC
+                LIMIT :lim
+                """
+            ).params(cid=str(convo_id), lim=int(n))
+        ).all()
+        messages: list[dict] = []
+        for m in msgs:
+            try:
+                messages.append({
+                    "timestamp_ms": getattr(m, "timestamp_ms", m[0]),
+                    "direction": getattr(m, "direction", m[1]),
+                    "text": getattr(m, "text", m[2]),
+                })
+            except Exception:
+                continue
+        # contact info
+        contact = {}
+        try:
+            rc = session.exec(text("SELECT contact_name, contact_phone, contact_address FROM conversations WHERE convo_id=:cid").params(cid=str(convo_id))).first()
+            if rc:
+                contact = {
+                    "name": getattr(rc, "contact_name", rc[0]) or None,
+                    "phone": getattr(rc, "contact_phone", rc[1]) or None,
+                    "address": getattr(rc, "contact_address", rc[2]) or None,
+                }
+        except Exception:
+            contact = {}
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        "ig_ai_run_result_detail.html",
+        {
+            "request": request,
+            "run_id": int(run_id),
+            "convo_id": str(convo_id),
+            "result": res,
+            "messages": messages,
+            "contact": contact,
+        },
+    )
+
+
 @router.get("/link-suggest")
 def link_suggest_page(request: Request, start: str | None = None, end: str | None = None, limit: int = 200):
     """Suggest linking orders to IG conversations by matching client phone in conversations/messages.

@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AI Çalıştırma Sonucu Detayı #{{ run_id }} · {{ convo_id }}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      h1 { margin-bottom: 12px; }
+      .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+      .card { border:1px solid #e5e7eb; border-radius:10px; padding:14px; background:#fff; }
+      .muted { color:#6b7280; font-size:12px; }
+      .flex { display:flex; gap:8px; align-items:center; }
+      pre { white-space: pre-wrap; }
+      a { color:#2563eb; text-decoration:none; }
+      table { width:100%; border-collapse: collapse; }
+      th, td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; text-align:left; font-size: 14px; vertical-align: top; }
+      th { background: #fafafa; position: sticky; top: 0; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>Sonuç Detayı <span class="muted">#{{ run_id }}</span></h1>
+    <div class="muted" style="margin:8px 0 16px 0;">
+      <a href="/ig/ai/process/run/{{ run_id }}/results">← Çalıştırma Sonuçları</a> ·
+      <a href="/ig/inbox/{{ convo_id }}" target="_blank">{{ convo_id }}</a>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>AI Çıktısı</h3>
+        <div class="muted">Durum: {{ result.status or 'unknown' }}{% if result.linked_order_id %} · Bağlı Sipariş: <a href="/orders/{{ result.linked_order_id }}/edit" target="_blank">#{{ result.linked_order_id }}</a>{% endif %}</div>
+        {% set ai = result.ai_json %}
+        {% if ai %}
+          <pre>{{ ai }}</pre>
+        {% else %}
+          <div class="muted">—</div>
+        {% endif %}
+        {% if not result.linked_order_id %}
+        <div style="margin-top:8px">
+          <div class="muted">Bağla:</div>
+          <div class="flex">
+            <input type="text" id="bindQ" placeholder="Ad/Telefon ara" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;flex:1" />
+            <button onclick="searchOrders()">Ara</button>
+          </div>
+          <div id="bindBox" class="muted" style="margin-top:6px"></div>
+        </div>
+        {% endif %}
+      </div>
+      <div class="card">
+        <h3>İleti Geçmişi</h3>
+        <table>
+          <thead>
+            <tr><th>Zaman</th><th>Yön</th><th>Metin</th></tr>
+          </thead>
+          <tbody>
+            {% for m in messages %}
+              <tr>
+                <td class="muted">{{ m.timestamp_ms }}</td>
+                <td class="muted">{{ m.direction }}</td>
+                <td>{{ m.text or '' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Kişi</h3>
+      <div><strong>{{ contact.name or '-' }}</strong></div>
+      <div class="muted">{{ contact.phone or '' }}</div>
+      <div class="muted">{{ contact.address or '' }}</div>
+    </div>
+    <script>
+      async function searchOrders(){
+        const q = document.getElementById('bindQ').value.trim();
+        const box = document.getElementById('bindBox');
+        if(!q){ alert('Arama terimi girin'); return; }
+        try{
+          const r = await fetch('/ig/ai/unlinked/search?q=' + encodeURIComponent(q));
+          if(!r.ok){ throw new Error('Arama hatası'); }
+          const js = await r.json();
+          const rows = js.results || [];
+          if(!rows.length){ box.innerHTML = 'Sonuç yok'; return; }
+          const items = rows.map(v => `
+            <div style="display:flex;justify-content:space-between;gap:12px;border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-top:6px">
+              <div>
+                <div><strong>#${v.order_id}</strong> — ${v.client_name || ''} (${v.client_phone || ''})</div>
+                <div class="muted">Tarih: ${v.shipment_date || v.data_date || '-'} — Toplam: ${v.total ?? '-'}</div>
+                <div class="muted">Kaynak: ${v.source || '-'}</div>
+              </div>
+              <div><button onclick="bind(${v.order_id})">Bağla</button></div>
+            </div>
+          `);
+          box.innerHTML = items.join('');
+        }catch(e){
+          box.innerHTML = 'Hata: ' + e.message;
+        }
+      }
+      async function bind(orderId){
+        if(!confirm('#'+orderId+' ile bağlansın mı?')) return;
+        try{
+          const r = await fetch('/ig/ai/unlinked/bind', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ conversation_id: '{{ convo_id }}', order_id: orderId })
+          });
+          if(!r.ok){
+            const t = await r.text();
+            alert('Bağlama hatası: ' + t);
+            return;
+          }
+          alert('Bağlandı');
+          location.reload();
+        }catch(e){
+          alert('Bağlama hatası: ' + e.message);
+        }
+      }
+    </script>
+  </body>
+</html>
+
+
