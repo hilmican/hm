@@ -292,22 +292,63 @@ def run_logs(run_id: int, limit: int = 200):
 
 
 @router.get("/process/run/{run_id}/results")
-def run_results(request: Request, run_id: int, limit: int = 200):
+def run_results(request: Request, run_id: int, limit: int = 200, status: str | None = None, linked: str | None = None, q: str | None = None, start: str | None = None, end: str | None = None):
     """List per-conversation results for a given AI run."""
     n = int(max(1, min(limit or 200, 1000)))
+    # Build filters
+    where = ["r.run_id = :rid"]
+    params: dict[str, object] = {"rid": int(run_id), "lim": int(n)}
+    st = (status or "").strip().lower()
+    if st and st not in ("all", "*"):
+        where.append("r.status = :st")
+        params["st"] = st
+    lk = (linked or "").strip().lower()
+    if lk in ("yes", "true", "1"):
+        where.append("r.linked_order_id IS NOT NULL")
+    elif lk in ("no", "false", "0"):
+        where.append("r.linked_order_id IS NULL")
+    qq = (q or "").strip()
+    if qq:
+        where.append("("
+                     "LOWER(COALESCE(r.convo_id,'')) LIKE :qq OR "
+                     "LOWER(COALESCE(r.ai_json,'')) LIKE :qq OR "
+                     "LOWER(COALESCE(c.contact_name,'')) LIKE :qq OR "
+                     "COALESCE(c.contact_phone,'') LIKE :qp"
+                     ")")
+        params["qq"] = f"%{qq.lower()}%"
+        # for phone, do not lower or strip digits only; a simple contains helps
+        params["qp"] = f"%{qq}%"
+    # Date filter on last_ts using HAVING after aggregation
+    having: list[str] = []
+    def _parse_date(s: str | None):
+        try:
+            return dt.date.fromisoformat(str(s)) if s else None
+        except Exception:
+            return None
+    sd = _parse_date(start)
+    ed = _parse_date(end)
+    if sd:
+        ms_from = int(dt.datetime.combine(sd, dt.time.min).timestamp() * 1000)
+        having.append("last_ts >= :ms_from")
+        params["ms_from"] = int(ms_from)
+    if ed:
+        ms_to = int(dt.datetime.combine(ed + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
+        having.append("last_ts < :ms_to")
+        params["ms_to"] = int(ms_to)
     sql = (
         "SELECT r.convo_id, r.status, r.linked_order_id, r.ai_json, r.created_at, "
         "       MAX(COALESCE(m.timestamp_ms,0)) AS last_ts, c.contact_name, c.contact_phone "
         "FROM ig_ai_result r "
         "LEFT JOIN conversations c ON c.convo_id = r.convo_id "
         "LEFT JOIN message m ON m.conversation_id = r.convo_id "
-        "WHERE r.run_id = :rid "
+        "WHERE " + " AND ".join(where) + " "
         "GROUP BY r.convo_id, r.status, r.linked_order_id, r.ai_json, r.created_at, c.contact_name, c.contact_phone "
-        "ORDER BY last_ts DESC, r.convo_id DESC "
+        + ("HAVING " + " AND ".join(having) + " " if having else "")
+        + "ORDER BY last_ts DESC, r.convo_id DESC "
         "LIMIT :lim"
     )
     with get_session() as session:
-        rows = session.exec(text(sql).params(rid=int(run_id), lim=int(n))).all()
+        rows = session.exec(text(sql).params(**params)).all()
         items: list[dict] = []
         for r in rows:
             try:
@@ -326,7 +367,16 @@ def run_results(request: Request, run_id: int, limit: int = 200):
     templates = request.app.state.templates
     return templates.TemplateResponse(
         "ig_ai_run_results.html",
-        {"request": request, "run_id": int(run_id), "rows": items},
+        {
+            "request": request,
+            "run_id": int(run_id),
+            "rows": items,
+            "status": status or "",
+            "linked": linked or "",
+            "q": q or "",
+            "start": start or "",
+            "end": end or "",
+        },
     )
 
 

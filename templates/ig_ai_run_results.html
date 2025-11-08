@@ -24,6 +24,29 @@
     <div class="muted" style="margin:8px 0 16px 0;">
       <a href="/ig/ai/process">← AI İşleme</a>
     </div>
+    <form method="get" action="/ig/ai/process/run/{{ run_id }}/results" style="display:flex;gap:8px;align-items:center;margin:8px 0 16px 0;">
+      <input type="hidden" name="run_id" value="{{ run_id }}" />
+      <label class="muted">Durum</label>
+      <select name="status" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;">
+        {% set st = (status or '') %}
+        <option value="" {% if not st %}selected{% endif %}>Hepsi</option>
+        <option value="ok" {% if st=='ok' %}selected{% endif %}>ok</option>
+        <option value="ambiguous" {% if st=='ambiguous' %}selected{% endif %}>ambiguous</option>
+        <option value="no_purchase" {% if st=='no_purchase' %}selected{% endif %}>no_purchase</option>
+      </select>
+      <label class="muted">Bağlı</label>
+      <select name="linked" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;">
+        {% set lk = (linked or '') %}
+        <option value="" {% if not lk %}selected{% endif %}>Hepsi</option>
+        <option value="yes" {% if lk=='yes' %}selected{% endif %}>Evet</option>
+        <option value="no" {% if lk=='no' %}selected{% endif %}>Hayır</option>
+      </select>
+      <input type="date" name="start" value="{{ start or '' }}" />
+      <input type="date" name="end" value="{{ end or '' }}" />
+      <input type="text" name="q" value="{{ q or '' }}" placeholder="Convo/Ad/Telefon/AI içinde ara" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;min-width:280px" />
+      <button type="submit" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#f8fafc;cursor:pointer">Filtrele</button>
+      <a href="/ig/ai/process/run/{{ run_id }}/results" class="muted" style="margin-left:6px">Temizle</a>
+    </form>
     <table>
       <thead>
         <tr>
