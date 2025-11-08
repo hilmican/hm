@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>IG AI Debug {{ conversation_id }}</title>
+    <title>IG AI Hata Ayıklama {{ conversation_id }}</title>
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background:#f8fafc; }
       .toolbar { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px; align-items:center; }
@@ -27,12 +27,12 @@
   <body>
     {% include "_nav.html" %}
     <div class="toolbar">
-      <a href="/ig/inbox/{{ conversation_id }}">← Back to Conversation</a>
+      <a href="/ig/inbox/{{ conversation_id }}">← Konuşmaya Geri Dön</a>
       <form method="post" action="/ig/inbox/{{ conversation_id }}/debug/run">
         <button type="submit">Yeni Debug Çalıştır</button>
       </form>
     </div>
-    <h2>AI Debug · {{ conversation_id }}</h2>
+    <h2>AI Hata Ayıklama · {{ conversation_id }}</h2>
     {% if not runs %}
       <div class="empty">Henüz debug çalışması bulunmuyor. Yeni bir debug çalıştırarak AI çıktısını inceleyebilirsiniz.</div>
     {% endif %}
@@ -45,19 +45,19 @@
           <span>Oluşturuldu: {{ run.created_at }}</span>
           {% if run.started_at %}<span>Başladı: {{ run.started_at }}</span>{% endif %}
           {% if run.completed_at %}<span>Bitti: {{ run.completed_at }}</span>{% endif %}
-          {% if run.job_id %}<span>Job ID: {{ run.job_id }}</span>{% endif %}
-          {% if run.ai_run_id %}<span>AI Run ID: {{ run.ai_run_id }}</span>{% endif %}
+          {% if run.job_id %}<span>İş ID: {{ run.job_id }}</span>{% endif %}
+          {% if run.ai_run_id %}<span>AI Çalışma ID: {{ run.ai_run_id }}</span>{% endif %}
           {% if run.ai_model %}<span>Model: {{ run.ai_model }}</span>{% endif %}
         </div>
         {% if entry.ai_run %}
           <div class="meta" style="margin-top:-6px;">
             <span>AI Çalışması: Başladı {{ entry.ai_run.started_at }}</span>
             {% if entry.ai_run.completed_at %}<span>Bitti {{ entry.ai_run.completed_at }}</span>{% endif %}
-            <span>Conversations: {{ entry.ai_run.considered }}/{{ entry.ai_run.processed }}</span>
-            <span>Satın Alma: {{ entry.ai_run.purchases }} · Unlinked: {{ entry.ai_run.unlinked }}</span>
+            <span>Konuşmalar: {{ entry.ai_run.considered }}/{{ entry.ai_run.processed }}</span>
+            <span>Satın Alma: {{ entry.ai_run.purchases }} · Bağlanmamış: {{ entry.ai_run.unlinked }}</span>
           </div>
           {% if entry.ai_run.errors_json %}
-            <h4>Run Errors</h4>
+            <h4>Çalışma Hataları</h4>
             <pre>{{ entry.ai_run.errors_json }}</pre>
           {% endif %}
         {% endif %}
@@ -66,11 +66,11 @@
           <pre>{{ run.error_message }}</pre>
         {% endif %}
         {% if run.system_prompt %}
-          <h4>System Prompt</h4>
+          <h4>Sistem İstemi</h4>
           <pre>{{ run.system_prompt }}</pre>
         {% endif %}
         {% if run.user_prompt %}
-          <h4>User Prompt</h4>
+          <h4>Kullanıcı İstemi</h4>
           <pre>{{ run.user_prompt }}</pre>
         {% endif %}
         {% if run.raw_response %}

@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Mappings</title>
+    <title>Haritalandırma</title>
     <style>
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
         table { width: 100%; border-collapse: collapse; }
@@ -18,16 +18,16 @@
 <body>
     {% include "_nav.html" %}
     <div class="toolbar">
-        <span class="pill">{{ rows|length }} rule(s)</span>
+        <span class="pill">{{ rows|length }} kural</span>
     </div>
-    <h2>Mapping Rules</h2>
+    <h2>Haritalandırma Kuralları</h2>
     <div class="toolbar">
-        <input id="searchPat" type="text" placeholder="Search pattern..." style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;" />
-        <button id="applySearch" type="button">Search</button>
+        <input id="searchPat" type="text" placeholder="Desende ara..." style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;" />
+        <button id="applySearch" type="button">Ara</button>
     </div>
     <table>
         <thead>
-            <tr><th>ID</th><th>Pattern</th><th>Mode</th><th>Priority</th><th>Active</th><th>Outputs</th><th>Actions</th></tr>
+            <tr><th>ID</th><th>Desen</th><th>Eşleşme</th><th>Öncelik</th><th>Aktif</th><th>Çıktılar</th><th>İşlemler</th></tr>
         </thead>
         <tbody>
             {% for r, outs in rows %}
@@ -36,12 +36,12 @@
                 <td>
                     <input data-id="{{ r.id }}" data-field="source_pattern" value="{{ r.source_pattern }}" style="width:220px" />
                     <div class="slugRow" style="font-size:12px;color:#6b7280;margin-top:4px;">
-                        slug: <code class="patSlug"></code>
+                        kısaltma: <code class="patSlug"></code>
                     </div>
                 </td>
                 <td>
                     <select data-id="{{ r.id }}" data-field="match_mode">
-                        <option value="exact" {% if r.match_mode=='exact' %}selected{% endif %}>exact</option>
+                        <option value="exact" {% if r.match_mode=='exact' %}selected{% endif %}>tam</option>
                         <option value="icontains" {% if r.match_mode=='icontains' %}selected{% endif %}>icontains</option>
                         <option value="regex" {% if r.match_mode=='regex' %}selected{% endif %}>regex</option>
                     </select>
@@ -54,7 +54,7 @@
                         <li>
                             <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                                 <span>#{{ o.id }}</span>
-                                <label>Product</label>
+                                <label>Ürün</label>
                                 <select class="prodSel" data-output-id="{{ o.id }}">
                                     <option value="">— none —</option>
                                     {% for p in products %}
@@ -62,27 +62,27 @@
                                     {% endfor %}
                                 </select>
                                 <label>size</label>
-                                <input class="outSize" type="text" value="{{ o.size }}" placeholder="size" style="width:70px" />
+                                <input class="outSize" type="text" value="{{ o.size }}" placeholder="beden" style="width:70px" />
                                 <label>color</label>
-                                <input class="outColor" type="text" value="{{ o.color }}" placeholder="color" style="width:90px" />
-                                <label>qty</label>
+                                <input class="outColor" type="text" value="{{ o.color }}" placeholder="renk" style="width:90px" />
+                                <label>adet</label>
                                 <input class="outQty" type="number" value="{{ o.quantity }}" min="1" style="width:64px" />
-                                <label>price</label>
+                                <label>fiyat</label>
                                 <input class="outPrice" type="number" step="0.01" value="{{ o.unit_price }}" style="width:90px" />
-                                <button class="updOutBtn" data-output-id="{{ o.id }}">Save</button>
-                                <button class="removeOutBtn" data-output-id="{{ o.id }}">Remove</button>
-                                <button class="ensureVarBtn" data-output-id="{{ o.id }}">Ensure variant</button>
+                                <button class="updOutBtn" data-output-id="{{ o.id }}">Kaydet</button>
+                                <button class="removeOutBtn" data-output-id="{{ o.id }}">Kaldır</button>
+                                <button class="ensureVarBtn" data-output-id="{{ o.id }}">Varyant oluştur</button>
                             </div>
                         </li>
                         {% endfor %}
                     </ul>
                 </td>
                 <td>
-                    <button class="saveRule" data-id="{{ r.id }}">Save</button>
-                    <button class="editOutputs" data-id="{{ r.id }}">Edit outputs</button>
-                    <button class="addOutput" data-id="{{ r.id }}">Add output</button>
-                    <button class="ensureRuleVars" data-id="{{ r.id }}">Ensure all variants</button>
-                    <button class="deleteRule" data-id="{{ r.id }}" style="color:#b91c1c">Delete</button>
+                    <button class="saveRule" data-id="{{ r.id }}">Kaydet</button>
+                    <button class="editOutputs" data-id="{{ r.id }}">Çıktıları düzenle</button>
+                    <button class="addOutput" data-id="{{ r.id }}">Çıktı ekle</button>
+                    <button class="ensureRuleVars" data-id="{{ r.id }}">Tüm varyantları oluştur</button>
+                    <button class="deleteRule" data-id="{{ r.id }}" style="color:#b91c1c">Sil</button>
                 </td>
             </tr>
             {% endfor %}
@@ -131,8 +131,8 @@
             try {
                 const r = await fetch('/mappings/rules/' + id, { method: 'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
                 if (!r.ok) throw new Error(await r.text());
-                alert('Saved');
-            } catch (err) { alert('Save error'); }
+                alert('Kaydedildi');
+            } catch (err) { alert('Kaydetme hatası'); }
         });
     }
 
@@ -149,15 +149,15 @@
                     if (rules.length) outputs = rules[0].outputs||[];
                 }
                 const tpl = '[\n  {"product_id": null, "item_id": null, "size": null, "color": null, "quantity": 1, "unit_price": null}\n]';
-                const text = prompt('Edit outputs as JSON array (product_id/item_id, size, color, quantity, unit_price):', JSON.stringify(outputs.length?outputs:JSON.parse(tpl)));
+                const text = prompt('Çıktıları JSON dizi olarak düzenleyin (product_id/item_id, size, color, quantity, unit_price):', JSON.stringify(outputs.length?outputs:JSON.parse(tpl)));
                 if (!text) return;
                 let arr = [];
-                try { arr = JSON.parse(text); } catch (e) { alert('Invalid JSON'); return; }
+                try { arr = JSON.parse(text); } catch (e) { alert('Geçersiz JSON'); return; }
                 const r = await fetch('/mappings/rules/' + id + '/outputs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(arr) });
                 if (!r.ok) throw new Error(await r.text());
-                alert('Outputs saved');
+                alert('Çıktılar kaydedildi');
                 location.reload();
-            } catch (err) { alert('Edit outputs error'); }
+            } catch (err) { alert('Çıktıları düzenleme hatası'); }
         });
     }
 
@@ -195,7 +195,7 @@
             const tr = e.target.closest('tr');
             const ruleId = Number(tr.querySelector('.saveRule').getAttribute('data-id'));
             const pattern = tr.querySelector('[data-field="source_pattern"]').value;
-            if (!confirm('Remove output #' + outId + '?')) return;
+            if (!confirm('Çıktı #' + outId + ' kaldırılacak. Onaylıyor musunuz?')) return;
             try {
                 const rs = await fetch('/mappings/rules?pattern=' + encodeURIComponent(pattern));
                 if (!rs.ok) throw new Error(await rs.text());
@@ -212,7 +212,7 @@
                 const r = await fetch('/mappings/rules/' + ruleId + '/outputs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(kept) });
                 if (!r.ok) throw new Error(await r.text());
                 location.reload();
-            } catch (err) { alert('Remove failed'); }
+            } catch (err) { alert('Kaldırma başarısız'); }
         });
     }
 
@@ -224,8 +224,8 @@
                 const r = await fetch('/mappings/outputs/' + outId + '/ensure-variant', { method:'POST' });
                 if (!r.ok) throw new Error(await r.text());
                 const j = await r.json();
-                alert('Variant ensured. item_id=' + j.item_id);
-            } catch (err) { alert('Ensure variant failed'); }
+                alert('Varyant oluşturuldu. item_id=' + j.item_id);
+            } catch (err) { alert('Varyant oluşturma başarısız'); }
         });
     }
 
@@ -237,8 +237,8 @@
                 const r = await fetch('/mappings/rules/' + id + '/ensure-variants', { method:'POST' });
                 if (!r.ok) throw new Error(await r.text());
                 const j = await r.json();
-                alert('Ensured ' + (j.count||0) + ' variant(s).');
-            } catch (err) { alert('Ensure all variants failed'); }
+                alert((j.count||0) + ' varyant oluşturuldu.');
+            } catch (err) { alert('Tüm varyantları oluşturma hatası'); }
         });
     }
 
@@ -250,7 +250,7 @@
         const colorListId = 'colorList-' + Date.now() + '-' + Math.random().toString(36).slice(2);
         li.innerHTML = `
             <div style=\"display:flex; gap:6px; align-items:center; flex-wrap:wrap;\">
-                <label>Product</label>
+                <label>Ürün</label>
                 <select class=\"newProd\">
                     <option value=\"\">— select —</option>
                     ${products.map(p=>`<option value=\"${p.id}\">${p.name} (#${p.id})</option>`).join('')}
@@ -261,9 +261,9 @@
                 <label>color</label>
                 <input class=\"newColor\" type=\"text\" list=\"${colorListId}\" placeholder=\"color\" style=\"width:110px\" />
                 <datalist id=\"${colorListId}\"></datalist>
-                <label>qty</label>
+                <label>adet</label>
                 <input class=\"newQty\" type=\"number\" min=\"1\" value=\"1\" style=\"width:64px\" />
-                <label>price</label>
+                <label>fiyat</label>
                 <input class=\"newPrice\" type=\"number\" step=\"0.01\" style=\"width:90px\" />
                 <button class=\"confirmAdd\">Add</button>
                 <button class=\"cancelAdd\">Cancel</button>
@@ -355,7 +355,7 @@
                     const r = await fetch('/mappings/rules/' + ruleId + '/outputs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(clean) });
                     if (!r.ok) throw new Error(await r.text());
                     location.reload();
-                } catch (err) { alert('Add output failed'); }
+                } catch (err) { alert('Çıktı ekleme başarısız'); }
             });
         });
     }
@@ -365,7 +365,7 @@
         btn.addEventListener('click', async (e)=>{
             const id = e.target.getAttribute('data-id');
             const pat = e.target.closest('tr').querySelector('[data-field="source_pattern"]').value;
-            if (!confirm('Delete rule #' + id + ' for pattern\n"' + pat + '" ?')) return;
+            if (!confirm('\"' + pat + '\" deseni için #' + id + ' kuralı silinsin mi?')) return;
             try {
                 const r = await fetch('/mappings/rules/' + id, { method:'DELETE' });
                 if (!r.ok) throw new Error(await r.text());

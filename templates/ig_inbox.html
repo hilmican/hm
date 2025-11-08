@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Instagram Inbox</title>
+    <title>Instagram Gelen Kutusu</title>
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
       .toolbar { display:flex; gap:8px; margin-bottom:12px; }
@@ -15,9 +15,9 @@
   </head>
   <body>
     {% include "_nav.html" %}
-    <h1>Instagram Inbox</h1>
+    <h1>Instagram Gelen Kutusu</h1>
     <div class="toolbar">
-      <button id="refresh">Refresh</button>
+      <button id="refresh">Yenile</button>
     </div>
     <div id="list">
       {% for m in conversations %}
@@ -25,7 +25,7 @@
           <div>
             <a href="/ig/inbox/{{ m.conversation_id }}">{{ labels.get(m.conversation_id) or m.conversation_id }}</a>
             {% if labels.get(m.conversation_id) %}
-              <a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ labels.get(m.conversation_id)[1:] }}">profile ↗</a>
+              <a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ labels.get(m.conversation_id)[1:] }}">profil ↗</a>
             {% endif %}
             <a class="meta-link" href="/ig/inbox/{{ m.conversation_id }}/debug" title="AI Debug">AI Debug</a>
             {% if ad_map.get(m.conversation_id) %}
@@ -44,20 +44,20 @@
         </div>
       {% endfor %}
       {% if not conversations %}
-        <div class="meta">No conversations cached yet. Click Refresh to sync.</div>
+        <div class="meta">Henüz önbelleğe alınmış konuşma yok. Senkron için Yenile’ye tıklayın.</div>
       {% endif %}
     </div>
     <script>
       const btn = document.getElementById('refresh');
       btn?.addEventListener('click', async () => {
-        btn.disabled = true; btn.textContent = 'Refreshing...';
+        btn.disabled = true; btn.textContent = 'Yenileniyor...';
         try {
           const r = await fetch('/ig/inbox/refresh', { method: 'POST' });
-          if (!r.ok) throw new Error('refresh failed');
+          if (!r.ok) throw new Error('yenileme başarısız');
           const js = await r.json();
-          if (js.status !== 'ok') console.warn('Refresh error', js);
+          if (js.status !== 'ok') console.warn('Yenileme hatası', js);
           location.reload();
-        } catch (e) { alert('Refresh error'); }
+        } catch (e) { alert('Yenileme hatası'); }
       });
 
       function fmtTs(){

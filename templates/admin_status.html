@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>System Status</title>
+    <title>Sistem Durumu</title>
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
       .ok { color: #16a34a; }
@@ -13,24 +13,24 @@
   </head>
   <body>
     {% include "_nav.html" %}
-    <h2>System Status</h2>
+    <h2>Sistem Durumu</h2>
     <div class="card">
-      <div>Version: <code>{{ version }}</code></div>
+      <div>Sürüm: <code>{{ version }}</code></div>
     </div>
     <div class="card">
-      <div>DB: {% if db.ok %}<span class="ok">OK</span>{% else %}<span class="bad">DOWN</span>{% endif %}</div>
+      <div>Veritabanı: {% if db.ok %}<span class="ok">TAMAM</span>{% else %}<span class="bad">KAPALI</span>{% endif %}</div>
       {% if db.counts %}
         <ul>
-          <li>messages: {{ db.counts.get('message') }}</li>
-          <li>attachments: {{ db.counts.get('attachments') }}</li>
-          <li>raw_events: {{ db.counts.get('raw_events') }}</li>
-          <li>jobs: {{ db.counts.get('jobs') }}</li>
+          <li>mesaj: {{ db.counts.get('message') }}</li>
+          <li>ekler: {{ db.counts.get('attachments') }}</li>
+          <li>ham_olaylar: {{ db.counts.get('raw_events') }}</li>
+          <li>işler: {{ db.counts.get('jobs') }}</li>
         </ul>
       {% endif %}
       {% if db.error %}<div class="bad">{{ db.error }}</div>{% endif %}
     </div>
     <div class="card">
-      <div>Redis: {% if redis.ok %}<span class="ok">OK</span>{% else %}<span class="bad">DOWN</span>{% endif %}</div>
+      <div>Redis: {% if redis.ok %}<span class="ok">TAMAM</span>{% else %}<span class="bad">KAPALI</span>{% endif %}</div>
       {% if redis.error %}<div class="bad">{{ redis.error }}</div>{% endif %}
     </div>
   </body>
