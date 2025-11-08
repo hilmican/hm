@@ -362,7 +362,7 @@ def run_result_detail(request: Request, run_id: int, convo_id: str, limit: int =
                 SELECT timestamp_ms, direction, text
                 FROM message
                 WHERE conversation_id=:cid
-                ORDER BY COALESCE(timestamp_ms,0) ASC, rowid ASC
+                ORDER BY COALESCE(timestamp_ms,0) ASC, id ASC
                 LIMIT :lim
                 """
             ).params(cid=str(convo_id), lim=int(n))
