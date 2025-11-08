@@ -603,3 +603,27 @@ def bind_conversation(body: dict):
     return {"status": "ok"}
 
 
+@router.post("/unlinked/mark")
+def mark_unlinked(body: dict):
+    """Mark an unlinked conversation's AI status (e.g., no_purchase) so it no longer appears in the list."""
+    convo_id = (body or {}).get("conversation_id")
+    status = (body or {}).get("status") or "no_purchase"
+    allowed = {"no_purchase", "ambiguous", "ok"}
+    if not convo_id:
+        raise HTTPException(status_code=400, detail="conversation_id required")
+    if status not in allowed:
+        raise HTTPException(status_code=400, detail=f"invalid status; allowed: {', '.join(sorted(allowed))}")
+    with get_session() as session:
+        try:
+            # Update ai_conversations watermark/state
+            session.exec(text("UPDATE ai_conversations SET ai_status=:st, ai_process_time=CURRENT_TIMESTAMP WHERE convo_id=:cid").params(st=status, cid=str(convo_id)))
+        except Exception:
+            pass
+        try:
+            # Also reflect in conversations when present
+            session.exec(text("UPDATE conversations SET ai_status=:st, ai_processed_at=CURRENT_TIMESTAMP WHERE convo_id=:cid").params(st=status, cid=str(convo_id)))
+        except Exception:
+            pass
+    return {"status": "ok"}
+
+

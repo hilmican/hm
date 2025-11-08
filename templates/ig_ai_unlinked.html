@@ -67,6 +67,7 @@
 						<div class="flex">
 							<input type="text" placeholder="Ad/Telefon ara" id="q-{{ r.convo_id }}" />
 							<button onclick="searchOrders('{{ r.convo_id }}')">Ara</button>
+							<button style="margin-left:8px" onclick="markNoPurchase('{{ r.convo_id }}')">Satın alma değil</button>
 						</div>
 						<div class="bind-box" id="box-{{ r.convo_id }}">
 							<div class="small">Sonuçlar:</div>
@@ -128,6 +129,26 @@
 				location.href = `/ig/inbox/${encodeURIComponent(convoId)}`;
 			} catch(e){
 				alert('Bağlama hatası: '+e.message);
+			}
+		}
+		async function markNoPurchase(convoId){
+			if (!confirm('Bu konuşmayı "satın alma değil" olarak işaretle?')) return;
+			try{
+				const res = await fetch('/ig/ai/unlinked/mark', {
+					method:'POST',
+					headers:{'Content-Type':'application/json'},
+					body: JSON.stringify({ conversation_id: convoId, status: 'no_purchase' })
+				});
+				if(!res.ok){
+					const t = await res.text();
+					throw new Error(t);
+				}
+				// Remove the row from UI
+				const link = document.querySelector(`a[href="/ig/inbox/${convoId}"]`);
+				const row = link?.closest('tr');
+				if(row){ row.remove(); }
+			}catch(e){
+				alert('İşaretleme hatası: ' + e.message);
 			}
 		}
 		</script>
