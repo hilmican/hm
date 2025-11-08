@@ -348,6 +348,15 @@ def init_db() -> None:
                                 conn.exec_driver_sql("CREATE INDEX idx_conversations_linked_order ON conversations(linked_order_id)")
                             except Exception:
                                 pass
+                            # Additional helpful indexes for faster previews
+                            try:
+                                conn.exec_driver_sql("CREATE INDEX idx_conversations_last_message_at ON conversations(last_message_at)")
+                            except Exception:
+                                pass
+                            try:
+                                conn.exec_driver_sql("CREATE INDEX idx_conversations_ai_last ON conversations(ai_processed_at, last_message_at)")
+                            except Exception:
+                                pass
                         except Exception:
                             pass
                         # Ensure `order`.ig_conversation_id exists for linking back to IG threads
@@ -365,6 +374,15 @@ def init_db() -> None:
                                 conn.exec_driver_sql("CREATE INDEX idx_order_ig_conversation_id ON `order`(ig_conversation_id)")
                             except Exception:
                                 pass
+                        except Exception:
+                            pass
+                        # Message timestamp and composite index to accelerate counts and latest-per-conversation lookups
+                        try:
+                            conn.exec_driver_sql("CREATE INDEX idx_message_ts ON message(timestamp_ms)")
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql("CREATE INDEX idx_message_conv_ts ON message(conversation_id, timestamp_ms)")
                         except Exception:
                             pass
                         # Normalize blank strings to NULL so COALESCE logic behaves consistently

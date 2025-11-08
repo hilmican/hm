@@ -29,6 +29,10 @@
       <label><input type="checkbox" name="reprocess" value="1" /> Daha önce işlenenleri tekrar işle</label>
       <button type="submit">İşle</button>
     </form>
+    <div id="previewBox" class="muted" style="margin-top:8px">
+      <span id="previewLoading">Önizleme hesaplanıyor...</span>
+      <span id="previewStats" style="display:none"></span>
+    </div>
     <div id="runMsg" class="muted"></div>
   </div>
 
@@ -74,6 +78,65 @@
   <script>
     const form = document.getElementById('runForm');
     const msg = document.getElementById('runMsg');
+    const statsEl = document.getElementById('previewStats');
+    const loadingEl = document.getElementById('previewLoading');
+
+    // Set default dates to last 7 days on first load if empty
+    (function setDefaultDates(){
+      try{
+        const df = form?.querySelector('input[name="date_from"]');
+        const dt = form?.querySelector('input[name="date_to"]');
+        const today = new Date();
+        const start = new Date(today.getTime() - 6*24*60*60*1000); // last 7 days inclusive
+        const toIso = (d) => d.toISOString().slice(0,10);
+        if (df && !df.value) df.value = toIso(start);
+        if (dt && !dt.value) dt.value = toIso(today);
+      }catch{}
+    })();
+
+    async function updatePreview(){
+      if(!form) return;
+      try{
+        loadingEl.style.display = '';
+        statsEl.style.display = 'none';
+        const fd = new FormData(form);
+        const body = Object.fromEntries(fd.entries());
+        body.reprocess = !!fd.get('reprocess');
+        for (const k of ['min_age_minutes','limit']) { if (body[k]) body[k] = Number(body[k]); }
+        const r = await fetch('/ig/ai/process/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if(!r.ok){
+          const t = await r.text();
+          loadingEl.textContent = 'Önizleme hatası: ' + (t || r.status);
+          return;
+        }
+        const p = await r.json();
+        statsEl.textContent = `İşlenecek: ${p.eligible_conversations||0} konuşma, ${p.messages_in_scope||0} mesaj` + (p.messages_without_timestamp ? ` (zaman damgası olmayan: ${p.messages_without_timestamp})` : '');
+        loadingEl.style.display = 'none';
+        statsEl.style.display = '';
+      }catch(e){
+        loadingEl.textContent = 'Önizleme hatası: ' + e;
+        statsEl.style.display = 'none';
+      }
+    }
+
+    // Debounce helper
+    function debounce(fn, ms){
+      let t; return (...args)=>{ clearTimeout(t); t = setTimeout(()=>fn(...args), ms); };
+    }
+    const debouncedPreview = debounce(updatePreview, 300);
+
+    // Trigger preview on load and when inputs change
+    window.addEventListener('DOMContentLoaded', updatePreview);
+    for (const sel of ['input[name="date_from"]','input[name="date_to"]','input[name="min_age_minutes"]','input[name="limit"]','input[name="reprocess"]']){
+      const el = form?.querySelector(sel);
+      if(!el) continue;
+      el.addEventListener('change', debouncedPreview);
+      el.addEventListener('input', debouncedPreview);
+    }
     form?.addEventListener('submit', async () => {
       msg.textContent = 'Önizleme alınıyor...';
       const fd = new FormData(form);
@@ -94,6 +157,8 @@
         if (!r.ok) { const t = await r.text(); throw new Error(t); }
         const data = await r.json();
         msg.textContent = 'Çalıştırma kuyruğa alındı. Run ID: ' + data.run_id;
+        // Refresh preview to reflect possibly reduced unprocessed pool
+        updatePreview();
         // Auto-start logs for this run
         document.getElementById('logsRunId').value = String(data.run_id);
         startWatch();
