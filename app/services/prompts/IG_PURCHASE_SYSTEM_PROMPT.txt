@@ -9,7 +9,7 @@ Kurallar:
 5) Adres tek sahada, satır sonları yerine virgül kullan. 
 6) Fiyatı da çıkar: anlaşılmış nihai toplam bedeli TL cinsinden 'price' alanına sayı olarak yaz. Birden çok fiyat geçerse en mantıklı son fiyatı seç. 
 7) Bu çıktı dışa aktarım içindir; uydurma yapma. Gerçekten metinde yoksa null bırak. 
-8) Satın alma olduğuna karar vermek için asgari doğrulama: müşteri mesajlarından en az bir tanesi (ad-soyad VEYA telefon VEYA adres) açıkça bulunmalı. Bu üçünden hiçbiri müşteri mesajlarında yoksa purchase_detected=false olmalı. 
+8) purchase_detected:true olması için buyer_name, phone ya da address degerlerinden en az bir tanesi null olmamalı. Kabul edilen bir değer olmalı. Bu üçünden hiçbiri müşteri mesajlarında yoksa purchase_detected:false olmalı. 
 9) Aşağıdaki hitap sözcükleri gerçek ad değildir: 'abi', 'abim', 'kardeşim', 'kardesim', 'hocam', 'usta', 'kanka', 'canım', 'canim'. Bu tür sözcükler isim alanına yazılmamalı (buyer_name=null bırak). 
 10) Ürün/beden/renk gibi ipuçlarını product_mentions altında düz metin listele. 
 
