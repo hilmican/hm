@@ -237,7 +237,7 @@ def process_run(
                     ai_run_log(run_id, "error", "reprocess_clear_error", {"error": str(e)})
                 except Exception:
                     pass
-        # Select eligible conversations by last_message_at and ai_processed_at is NULL
+        # Select eligible conversations by last_message_at and ai_process_time
         params: Dict[str, Any] = {"cutoff": cutoff_dt.isoformat(" ")}
         if conversation_id:
             sql = "SELECT convo_id FROM conversations WHERE convo_id = :single LIMIT 1"
@@ -249,7 +249,7 @@ def process_run(
                 convo_ids = [conversation_id]
             considered = len(convo_ids)
         else:
-            where = ["ai_processed_at IS NULL", "last_message_at <= :cutoff"]
+            where = ["last_message_at <= :cutoff"]
             if date_from and date_to and date_from <= date_to:
                 dt_end = date_to + dt.timedelta(days=1)
                 params["df"] = f"{date_from.isoformat()} 00:00:00"
@@ -262,6 +262,9 @@ def process_run(
                 dt_end = date_to + dt.timedelta(days=1)
                 params["dte"] = f"{dt_end.isoformat()} 00:00:00"
                 where.append("last_message_at < :dte")
+            # When not reprocessing, only process conversations that have new messages since last AI process time
+            if not reprocess:
+                where.append("(ai_process_time IS NULL OR last_message_at > ai_process_time)")
             sql = (
                 "SELECT convo_id FROM conversations WHERE "
                 + " AND ".join(where)
@@ -382,7 +385,7 @@ def process_run(
                 try:
                     session.exec(
                         _text(
-                            "UPDATE conversations SET ai_status=:s, ai_json=:j, ai_processed_at=CURRENT_TIMESTAMP, ai_run_id=:rid WHERE convo_id=:cid"
+                            "UPDATE conversations SET ai_status=:s, ai_json=:j, ai_processed_at=CURRENT_TIMESTAMP, ai_process_time=CURRENT_TIMESTAMP, ai_run_id=:rid WHERE convo_id=:cid"
                         ).params(s="error", j=json.dumps({"error": str(e)}), rid=run_id, cid=cid)
                     )
                 except Exception:
@@ -478,6 +481,7 @@ def process_run(
                           ai_status = :st,
                           ai_json = :js,
                           ai_processed_at = CURRENT_TIMESTAMP,
+                          ai_process_time = CURRENT_TIMESTAMP,
                           linked_order_id = COALESCE(linked_order_id, :oid),
                           ai_run_id = :rid
                         WHERE convo_id = :cid

@@ -335,6 +335,8 @@ def init_db() -> None:
                                 conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_json LONGTEXT NULL")
                             if 'ai_processed_at' not in have_cols:
                                 conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_processed_at DATETIME NULL")
+                            if 'ai_process_time' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_process_time DATETIME NULL")
                             if 'linked_order_id' not in have_cols:
                                 conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN linked_order_id INTEGER NULL")
                             if 'ai_run_id' not in have_cols:
@@ -355,6 +357,10 @@ def init_db() -> None:
                                 pass
                             try:
                                 conn.exec_driver_sql("CREATE INDEX idx_conversations_ai_last ON conversations(ai_processed_at, last_message_at)")
+                            except Exception:
+                                pass
+                            try:
+                                conn.exec_driver_sql("CREATE INDEX idx_conversations_ai_process_time ON conversations(ai_process_time)")
                             except Exception:
                                 pass
                         except Exception:
@@ -711,6 +717,8 @@ def init_db() -> None:
                         add_cols.append(("ai_json", "TEXT"))
                     if 'ai_processed_at' not in have:
                         add_cols.append(("ai_processed_at", "DATETIME"))
+                    if 'ai_process_time' not in have:
+                        add_cols.append(("ai_process_time", "DATETIME"))
                     if 'linked_order_id' not in have:
                         add_cols.append(("linked_order_id", "INTEGER"))
                     if 'ai_run_id' not in have:
@@ -723,6 +731,10 @@ def init_db() -> None:
                     # helpful indexes
                     try:
                         conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_conversations_ai_processed ON conversations(ai_processed_at)")
+                    except Exception:
+                        pass
+                    try:
+                        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_conversations_ai_process_time ON conversations(ai_process_time)")
                     except Exception:
                         pass
                 except Exception:

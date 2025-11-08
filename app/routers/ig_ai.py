@@ -173,6 +173,7 @@ def preview_process(body: dict):
     date_from_s: Optional[str] = (body or {}).get("date_from")
     date_to_s: Optional[str] = (body or {}).get("date_to")
     min_age_minutes: int = int((body or {}).get("min_age_minutes") or 60)
+    reprocess: bool = bool((body or {}).get("reprocess") not in (False, 0, "0", "false", "False", None))
 
     def _parse_date(v: Optional[str]) -> Optional[dt.date]:
         try:
@@ -190,8 +191,10 @@ def preview_process(body: dict):
     cutoff_ms = int(cutoff_dt.timestamp() * 1000)
 
     with get_session() as session:
-        # Conversations count with same eligibility as processor
-        where = ["ai_processed_at IS NULL", "last_message_at <= :cutoff"]
+        # Conversations count with same eligibility as processor (ai_process_time aware)
+        where = ["last_message_at <= :cutoff"]
+        if not reprocess:
+            where.append("(ai_process_time IS NULL OR last_message_at > ai_process_time)")
         params: dict[str, object] = {"cutoff": cutoff_dt.isoformat(" ")}
         if date_from and date_to and date_from <= date_to:
             dt_end = date_to + dt.timedelta(days=1)
