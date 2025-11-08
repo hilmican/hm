@@ -440,7 +440,7 @@ async def link_suggest_apply(request: Request):
 
 
 @router.get("/unlinked")
-def unlinked_purchases(request: Request, q: str | None = None, limit: int = 200):
+def unlinked_purchases(request: Request, q: str | None = None, start: str | None = None, end: str | None = None, limit: int = 200):
     """List conversations where a purchase was detected but not linked to an order.
 
     Uses ai_conversations (vendor-neutral watermark/state) and orders by latest message timestamp.
@@ -448,24 +448,47 @@ def unlinked_purchases(request: Request, q: str | None = None, limit: int = 200)
     n = int(max(1, min(limit or 200, 1000)))
     where = ["(ac.linked_order_id IS NULL)", "(ac.ai_status = 'ambiguous' OR ac.ai_status IS NULL)"]
     params: dict[str, object] = {}
+    # Parse start/end as dates and convert to ms window over last_ts
+    def _parse_date(s: str | None):
+        try:
+            return dt.date.fromisoformat(str(s)) if s else None
+        except Exception:
+            return None
+    start_d = _parse_date(start)
+    end_d = _parse_date(end)
+    ms_from = None
+    ms_to = None
+    if start_d:
+        ms_from = int(dt.datetime.combine(start_d, dt.time.min).timestamp() * 1000)
+    if end_d:
+        ms_to = int(dt.datetime.combine(end_d + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
     if q:
         # Search in contact fields (when present) or AI JSON
         where.append("(LOWER(COALESCE(c.contact_name,'')) LIKE :qq OR COALESCE(c.contact_phone,'') LIKE :qp OR LOWER(COALESCE(ac.ai_json,'')) LIKE :qa)")
         qs = f"%{q.lower()}%"
         params.update({"qq": qs, "qa": qs, "qp": f"%{q}%"} )
+    # Build via subquery to filter on last_ts window
     sql = (
-        "SELECT ac.convo_id, c.contact_name, c.contact_phone, c.contact_address, "
-        "       ac.ai_status, ac.ai_json, ac.linked_order_id, "
-        "       MAX(COALESCE(m.timestamp_ms,0)) AS last_ts "
-        "FROM ai_conversations ac "
-        "LEFT JOIN conversations c ON c.convo_id = ac.convo_id "
-        "LEFT JOIN message m ON m.conversation_id = ac.convo_id "
-        "WHERE " + " AND ".join(where) + " "
-        "GROUP BY ac.convo_id, c.contact_name, c.contact_phone, c.contact_address, ac.ai_status, ac.ai_json, ac.linked_order_id "
-        "ORDER BY last_ts DESC, ac.convo_id DESC "
+        "SELECT t.convo_id, c.contact_name, c.contact_phone, c.contact_address, "
+        "       ac.ai_status, ac.ai_json, ac.linked_order_id, t.last_ts "
+        "FROM ("
+        "  SELECT m.conversation_id AS convo_id, MAX(COALESCE(m.timestamp_ms,0)) AS last_ts "
+        "  FROM message m "
+        "  GROUP BY m.conversation_id"
+        ") t "
+        "JOIN ai_conversations ac ON ac.convo_id = t.convo_id "
+        "LEFT JOIN conversations c ON c.convo_id = t.convo_id "
+        "WHERE " + " AND ".join(where)
+        + (" AND t.last_ts >= :ms_from" if ms_from is not None else "")
+        + (" AND t.last_ts < :ms_to" if ms_to is not None else "")
+        + " ORDER BY t.last_ts DESC, t.convo_id DESC "
         "LIMIT :lim"
     )
     params["lim"] = int(n)
+    if ms_from is not None:
+        params["ms_from"] = int(ms_from)
+    if ms_to is not None:
+        params["ms_to"] = int(ms_to)
     with get_session() as session:
         rows = session.exec(text(sql).params(**params)).all()
         items = []
@@ -508,7 +531,7 @@ def unlinked_purchases(request: Request, q: str | None = None, limit: int = 200)
             except Exception:
                 continue
     templates = request.app.state.templates
-    return templates.TemplateResponse("ig_ai_unlinked.html", {"request": request, "rows": items, "q": q or ""})
+    return templates.TemplateResponse("ig_ai_unlinked.html", {"request": request, "rows": items, "q": q or "", "start": start or "", "end": end or ""})
 
 
 @router.get("/unlinked/search")

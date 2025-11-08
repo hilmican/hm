@@ -25,6 +25,8 @@
 		<h1>Bağlanmamış Satın Alımlar</h1>
 		<div class="toolbar">
 			<form method="get" action="/ig/ai/unlinked" class="flex">
+				<input type="date" name="start" value="{{ start or '' }}" />
+				<input type="date" name="end" value="{{ end or '' }}" />
 				<input type="text" name="q" placeholder="Ad, soyad veya telefon" value="{{ q or '' }}" />
 				<button type="submit">Ara</button>
 				<a class="link" href="/ig/ai/unlinked" style="margin-left:8px;">Temizle</a>
