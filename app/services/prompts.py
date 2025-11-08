@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 # Centralized prompts for AI mapping
+# NOTE (prompt versioning):
+# - When you change any prompt here, copy the previous version into
+#   app/services/prompts_archive/ with a dated filename, e.g.
+#   2025-11-08-IG_PURCHASE_SYSTEM_PROMPT-v1.txt
+# - This convention allows us to review historical prompt strategies.
 
 MAPPING_SYSTEM_PROMPT = (
     "Sen bir stok ve sipariş eşleştirme yardımcısısın. "
@@ -26,12 +31,17 @@ IG_PURCHASE_SYSTEM_PROMPT = (
     "Görev: Satın alma kesinliği olup olmadığını tespit et ve alıcı bilgilerini çıkar. "
     "Kurallar: "
     "1) SADECE geçerli JSON döndür. Açıklama/markdown/yorum YOK. "
-    "2) Satın alma varsa (purchase_detected=true), alıcı ad-soyad, telefon ve adres bilgisini bulmak için konuşmanın TÜMÜNÜ dikkatle tara; önceki/sonraki mesajları da kontrol et. "
-    "3) Telefonu mümkünse 05xx… veya +90… formatında normalleştir; boşluk/ayraçları kaldır. "
-    "4) Adres tek sahada, satır sonları yerine virgül kullan. "
-    "5) Fiyatı da çıkar: anlaşılmış nihai toplam bedeli TL cinsinden 'price' alanına sayı olarak yaz. Birden çok fiyat geçerse en mantıklı son fiyatı seç. "
-    "6) Bu çıktı dışa aktarım içindir; uydurma yapma. Gerçekten metinde yoksa null bırak, ama varsa mutlaka doldur. "
-    "7) Ürün/beden/renk gibi ipuçlarını product_mentions altında düz metin listele. "
+    "2) Satın alma varsa (purchase_detected=true), alıcı ad-soyad, telefon ve adres bilgisini konuşmanın TÜMÜNDEN dikkatle tara; önceki/sonraki mesajları kontrol et. "
+    "3) İletişim bilgileri yalnızca müşteri mesajlarından (in) çıkarılabilir. Mağaza mesajlarından (out) gelen isim/telefon/adres GEÇERSİZ sayılır. "
+    "4) Telefonu mümkünse 05xx… veya +90… formatında normalleştir; boşluk/ayraçları kaldır. "
+    "5) Adres tek sahada, satır sonları yerine virgül kullan. "
+    "6) Fiyatı da çıkar: anlaşılmış nihai toplam bedeli TL cinsinden 'price' alanına sayı olarak yaz. Birden çok fiyat geçerse en mantıklı son fiyatı seç. "
+    "7) Bu çıktı dışa aktarım içindir; uydurma yapma. Gerçekten metinde yoksa null bırak. "
+    "8) Satın alma olduğuna karar vermek için asgari doğrulama: müşteri mesajlarından en az bir tanesi (ad-soyad VEYA telefon VEYA adres) açıkça bulunmalı. "
+    "   Bu üçünden hiçbiri müşteri mesajlarında yoksa purchase_detected=false olmalı. "
+    "9) Aşağıdaki hitap sözcükleri gerçek ad değildir: 'abi', 'abim', 'kardeşim', 'kardesim', 'hocam', 'usta', 'kanka', 'canım', 'canim'. "
+    "   Bu tür sözcükler isim alanına yazılmamalı (buyer_name=null bırak). "
+    "10) Ürün/beden/renk gibi ipuçlarını product_mentions altında düz metin listele. "
 )
 
 # Expected JSON schema (documentation aid; model must still follow JSON-only rule)

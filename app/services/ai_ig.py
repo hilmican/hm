@@ -434,6 +434,14 @@ def process_run(
         buyer_name_clean = _clean_field(data.get("buyer_name"))
         phone_clean = _clean_field(data.get("phone"))
         address_clean = _clean_field(data.get("address"))
+        # Normalize honorific/non-name placeholders
+        banned_names = {"abi","abim","kardeşim","kardesim","hocam","usta","kanka","canım","canim"}
+        try:
+            if buyer_name_clean:
+                if buyer_name_clean.strip().lower() in banned_names:
+                    buyer_name_clean = None
+        except Exception:
+            pass
         # Normalize phone to digits and reduce to last 10
         phone_digits = normalize_phone(phone_clean)
         phone_last10 = phone_digits[-10:] if len(phone_digits) >= 10 else phone_digits
@@ -448,7 +456,9 @@ def process_run(
             }) if run_id is not None else None
         except Exception:
             pass
-        if bool(data.get("purchase_detected")):
+        # Enforce minimum contact info for purchase: at least one of (name, phone, address)
+        has_min_contact = bool((buyer_name_clean and buyer_name_clean.strip()) or (phone_last10 and len(phone_last10) >= 7) or (address_clean and address_clean.strip()))
+        if bool(data.get("purchase_detected")) and has_min_contact:
             purchases += 1
             try:
                 with get_session() as session:
