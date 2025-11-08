@@ -319,6 +319,25 @@ def process_run(
         "limit": int(limit),
         "considered": int(considered),
     })
+    # Initialize run row with considered count for early visibility
+    try:
+        from sqlalchemy import text as _text  # local alias if not imported above
+        with get_session() as session:
+            session.exec(
+                _text(
+                    """
+                    UPDATE ig_ai_run SET
+                      conversations_considered = :cns,
+                      conversations_processed = COALESCE(conversations_processed, 0),
+                      orders_linked = COALESCE(orders_linked, 0),
+                      purchases_detected = COALESCE(purchases_detected, 0),
+                      purchases_unlinked = COALESCE(purchases_unlinked, 0)
+                    WHERE id = :rid
+                    """
+                ).params(cns=int(considered), rid=int(run_id))
+            )
+    except Exception:
+        pass
 
     # Helper to check cancellation flag quickly
     def _is_cancelled() -> bool:
@@ -497,6 +516,30 @@ def process_run(
                 errors.append(f"{cid}: persist_err {pe}")
                 ai_run_log(run_id, "error", "persist_error", {"conversation_id": cid, "error": str(pe)})
                 ai_run_log(run_id, "error", "persist_error", {"conversation_id": cid, "error": str(pe)})
+
+        # Persist live counters for UI progress (best-effort)
+        try:
+            with get_session() as session:
+                session.exec(
+                    _text(
+                        """
+                        UPDATE ig_ai_run SET
+                          conversations_processed = :prs,
+                          orders_linked = :lnk,
+                          purchases_detected = :pur,
+                          purchases_unlinked = :pun
+                        WHERE id = :rid
+                        """
+                    ).params(
+                        prs=int(processed),
+                        lnk=int(linked),
+                        pur=int(purchases),
+                        pun=int(purchases_unlinked),
+                        rid=int(run_id),
+                    )
+                )
+        except Exception:
+            pass
 
         # cancellation check between items
         if _is_cancelled():
