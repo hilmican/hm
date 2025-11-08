@@ -54,7 +54,7 @@
           <tbody>
             {% for m in messages %}
               <tr>
-                <td class="muted">{{ m.timestamp_ms }}</td>
+                <td class="muted">{{ m.ts or '-' }}</td>
                 <td class="muted">{{ m.direction }}</td>
                 <td>{{ m.text or '' }}</td>
               </tr>

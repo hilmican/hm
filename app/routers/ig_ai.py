@@ -420,8 +420,17 @@ def run_result_detail(request: Request, run_id: int, convo_id: str, limit: int =
         messages: list[dict] = []
         for m in msgs:
             try:
+                ts_ms = getattr(m, "timestamp_ms", m[0])
+                ts_h = None
+                try:
+                    if ts_ms and int(ts_ms) > 0:
+                        from datetime import datetime as _dt
+                        ts_h = _dt.utcfromtimestamp(int(ts_ms) / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    ts_h = None
                 messages.append({
-                    "timestamp_ms": getattr(m, "timestamp_ms", m[0]),
+                    "timestamp_ms": ts_ms,
+                    "ts": ts_h,
                     "direction": getattr(m, "direction", m[1]),
                     "text": getattr(m, "text", m[2]),
                 })
