@@ -441,33 +441,69 @@ async def link_suggest_apply(request: Request):
 
 @router.get("/unlinked")
 def unlinked_purchases(request: Request, q: str | None = None, limit: int = 200):
-    """List conversations where a purchase was detected but not linked to an order."""
+    """List conversations where a purchase was detected but not linked to an order.
+
+    Uses ai_conversations (vendor-neutral watermark/state) and orders by latest message timestamp.
+    """
     n = int(max(1, min(limit or 200, 1000)))
-    where = ["(ai_status = 'ambiguous' OR (ai_status IS NULL AND linked_order_id IS NULL))", "linked_order_id IS NULL"]
+    where = ["(ac.linked_order_id IS NULL)", "(ac.ai_status = 'ambiguous' OR ac.ai_status IS NULL)"]
     params: dict[str, object] = {}
     if q:
-        # Search in contact_name, contact_phone or ai_json
-        where.append("(LOWER(COALESCE(contact_name,'')) LIKE :qq OR COALESCE(contact_phone,'') LIKE :qp OR LOWER(COALESCE(ai_json,'')) LIKE :qa)")
+        # Search in contact fields (when present) or AI JSON
+        where.append("(LOWER(COALESCE(c.contact_name,'')) LIKE :qq OR COALESCE(c.contact_phone,'') LIKE :qp OR LOWER(COALESCE(ac.ai_json,'')) LIKE :qa)")
         qs = f"%{q.lower()}%"
         params.update({"qq": qs, "qa": qs, "qp": f"%{q}%"} )
     sql = (
-        "SELECT convo_id, contact_name, contact_phone, contact_address, ai_status, ai_json, linked_order_id, last_message_at "
-        "FROM conversations WHERE " + " AND ".join(where) + " ORDER BY last_message_at DESC, convo_id DESC"
+        "SELECT ac.convo_id, c.contact_name, c.contact_phone, c.contact_address, "
+        "       ac.ai_status, ac.ai_json, ac.linked_order_id, "
+        "       MAX(COALESCE(m.timestamp_ms,0)) AS last_ts "
+        "FROM ai_conversations ac "
+        "LEFT JOIN conversations c ON c.convo_id = ac.convo_id "
+        "LEFT JOIN message m ON m.conversation_id = ac.convo_id "
+        "WHERE " + " AND ".join(where) + " "
+        "GROUP BY ac.convo_id, c.contact_name, c.contact_phone, c.contact_address, ac.ai_status, ac.ai_json, ac.linked_order_id "
+        "ORDER BY last_ts DESC, ac.convo_id DESC "
+        "LIMIT :lim"
     )
+    params["lim"] = int(n)
     with get_session() as session:
         rows = session.exec(text(sql).params(**params)).all()
         items = []
-        for r in rows[:n]:
+        for r in rows:
             try:
+                convo_id = getattr(r, "convo_id", r[0])
+                contact_name = getattr(r, "contact_name", None if len(r) < 2 else r[1])
+                contact_phone = getattr(r, "contact_phone", None if len(r) < 3 else r[2])
+                contact_address = getattr(r, "contact_address", None if len(r) < 4 else r[3])
+                ai_status = getattr(r, "ai_status", None if len(r) < 5 else r[4])
+                ai_json = getattr(r, "ai_json", None if len(r) < 6 else r[5])
+                last_ts = getattr(r, "last_ts", None if len(r) < 8 else r[7])
+                # Fallback contact info from AI JSON if conversations row is missing/empty
+                if (not contact_name or not contact_phone or not contact_address) and ai_json:
+                    try:
+                        data = __import__("json").loads(ai_json)
+                        if isinstance(data, dict):
+                            contact_name = contact_name or data.get("buyer_name")
+                            contact_phone = contact_phone or data.get("phone")
+                            contact_address = contact_address or data.get("address")
+                    except Exception:
+                        pass
+                # Convert last_ts ms to ISO string
+                last_dt = None
+                try:
+                    if last_ts and int(last_ts) > 0:
+                        last_dt = __import__("datetime").datetime.utcfromtimestamp(int(last_ts) / 1000).isoformat()
+                except Exception:
+                    last_dt = None
                 items.append({
-                    "convo_id": getattr(r, "convo_id", r[0]),
-                    "contact_name": getattr(r, "contact_name", r[1]),
-                    "contact_phone": getattr(r, "contact_phone", r[2]),
-                    "contact_address": getattr(r, "contact_address", r[3]),
-                    "ai_status": getattr(r, "ai_status", r[4]),
-                    "ai_json": getattr(r, "ai_json", r[5]),
-                    "linked_order_id": getattr(r, "linked_order_id", r[6]),
-                    "last_message_at": getattr(r, "last_message_at", r[7]) if len(r) > 7 else None,
+                    "convo_id": convo_id,
+                    "contact_name": contact_name,
+                    "contact_phone": contact_phone,
+                    "contact_address": contact_address,
+                    "ai_status": ai_status,
+                    "ai_json": ai_json,
+                    "linked_order_id": None,
+                    "last_message_at": last_dt,
                 })
             except Exception:
                 continue
@@ -530,6 +566,11 @@ def bind_conversation(body: dict):
             session.exec(text("UPDATE conversations SET linked_order_id=:oid WHERE convo_id=:cid").params(oid=oid, cid=str(convo_id)))
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"link_failed: {e}")
+        # Reflect link in ai_conversations as well
+        try:
+            session.exec(text("UPDATE ai_conversations SET linked_order_id=:oid WHERE convo_id=:cid").params(oid=oid, cid=str(convo_id)))
+        except Exception:
+            pass
         try:
             if not row.ig_conversation_id:
                 row.ig_conversation_id = str(convo_id)
