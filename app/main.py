@@ -49,6 +49,14 @@ def create_app() -> FastAPI:
 			print(f"[i18n] loaded languages: {', '.join(app.state.i18n.available_languages())}")
 		except Exception:
 			app.state.i18n = _i18n.I18n()
+		# Ensure Jinja globals are registered (idempotent)
+		try:
+			tmpl = getattr(app.state, "templates", None)
+			if tmpl and getattr(tmpl, "env", None):
+				tmpl.env.globals["t"] = _i18n.t
+				tmpl.env.globals["current_lang"] = _i18n.current_lang
+		except Exception:
+			pass
 		# Log DB backend once for sanity
 		try:
 			_backend = getattr(_db_engine.url, "get_backend_name", lambda: "")()
