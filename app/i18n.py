@@ -61,9 +61,22 @@ class I18n:
 
 
 def current_lang(request: Request, default: str = "tr") -> str:
-	lang = getattr(request.state, "lang", None)
-	if isinstance(lang, str) and lang:
-		return lang
+	# Prefer session language (set via /i18n/set or user preference)
+	try:
+		s = getattr(request, "session", None)
+		if isinstance(s, dict):
+			lang = s.get("lang")
+			if isinstance(lang, str) and lang:
+				return lang
+	except Exception:
+		pass
+	# Fallback to request.state.lang (may be set by middleware)
+	try:
+		lang = getattr(request.state, "lang", None)
+		if isinstance(lang, str) and lang:
+			return lang
+	except Exception:
+		pass
 	# last-resort
 	return default
 
