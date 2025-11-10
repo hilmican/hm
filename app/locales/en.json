@@ -11,6 +11,7 @@
     "orders": "Orders",
     "payments": "Payments",
     "instagram": "Instagram",
+    "inbox": "Inbox",
     "ai_processing": "AI Processing",
     "unlinked_purchases": "Unlinked Purchases",
     "link_conversation": "Link Conversation",
@@ -46,6 +47,16 @@
   "lang": {
     "turkish": "Turkish",
     "english": "English"
+  },
+  "dashboard": {
+    "title": "Admin Panel",
+    "heading": "Cargo Management Panel",
+    "total_sales": "Total Sales",
+    "net_collected": "Collected (Net)",
+    "to_collect": "To Collect",
+    "total_fees": "Total Fees",
+    "order_status_distribution": "Order Status Distribution",
+    "low_stock_best": "Top Sellers - Low Stock (<=5)"
   },
   "login": {
     "title": "Login",

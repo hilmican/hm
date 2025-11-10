@@ -11,6 +11,7 @@
     "orders": "Siparişler",
     "payments": "Ödemeler",
     "instagram": "Instagram",
+    "inbox": "Gelen Kutusu",
     "ai_processing": "AI İşleme",
     "unlinked_purchases": "Bağlanmamış Satın Alımlar",
     "link_conversation": "Konuşma Bağlama",
@@ -46,6 +47,16 @@
   "lang": {
     "turkish": "Türkçe",
     "english": "English"
+  },
+  "dashboard": {
+    "title": "Yönetim Paneli",
+    "heading": "Kargo Yönetim Paneli",
+    "total_sales": "Toplam Satış",
+    "net_collected": "Toplanan (Net)",
+    "to_collect": "Alınacak",
+    "total_fees": "Toplam Kesintiler",
+    "order_status_distribution": "Sipariş Durum Dağılımı",
+    "low_stock_best": "En Çok Satan - Düşük Stok (<=5)"
   },
   "login": {
     "title": "Giriş",
