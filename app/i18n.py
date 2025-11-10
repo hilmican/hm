@@ -69,11 +69,8 @@ def current_lang(request: Request, default: str = "tr") -> str:
 
 
 def t(request: Request, key: str, **kwargs: Any) -> str:
-	i18n: I18n | None = getattr(request.app.state, "i18n", None)
+	i18n = _ensure_i18n_loaded(request)
 	lang = current_lang(request, default=(i18n.default_lang if i18n else "tr"))
-	if i18n is None:
-		# no manager yet; return key
-		return key
 	return i18n.translate(lang, key, **kwargs)
 
 
@@ -82,5 +79,54 @@ class _SafeDict(dict):
 
 	def __missing__(self, key: str) -> str:
 		return "{" + key + "}"
+
+
+def _ensure_i18n_loaded(request: Request) -> I18n:
+	"""Lazy loader to guarantee an I18n instance is available at render time.
+	Attempts to locate catalogs relative to the package and common working dirs.
+	"""
+	try:
+		existing = getattr(request.app.state, "i18n", None)
+		# Use an already-loaded manager when it has catalogs
+		if isinstance(existing, I18n) and (existing.catalogs or {}):
+			return existing
+	except Exception:
+		pass
+	# Try to load catalogs now (best-effort)
+	try:
+		import os as _os
+		from pathlib import Path as _Path
+		default_lang = _os.getenv("DEFAULT_LANG", "tr")
+		candidates = [
+			_Path(__file__).resolve().parent / "locales",
+			_Path.cwd() / "app" / "locales",
+			_Path.cwd() / "locales",
+			_Path("app/locales"),
+		]
+		catalog_dir = None
+		for c in candidates:
+			try:
+				if c.exists() and any(c.glob("*.json")):
+					catalog_dir = c
+					break
+			except Exception:
+				continue
+		if catalog_dir is None:
+			catalog_dir = _Path(__file__).resolve().parent / "locales"
+		mgr = I18n.load_from_dir(str(catalog_dir), default_lang=default_lang)
+		try:
+			request.app.state.i18n = mgr
+		except Exception:
+			# ignore inability to set; still return the manager
+			pass
+		return mgr
+	except Exception:
+		# Fallback empty manager; returns keys to surface missing translations
+		mgr = I18n()
+		try:
+			request.app.state.i18n = mgr
+		except Exception:
+			pass
+		return mgr
 
 
