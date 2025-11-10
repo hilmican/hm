@@ -2,7 +2,7 @@
 <html>
 	<head>
 		<meta charset="utf-8" />
-		<title>Yönetim Paneli</title>
+		<title>{{ t(request, 'dashboard.title') }}</title>
 		<style>
 			body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
 			h1 { margin-bottom: 12px; }
@@ -24,43 +24,43 @@
 	</head>
 	<body>
 		{% include "_nav.html" %}
-		<h1>Kargo Yönetim Paneli</h1>
+		<h1>{{ t(request, 'dashboard.heading') }}</h1>
 		<div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 18px 0;">
 			<div class="card" style="padding:8px 12px;">
-				<strong>Toplam Satış:</strong> {{ '%.2f'|format(total_sales or 0) }}
+				<strong>{{ t(request, 'dashboard.total_sales') }}:</strong> {{ '%.2f'|format(total_sales or 0) }}
 			</div>
 			<div class="card" style="padding:8px 12px;">
-				<strong>Toplanan (Net):</strong> {{ '%.2f'|format(total_collected or 0) }}
+				<strong>{{ t(request, 'dashboard.net_collected') }}:</strong> {{ '%.2f'|format(total_collected or 0) }}
 			</div>
 			<div class="card" style="padding:8px 12px;">
-				<strong>Alınacak:</strong> {{ '%.2f'|format(total_to_collect or 0) }}
+				<strong>{{ t(request, 'dashboard.to_collect') }}:</strong> {{ '%.2f'|format(total_to_collect or 0) }}
 			</div>
 			<div class="card" style="padding:8px 12px;">
-				<strong>Toplam Kesintiler:</strong> {{ '%.2f'|format(total_fees or 0) }}
+				<strong>{{ t(request, 'dashboard.total_fees') }}:</strong> {{ '%.2f'|format(total_fees or 0) }}
 			</div>
 		</div>
 		<div class="toolbar">
 			<form id="uploadForm" method="post" action="/import/upload" enctype="multipart/form-data" style="display:inline-block;margin-left:12px;">
 				<select name="source" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;">
-					<option value="bizim">bizim</option>
-					<option value="kargo">kargo</option>
-					<option value="returns">iade/değişim</option>
+					<option value="bizim">{{ t(request, 'sources.bizim') }}</option>
+					<option value="kargo">{{ t(request, 'sources.kargo') }}</option>
+					<option value="returns">{{ t(request, 'sources.returns') }}</option>
 				</select>
 				<input type="file" name="files" multiple accept=".xlsx" required style="margin-left:6px" />
-				<button type="submit" style="margin-left:6px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">Yükle</button>
+				<button type="submit" style="margin-left:6px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">{{ t(request, 'dashboard.upload') }}</button>
 			</form>
 		</div>
 
 		<div id="uploadResult" class="caption"></div>
 		<div class="grid">
 			<div class="card">
-				<h2>Sipariş Durum Dağılımı</h2>
+				<h2>{{ t(request, 'dashboard.order_status_distribution') }}</h2>
 				<canvas id="statusPie" width="400" height="260" style="display:block;margin:8px auto;"></canvas>
 				<div id="statusLegend" class="caption" style="padding:8px 16px;"></div>
 			</div>
 
 			<div class="card">
-				<h2>En Çok Satan - Düşük Stok (<=5)</h2>
+				<h2>{{ t(request, 'dashboard.low_stock_best') }}</h2>
 				<table>
 					<thead>
 						<tr><th>ID</th><th>SKU</th><th>Ürün Adı</th><th>Mevcut Stok</th><th>Satış (Toplam)</th></tr>
@@ -84,25 +84,42 @@
 		const form = document.getElementById('uploadForm');
 		const result = document.getElementById('uploadResult');
 		const logoutBtn = document.getElementById('logoutBtn');
+		const labels = {
+			uploading: "{{ t(request, 'dashboard.uploading') }}",
+			upload_failed: "{{ t(request, 'dashboard.upload_failed') }}",
+			uploaded_files_count_label: "{{ t(request, 'dashboard.uploaded_files_count') }}",
+			confirm_import_all: "{{ t(request, 'dashboard.confirm_import_all') }}",
+			unmatched_found_prompt: "{{ t(request, 'dashboard.unmatched_found_prompt') }}",
+			import_failed_for: "{{ t(request, 'dashboard.import_failed_for') }}"
+		};
+		const STATUS_LABELS = {
+			"tamamlandi": "{{ t(request, 'status.tamamlandi') }}",
+			"dagitimda": "{{ t(request, 'status.dagitimda') }}",
+			"gecikmede": "{{ t(request, 'status.gecikmede') }}",
+			"sorunlu": "{{ t(request, 'status.sorunlu') }}",
+			"refunded": "{{ t(request, 'status.refunded') }}",
+			"switched": "{{ t(request, 'status.switched') }}",
+			"stitched": "{{ t(request, 'status.stitched') }}",
+			"unknown": "{{ t(request, 'status.unknown') }}"
+		};
 		if (logoutBtn) {
 			logoutBtn.addEventListener('click', async () => {
 				try {
 					await fetch('/auth/logout', { method: 'POST' });
 					location.href = '/auth/login';
-				} catch (e) { alert('Çıkış hatası'); }
+				} catch (e) { /* ignore here; navbar handles messaging */ }
 			});
 		}
 		if (form) {
 			form.addEventListener('submit', async (e) => {
 				e.preventDefault();
 				const data = new FormData(form);
-				result.textContent = 'Yükleniyor...';
+				result.textContent = labels.uploading;
 				try {
 					const res = await fetch('/import/upload', { method: 'POST', body: data });
-					if (!res.ok) throw new Error('Yükleme başarısız');
+					if (!res.ok) throw new Error(labels.upload_failed);
 					const json = await res.json();
-					console.log('Yüklenen dosyalar (önizleme)', json.files);
-					result.textContent = `Yüklenen dosya sayısı: ${json.files.length}`;
+					result.textContent = `${labels.uploaded_files_count_label}: ${json.files.length}`;
 					// For 'returns', redirect to interactive review for the first file
 					if (json.source === 'returns' && json.files && json.files.length){
 						const fn = encodeURIComponent(json.files[0].filename);
@@ -117,7 +134,7 @@
                             if (pm.ok) {
                                 const j = await pm.json();
 								if ((j.total_unmatched||0) > 0) {
-									if (confirm(`${j.total_unmatched} eşleşmeyen ürün bulundu. Haritalandırma ekranına gitmek ister misiniz?`)) {
+									if (confirm(labels.unmatched_found_prompt.replace('{count}', j.total_unmatched))) {
                                         const joined = fnames.map(encodeURIComponent).join(',');
                                         location.href = `/import/map?source=bizim&filename=${joined}`;
                                         return;
@@ -128,7 +145,7 @@
                     }
 
 					// Offer to commit each file sequentially (date prompt only for bizim)
-					if (confirm('Dosyalar yüklendi. Hepsini içe aktarmak ister misiniz?')) {
+					if (confirm(labels.confirm_import_all)) {
 						const totals = { created_orders:0, created_clients:0, created_items:0, created_payments:0, unmatched:0, enriched_orders:0, payments_existing:0, payments_skipped_zero:0 };
 						const runIds = [];
 						for (const f of json.files) {
@@ -137,10 +154,10 @@
 							if (json.source === 'returns') { continue; }
 						// For 'bizim', data_date will be derived from filename (first 10 chars)
 							const res2 = await fetch('/import/commit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)});
-							if (!res2.ok) { const t = await res2.text(); throw new Error(`${f.filename} için içe aktarım başarısız: ${t}`); }
+							if (!res2.ok) { const t = await res2.text(); throw new Error(`${labels.import_failed_for} ${f.filename}: ${t}`); }
 							const j2 = await res2.json();
-							console.group('İçe aktarma sonucu', f.filename);
-							console.log('Özet:', j2);
+							console.group('Import result', f.filename);
+							console.log('Summary:', j2);
 							console.groupEnd();
 							for (const k of Object.keys(totals)) { totals[k] += (j2[k] || 0); }
 							if (j2.run_id) { runIds.push(j2.run_id); }
@@ -183,17 +200,7 @@
 			});
 			const legend = document.getElementById('statusLegend');
 			if (legend) {
-				const trMap = {
-					'tamamlandi': 'Tamamlandı',
-					'dagitimda': 'Dağıtımda (≤7g)',
-					'gecikmede': 'Gecikmede (8‑17g)',
-					'sorunlu': 'Sorunlu (>17g)',
-					'refunded': 'İade',
-					'switched': 'Değişim',
-					'stitched': 'Birleştirilmiş',
-					'unknown': 'Bilinmiyor'
-				};
-				const label = (s)=> trMap[String(s||'').toLowerCase()] || (String(s||'').charAt(0).toUpperCase() + String(s||'').slice(1));
+				const label = (s)=> STATUS_LABELS[String(s||'').toLowerCase()] || (String(s||'').charAt(0).toUpperCase() + String(s||'').slice(1));
 				legend.innerHTML = data.map((r,i)=>`<span style="display:inline-flex;align-items:center;margin-right:12px;">
 					<span style="display:inline-block;width:10px;height:10px;background:${colors[i%colors.length]};border-radius:2px;margin-right:6px;"></span>
 					${label(r.status)}: <strong style="margin-left:4px;">${r.count}</strong>

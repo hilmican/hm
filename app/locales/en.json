@@ -56,7 +56,34 @@
     "to_collect": "To Collect",
     "total_fees": "Total Fees",
     "order_status_distribution": "Order Status Distribution",
-    "low_stock_best": "Top Sellers - Low Stock (<=5)"
+    "low_stock_best": "Top Sellers - Low Stock (<=5)",
+    "upload": "Upload",
+    "uploading": "Uploading...",
+    "upload_failed": "Upload failed",
+    "uploaded_files_count": "Uploaded file count",
+    "confirm_import_all": "Files uploaded. Import all of them now?",
+    "unmatched_found_prompt": "{count} unmatched items found. Go to mapping screen?",
+    "import_failed_for": "Import failed for",
+    "id": "ID",
+    "sku": "SKU",
+    "product_name": "Product Name",
+    "stock_on_hand": "Stock on Hand",
+    "sales_total": "Sales (Total)"
+  },
+  "status": {
+    "tamamlandi": "Completed",
+    "dagitimda": "Out for delivery (≤7d)",
+    "gecikmede": "Overdue (8‑17d)",
+    "sorunlu": "Problem (>17d)",
+    "refunded": "Refunded",
+    "switched": "Exchange",
+    "stitched": "Merged",
+    "unknown": "Unknown"
+  },
+  "sources": {
+    "bizim": "bizim",
+    "kargo": "kargo",
+    "returns": "returns"
   },
   "login": {
     "title": "Login",

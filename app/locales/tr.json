@@ -56,7 +56,34 @@
     "to_collect": "Alınacak",
     "total_fees": "Toplam Kesintiler",
     "order_status_distribution": "Sipariş Durum Dağılımı",
-    "low_stock_best": "En Çok Satan - Düşük Stok (<=5)"
+    "low_stock_best": "En Çok Satan - Düşük Stok (<=5)",
+    "upload": "Yükle",
+    "uploading": "Yükleniyor...",
+    "upload_failed": "Yükleme başarısız",
+    "uploaded_files_count": "Yüklenen dosya sayısı",
+    "confirm_import_all": "Dosyalar yüklendi. Hepsini içe aktarmak ister misiniz?",
+    "unmatched_found_prompt": "{count} eşleşmeyen ürün bulundu. Haritalandırma ekranına gitmek ister misiniz?",
+    "import_failed_for": "İçe aktarım başarısız:",
+    "id": "ID",
+    "sku": "SKU",
+    "product_name": "Ürün Adı",
+    "stock_on_hand": "Mevcut Stok",
+    "sales_total": "Satış (Toplam)"
+  },
+  "status": {
+    "tamamlandi": "Tamamlandı",
+    "dagitimda": "Dağıtımda (≤7g)",
+    "gecikmede": "Gecikmede (8‑17g)",
+    "sorunlu": "Sorunlu (>17g)",
+    "refunded": "İade",
+    "switched": "Değişim",
+    "stitched": "Birleştirilmiş",
+    "unknown": "Bilinmiyor"
+  },
+  "sources": {
+    "bizim": "bizim",
+    "kargo": "kargo",
+    "returns": "iade/değişim"
   },
   "login": {
     "title": "Giriş",
