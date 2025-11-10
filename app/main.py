@@ -45,7 +45,9 @@ def create_app() -> FastAPI:
 		init_db()
 		# Load i18n catalogs
 		try:
-			app.state.i18n = _i18n.I18n.load_from_dir("app/locales", default_lang=_os.getenv("DEFAULT_LANG", "tr"))
+			from pathlib import Path as _Path
+			_catalog_dir = str((_Path(__file__).resolve().parent / "locales"))
+			app.state.i18n = _i18n.I18n.load_from_dir(_catalog_dir, default_lang=_os.getenv("DEFAULT_LANG", "tr"))
 			print(f"[i18n] loaded languages: {', '.join(app.state.i18n.available_languages())}")
 		except Exception:
 			app.state.i18n = _i18n.I18n()
