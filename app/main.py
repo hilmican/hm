@@ -35,6 +35,31 @@ def create_app() -> FastAPI:
 		templates.env.globals["current_lang"] = _i18n.current_lang
 	except Exception:
 		pass
+	# Eager i18n init (fallback in case startup hook is skipped/errored)
+	try:
+		import os as _os_init
+		from pathlib import Path as _Path_init
+		_default_lang = _os_init.getenv("DEFAULT_LANG", "tr")
+		_candidates = [
+			_Path_init(__file__).resolve().parent / "locales",
+			_Path_init.cwd() / "app" / "locales",
+			_Path_init.cwd() / "locales",
+			_Path_init("app/locales"),
+		]
+		_catalog_dir = None
+		for c in _candidates:
+			try:
+				if c.exists() and any(c.glob("*.json")):
+					_catalog_dir = c
+					break
+			except Exception:
+				continue
+		if _catalog_dir is None:
+			_catalog_dir = _Path_init(__file__).resolve().parent / "locales"
+		app.state.i18n = _i18n.I18n.load_from_dir(str(_catalog_dir), default_lang=_default_lang)
+	except Exception:
+		# keep a minimal manager to avoid template errors
+		app.state.i18n = _i18n.I18n()
 
 	# simple session middleware for cookie-based auth (HTTPOnly cookies)
 	import os as _os
