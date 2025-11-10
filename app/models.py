@@ -48,6 +48,7 @@ class Order(SQLModel, table=True):
     total_amount: Optional[float] = None
     total_cost: Optional[float] = Field(default=None, index=True)
     shipping_fee: Optional[float] = Field(default=None, index=True)
+    paid_by_bank_transfer: Optional[bool] = Field(default=False, index=True, description="IBAN ödeme: True ise kargo ücreti sadece taban (89) olarak alınır")
     shipment_date: Optional[dt.date] = Field(default=None, index=True)
     data_date: Optional[dt.date] = Field(default=None, index=True)
     # date when return or switch (iade/degisim) happened

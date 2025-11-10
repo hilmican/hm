@@ -380,6 +380,16 @@ def init_db() -> None:
                                 conn.exec_driver_sql("CREATE INDEX idx_order_ig_conversation_id ON `order`(ig_conversation_id)")
                             except Exception:
                                 pass
+                            # Ensure paid_by_bank_transfer exists (MySQL bool -> TINYINT)
+                            if 'paid_by_bank_transfer' not in have_cols:
+                                try:
+                                    conn.exec_driver_sql("ALTER TABLE `order` ADD COLUMN paid_by_bank_transfer TINYINT(1) NULL DEFAULT 0")
+                                except Exception:
+                                    pass
+                                try:
+                                    conn.exec_driver_sql("CREATE INDEX idx_order_paid_by_bank_transfer ON `order`(paid_by_bank_transfer)")
+                                except Exception:
+                                    pass
                         except Exception:
                             pass
                         # Lightweight table for AI processing state keyed by message.conversation_id
@@ -567,6 +577,14 @@ def init_db() -> None:
                 # Optional helpful index for filtering
                 try:
                     conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_order_return_or_switch_date ON "order"(return_or_switch_date)')
+                except Exception:
+                    pass
+
+                # Order.paid_by_bank_transfer (INTEGER as boolean)
+                if not column_exists("order", "paid_by_bank_transfer"):
+                    conn.exec_driver_sql('ALTER TABLE "order" ADD COLUMN paid_by_bank_transfer INTEGER DEFAULT 0')
+                try:
+                    conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_order_paid_by_bank_transfer ON "order"(paid_by_bank_transfer)')
                 except Exception:
                     pass
 

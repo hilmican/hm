@@ -261,7 +261,10 @@ def recalc_financials():
         for o in rows:
             # shipping from toplam; zero totals => base only
             amt = float(o.total_amount or 0.0)
-            o.shipping_fee = compute_shipping_fee(amt)
+            if bool(o.paid_by_bank_transfer):
+                o.shipping_fee = 89.0
+            else:
+                o.shipping_fee = compute_shipping_fee(amt)
             # cost from order items * item.cost (zero if refunded/switched)
             if (o.status or "") in ("refunded", "switched", "stitched"):
                 o.total_cost = 0.0
@@ -621,6 +624,7 @@ async def edit_order_apply(order_id: int, request: Request):
     new_status = _get("status") or None
     new_notes = _get("notes") or None
     new_source = _get("source") or None
+    new_paid_by_bank_transfer = (_get("paid_by_bank_transfer").lower() in ("1","true","on","yes"))
 
     with get_session() as session:
         o = session.exec(select(Order).where(Order.id == order_id)).first()
@@ -822,6 +826,11 @@ async def edit_order_apply(order_id: int, request: Request):
         if new_notes != (o.notes or None):
             changes["notes"] = [o.notes, new_notes]
             o.notes = new_notes
+        # paid_by_bank_transfer flag
+        prev_iban = bool(o.paid_by_bank_transfer or False)
+        if new_paid_by_bank_transfer != prev_iban:
+            changes["paid_by_bank_transfer"] = [prev_iban, new_paid_by_bank_transfer]
+            o.paid_by_bank_transfer = new_paid_by_bank_transfer
 
         prev_status = o.status or None
         if new_status != prev_status:
@@ -859,6 +868,17 @@ async def edit_order_apply(order_id: int, request: Request):
         try:
             editor = request.session.get("uid") if hasattr(request, "session") else None
             session.add(OrderEditLog(order_id=order_id, editor_user_id=editor, action="edit", changes_json=str(changes)))
+        except Exception:
+            pass
+
+        # Update shipping fee based on IBAN flag and current total
+        try:
+            if bool(o.paid_by_bank_transfer):
+                # IBAN: only base fee (pre-tax)
+                o.shipping_fee = 89.0
+            else:
+                amt = float(o.total_amount or 0.0)
+                o.shipping_fee = compute_shipping_fee(amt)
         except Exception:
             pass
 
