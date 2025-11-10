@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Gizlilik Politikası - Hİ-MAN</title>
+    <title>{{ t(request, 'legal.privacy.title') }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 32px; line-height: 1.6; }
@@ -12,56 +12,44 @@
     <meta name="robots" content="noindex" />
 </head>
 <body>
-    <h1>Gizlilik Politikası</h1>
-    <p>Son güncelleme: <strong>2025-10-21</strong></p>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <a href="/i18n/switch?lang=tr&next={{ request.url.path }}">{{ t(request, 'lang.turkish') }}</a>
+      <span>·</span>
+      <a href="/i18n/switch?lang=en&next={{ request.url.path }}">{{ t(request, 'lang.english') }}</a>
+    </div>
+    <h1>{{ t(request, 'legal.privacy.heading') }}</h1>
+    <p>{{ t(request, 'legal.updated') }} <strong>2025-10-21</strong></p>
 
-    <p>
-        Bu Gizlilik Politikası, Hİ-MAN (“biz”) olarak <em>@himanistanbul</em> hesabına bağlı Instagram Business entegrasyonu ve
-        dahili iş araçlarımızla etkileşime geçtiğinizde bilgileri nasıl topladığımızı ve kullandığımızı açıklar.
-        Uygulama yalnızca kendi iş mesajlarımızı ve içeriklerimizi yönetmek için kullanılır; halka açık bir hizmet değildir.
-    </p>
+    <p>{{ t(request, 'legal.privacy.intro') | safe }}</p>
 
-    <h2>İşlediğimiz Bilgiler</h2>
+    <h2>{{ t(request, 'legal.privacy.section_processed') }}</h2>
     <ul>
-        <li><em>@himanistanbul</em> ile gönderilen/alınan Instagram Direkt Mesajları (mesaj metni ve gönderen ID, zaman damgası gibi metaveriler).</li>
-        <li>İletim ve sorun gidermeye yönelik operasyonel loglar.</li>
+        <li>{{ t(request, 'legal.privacy.item_messages') | safe }}</li>
+        <li>{{ t(request, 'legal.privacy.item_logs') }}</li>
     </ul>
 
-    <h2>Bilgileri Nasıl Kullanıyoruz</h2>
+    <h2>{{ t(request, 'legal.privacy.section_usage') }}</h2>
     <ul>
-        <li>Müşteri destek ve sipariş iletişimleri için mesajları almak, saklamak ve yönetmek.</li>
-        <li>Dahili süreçlerimizi iyileştirmek, hizmet güvenilirliğini ve güvenliğini sağlamak.</li>
+        <li>{{ t(request, 'legal.privacy.use_support') }}</li>
+        <li>{{ t(request, 'legal.privacy.use_improve') }}</li>
     </ul>
 
-    <h2>Veri Paylaşımı</h2>
-    <p>
-        Verileri pazarlama amacıyla üçüncü taraflarla satmıyor veya paylaşmıyoruz. Hizmeti işletmek için
-        altyapı sağlayıcılarımız (barındırma, depolama) tarafından işlenebilir.
-    </p>
+    <h2>{{ t(request, 'legal.privacy.section_sharing') }}</h2>
+    <p>{{ t(request, 'legal.privacy.sharing_text') }}</p>
 
-    <h2>Veri Saklama</h2>
-    <p>
-        Mesaj verileri, iş operasyonları ve kayıt tutma için gerekli olduğu sürece saklanır; sonrasında silinir veya anonimleştirilir.
-    </p>
+    <h2>{{ t(request, 'legal.privacy.section_retention') }}</h2>
+    <p>{{ t(request, 'legal.privacy.retention_text') }}</p>
 
-    <h2>Güvenlik</h2>
-    <p>
-        Verilere erişim yetkili personelle sınırlıdır. İletim HTTPS ile yapılır; webhook olayları HMAC imzalarıyla doğrulanır.
-        Veriler erişim kontrollü korumalı veritabanlarında saklanır.
-    </p>
+    <h2>{{ t(request, 'legal.privacy.section_security') }}</h2>
+    <p>{{ t(request, 'legal.privacy.security_text') }}</p>
 
-    <h2>Seçenekleriniz</h2>
-    <p>
-        Instagram kullanıcıları kendi taraflarında mesajları silebilir veya kontrolümüzde olan mesajların silinmesi için bize başvurabilir.
-        Talimatlar için Veri Silme bölümüne bakın.
-    </p>
+    <h2>{{ t(request, 'legal.privacy.section_choices') }}</h2>
+    <p>{{ t(request, 'legal.privacy.choices_text') }}</p>
 
-    <h2>İletişim</h2>
-    <p>
-        Gizlilikle ilgili sorular veya talepler için: <a href="mailto:info@himan.com.tr">info@himan.com.tr</a>
-    </p>
+    <h2>{{ t(request, 'legal.privacy.section_contact') }}</h2>
+    <p>{{ t(request, 'legal.privacy.contact_text') | safe }}</p>
 
-    <p><a href="/legal/data-deletion">Veri Silme</a> · <a href="/legal/terms">Kullanım Koşulları</a></p>
+    <p><a href="/legal/data-deletion">{{ t(request, 'legal.links.data_deletion') }}</a> · <a href="/legal/terms">{{ t(request, 'legal.links.terms') }}</a></p>
 </body>
 </html>
 

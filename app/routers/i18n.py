@@ -50,3 +50,25 @@ async def set_language(request: Request, lang: Optional[str] = Form(None), next:
 	return JSONResponse({"status": "ok"})
 
 
+@router.get("/switch")
+def switch_language(request: Request, lang: Optional[str] = None, next: Optional[str] = None):
+	"""Convenience GET endpoint for public pages to switch language via link."""
+	lang = (lang or "").strip().lower()
+	available = getattr(getattr(request.app.state, "i18n", None), "catalogs", {}) or {}
+	if lang in available:
+		request.session["lang"] = lang
+		# persist to user if logged in (best-effort)
+		try:
+			uid = request.session.get("uid")
+			if uid:
+				with get_session() as session:
+					u = session.get(User, int(uid))
+					if u:
+						u.preferred_language = lang
+						session.add(u)
+		except Exception:
+			pass
+	dest = next or request.headers.get("referer") or "/dashboard"
+	return RedirectResponse(dest, status_code=303)
+
+

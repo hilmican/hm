@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Veri Silme Talimatları - Hİ-MAN</title>
+    <title>{{ t(request, 'legal.data_deletion.title') }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 32px; line-height: 1.6; }
@@ -12,21 +12,17 @@
     <meta name="robots" content="noindex" />
 </head>
 <body>
-    <h1>Veri Silme Talimatları</h1>
-    <p>
-        <em>@himanistanbul</em> ile mesajlaşmış bir Instagram kullanıcısıysanız ve mesaj verilerinizin sistemlerimizden
-        silinmesini istiyorsanız, konu satırında “Instagram Veri Silme Talebi” ifadesiyle
-        <a href="mailto:privacy@himan.com.tr">privacy@himan.com.tr</a> adresine e‑posta gönderin.
-        Instagram kullanıcı adınızı ve yaklaşık görüşme tarihini ekleyin. Mülkiyeti doğruladıktan sonra,
-        yasal saklama gerekliliklerine tabi olarak kontrolümüzdeki verileri sileceğiz.
-    </p>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <a href="/i18n/switch?lang=tr&next={{ request.url.path }}">{{ t(request, 'lang.turkish') }}</a>
+      <span>·</span>
+      <a href="/i18n/switch?lang=en&next={{ request.url.path }}">{{ t(request, 'lang.english') }}</a>
+    </div>
+    <h1>{{ t(request, 'legal.data_deletion.heading') }}</h1>
+    <p>{{ t(request, 'legal.data_deletion.instructions_html') | safe }}</p>
 
-    <p>
-        Mesajları Instagram içinde doğrudan da silebilirsiniz; ancak iş kayıtları için gereken sunucu tarafı kopyalar,
-        yukarıdaki talep süreci tamamlanana kadar saklanabilir.
-    </p>
+    <p>{{ t(request, 'legal.data_deletion.direct_delete') }}</p>
 
-    <p><a href="/legal/privacy">Gizlilik Politikası</a> · <a href="/legal/terms">Kullanım Koşulları</a></p>
+    <p><a href="/legal/privacy">{{ t(request, 'legal.links.privacy') }}</a> · <a href="/legal/terms">{{ t(request, 'legal.links.terms') }}</a></p>
 </body>
 </html>
 

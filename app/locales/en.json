@@ -96,6 +96,60 @@
     "select_title": "Select your language",
     "continue": "Continue",
     "or": "or"
+  },
+  "legal": {
+    "updated": "Last updated:",
+    "links": {
+      "privacy": "Privacy Policy",
+      "terms": "Terms of Use",
+      "data_deletion": "Data Deletion"
+    },
+    "privacy": {
+      "title": "Privacy Policy - HI-MAN",
+      "heading": "Privacy Policy",
+      "intro": "This Privacy Policy explains how HI-MAN (\"we\") uses information when you interact with our Instagram Business account <em>@himanistanbul</em> and our internal tools. The application is used only to manage our own business messages and content; it is not a public service.",
+      "section_processed": "Information We Process",
+      "item_messages": "Instagram Direct Messages sent to/received from <em>@himanistanbul</em> (message content and metadata such as sender ID and timestamps).",
+      "item_logs": "Operational logs for delivery and troubleshooting.",
+      "section_usage": "How We Use Information",
+      "use_support": "Receive, store and manage messages for customer support and order communications.",
+      "use_improve": "Improve internal processes and ensure service reliability and security.",
+      "section_sharing": "Data Sharing",
+      "sharing_text": "We do not sell or share data with third parties for marketing. Our infrastructure providers (hosting, storage) may process data solely to operate the service.",
+      "section_retention": "Data Retention",
+      "retention_text": "Message data is retained as long as necessary for operations and record-keeping, then deleted or anonymized.",
+      "section_security": "Security",
+      "security_text": "Access to data is limited to authorized personnel. Transport uses HTTPS; webhook events are verified with HMAC signatures. Data is stored in access-controlled databases.",
+      "section_choices": "Your Choices",
+      "choices_text": "Instagram users may delete messages on their side or request deletion of data under our control. See the Data Deletion section for instructions.",
+      "section_contact": "Contact",
+      "contact_text": "For privacy questions or requests: <a href=\"mailto:info@himan.com.tr\">info@himan.com.tr</a>"
+    },
+    "terms": {
+      "title": "Terms of Use - HI-MAN",
+      "heading": "Terms of Use",
+      "intro": "These Terms govern internal use of HI-MAN tools, including the Instagram Business integration for the <em>@himanistanbul</em> account. The application is an internal tool and not a public service.",
+      "section_acceptable": "Acceptable Use",
+      "accept_item1": "Use is limited to legitimate business purposes by authorized HI-MAN personnel.",
+      "accept_item2": "Users must comply with applicable laws and Meta/Instagram policies.",
+      "accept_item3": "Misuse, disruption, or attempts at reverse engineering are prohibited.",
+      "section_data": "Data",
+      "data_text": "We process Instagram messages and related metadata to support customers and operations. See our <a href=\"/legal/privacy\">Privacy Policy</a> for details.",
+      "section_availability": "Availability",
+      "availability_text": "We strive for high availability but do not guarantee it; outages or maintenance may occur.",
+      "section_liability": "Liability",
+      "liability_text": "To the extent permitted by law, the service is provided “as is” without warranties.",
+      "section_changes": "Changes",
+      "changes_text": "We may update these Terms. Continued internal use constitutes acceptance of the revised Terms.",
+      "section_contact": "Contact",
+      "contact_text": "Contact us at <a href=\"mailto:info@himan.com.tr\">info@himan.com.tr</a>."
+    },
+    "data_deletion": {
+      "title": "Data Deletion Instructions - HI-MAN",
+      "heading": "Data Deletion Instructions",
+      "instructions_html": "If you have exchanged messages with <em>@himanistanbul</em> on Instagram and want your message data removed from our systems, email <a href=\"mailto:privacy@himan.com.tr\">privacy@himan.com.tr</a> with the subject “Instagram Data Deletion Request”. Include your Instagram username and approximate conversation date. After verifying ownership, we will delete data under our control subject to legal retention requirements.",
+      "direct_delete": "You can delete messages directly in Instagram; however, server-side copies required for business records may be retained until the above request process is completed."
+    }
   }
 }
 

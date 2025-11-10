@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Kullanım Koşulları - Hİ-MAN</title>
+    <title>{{ t(request, 'legal.terms.title') }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 32px; line-height: 1.6; }
@@ -12,40 +12,39 @@
     <meta name="robots" content="noindex" />
 </head>
 <body>
-    <h1>Kullanım Koşulları</h1>
-    <p>Son güncelleme: <strong>2025-10-21</strong></p>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <a href="/i18n/switch?lang=tr&next={{ request.url.path }}">{{ t(request, 'lang.turkish') }}</a>
+      <span>·</span>
+      <a href="/i18n/switch?lang=en&next={{ request.url.path }}">{{ t(request, 'lang.english') }}</a>
+    </div>
+    <h1>{{ t(request, 'legal.terms.heading') }}</h1>
+    <p>{{ t(request, 'legal.updated') }} <strong>2025-10-21</strong></p>
 
-    <p>
-        Bu Koşullar, <em>@himanistanbul</em> hesabı için Instagram Business entegrasyonu dahil Hİ-MAN’ın iş araçlarının
-        dahili kullanımını düzenler. Uygulama şirketimizin iç aracı olup halka açık bir hizmet değildir.
-    </p>
+    <p>{{ t(request, 'legal.terms.intro') | safe }}</p>
 
-    <h2>Kabul Edilebilir Kullanım</h2>
+    <h2>{{ t(request, 'legal.terms.section_acceptable') }}</h2>
     <ul>
-        <li>Kullanım, yetkili Hİ-MAN personeliyle meşru iş amaçlarıyla sınırlıdır.</li>
-        <li>Kullanıcılar yürürlükteki yasalara ve Meta/Instagram politikalarına uymalıdır.</li>
-        <li>Platformu kötüye kullanma, bozma veya tersine mühendislik girişimi yasaktır.</li>
+        <li>{{ t(request, 'legal.terms.accept_item1') }}</li>
+        <li>{{ t(request, 'legal.terms.accept_item2') }}</li>
+        <li>{{ t(request, 'legal.terms.accept_item3') }}</li>
     </ul>
 
-    <h2>Veri</h2>
-    <p>
-        Müşterileri ve operasyonları desteklemek için Instagram mesajlarını ve ilgili metaverileri işleriz.
-        Veri işleme <a href="/legal/privacy">Gizlilik Politikamızda</a> açıklanmıştır.
-    </p>
+    <h2>{{ t(request, 'legal.terms.section_data') }}</h2>
+    <p>{{ t(request, 'legal.terms.data_text') | safe }}</p>
 
-    <h2>Erişilebilirlik</h2>
-    <p>Yüksek erişilebilirlik için çaba gösteririz, ancak garanti vermeyiz; kesintiler veya bakım olabilir.</p>
+    <h2>{{ t(request, 'legal.terms.section_availability') }}</h2>
+    <p>{{ t(request, 'legal.terms.availability_text') }}</p>
 
-    <h2>Sorumluluk</h2>
-    <p>Yasaların izin verdiği ölçüde, hizmet “olduğu gibi” sağlanır; garanti verilmez.</p>
+    <h2>{{ t(request, 'legal.terms.section_liability') }}</h2>
+    <p>{{ t(request, 'legal.terms.liability_text') }}</p>
 
-    <h2>Değişiklikler</h2>
-    <p>Bu Koşulları güncelleyebiliriz. İç kullanımın devamı, revize Koşulların kabulü anlamına gelir.</p>
+    <h2>{{ t(request, 'legal.terms.section_changes') }}</h2>
+    <p>{{ t(request, 'legal.terms.changes_text') }}</p>
 
-    <h2>İletişim</h2>
-    <p>Bize <a href="mailto:info@himan.com.tr">info@himan.com.tr</a> adresinden ulaşabilirsiniz.</p>
+    <h2>{{ t(request, 'legal.terms.section_contact') }}</h2>
+    <p>{{ t(request, 'legal.terms.contact_text') | safe }}</p>
 
-    <p><a href="/legal/privacy">Gizlilik Politikası</a> · <a href="/legal/data-deletion">Veri Silme</a></p>
+    <p><a href="/legal/privacy">{{ t(request, 'legal.links.privacy') }}</a> · <a href="/legal/data-deletion">{{ t(request, 'legal.links.data_deletion') }}</a></p>
 </body>
 </html>
 

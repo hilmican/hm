@@ -96,6 +96,60 @@
     "select_title": "Dil seçimi",
     "continue": "Devam",
     "or": "veya"
+  },
+  "legal": {
+    "updated": "Son güncelleme:",
+    "links": {
+      "privacy": "Gizlilik Politikası",
+      "terms": "Kullanım Koşulları",
+      "data_deletion": "Veri Silme"
+    },
+    "privacy": {
+      "title": "Gizlilik Politikası - Hİ-MAN",
+      "heading": "Gizlilik Politikası",
+      "intro": "Bu Gizlilik Politikası, Hİ-MAN (\"biz\") olarak <em>@himanistanbul</em> hesabına bağlı Instagram Business entegrasyonu ve dahili iş araçlarımızla etkileşime geçtiğinizde bilgileri nasıl kullandığımızı açıklar. Uygulama yalnızca kendi iş mesajlarımızı ve içeriklerimizi yönetmek için kullanılır; halka açık bir hizmet değildir.",
+      "section_processed": "İşlediğimiz Bilgiler",
+      "item_messages": "<em>@himanistanbul</em> ile gönderilen/alınan Instagram Direkt Mesajları (mesaj metni ve gönderen ID, zaman damgası gibi metaveriler).",
+      "item_logs": "İletim ve sorun gidermeye yönelik operasyonel loglar.",
+      "section_usage": "Bilgileri Nasıl Kullanıyoruz",
+      "use_support": "Müşteri destek ve sipariş iletişimleri için mesajları almak, saklamak ve yönetmek.",
+      "use_improve": "Dahili süreçlerimizi iyileştirmek, hizmet güvenilirliğini ve güvenliğini sağlamak.",
+      "section_sharing": "Veri Paylaşımı",
+      "sharing_text": "Verileri pazarlama amacıyla üçüncü taraflarla satmıyor veya paylaşmıyoruz. Hizmeti işletmek için altyapı sağlayıcılarımız (barındırma, depolama) tarafından işlenebilir.",
+      "section_retention": "Veri Saklama",
+      "retention_text": "Mesaj verileri, iş operasyonları ve kayıt tutma için gerekli olduğu sürece saklanır; sonrasında silinir veya anonimleştirilir.",
+      "section_security": "Güvenlik",
+      "security_text": "Verilere erişim yetkili personelle sınırlıdır. İletim HTTPS ile yapılır; webhook olayları HMAC imzalarıyla doğrulanır. Veriler erişim kontrollü veritabanlarında saklanır.",
+      "section_choices": "Seçenekleriniz",
+      "choices_text": "Instagram kullanıcıları kendi taraflarında mesajları silebilir veya kontrolümüzde olan mesajların silinmesi için bize başvurabilir. Talimatlar için Veri Silme bölümüne bakın.",
+      "section_contact": "İletişim",
+      "contact_text": "Gizlilikle ilgili sorular veya talepler için: <a href=\"mailto:info@himan.com.tr\">info@himan.com.tr</a>"
+    },
+    "terms": {
+      "title": "Kullanım Koşulları - Hİ-MAN",
+      "heading": "Kullanım Koşulları",
+      "intro": "Bu Koşullar, <em>@himanistanbul</em> hesabı için Instagram Business entegrasyonu dahil Hİ-MAN’ın iş araçlarının dahili kullanımını düzenler. Uygulama şirketimizin iç aracı olup halka açık bir hizmet değildir.",
+      "section_acceptable": "Kabul Edilebilir Kullanım",
+      "accept_item1": "Kullanım, yetkili Hİ-MAN personeliyle meşru iş amaçlarıyla sınırlıdır.",
+      "accept_item2": "Kullanıcılar yürürlükteki yasalara ve Meta/Instagram politikalarına uymalıdır.",
+      "accept_item3": "Platformu kötüye kullanma, bozma veya tersine mühendislik girişimi yasaktır.",
+      "section_data": "Veri",
+      "data_text": "Müşterileri ve operasyonları desteklemek için Instagram mesajlarını ve ilgili metaverileri işleriz. Ayrıntılar için <a href=\"/legal/privacy\">Gizlilik Politikamız</a> sayfasına bakın.",
+      "section_availability": "Erişilebilirlik",
+      "availability_text": "Yüksek erişilebilirlik için çaba gösteririz, ancak garanti vermeyiz; kesintiler veya bakım olabilir.",
+      "section_liability": "Sorumluluk",
+      "liability_text": "Yasaların izin verdiği ölçüde, hizmet “olduğu gibi” sağlanır; garanti verilmez.",
+      "section_changes": "Değişiklikler",
+      "changes_text": "Bu Koşulları güncelleyebiliriz. İç kullanımın devamı, revize Koşulların kabulü anlamına gelir.",
+      "section_contact": "İletişim",
+      "contact_text": "Bize <a href=\"mailto:info@himan.com.tr\">info@himan.com.tr</a> adresinden ulaşabilirsiniz."
+    },
+    "data_deletion": {
+      "title": "Veri Silme Talimatları - Hİ-MAN",
+      "heading": "Veri Silme Talimatları",
+      "instructions_html": "<em>@himanistanbul</em> ile mesajlaşmış bir Instagram kullanıcısıysanız ve mesaj verilerinizin sistemlerimizden silinmesini istiyorsanız, konu satırında “Instagram Veri Silme Talebi” ifadesiyle <a href=\"mailto:privacy@himan.com.tr\">privacy@himan.com.tr</a> adresine e‑posta gönderin. Instagram kullanıcı adınızı ve yaklaşık görüşme tarihini ekleyin. Mülkiyeti doğruladıktan sonra, yasal saklama gerekliliklerine tabi olarak kontrolümüzdeki verileri sileceğiz.",
+      "direct_delete": "Mesajları Instagram içinde doğrudan da silebilirsiniz; ancak iş kayıtları için gereken sunucu tarafı kopyalar, yukarıdaki talep süreci tamamlanana kadar saklanabilir."
+    }
   }
 }
 
