@@ -654,23 +654,23 @@ async def send_message(conversation_id: str, body: dict):
     now_ms = int(time.time() * 1000)
     conv_id = conversation_id if conversation_id.startswith("dm:") else f"dm:{other_id}"
     with get_session() as session:
-		# Idempotency: avoid duplicate insert when the same message_id was already saved
-		if mid:
-			try:
-				exists = session.exec(select(Message).where(Message.ig_message_id == mid)).first()
-				if exists:
-					# still bump last_message_at for the conversation to reflect the send time
-					try:
-						from datetime import datetime as _dt
-						ts_iso = _dt.utcfromtimestamp(int(now_ms/1000)).strftime('%Y-%m-%d %H:%M:%S')
-						from sqlalchemy import text as _text
-						session.exec(_text("UPDATE conversations SET last_message_at=:ts WHERE convo_id=:cid").params(ts=ts_iso, cid=conv_id))
-					except Exception:
-						pass
-					return {"status": "ok", "message_id": mid}
-			except Exception:
-				# proceed with best-effort insert
-				pass
+        # Idempotency: avoid duplicate insert when the same message_id was already saved
+        if mid:
+            try:
+                exists = session.exec(select(Message).where(Message.ig_message_id == mid)).first()
+                if exists:
+                    # still bump last_message_at for the conversation to reflect the send time
+                    try:
+                        from datetime import datetime as _dt
+                        ts_iso = _dt.utcfromtimestamp(int(now_ms/1000)).strftime('%Y-%m-%d %H:%M:%S')
+                        from sqlalchemy import text as _text
+                        session.exec(_text("UPDATE conversations SET last_message_at=:ts WHERE convo_id=:cid").params(ts=ts_iso, cid=conv_id))
+                    except Exception:
+                        pass
+                    return {"status": "ok", "message_id": mid}
+            except Exception:
+                # proceed with best-effort insert
+                pass
         row = Message(
             ig_sender_id=str(entity_id),
             ig_recipient_id=str(other_id),
