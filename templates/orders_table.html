@@ -226,7 +226,9 @@
         const num = parseFloat(val);
         if(!isFinite(num)){ alert('Gecersiz tutar'); return; }
         try{
-            const res = await fetch(`/orders/${id}/update-total`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ total: num }) });
+            // Ask whether this is paid by bank transfer (IBAN)
+            const isIban = confirm('IBAN (banka havalesi) ödemesi mi? (Tamam = Evet, İptal = Hayır)');
+            const res = await fetch(`/orders/${id}/update-total`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ total: num, paid_by_bank_transfer: isIban }) });
             if(!res.ok){ const t = await res.text(); alert('Guncelleme hatasi: ' + t); return; }
             location.reload();
         }catch(e){ alert('Ag hatasi: ' + e); }

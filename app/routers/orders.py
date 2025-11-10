@@ -532,14 +532,40 @@ def update_total(order_id: int, body: dict):
         new_total = float(new_total_raw)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid total")
+    # Optional IBAN flag
+    iban_flag_raw = body.get("paid_by_bank_transfer", None)
+    try:
+        iban_flag = False if iban_flag_raw is None else (str(iban_flag_raw).lower() in ("1", "true", "on", "yes"))
+    except Exception:
+        iban_flag = False
     with get_session() as session:
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
-        o.total_amount = round(new_total, 2)
+        prev_total = float(o.total_amount or 0.0)
+        new_total_rounded = round(new_total, 2)
+        o.total_amount = new_total_rounded
+        # Update IBAN flag if provided; None keeps existing value
+        changes = {"total_amount": [prev_total, new_total_rounded]}
+        try:
+            if iban_flag_raw is not None:
+                prev_iban = bool(o.paid_by_bank_transfer or False)
+                if bool(iban_flag) != prev_iban:
+                    o.paid_by_bank_transfer = bool(iban_flag)
+                    changes["paid_by_bank_transfer"] = [prev_iban, bool(iban_flag)]
+        except Exception:
+            pass
+        # Recompute shipping_fee pre-tax based on flag and new total
+        try:
+            if bool(o.paid_by_bank_transfer):
+                o.shipping_fee = 89.0
+            else:
+                o.shipping_fee = compute_shipping_fee(new_total_rounded)
+        except Exception:
+            pass
         try:
             # log
-            session.add(OrderEditLog(order_id=order_id, action="update_total", changes_json=str({"total_amount": [o.total_amount, new_total]})))
+            session.add(OrderEditLog(order_id=order_id, action="update_total", changes_json=str(changes)))
         except Exception:
             pass
         return {"status": "ok"}
