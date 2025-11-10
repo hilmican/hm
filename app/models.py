@@ -180,7 +180,7 @@ class User(SQLModel, table=True):
     username: str = Field(index=True, unique=True)
     password_hash: str
     role: str = Field(default="admin", index=True)
-	preferred_language: Optional[str] = Field(default=None, index=True)
+    preferred_language: Optional[str] = Field(default=None, index=True)
     failed_attempts: int = 0
     locked_until: Optional[dt.datetime] = Field(default=None, index=True)
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
