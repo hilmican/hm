@@ -46,8 +46,24 @@ def create_app() -> FastAPI:
 		# Load i18n catalogs
 		try:
 			from pathlib import Path as _Path
-			_catalog_dir = str((_Path(__file__).resolve().parent / "locales"))
-			app.state.i18n = _i18n.I18n.load_from_dir(_catalog_dir, default_lang=_os.getenv("DEFAULT_LANG", "tr"))
+			_default_lang = _os.getenv("DEFAULT_LANG", "tr")
+			_candidates = [
+				_Path(__file__).resolve().parent / "locales",
+				_Path.cwd() / "app" / "locales",
+				_Path.cwd() / "locales",
+				_Path("app/locales"),
+			]
+			_catalog_dir = None
+			for c in _candidates:
+				try:
+					if c.exists() and any(c.glob("*.json")):
+						_catalog_dir = c
+						break
+				except Exception:
+					continue
+			if _catalog_dir is None:
+				_catalog_dir = _Path(__file__).resolve().parent / "locales"
+			app.state.i18n = _i18n.I18n.load_from_dir(str(_catalog_dir), default_lang=_default_lang)
 			print(f"[i18n] loaded languages: {', '.join(app.state.i18n.available_languages())}")
 		except Exception:
 			app.state.i18n = _i18n.I18n()
