@@ -1,0 +1,64 @@
+{
+  "nav": {
+    "brand": "Panel",
+    "data": "Data",
+    "clients": "Clients",
+    "items": "Variants",
+    "products": "Products",
+    "inventory": "Inventory",
+    "movements": "Stock Movements",
+    "sales": "Sales",
+    "orders": "Orders",
+    "payments": "Payments",
+    "instagram": "Instagram",
+    "ai_processing": "AI Processing",
+    "unlinked_purchases": "Unlinked Purchases",
+    "link_conversation": "Link Conversation",
+    "debug_env": "Debug Env",
+    "import": "Import",
+    "mapping": "Mapping",
+    "mapping_wizard": "Mapping Wizard",
+    "returns_reconcile": "Returns/Exchange Reconcile",
+    "reports": "Reports",
+    "daily": "Daily",
+    "costs": "Costs",
+    "admin": "Admin",
+    "noc": "NOC",
+    "system_status": "System Status",
+    "health_json": "Health (JSON)",
+    "version_json": "Version (JSON)",
+    "fix_message_ts": "Fix Message Timestamps",
+    "reimport_raw_json": "Re-import Message Raw JSON",
+    "jobs_ingest": "Jobs (ingest)",
+    "attachments_json": "Attachments (JSON)",
+    "conversations_json": "Conversations (JSON)",
+    "cache_invalidate": "Invalidate Cache",
+    "legal": "Legal",
+    "privacy": "Privacy",
+    "terms": "Terms",
+    "data_deletion": "Data Deletion",
+    "logout": "Logout",
+    "language": "Language",
+    "cache_cleared": "Cache cleared",
+    "clear_error": "Clear error",
+    "logout_error": "Logout error"
+  },
+  "lang": {
+    "turkish": "Turkish",
+    "english": "English"
+  },
+  "login": {
+    "title": "Login",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Login",
+    "error": "Login failed"
+  },
+  "i18n": {
+    "select_title": "Select your language",
+    "continue": "Continue",
+    "or": "or"
+  }
+}
+
+

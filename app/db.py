@@ -478,6 +478,26 @@ def init_db() -> None:
                                 conn.exec_driver_sql("ALTER TABLE `jobs` ADD CONSTRAINT `uq_jobs_kind_key` UNIQUE (`kind`,`key`)")
                         except Exception:
                             pass
+                        # Ensure user.preferred_language exists
+                        try:
+                            row = conn.exec_driver_sql(
+                                """
+                                SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND COLUMN_NAME = 'preferred_language'
+                                LIMIT 1
+                                """
+                            ).fetchone()
+                            if row is None:
+                                try:
+                                    conn.exec_driver_sql("ALTER TABLE user ADD COLUMN preferred_language VARCHAR(8) NULL")
+                                except Exception:
+                                    pass
+                                try:
+                                    conn.exec_driver_sql("CREATE INDEX idx_user_pref_lang ON user(preferred_language)")
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                 return
             # lightweight migrations for existing SQLite DBs
             with engine.begin() as conn:
@@ -617,6 +637,11 @@ def init_db() -> None:
                     conn.exec_driver_sql("ALTER TABLE user ADD COLUMN failed_attempts INTEGER DEFAULT 0")
                 if not column_exists("user", "locked_until"):
                     conn.exec_driver_sql("ALTER TABLE user ADD COLUMN locked_until DATETIME")
+                if not column_exists("user", "preferred_language"):
+                    try:
+                        conn.exec_driver_sql("ALTER TABLE user ADD COLUMN preferred_language TEXT")
+                    except Exception:
+                        pass
 
                 # Client.status
                 if not column_exists("client", "status"):

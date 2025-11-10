@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>{{ t(request, 'i18n.select_title') }}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    .card { max-width: 420px; margin: 80px auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }
+    .actions { display: flex; gap: 10px; margin-top: 12px; }
+    button { background:#2563eb;color:#fff;border:none;border-radius:6px;padding:8px 12px;cursor:pointer; }
+    .muted { color:#6b7280; font-size: 13px; margin-top: 8px; }
+  </style>
+  <script>
+    async function choose(lang){
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get('next') || '/dashboard';
+      const res = await fetch('/i18n/set', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ lang, next })
+      });
+      try {
+        const j = await res.json();
+        if (j && j.redirect) { location.href = j.redirect; return; }
+      } catch(e){}
+      location.href = next;
+    }
+  </script>
+</head>
+<body>
+  <div class="card">
+    <h2>{{ t(request, 'i18n.select_title') }}</h2>
+    <div class="actions">
+      <button type="button" onclick="choose('tr')">{{ t(request, 'lang.turkish') }}</button>
+      <span style="align-self:center">{{ t(request, 'i18n.or') }}</span>
+      <button type="button" onclick="choose('en')">{{ t(request, 'lang.english') }}</button>
+    </div>
+    <div class="muted">{{ t(request, 'i18n.continue') }}</div>
+  </div>
+</body>
+</html>
+
+

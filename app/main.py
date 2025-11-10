@@ -18,6 +18,8 @@ from .routers import costs
 from collections import deque
 import time as _time
 from .routers import admin
+from . import i18n as _i18n
+from .routers import i18n as i18n_router
 
 
 def create_app() -> FastAPI:
@@ -27,6 +29,12 @@ def create_app() -> FastAPI:
 
 	templates = Jinja2Templates(directory="templates")
 	app.state.templates = templates
+	# Register Jinja helpers for translations
+	try:
+		templates.env.globals["t"] = _i18n.t
+		templates.env.globals["current_lang"] = _i18n.current_lang
+	except Exception:
+		pass
 
 	# simple session middleware for cookie-based auth (HTTPOnly cookies)
 	import os as _os
@@ -35,6 +43,12 @@ def create_app() -> FastAPI:
 	@app.on_event("startup")
 	def _startup() -> None:
 		init_db()
+		# Load i18n catalogs
+		try:
+			app.state.i18n = _i18n.I18n.load_from_dir("app/locales", default_lang=_os.getenv("DEFAULT_LANG", "tr"))
+			print(f"[i18n] loaded languages: {', '.join(app.state.i18n.available_languages())}")
+		except Exception:
+			app.state.i18n = _i18n.I18n()
 		# Log DB backend once for sanity
 		try:
 			_backend = getattr(_db_engine.url, "get_backend_name", lambda: "")()
@@ -59,6 +73,20 @@ def create_app() -> FastAPI:
 			app.state.slowlog = deque(maxlen=int(_os.getenv("SLOWLOG_SIZE", "500")))
 		except Exception:
 			app.state.slowlog = deque(maxlen=500)
+
+	# Language resolution middleware
+	@app.middleware("http")
+	async def _lang_mw(request: Request, call_next):
+		try:
+			lang = request.session.get("lang")
+			if not lang:
+				i18n_mgr = getattr(request.app.state, "i18n", None)
+				if i18n_mgr:
+					lang = i18n_mgr.default_lang
+			request.state.lang = lang or "tr"
+		except Exception:
+			request.state.lang = "tr"
+		return await call_next(request)
 
 	# Lightweight timing middleware for slow-request diagnostics
 	@app.middleware("http")
@@ -107,6 +135,8 @@ def create_app() -> FastAPI:
 	app.include_router(reports.router, prefix="/reports", tags=["reports"]) 
 	app.include_router(noc.router)
 	app.include_router(costs.router, prefix="/costs", tags=["costs"])
+	# i18n endpoints
+	app.include_router(i18n_router.router)
 
 	# Diag router for slowlog endpoints
 	from fastapi import APIRouter as _AR

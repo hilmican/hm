@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Giriş</title>
+  <title>{{ t(request, 'login.title') }}</title>
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
     .card { max-width: 360px; margin: 80px auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }
@@ -15,25 +15,30 @@
     async function submitForm(ev){
       ev.preventDefault();
       const fd = new FormData(document.getElementById('f'));
-      const r = await fetch('/auth/login', { method: 'POST', body: fd });
-      if (!r.ok){
-        const t = await r.text();
-        document.getElementById('err').textContent = t || 'Giriş başarısız';
-        return;
+      try {
+        const r = await fetch('/auth/login', { method: 'POST', body: fd });
+        const j = await r.json();
+        if (!r.ok || (j && j.status !== 'ok')){
+          document.getElementById('err').textContent = (j && (j.detail || j.error)) || "{{ t(request, 'login.error') }}";
+          return;
+        }
+        if (j && j.redirect){ location.href = j.redirect; return; }
+        location.href = '/dashboard';
+      } catch(e){
+        document.getElementById('err').textContent = "{{ t(request, 'login.error') }}";
       }
-      location.href = '/dashboard';
     }
   </script>
 </head>
 <body>
   <div class="card">
-    <h2>Giriş</h2>
+    <h2>{{ t(request, 'login.title') }}</h2>
     <form id="f" onsubmit="submitForm(event)">
-      <label>Kullanıcı Adı</label>
+      <label>{{ t(request, 'login.username') }}</label>
       <input name="username" required />
-      <label>Şifre</label>
+      <label>{{ t(request, 'login.password') }}</label>
       <input name="password" type="password" required />
-      <button type="submit">Giriş</button>
+      <button type="submit">{{ t(request, 'login.submit') }}</button>
     </form>
     <div id="err" class="error"></div>
   </div>

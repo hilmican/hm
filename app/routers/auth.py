@@ -56,7 +56,16 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
         session.commit()
         request.session["uid"] = user.id
         request.session["uname"] = user.username
-        return {"status": "ok"}
+		# set session lang from user preference when available
+		try:
+			if user.preferred_language:
+				request.session["lang"] = user.preferred_language
+		except Exception:
+			pass
+		redirect = "/dashboard"
+		if not user.preferred_language:
+			redirect = "/i18n/select"
+		return {"status": "ok", "redirect": redirect}
 
 
 @router.post("/logout")

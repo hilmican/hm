@@ -19,81 +19,91 @@
 </style>
 <nav class="topnav">
   <div class="inner">
-    <a class="brand" href="/dashboard">Panel</a>
+    <a class="brand" href="/dashboard">{{ t(request, 'nav.brand') }}</a>
     <div class="menu">
       <div class="menu-item has-sub">
-        <a href="#">Veri</a>
+        <a href="#">{{ t(request, 'nav.data') }}</a>
         <div class="submenu">
-          <a href="/clients/table">Müşteriler</a>
-          <a href="/items/table">Varyantlar</a>
-          <a href="/products/table">Ürünler</a>
-          <a href="/inventory/table">Stok</a>
-          <a href="/inventory/movements/table">Stok Hareketleri</a>
+          <a href="/clients/table">{{ t(request, 'nav.clients') }}</a>
+          <a href="/items/table">{{ t(request, 'nav.items') }}</a>
+          <a href="/products/table">{{ t(request, 'nav.products') }}</a>
+          <a href="/inventory/table">{{ t(request, 'nav.inventory') }}</a>
+          <a href="/inventory/movements/table">{{ t(request, 'nav.movements') }}</a>
         </div>
       </div>
       <div class="menu-item has-sub">
-        <a href="#">Satış</a>
+        <a href="#">{{ t(request, 'nav.sales') }}</a>
         <div class="submenu">
-          <a href="/orders/table">Siparişler</a>
-          <a href="/payments/table">Ödemeler</a>
+          <a href="/orders/table">{{ t(request, 'nav.orders') }}</a>
+          <a href="/payments/table">{{ t(request, 'nav.payments') }}</a>
         </div>
       </div>
       <div class="menu-item has-sub">
-        <a href="#">Instagram</a>
+        <a href="#">{{ t(request, 'nav.instagram') }}</a>
         <div class="submenu">
-          <a href="/ig/inbox">Gelen Kutusu</a>
-          <a href="/ig/ai/process">AI İşleme</a>
-          <a href="/ig/ai/unlinked">Bağlanmamış Satın Alımlar</a>
-          <a href="/ig/ai/link-suggest">Konuşma Bağlama</a>
-          <a href="/ig/debug/env">Debug Ortam</a>
+          <a href="/ig/inbox">{{ t(request, 'nav.instagram') }}: Inbox</a>
+          <a href="/ig/ai/process">{{ t(request, 'nav.ai_processing') }}</a>
+          <a href="/ig/ai/unlinked">{{ t(request, 'nav.unlinked_purchases') }}</a>
+          <a href="/ig/ai/link-suggest">{{ t(request, 'nav.link_conversation') }}</a>
+          <a href="/ig/debug/env">{{ t(request, 'nav.debug_env') }}</a>
         </div>
       </div>
       <div class="menu-item has-sub">
-        <a href="#">İçe Aktarma</a>
+        <a href="#">{{ t(request, 'nav.import') }}</a>
         <div class="submenu">
-          <a href="/mappings/table">Haritalandırma</a>
-          <a href="/import/map?source=bizim&filename=last">Haritalandırma Sihirbazı</a>
-          <a href="/reconcile/returns">İade/Değişim Eşleştirme</a>
+          <a href="/mappings/table">{{ t(request, 'nav.mapping') }}</a>
+          <a href="/import/map?source=bizim&filename=last">{{ t(request, 'nav.mapping_wizard') }}</a>
+          <a href="/reconcile/returns">{{ t(request, 'nav.returns_reconcile') }}</a>
         </div>
       </div>
       <div class="menu-item has-sub">
-        <a href="#">Raporlar</a>
+        <a href="#">{{ t(request, 'nav.reports') }}</a>
         <div class="submenu">
-          <a href="/reports/daily">Günlük</a>
-          <a href="/costs">Maliyetler</a>
+          <a href="/reports/daily">{{ t(request, 'nav.daily') }}</a>
+          <a href="/costs">{{ t(request, 'nav.costs') }}</a>
         </div>
       </div>
       <div class="menu-item has-sub">
-        <a href="#">Yönetim</a>
+        <a href="#">{{ t(request, 'nav.admin') }}</a>
         <div class="submenu">
-          <a href="/noc">NOC</a>
-          <a href="/admin/status">Sistem Durumu</a>
-          <a href="/admin/health">Sağlık (JSON)</a>
-          <a href="/admin/version">Sürüm (JSON)</a>
-          <a href="/admin/fix/message-timestamps">Mesaj Zaman Düzelt</a>
-          <a href="/admin/reimport/raw-json">Mesaj Raw JSON Yeniden Al</a>
-          <a href="/admin/debug/jobs?kind=ingest">İşler (ingest)</a>
-          <a href="/admin/debug/attachments">Ekler (JSON)</a>
-          <a href="/admin/debug/conversations">Sohbetler (JSON)</a>
-          <a href="#" id="invalidateCacheLink">Cache Temizle</a>
+          <a href="/noc">{{ t(request, 'nav.noc') }}</a>
+          <a href="/admin/status">{{ t(request, 'nav.system_status') }}</a>
+          <a href="/admin/health">{{ t(request, 'nav.health_json') }}</a>
+          <a href="/admin/version">{{ t(request, 'nav.version_json') }}</a>
+          <a href="/admin/fix/message-timestamps">{{ t(request, 'nav.fix_message_ts') }}</a>
+          <a href="/admin/reimport/raw-json">{{ t(request, 'nav.reimport_raw_json') }}</a>
+          <a href="/admin/debug/jobs?kind=ingest">{{ t(request, 'nav.jobs_ingest') }}</a>
+          <a href="/admin/debug/attachments">{{ t(request, 'nav.attachments_json') }}</a>
+          <a href="/admin/debug/conversations">{{ t(request, 'nav.conversations_json') }}</a>
+          <a href="#" id="invalidateCacheLink">{{ t(request, 'nav.cache_invalidate') }}</a>
         </div>
       </div>
       <div class="menu-item has-sub">
-        <a href="#">Yasal</a>
+        <a href="#">{{ t(request, 'nav.legal') }}</a>
         <div class="submenu">
-          <a href="/privacy">Gizlilik</a>
-          <a href="/terms">Koşullar</a>
-          <a href="/data_deletion">Veri Silme</a>
+          <a href="/privacy">{{ t(request, 'nav.privacy') }}</a>
+          <a href="/terms">{{ t(request, 'nav.terms') }}</a>
+          <a href="/data_deletion">{{ t(request, 'nav.data_deletion') }}</a>
+        </div>
+      </div>
+      <div class="menu-item has-sub">
+        <a href="#">{{ t(request, 'nav.language') }}</a>
+        <div class="submenu">
+          <a href="#" onclick="return setLang('tr')">{{ t(request, 'lang.turkish') }}</a>
+          <a href="#" onclick="return setLang('en')">{{ t(request, 'lang.english') }}</a>
         </div>
       </div>
     </div>
     <div class="spacer"></div>
-    <button id="logoutBtn" class="logout" type="button">Çıkış</button>
+    <button id="logoutBtn" class="logout" type="button">{{ t(request, 'nav.logout') }}</button>
   </div>
   
 </nav>
 <script>
   (function(){
+    const MSG_LOGOUT_ERROR = "{{ t(request, 'nav.logout_error') }}";
+    const MSG_CACHE_CLEARED = "{{ t(request, 'nav.cache_cleared') }}";
+    const MSG_CLEAR_ERROR = "{{ t(request, 'nav.clear_error') }}";
     const btn = document.getElementById('logoutBtn');
     if (btn) {
       btn.addEventListener('click', async ()=>{
@@ -106,11 +116,25 @@
         e.preventDefault();
         try {
           const res = await fetch('/admin/cache/invalidate', { method: 'POST' });
-          let msg = 'Önbellek temizlendi';
-          try { const j = await res.json(); if (!res.ok) msg = 'Hata: ' + (j && (j.detail||j.error) || res.status); } catch(_e) {}
+          let msg = MSG_CACHE_CLEARED;
+          try { const j = await res.json(); if (!res.ok) msg = (j && (j.detail||j.error)) ? (MSG_CLEAR_ERROR + ': ' + (j.detail||j.error)) : (MSG_CLEAR_ERROR + ': ' + res.status); } catch(_e) {}
           alert(msg);
-        } catch(e){ alert('Temizleme hatası'); }
+        } catch(e){ alert(MSG_CLEAR_ERROR); }
       });
+    }
+    window.setLang = async function(lang){
+      try {
+        const res = await fetch('/i18n/set', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ lang })
+        });
+        // Always reload to reflect new language
+        location.reload();
+      } catch(e){
+        // ignore
+      }
+      return false;
     }
   })();
 </script>

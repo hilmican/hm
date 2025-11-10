@@ -1,0 +1,64 @@
+{
+  "nav": {
+    "brand": "Panel",
+    "data": "Veri",
+    "clients": "Müşteriler",
+    "items": "Varyantlar",
+    "products": "Ürünler",
+    "inventory": "Stok",
+    "movements": "Stok Hareketleri",
+    "sales": "Satış",
+    "orders": "Siparişler",
+    "payments": "Ödemeler",
+    "instagram": "Instagram",
+    "ai_processing": "AI İşleme",
+    "unlinked_purchases": "Bağlanmamış Satın Alımlar",
+    "link_conversation": "Konuşma Bağlama",
+    "debug_env": "Debug Ortam",
+    "import": "İçe Aktarma",
+    "mapping": "Haritalandırma",
+    "mapping_wizard": "Haritalandırma Sihirbazı",
+    "returns_reconcile": "İade/Değişim Eşleştirme",
+    "reports": "Raporlar",
+    "daily": "Günlük",
+    "costs": "Maliyetler",
+    "admin": "Yönetim",
+    "noc": "NOC",
+    "system_status": "Sistem Durumu",
+    "health_json": "Sağlık (JSON)",
+    "version_json": "Sürüm (JSON)",
+    "fix_message_ts": "Mesaj Zaman Düzelt",
+    "reimport_raw_json": "Mesaj Raw JSON Yeniden Al",
+    "jobs_ingest": "İşler (ingest)",
+    "attachments_json": "Ekler (JSON)",
+    "conversations_json": "Sohbetler (JSON)",
+    "cache_invalidate": "Cache Temizle",
+    "legal": "Yasal",
+    "privacy": "Gizlilik",
+    "terms": "Koşullar",
+    "data_deletion": "Veri Silme",
+    "logout": "Çıkış",
+    "language": "Dil",
+    "cache_cleared": "Önbellek temizlendi",
+    "clear_error": "Temizleme hatası",
+    "logout_error": "Çıkış hatası"
+  },
+  "lang": {
+    "turkish": "Türkçe",
+    "english": "English"
+  },
+  "login": {
+    "title": "Giriş",
+    "username": "Kullanıcı Adı",
+    "password": "Şifre",
+    "submit": "Giriş",
+    "error": "Giriş başarısız"
+  },
+  "i18n": {
+    "select_title": "Dil seçimi",
+    "continue": "Devam",
+    "or": "veya"
+  }
+}
+
+
