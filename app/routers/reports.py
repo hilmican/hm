@@ -52,7 +52,6 @@ def daily_report(
 						and_(Order.data_date.is_not(None), Order.data_date >= start_date, Order.data_date <= end_date),
 					)
 				)
-				.where((Order.status.is_(None)) | (~Order.status.in_(["refunded","switched","stitched"])) )
 				.order_by(Order.id.desc())
 			).all()
 		else:
@@ -67,7 +66,6 @@ def daily_report(
 						and_(date_col.is_(None), alt_date_col.is_not(None), alt_date_col >= start_date, alt_date_col <= end_date),
 					)
 				)
-				.where((Order.status.is_(None)) | (~Order.status.in_(["refunded","switched","stitched"])) )
 				.order_by(Order.id.desc())
 			).all()
 
