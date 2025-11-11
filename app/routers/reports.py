@@ -181,6 +181,12 @@ def daily_report(
 			by_channel[src]["count"] += 1.0
 			by_channel[src]["sales"] += float(o.total_amount or 0.0)
 
+		# Refund (iade) metrics: count, totals, shipping specifically for refunded orders in period
+		refunded_orders = [o for o in orders if (str(o.status or "").lower() == "refunded")]
+		refund_count = len(refunded_orders)
+		refund_total_amount = sum(float(o.total_amount or 0.0) for o in refunded_orders)
+		refund_shipping_total = sum(order_shipping_map.get(o.id or 0, 0.0) for o in refunded_orders)
+
 		# Top items by revenue and quantity
 		item_stats: dict[int, dict[str, float]] = {}
 		for o in orders:
@@ -332,6 +338,10 @@ def daily_report(
 				"orders": orders,
 				"client_map": client_map,
 				"item_map": item_map,
+				# refund (iade) KPIs
+				"refund_count": refund_count,
+				"refund_total_amount": refund_total_amount,
+				"refund_shipping_total": refund_shipping_total,
 			},
 		)
 

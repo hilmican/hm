@@ -76,6 +76,9 @@
             <div class="kpi"><div class="label">Net Marj</div><div class="value">{{ '%.1f'|format((net_margin or 0)*100) }}%</div></div>
             <div class="kpi"><div class="label">Stok Değeri</div><div class="value">{{ '%.2f'|format(inventory_value or 0) }}</div></div>
             <div class="kpi"><div class="label">Stok Kalem Sayısı</div><div class="value">{{ inventory_item_count or 0 }}</div></div>
+            <div class="kpi"><div class="label">İade Adedi</div><div class="value">{{ refund_count or 0 }}</div></div>
+            <div class="kpi"><div class="label">İade Toplam</div><div class="value">{{ '%.2f'|format(refund_total_amount or 0) }}</div></div>
+            <div class="kpi"><div class="label">İade Kargo</div><div class="value">{{ '%.2f'|format(refund_shipping_total or 0) }}</div></div>
         </div>
 
         <div class="grid" style="margin-top:16px;">
