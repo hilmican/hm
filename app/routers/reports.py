@@ -162,14 +162,17 @@ def daily_report(
 		fee_eok = float(pay_sums.get("eok", 0.0))
 		total_fees = fee_kom + fee_hiz + fee_kar + fee_iad + fee_eok
 		net_profit = gross_profit - total_fees
-		collection_ratio = (gross_collected / total_sales) if total_sales > 0 else 0.0
+		# Treat IBAN-marked orders as collected/completed for ratios/outstanding
+		iban_collected = sum(float(o.total_amount or 0.0) for o in orders if bool(getattr(o, "paid_by_bank_transfer", False)))
+		collection_ratio = ((gross_collected + iban_collected) / total_sales) if total_sales > 0 else 0.0
 		net_margin = (net_profit / total_sales) if total_sales > 0 else 0.0
 
 		# Outstanding for period: payments linked to these orders (regardless of payment date)
 		order_ids = [o.id for o in orders if o.id]
 		linked_payments = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
 		linked_paid = sum(float(p.amount or 0.0) for p in linked_payments)
-		outstanding = total_sales - linked_paid
+		# Consider IBAN-marked orders fully paid
+		outstanding = total_sales - (linked_paid + iban_collected)
 
 		# Orders by channel (source)
 		by_channel: dict[str, dict[str, float]] = {}

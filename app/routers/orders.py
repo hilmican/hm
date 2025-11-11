@@ -138,7 +138,11 @@ def list_orders_table(
             if (o.status or "") in ("refunded", "switched", "stitched"):
                 status_map[oid] = str(o.status)
             else:
-                status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
+                # Consider IBAN (bank transfer) orders as completed/paid
+                if bool(o.paid_by_bank_transfer):
+                    status_map[oid] = "paid"
+                else:
+                    status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
 
         # Optional status filter — ignored for quicksearch presets
         if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched"):
@@ -149,6 +153,9 @@ def list_orders_table(
             cutoff = today - dt.timedelta(days=7)
             def _is_overdue_unpaid(o: Order) -> bool:
                 if (o.status or "") in ("refunded", "switched", "stitched"):
+                    return False
+                # IBAN-marked orders are considered completed, not overdue/unpaid
+                if bool(o.paid_by_bank_transfer):
                     return False
                 base_date = o.shipment_date or o.data_date
                 if (base_date is None) or (base_date > cutoff):
@@ -399,7 +406,11 @@ def export_orders(
             if (o.status or "") in ("refunded", "switched", "stitched"):
                 status_map[oid] = str(o.status)
             else:
-                status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
+                # Treat IBAN (bank transfer) as paid/completed
+                if bool(o.paid_by_bank_transfer):
+                    status_map[oid] = "paid"
+                else:
+                    status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
         if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
         if preset == "overdue_unpaid_7":
