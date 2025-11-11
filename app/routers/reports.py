@@ -99,6 +99,10 @@ def daily_report(
 		# Compute total cost (prefer stored per-order total_cost; otherwise sum over OrderItems * item.cost)
 		total_cost = 0.0
 		for o in orders:
+			# For refunded/switch/stitched or negative totals, treat product cost as zero for reporting
+			status_lc = str(o.status or "").lower()
+			if (status_lc in ("refunded", "switched", "stitched")) or (float(o.total_amount or 0.0) < 0.0):
+				continue
 			if o.total_cost is not None:
 				total_cost += float(o.total_cost or 0.0)
 			else:

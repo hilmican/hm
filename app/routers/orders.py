@@ -272,8 +272,8 @@ def recalc_financials():
                 o.shipping_fee = 89.0
             else:
                 o.shipping_fee = compute_shipping_fee(amt)
-            # cost from order items * item.cost (zero if refunded/switched)
-            if (o.status or "") in ("refunded", "switched", "stitched"):
+            # cost from order items * item.cost (zero if refunded/switched or negative totals)
+            if (o.status or "") in ("refunded", "switched", "stitched") or (float(o.total_amount or 0.0) < 0.0):
                 o.total_cost = 0.0
             else:
                 total_cost = 0.0
@@ -295,7 +295,7 @@ def recalc_costs():
         for o in rows:
             if not o.id:
                 continue
-            if (o.status or "") in ("refunded", "switched", "stitched"):
+            if (o.status or "") in ("refunded", "switched", "stitched") or (float(o.total_amount or 0.0) < 0.0):
                 if o.total_cost != 0.0:
                     o.total_cost = 0.0
                     updated += 1
@@ -572,6 +572,13 @@ def update_total(order_id: int, body: dict):
                 o.shipping_fee = 89.0
             else:
                 o.shipping_fee = compute_shipping_fee(new_total_rounded)
+        except Exception:
+            pass
+        # Ensure product cost is zero when refunded/switched/stitched or negative totals
+        try:
+            status_lc = str(o.status or "").lower()
+            if status_lc in ("refunded", "switched", "stitched") or (float(o.total_amount or 0.0) < 0.0):
+                o.total_cost = 0.0
         except Exception:
             pass
         try:
@@ -916,6 +923,13 @@ async def edit_order_apply(order_id: int, request: Request):
             else:
                 amt = float(o.total_amount or 0.0)
                 o.shipping_fee = compute_shipping_fee(amt)
+        except Exception:
+            pass
+        # Final guard: zero product cost if refunded/switched/stitched or negative totals
+        try:
+            status_lc = str(o.status or "").lower()
+            if status_lc in ("refunded", "switched", "stitched") or (float(o.total_amount or 0.0) < 0.0):
+                o.total_cost = 0.0
         except Exception:
             pass
 
