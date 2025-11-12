@@ -23,10 +23,13 @@
       <a class="action" href="/ig/inbox/{{ conversation_id }}/debug" title="AI Debug">AI Debug</a>
       <button id="refresh">Refresh</button>
     </div>
-    {% if shadow and shadow.text %}
+    {% if shadow and shadow.text and not inline_drafts %}
       <div style="margin:12px 0; padding:12px; border:1px dashed #93c5fd; background:#eff6ff; border-radius:10px;">
         <div style="font-weight:600; color:#1e40af; margin-bottom:6px;">AI Öneri (gönderilmedi)</div>
         <div style="white-space:pre-wrap; color:#111827;">{{ shadow.text }}</div>
+        {% if shadow.timestamp_ms %}
+          <div class="meta"><span class="ts" data-ts="{{ shadow.timestamp_ms }}">{{ shadow.timestamp_ms }}</span></div>
+        {% endif %}
         <div class="meta" style="margin-top:6px;">
           model={{ shadow.model or '-' }} · güven={{ ('%.2f' % shadow.confidence) if shadow.confidence is not none else '-' }} · sebep={{ shadow.reason or '-' }}
         </div>
@@ -83,7 +86,7 @@
     <div id="thread">
       {% for m in messages %}
         <div class="msg {{ m.direction or 'in' }}">
-          <div class="bubble">
+          <div class="bubble" {% if m.is_ai_draft %}style="border:1px dashed #93c5fd; background:#eff6ff;"{% endif %}>
             <div>
               {% set u_map = usernames if usernames is defined else {} %}
               {% set uname = m.sender_username or (u_map.get(m.ig_sender_id or '')) %}
@@ -93,6 +96,12 @@
                 <span class="meta">id: {{ m.ig_sender_id }}</span><br/>
               {% endif %}
               {{ m.text or '' }}
+              {% if m.is_ai_draft %}
+                <div class="meta" style="margin-top:4px">AI Öneri · model: {{ m.ai_model or '-' }}{% if m.ai_reason %} · {{ m.ai_reason }}{% endif %}</div>
+                <div style="margin-top:6px">
+                  <a class="action" href="/ig/ai/products?focus={{ m.product_slug or 'default' }}" target="_blank" rel="noopener">Ürün AI mesajlarını düzenle ↗</a>
+                </div>
+              {% endif %}
             </div>
             {% set local_ids = att_ids_map.get(m.ig_message_id or '') %}
             {% if local_ids %}

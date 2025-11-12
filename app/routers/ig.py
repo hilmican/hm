@@ -18,6 +18,7 @@ from starlette.status import HTTP_303_SEE_OTHER
 import time
 import httpx
 import os
+from ..services.ai_ig import _detect_focus_product
 
 
 router = APIRouter(prefix="/ig", tags=["instagram"])
@@ -680,26 +681,84 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
         templates = request.app.state.templates
         # Fetch latest AI shadow draft (suggested) for this conversation
         shadow = None
+        # Fetch ALL AI suggestions for this thread (not just the latest)
         try:
             from sqlalchemy import text as _text
-            row_shadow = session.exec(
+            rows_shadow = session.exec(
                 _text(
-                    "SELECT id, reply_text, model, confidence, reason, created_at FROM ai_shadow_reply WHERE convo_id=:cid AND (status IS NULL OR status='suggested') ORDER BY id DESC LIMIT 1"
+                    "SELECT id, reply_text, model, confidence, reason, created_at, status FROM ai_shadow_reply WHERE convo_id=:cid ORDER BY id ASC LIMIT 200"
                 ).params(cid=str(conversation_id))
-            ).first()
-            if row_shadow:
+            ).all()
+            # Represent the last one (if any) in 'shadow' for legacy panel rendering
+            if rows_shadow:
+                rlast = rows_shadow[-1]
                 shadow = {
-                    "id": getattr(row_shadow, "id", None) if hasattr(row_shadow, "id") else (row_shadow[0] if len(row_shadow) > 0 else None),
-                    "text": getattr(row_shadow, "reply_text", None) if hasattr(row_shadow, "reply_text") else (row_shadow[1] if len(row_shadow) > 1 else None),
-                    "model": getattr(row_shadow, "model", None) if hasattr(row_shadow, "model") else (row_shadow[2] if len(row_shadow) > 2 else None),
-                    "confidence": getattr(row_shadow, "confidence", None) if hasattr(row_shadow, "confidence") else (row_shadow[3] if len(row_shadow) > 3 else None),
-                    "reason": getattr(row_shadow, "reason", None) if hasattr(row_shadow, "reason") else (row_shadow[4] if len(row_shadow) > 4 else None),
-                    "created_at": getattr(row_shadow, "created_at", None) if hasattr(row_shadow, "created_at") else (row_shadow[5] if len(row_shadow) > 5 else None),
+                    "id": getattr(rlast, "id", None) if hasattr(rlast, "id") else (rlast[0] if len(rlast) > 0 else None),
+                    "text": getattr(rlast, "reply_text", None) if hasattr(rlast, "reply_text") else (rlast[1] if len(rlast) > 1 else None),
+                    "model": getattr(rlast, "model", None) if hasattr(rlast, "model") else (rlast[2] if len(rlast) > 2 else None),
+                    "confidence": getattr(rlast, "confidence", None) if hasattr(rlast, "confidence") else (rlast[3] if len(rlast) > 3 else None),
+                    "reason": getattr(rlast, "reason", None) if hasattr(rlast, "reason") else (rlast[4] if len(rlast) > 4 else None),
+                    "created_at": getattr(rlast, "created_at", None) if hasattr(rlast, "created_at") else (rlast[5] if len(rlast) > 5 else None),
                 }
+                try:
+                    ca = shadow.get("created_at")
+                    if ca:
+                        from datetime import datetime as _d
+                        dtv = _d.fromisoformat(ca.replace("Z","+00:00")) if isinstance(ca, str) and "Z" in ca else (_d.fromisoformat(ca) if isinstance(ca, str) else ca)
+                        if dtv:
+                            shadow["timestamp_ms"] = int(dtv.timestamp() * 1000)
+                except Exception:
+                    pass
+            else:
+                shadow = None
         except Exception:
+            rows_shadow = []
             shadow = None
+        # If inline drafts enabled, merge all suggestions as virtual messages and resort by timestamp
         import os as _os
         inline_drafts = (_os.getenv("IG_INLINE_DRAFTS", "1") not in ("0", "false", "False"))
+        if inline_drafts and rows_shadow:
+            # Determine product focus once for this thread (fallback to None)
+            try:
+                focus_slug, _ = _detect_focus_product(conversation_id)
+            except Exception:
+                focus_slug = None
+            vms: list[dict] = []
+            from datetime import datetime as _d
+            for rr in rows_shadow:
+                try:
+                    txt = getattr(rr, "reply_text", None) if hasattr(rr, "reply_text") else (rr[1] if len(rr) > 1 else None)
+                    if not (txt and str(txt).strip()):
+                        continue
+                    ca = getattr(rr, "created_at", None) if hasattr(rr, "created_at") else (rr[5] if len(rr) > 5 else None)
+                    ts = None
+                    if ca:
+                        try:
+                            ts = _d.fromisoformat(ca.replace("Z","+00:00")).timestamp()*1000 if isinstance(ca, str) else (ca.timestamp()*1000)
+                            ts = int(ts)
+                        except Exception:
+                            ts = None
+                    vm = {
+                        "direction": "out",
+                        "text": str(txt),
+                        "timestamp_ms": ts or 0,
+                        "sender_username": "AI",
+                        "ig_message_id": None,
+                        "ig_sender_id": None,
+                        "ig_recipient_id": None,
+                        "is_ai_draft": True,
+                        "ai_model": getattr(rr, "model", None) if hasattr(rr, "model") else (rr[2] if len(rr) > 2 else None),
+                        "ai_reason": getattr(rr, "reason", None) if hasattr(rr, "reason") else (rr[4] if len(rr) > 4 else None),
+                        "product_slug": focus_slug or "default",
+                    }
+                    vms.append(vm)
+                except Exception:
+                    continue
+            msgs = list(msgs) + vms
+            try:
+                msgs.sort(key=lambda m: (getattr(m, "timestamp_ms", None) if hasattr(m, "timestamp_ms") else (m.get("timestamp_ms") if isinstance(m, dict) else 0)) or 0)
+            except Exception:
+                pass
         return templates.TemplateResponse(
             "ig_thread.html",
             {
@@ -811,6 +870,65 @@ def backfill_ai_conversations(limit: int = 1000):
             except Exception:
                 pass
     return {"status": "ok", "created": created}
+
+@router.post("/admin/backfill/ads")
+def backfill_ads():
+	"""Create missing ads rows from messages with ad metadata or Ads Library links."""
+	from sqlalchemy import text as _text
+	created = 0
+	updated = 0
+	with get_session() as session:
+		# 1) Parse ad_id from ad_link when missing on message, best-effort
+		try:
+			rows = session.exec(
+				_text("SELECT id, ad_link FROM message WHERE ad_id IS NULL AND ad_link IS NOT NULL LIMIT 5000")
+			).all()
+			for r in rows:
+				try:
+					mid = r.id if hasattr(r, "id") else r[0]
+					lnk = r.ad_link if hasattr(r, "ad_link") else r[1]
+					if lnk and "facebook.com/ads/library" in str(lnk):
+						from urllib.parse import urlparse, parse_qs
+						q = parse_qs(urlparse(str(lnk)).query)
+						aid = (q.get("id") or [None])[0]
+						if aid:
+							session.exec(_text("UPDATE message SET ad_id=:aid WHERE id=:id")).params(aid=str(aid), id=int(mid))
+				except Exception:
+					continue
+		except Exception:
+			pass
+		# 2) Insert or update ads table from distinct message ad_id/link/title
+		try:
+			rows2 = session.exec(
+				_text(
+					"""
+					SELECT DISTINCT ad_id, MAX(ad_link) AS link, MAX(ad_title) AS title
+					FROM message
+					WHERE ad_id IS NOT NULL
+					GROUP BY ad_id
+					"""
+				)
+			).all()
+			for r in rows2:
+				aid = r.ad_id if hasattr(r, "ad_id") else r[0]
+				lnk = r.link if hasattr(r, "link") else (r[1] if len(r) > 1 else None)
+				title = r.title if hasattr(r, "title") else (r[2] if len(r) > 2 else None)
+				if not aid:
+					continue
+				try:
+					session.exec(_text("INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, NULL, :lnk, CURRENT_TIMESTAMP)")).params(id=str(aid), n=(title or None), lnk=(lnk or f\"https://www.facebook.com/ads/library/?id={aid}\"))
+					created += 1
+				except Exception:
+					# fallback for SQLite
+					session.exec(_text("INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, NULL, :lnk, CURRENT_TIMESTAMP)")).params(id=str(aid), n=(title or None), lnk=(lnk or f\"https://www.facebook.com/ads/library/?id={aid}\"))
+				try:
+					rc = session.exec(_text("UPDATE ads SET name=COALESCE(:n,name), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=str(aid), n=(title or None), lnk=(lnk or f\"https://www.facebook.com/ads/library/?id={aid}\"))
+					updated += int(getattr(rc, "rowcount", 0) or 0)
+				except Exception:
+					pass
+		except Exception:
+			pass
+	return {"status": "ok", "created": int(created), "updated": int(updated)}
 
 @router.post("/admin/backfill/latest")
 def backfill_latest_messages(limit: int = 50000):
