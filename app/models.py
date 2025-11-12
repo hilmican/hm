@@ -286,7 +286,7 @@ class Job(SQLModel, table=True):
 class AiShadowState(SQLModel, table=True):
 	__tablename__ = "ai_shadow_state"
 	convo_id: str = Field(primary_key=True)
-	last_inbound_ms: Optional[int] = Field(default=None, sa_column=Column(BigInteger), index=True)
+	last_inbound_ms: Optional[int] = Field(default=None, sa_column=Column(BigInteger))
 	next_attempt_at: Optional[dt.datetime] = Field(default=None, index=True)
 	postpone_count: int = Field(default=0, index=True)
 	status: Optional[str] = Field(default="pending", index=True, description="pending|running|suggested|paused|exhausted|error")

@@ -19,13 +19,13 @@ spec:
             claimName: hm-app-root
       initContainers:
         - name: seed-app
-          image: mediatriple/hm:0.5
+          image: mediatriple/hm:0.7.1
           command: ["/bin/sh","-c"]
           args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
-          image: mediatriple/hm:0.5
+          image: mediatriple/hm:0.7.1
           command: ["python","scripts/worker_ingest.py"]
           workingDir: /app
           env:
@@ -76,13 +76,13 @@ spec:
             claimName: hm-app-root
       initContainers:
         - name: seed-app
-          image: mediatriple/hm:0.5
+          image: mediatriple/hm:0.7.1
           command: ["/bin/sh","-c"]
           args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
-          image: mediatriple/hm:0.5
+          image: mediatriple/hm:0.7.1
           command: ["python","scripts/worker_enrich.py"]
           workingDir: /app
           env:
@@ -133,13 +133,13 @@ spec:
             claimName: hm-app-root
       initContainers:
         - name: seed-app
-          image: mediatriple/hm:0.5
+          image: mediatriple/hm:0.7.1
           command: ["/bin/sh","-c"]
           args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
-          image: mediatriple/hm:0.5
+          image: mediatriple/hm:0.7.1
           command: ["python","scripts/worker_media.py"]
           workingDir: /app
           env:
@@ -167,4 +167,49 @@ spec:
               valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
             - name: IG_GRAPH_API_VERSION
               value: v21.0
+          volumeMounts: [ { name: app-root, mountPath: /app } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hm-worker-reply
+  namespace: hm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hm-worker-reply
+  template:
+    metadata:
+      labels:
+        app: hm-worker-reply
+    spec:
+      volumes:
+        - name: app-root
+          persistentVolumeClaim:
+            claimName: hm-app-root
+      initContainers:
+        - name: seed-app
+          image: mediatriple/hm:0.7.1
+          command: ["/bin/sh","-c"]
+          args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
+          volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
+      containers:
+        - name: worker
+          image: mediatriple/hm:0.7.1
+          command: ["python","scripts/worker_reply.py"]
+          workingDir: /app
+          env:
+            - name: PYTHONPATH
+              value: /app
+            - name: REDIS_URL
+              value: redis://hm-redis.hm.svc.cluster.local:6379/0
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: hm-openai, key: OPENAI_API_KEY } }
+            - name: AI_SHADOW_ENABLED
+              value: "1"
+            - name: AI_SHADOW_MODEL
+              value: gpt-4o-mini
+            - name: DATABASE_URL
+              value: "mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
           volumeMounts: [ { name: app-root, mountPath: /app } ]
