@@ -20,6 +20,7 @@ import httpx
 from .ig import notify_new_message
 import logging
 from ..services.monitoring import increment_counter
+from starlette.requests import ClientDisconnect
 
 
 router = APIRouter()
@@ -63,7 +64,15 @@ def _validate_signature(raw_body: bytes, signature: Optional[str]) -> None:
 @router.post("/webhooks/instagram")
 async def receive_events(request: Request):
 	# Read raw body to compute HMAC
-	body = await request.body()
+	try:
+		body = await request.body()
+	except ClientDisconnect:
+		# Client dropped connection; avoid error-level logs and exit fast
+		try:
+			_log.warning("IG webhook POST: client disconnected while reading body")
+		except Exception:
+			pass
+		return Response(status_code=204)
 	signature = request.headers.get("X-Hub-Signature-256") or request.headers.get("x-hub-signature-256")
 	# lightweight arrival log (no secrets)
 	try:
