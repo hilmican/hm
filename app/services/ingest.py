@@ -126,6 +126,14 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 			session.exec(_sql_text("UPDATE ads SET name=COALESCE(:n,name), image_url=COALESCE(:img,image_url), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
 	except Exception:
 		pass
+	# Touch AI shadow state on inbound messages to start debounce timer
+	try:
+		if (direction or "in") == "in" and conversation_id:
+			from .ai_shadow import touch_shadow_state
+			ts_val = int(timestamp_ms) if isinstance(timestamp_ms, (int, float)) else (int(str(timestamp_ms)) if isinstance(timestamp_ms, str) and str(timestamp_ms).isdigit() else None)
+			touch_shadow_state(str(conversation_id), ts_val)
+	except Exception:
+		pass
 	return row.id  # type: ignore
 
 

@@ -540,6 +540,47 @@ def init_db() -> None:
                                     pass
                         except Exception:
                             pass
+                        # AI Shadow tables (MySQL)
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS ai_shadow_state (
+                                    convo_id VARCHAR(128) PRIMARY KEY,
+                                    last_inbound_ms BIGINT NULL,
+                                    next_attempt_at DATETIME NULL,
+                                    postpone_count INT NOT NULL DEFAULT 0,
+                                    status VARCHAR(32) NULL,
+                                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                    INDEX idx_ai_shadow_next_attempt (next_attempt_at),
+                                    INDEX idx_ai_shadow_status (status),
+                                    INDEX idx_ai_shadow_postpone (postpone_count)
+                                )
+                                """
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS ai_shadow_reply (
+                                    id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                                    convo_id VARCHAR(128) NOT NULL,
+                                    reply_text LONGTEXT NULL,
+                                    model VARCHAR(128) NULL,
+                                    confidence DOUBLE NULL,
+                                    reason VARCHAR(128) NULL,
+                                    json_meta LONGTEXT NULL,
+                                    attempt_no INT NULL DEFAULT 0,
+                                    status VARCHAR(32) NULL,
+                                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                    INDEX idx_ai_shadow_reply_convo (convo_id),
+                                    INDEX idx_ai_shadow_reply_created (created_at),
+                                    INDEX idx_ai_shadow_reply_status (status)
+                                )
+                                """
+                            )
+                        except Exception:
+                            pass
                 return
             # lightweight migrations for existing SQLite DBs
             with engine.begin() as conn:
@@ -1033,6 +1074,55 @@ def init_db() -> None:
                     pass
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ig_users_fetched_at ON ig_users(fetched_at)")
+                except Exception:
+                    pass
+                # AI Shadow tables (SQLite)
+                conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS ai_shadow_state (
+                        convo_id TEXT PRIMARY KEY,
+                        last_inbound_ms BIGINT,
+                        next_attempt_at DATETIME,
+                        postpone_count INTEGER DEFAULT 0,
+                        status TEXT,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_shadow_next_attempt ON ai_shadow_state(next_attempt_at)")
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_shadow_status ON ai_shadow_state(status)")
+                except Exception:
+                    pass
+                conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS ai_shadow_reply (
+                        id INTEGER PRIMARY KEY,
+                        convo_id TEXT NOT NULL,
+                        reply_text TEXT,
+                        model TEXT,
+                        confidence REAL,
+                        reason TEXT,
+                        json_meta TEXT,
+                        attempt_no INTEGER DEFAULT 0,
+                        status TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_shadow_reply_convo ON ai_shadow_reply(convo_id)")
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_shadow_reply_created ON ai_shadow_reply(created_at)")
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_shadow_reply_status ON ai_shadow_reply(status)")
                 except Exception:
                     pass
             return

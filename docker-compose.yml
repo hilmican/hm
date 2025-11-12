@@ -72,3 +72,18 @@ services:
       - ./data:/app/data
     depends_on:
       - redis
+  worker_reply:
+    build: .
+    container_name: hm-worker-reply
+    command: ["python", "scripts/worker_reply.py"]
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_SHADOW_ENABLED=1
+      - AI_SHADOW_MODEL=${AI_SHADOW_MODEL:-gpt-4o-mini}
+      - "DATABASE_URL=mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
+    volumes:
+      - ./:/app
+      - ./data:/app/data
+    depends_on:
+      - redis

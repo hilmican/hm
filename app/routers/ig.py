@@ -198,32 +198,32 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
             except Exception:
                 pass
         # Last-resort: conversation ids that are dm:<ig_user_id> but still missing a label
-        try:
-            dm_missing = [cid for cid in conv_map.keys() if (cid not in labels and isinstance(cid, str) and cid.startswith("dm:"))]
-            if dm_missing:
-                dm_ids = []
-                for cid in dm_missing:
-                    try:
-                        dm_ids.append(cid.split(":", 1)[1])
-                    except Exception:
-                        continue
-                if dm_ids:
-                    placeholders = ",".join([":d" + str(i) for i in range(len(dm_ids))])
-                    from sqlalchemy import text as _text
-                    params = {("d" + str(i)): dm_ids[i] for i in range(len(dm_ids))}
+        dm_missing = [cid for cid in conv_map.keys() if (cid not in labels and isinstance(cid, str) and cid.startswith("dm:"))]
+        if dm_missing:
+            dm_ids = []
+            for cid in dm_missing:
+                try:
+                    dm_ids.append(cid.split(":", 1)[1])
+                except Exception:
+                    continue
+            if dm_ids:
+                placeholders = ",".join([":d" + str(i) for i in range(len(dm_ids))])
+                from sqlalchemy import text as _text
+                params = {("d" + str(i)): dm_ids[i] for i in range(len(dm_ids))}
+                try:
                     rows_dm = session.exec(_text(f"SELECT ig_user_id, username, name FROM ig_users WHERE ig_user_id IN ({placeholders})")).params(**params).all()
-                    for r in rows_dm:
-                        uid = r.ig_user_id if hasattr(r, "ig_user_id") else r[0]
-                        un = r.username if hasattr(r, "username") else r[1]
-                        nm = r.name if hasattr(r, "name") else (r[2] if len(r) > 2 else None)
-                        if uid and un:
-                            cid = f"dm:{uid}"
-                            if cid not in labels:
-                                labels[cid] = f"@{str(un)}"
-                            if nm and cid not in names:
-                                names[cid] = str(nm)
-            except Exception:
-                pass
+                except Exception:
+                    rows_dm = []
+                for r in rows_dm:
+                    uid = r.ig_user_id if hasattr(r, "ig_user_id") else r[0]
+                    un = r.username if hasattr(r, "username") else r[1]
+                    nm = r.name if hasattr(r, "name") else (r[2] if len(r) > 2 else None)
+                    if uid and un:
+                        cid = f"dm:{uid}"
+                        if cid not in labels:
+                            labels[cid] = f"@{str(un)}"
+                        if nm and cid not in names:
+                            names[cid] = str(nm)
         # Best-effort ad metadata from messages
         ad_map = {}
         for m in rows:
@@ -677,7 +677,27 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
         except Exception:
             att_ids_map = {}
         templates = request.app.state.templates
-        return templates.TemplateResponse(
+		# Fetch latest AI shadow draft (suggested) for this conversation
+		shadow = None
+		try:
+			from sqlalchemy import text as _text
+			row_shadow = session.exec(
+				_text(
+					"SELECT id, reply_text, model, confidence, reason, created_at FROM ai_shadow_reply WHERE convo_id=:cid AND (status IS NULL OR status='suggested') ORDER BY id DESC LIMIT 1"
+				).params(cid=str(conversation_id))
+			).first()
+			if row_shadow:
+				shadow = {
+					"id": getattr(row_shadow, "id", None) if hasattr(row_shadow, "id") else (row_shadow[0] if len(row_shadow) > 0 else None),
+					"text": getattr(row_shadow, "reply_text", None) if hasattr(row_shadow, "reply_text") else (row_shadow[1] if len(row_shadow) > 1 else None),
+					"model": getattr(row_shadow, "model", None) if hasattr(row_shadow, "model") else (row_shadow[2] if len(row_shadow) > 2 else None),
+					"confidence": getattr(row_shadow, "confidence", None) if hasattr(row_shadow, "confidence") else (row_shadow[3] if len(row_shadow) > 3 else None),
+					"reason": getattr(row_shadow, "reason", None) if hasattr(row_shadow, "reason") else (row_shadow[4] if len(row_shadow) > 4 else None),
+					"created_at": getattr(row_shadow, "created_at", None) if hasattr(row_shadow, "created_at") else (row_shadow[5] if len(row_shadow) > 5 else None),
+				}
+		except Exception:
+			shadow = None
+		return templates.TemplateResponse(
             "ig_thread.html",
             {
                 "request": request,
@@ -695,6 +715,7 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                 "linked_order_id": linked_order_id,
                 "ai_status": ai_status,
                 "ai_json": ai_json,
+				"shadow": shadow,
             },
         )
 
@@ -726,6 +747,25 @@ async def refresh_thread(conversation_id: str):
         except Exception:
             pass
         return {"status": "error", "error": str(e)}
+
+@router.post("/inbox/{conversation_id}/shadow/dismiss")
+def dismiss_shadow(conversation_id: str):
+	# Mark the latest suggested shadow draft as dismissed
+	try:
+		from sqlalchemy import text as _text
+		with get_session() as session:
+			row = session.exec(
+				_text("SELECT id FROM ai_shadow_reply WHERE convo_id=:cid AND (status IS NULL OR status='suggested') ORDER BY id DESC LIMIT 1")
+			).params(cid=str(conversation_id)).first()
+			if not row:
+				return {"status": "ok", "changed": 0}
+			rid = getattr(row, "id", None) if hasattr(row, "id") else (row[0] if isinstance(row, (list, tuple)) else None)
+			if not rid:
+				return {"status": "ok", "changed": 0}
+			session.exec(_text("UPDATE ai_shadow_reply SET status='dismissed' WHERE id=:id").params(id=int(rid)))
+		return {"status": "ok", "changed": 1}
+	except Exception as e:
+		return {"status": "error", "error": str(e)}
 
 @router.post("/admin/backfill/ai_conversations")
 def backfill_ai_conversations(limit: int = 1000):

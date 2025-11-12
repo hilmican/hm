@@ -211,6 +211,14 @@ async def receive_events(request: Request):
 					)
 					session.add(row)
 					persisted += 1
+					# Start/refresh AI shadow debounce for inbound messages
+					try:
+						if (direction or "in") == "in" and conversation_id:
+							from ..services.ai_shadow import touch_shadow_state
+							tsv = int(ts_ms) if isinstance(ts_ms, (int, float)) or (isinstance(ts_ms, str) and str(ts_ms).isdigit()) else None
+							touch_shadow_state(str(conversation_id), tsv)
+					except Exception:
+						pass
 					# Upsert ads cache
 					try:
 						if ad_id:

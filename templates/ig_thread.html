@@ -23,6 +23,19 @@
       <a class="action" href="/ig/inbox/{{ conversation_id }}/debug" title="AI Debug">AI Debug</a>
       <button id="refresh">Refresh</button>
     </div>
+    {% if shadow and shadow.text %}
+      <div style="margin:12px 0; padding:12px; border:1px dashed #93c5fd; background:#eff6ff; border-radius:10px;">
+        <div style="font-weight:600; color:#1e40af; margin-bottom:6px;">AI Öneri (gönderilmedi)</div>
+        <div style="white-space:pre-wrap; color:#111827;">{{ shadow.text }}</div>
+        <div class="meta" style="margin-top:6px;">
+          model={{ shadow.model or '-' }} · güven={{ ('%.2f' % shadow.confidence) if shadow.confidence is not none else '-' }} · sebep={{ shadow.reason or '-' }}
+        </div>
+        <div style="margin-top:8px; display:flex; gap:8px;">
+          <button id="useShadow" class="action" type="button">Metni kutuya al</button>
+          <button id="dismissShadow" class="action" type="button" style="border-color:#ef4444;color:#ef4444">Gizle</button>
+        </div>
+      </div>
+    {% endif %}
   <div style="margin-top:18px">
     <h3>AI Çıktısı</h3>
     {% if ai_status %}<div class="meta">Durum: {{ ai_status }}</div>{% endif %}
@@ -199,6 +212,26 @@
       // Send reply
       const form = document.getElementById('replyForm');
       const input = document.getElementById('replyInput');
+      const useShadow = document.getElementById('useShadow');
+      const dismissShadow = document.getElementById('dismissShadow');
+      useShadow?.addEventListener('click', () => {
+        try {
+          const txt = {{ shadow.text|tojson if shadow and shadow.text else '""' }};
+          if (input && txt) input.value = txt;
+        } catch {}
+      });
+      dismissShadow?.addEventListener('click', async () => {
+        try {
+          dismissShadow.disabled = true;
+          const r = await fetch(location.pathname + '/shadow/dismiss', { method: 'POST' });
+          if (!r.ok) throw new Error('dismiss failed');
+          location.reload();
+        } catch (e) {
+          alert('Gizleme hatası');
+        } finally {
+          dismissShadow.disabled = false;
+        }
+      });
       form?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = (input?.value || '').trim();

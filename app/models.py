@@ -283,6 +283,30 @@ class Job(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("kind", "key", name="uq_jobs_kind_key"),)
 
 
+class AiShadowState(SQLModel, table=True):
+	__tablename__ = "ai_shadow_state"
+	convo_id: str = Field(primary_key=True)
+	last_inbound_ms: Optional[int] = Field(default=None, sa_column=Column(BigInteger), index=True)
+	next_attempt_at: Optional[dt.datetime] = Field(default=None, index=True)
+	postpone_count: int = Field(default=0, index=True)
+	status: Optional[str] = Field(default="pending", index=True, description="pending|running|suggested|paused|exhausted|error")
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class AiShadowReply(SQLModel, table=True):
+	__tablename__ = "ai_shadow_reply"
+	id: Optional[int] = Field(default=None, primary_key=True)
+	convo_id: str = Field(index=True)
+	reply_text: Optional[str] = Field(default=None, sa_column=Column(Text))
+	model: Optional[str] = None
+	confidence: Optional[float] = None
+	reason: Optional[str] = None
+	json_meta: Optional[str] = Field(default=None, sa_column=Column(Text))
+	attempt_no: Optional[int] = 0
+	status: Optional[str] = Field(default="suggested", index=True, description="suggested|dismissed|expired|error")
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
 class CostType(SQLModel, table=True):
 	id: Optional[int] = Field(default=None, primary_key=True)
 	name: str = Field(index=True, unique=True, description="Type name, e.g., Ads, Rent, Shipping supplies")
