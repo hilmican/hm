@@ -676,28 +676,28 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                         att_ids_map.setdefault(mid, []).append(int(att_id))
         except Exception:
             att_ids_map = {}
-        templates = request.app.state.templates
-        # Fetch latest AI shadow draft (suggested) for this conversation
-        shadow = None
-        try:
-            from sqlalchemy import text as _text
-            row_shadow = session.exec(
-                _text(
-                    "SELECT id, reply_text, model, confidence, reason, created_at FROM ai_shadow_reply WHERE convo_id=:cid AND (status IS NULL OR status='suggested') ORDER BY id DESC LIMIT 1"
-                ).params(cid=str(conversation_id))
-            ).first()
-            if row_shadow:
-                shadow = {
-                    "id": getattr(row_shadow, "id", None) if hasattr(row_shadow, "id") else (row_shadow[0] if len(row_shadow) > 0 else None),
-                    "text": getattr(row_shadow, "reply_text", None) if hasattr(row_shadow, "reply_text") else (row_shadow[1] if len(row_shadow) > 1 else None),
-                    "model": getattr(row_shadow, "model", None) if hasattr(row_shadow, "model") else (row_shadow[2] if len(row_shadow) > 2 else None),
-                    "confidence": getattr(row_shadow, "confidence", None) if hasattr(row_shadow, "confidence") else (row_shadow[3] if len(row_shadow) > 3 else None),
-                    "reason": getattr(row_shadow, "reason", None) if hasattr(row_shadow, "reason") else (row_shadow[4] if len(row_shadow) > 4 else None),
-                    "created_at": getattr(row_shadow, "created_at", None) if hasattr(row_shadow, "created_at") else (row_shadow[5] if len(row_shadow) > 5 else None),
-                }
-        except Exception:
-            shadow = None
-        return templates.TemplateResponse(
+		templates = request.app.state.templates
+		# Fetch latest AI shadow draft (suggested) for this conversation
+		shadow = None
+		try:
+			from sqlalchemy import text as _text
+			row_shadow = session.exec(
+				_text(
+					"SELECT id, reply_text, model, confidence, reason, created_at FROM ai_shadow_reply WHERE convo_id=:cid AND (status IS NULL OR status='suggested') ORDER BY id DESC LIMIT 1"
+				).params(cid=str(conversation_id))
+			).first()
+			if row_shadow:
+				shadow = {
+					"id": getattr(row_shadow, "id", None) if hasattr(row_shadow, "id") else (row_shadow[0] if len(row_shadow) > 0 else None),
+					"text": getattr(row_shadow, "reply_text", None) if hasattr(row_shadow, "reply_text") else (row_shadow[1] if len(row_shadow) > 1 else None),
+					"model": getattr(row_shadow, "model", None) if hasattr(row_shadow, "model") else (row_shadow[2] if len(row_shadow) > 2 else None),
+					"confidence": getattr(row_shadow, "confidence", None) if hasattr(row_shadow, "confidence") else (row_shadow[3] if len(row_shadow) > 3 else None),
+					"reason": getattr(row_shadow, "reason", None) if hasattr(row_shadow, "reason") else (row_shadow[4] if len(row_shadow) > 4 else None),
+					"created_at": getattr(row_shadow, "created_at", None) if hasattr(row_shadow, "created_at") else (row_shadow[5] if len(row_shadow) > 5 else None),
+				}
+		except Exception:
+			shadow = None
+		return templates.TemplateResponse(
             "ig_thread.html",
             {
                 "request": request,
@@ -708,14 +708,14 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                 "att_map": att_map,
                 "att_ids_map": att_ids_map,
                 "usernames": usernames,
-                "ads_cache": ads_cache,
+				"ads_cache": ads_cache,
                 "contact_name": contact_name,
                 "contact_phone": contact_phone,
                 "contact_address": contact_address,
                 "linked_order_id": linked_order_id,
                 "ai_status": ai_status,
                 "ai_json": ai_json,
-                "shadow": shadow,
+				"shadow": shadow,
             },
         )
 
