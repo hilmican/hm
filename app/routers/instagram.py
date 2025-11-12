@@ -223,6 +223,71 @@ async def receive_events(request: Request):
 					session.add(row)
 					session.flush()  # Flush to get row.id
 					persisted += 1
+
+					ts_val = None
+					try:
+						if isinstance(ts_ms, (int, float)):
+							ts_val = int(ts_ms)
+						elif isinstance(ts_ms, str):
+							digits = "".join(ch for ch in ts_ms if ch.isdigit())
+							if digits:
+								ts_val = int(digits)
+					except Exception:
+						ts_val = None
+					if ts_val is None:
+						try:
+							ts_val = int(row.timestamp_ms) if row.timestamp_ms is not None else None
+						except Exception:
+							ts_val = None
+					if ts_val is None:
+						try:
+							ts_val = int(time.time() * 1000)
+						except Exception:
+							ts_val = None
+					if ts_val is not None and getattr(row, "timestamp_ms", None) is None:
+						try:
+							row.timestamp_ms = ts_val
+						except Exception:
+							pass
+
+					sender_info = event.get("sender") or {}
+					recipient_info = event.get("recipient") or {}
+					sender_username_val = sender_info.get("username") or sender_info.get("name")
+					recipient_username_val = recipient_info.get("username") or recipient_info.get("name")
+					other_username_val = recipient_username_val if (direction == "out") else sender_username_val
+					username_param = str(other_username_val).strip() if other_username_val else None
+					if sender_username_val:
+						try:
+							row.sender_username = str(sender_username_val)
+						except Exception:
+							pass
+
+					if other_party_id:
+						try:
+							from sqlalchemy import text as _t
+							try:
+								session.exec(_t("INSERT OR IGNORE INTO ig_users(ig_user_id, username, last_seen_at) VALUES (:id, :uname, CURRENT_TIMESTAMP)").params(id=str(other_party_id), uname=username_param))
+							except Exception:
+								try:
+									session.exec(_t("INSERT IGNORE INTO ig_users(ig_user_id, username, last_seen_at) VALUES (:id, :uname, CURRENT_TIMESTAMP)").params(id=str(other_party_id), uname=username_param))
+								except Exception:
+									pass
+							try:
+								session.exec(_t("UPDATE ig_users SET username=COALESCE(:uname, username), last_seen_at=CURRENT_TIMESTAMP WHERE ig_user_id=:id").params(id=str(other_party_id), uname=username_param))
+							except Exception:
+								pass
+						except Exception:
+							pass
+						try:
+							enqueue("enrich_user", key=str(other_party_id), payload={"ig_user_id": str(other_party_id)})
+						except Exception:
+							pass
+					if igba_id:
+						try:
+							enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})
+						except Exception:
+							pass
+
 					# Ensure ai_conversations entry exists FIRST so inbox can display the conversation
 					# This must happen before latest_messages update to ensure conversation appears even if update fails
 					if conversation_id:
@@ -252,7 +317,7 @@ async def receive_events(request: Request):
 							except Exception:
 								pass
 					# Update latest_messages for inbox performance
-					if conversation_id and ts_ms is not None and row.id:
+					if conversation_id and ts_val is not None and row.id:
 						try:
 							from sqlalchemy import text as _t
 							# Try SQLite syntax first (ON CONFLICT)
@@ -276,9 +341,9 @@ async def receive_events(request: Request):
 									).params(
 										cid=str(conversation_id),
 										mid=int(row.id),
-										ts=int(ts_ms) if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit() else 0,
+										ts=int(ts_val) if ts_val is not None else 0,
 										txt=(text_val or ""),
-										sun=None,
+										sun=username_param,
 										dir=(direction or "in"),
 										sid=(str(sender_id) if sender_id is not None else None),
 										rid=(str(recipient_id) if recipient_id is not None else None),
@@ -307,9 +372,9 @@ async def receive_events(request: Request):
 									).params(
 										cid=str(conversation_id),
 										mid=int(row.id),
-										ts=int(ts_ms) if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit() else 0,
+										ts=int(ts_val) if ts_val is not None else 0,
 										txt=(text_val or ""),
-										sun=None,
+										sun=username_param,
 										dir=(direction or "in"),
 										sid=(str(sender_id) if sender_id is not None else None),
 										rid=(str(recipient_id) if recipient_id is not None else None),
@@ -320,19 +385,19 @@ async def receive_events(request: Request):
 							# Context manager will commit automatically
 						except Exception as e:
 							try:
-								_log.warning("webhook: failed to update latest_messages cid=%s mid=%s ts=%s err=%s", conversation_id, row.id, ts_ms, str(e)[:200])
+								_log.warning("webhook: failed to update latest_messages cid=%s mid=%s ts=%s err=%s", conversation_id, row.id, ts_val, str(e)[:200])
 							except Exception:
 								pass
 					else:
 						try:
-							_log.debug("webhook: skipped latest_messages update cid=%s ts=%s row_id=%s", conversation_id, ts_ms, row.id if hasattr(row, 'id') else None)
+							_log.debug("webhook: skipped latest_messages update cid=%s ts=%s row_id=%s", conversation_id, ts_val, row.id if hasattr(row, 'id') else None)
 						except Exception:
 							pass
 					# Start/refresh AI shadow debounce for inbound messages
 					try:
 						if (direction or "in") == "in" and conversation_id:
 							from ..services.ai_shadow import touch_shadow_state
-							tsv = int(ts_ms) if isinstance(ts_ms, (int, float)) or (isinstance(ts_ms, str) and str(ts_ms).isdigit()) else None
+							tsv = int(ts_val) if ts_val is not None else None
 							touch_shadow_state(str(conversation_id), tsv)
 					except Exception:
 						pass
@@ -406,8 +471,8 @@ async def receive_events(request: Request):
 							# update last_message_at based on message timestamp when available
 							try:
 								from datetime import datetime
-								if isinstance(ts_ms, (int, float)) or (isinstance(ts_ms, str) and str(ts_ms).isdigit()):
-									sec = int(int(ts_ms) / 1000) if int(ts_ms) > 10_000_000_000 else int(ts_ms)
+								if ts_val is not None:
+									sec = int(ts_val // 1000) if ts_val > 10_000_000_000 else int(ts_val)
 									ts_iso = datetime.utcfromtimestamp(sec).strftime('%Y-%m-%d %H:%M:%S')
 									session.exec(text(
 										"UPDATE conversations SET last_message_at=:ts WHERE convo_id=:cid"
@@ -438,7 +503,7 @@ async def receive_events(request: Request):
 						"type": "ig_message",
 						"conversation_id": conversation_id,
 						"text": text_val,
-						"timestamp_ms": int(ts_ms) if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit() else None,
+						"timestamp_ms": int(ts_val) if ts_val is not None else None,
 					})
 				except Exception:
 					pass
