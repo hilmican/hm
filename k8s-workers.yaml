@@ -19,13 +19,13 @@ spec:
             claimName: hm-app-root
       initContainers:
         - name: seed-app
-          image: mediatriple/hm:0.7.1
+          image: mediatriple/hm:0.7.2
           command: ["/bin/sh","-c"]
-          args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
+          args: [ "cp -a /app/. /mnt/app/" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
-          image: mediatriple/hm:0.7.1
+          image: mediatriple/hm:0.7.2
           command: ["python","scripts/worker_ingest.py"]
           workingDir: /app
           env:
@@ -76,13 +76,13 @@ spec:
             claimName: hm-app-root
       initContainers:
         - name: seed-app
-          image: mediatriple/hm:0.7.1
+          image: mediatriple/hm:0.7.2
           command: ["/bin/sh","-c"]
-          args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
+          args: [ "cp -a /app/. /mnt/app/" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
-          image: mediatriple/hm:0.7.1
+          image: mediatriple/hm:0.7.2
           command: ["python","scripts/worker_enrich.py"]
           workingDir: /app
           env:
@@ -133,13 +133,13 @@ spec:
             claimName: hm-app-root
       initContainers:
         - name: seed-app
-          image: mediatriple/hm:0.7.1
+          image: mediatriple/hm:0.7.2
           command: ["/bin/sh","-c"]
-          args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
+          args: [ "cp -a /app/. /mnt/app/" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
-          image: mediatriple/hm:0.7.1
+          image: mediatriple/hm:0.7.2
           command: ["python","scripts/worker_media.py"]
           workingDir: /app
           env:
@@ -190,13 +190,13 @@ spec:
             claimName: hm-app-root
       initContainers:
         - name: seed-app
-          image: mediatriple/hm:0.7.1
+          image: mediatriple/hm:0.7.2
           command: ["/bin/sh","-c"]
-          args: [ "if [ -z \"$(ls -A /mnt/app)\" ]; then cp -a /app/. /mnt/app/; fi" ]
+          args: [ "cp -a /app/. /mnt/app/" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
-          image: mediatriple/hm:0.7.1
+          image: mediatriple/hm:0.7.2
           command: ["python","scripts/worker_reply.py"]
           workingDir: /app
           env:
