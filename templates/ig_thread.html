@@ -100,6 +100,13 @@
                 · Replied to an ad{% if m.ad_title or m.ad_id %}: {{ m.ad_title or m.ad_id }}{% endif %}
                 {% set ad_url = m.ad_link or (('https://www.facebook.com/ads/library/?id=' ~ m.ad_id) if m.ad_id else None) %}
                 {% if ad_url %} (<a target="_blank" rel="noopener" href="{{ ad_url }}">link</a>){% endif %}
+                {% set ad = (ads_cache.get(m.ad_id) if (ads_cache is defined and m.ad_id) else None) %}
+                {% if ad and ad.image_url %}
+                  <div style="margin-top:6px;display:flex;gap:8px;align-items:center">
+                    <img src="{{ ad.image_url }}" alt="ad" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb" />
+                    <div class="meta">{{ ad.name or '' }}</div>
+                  </div>
+                {% endif %}
               {% endif %}
             </div>
           </div>

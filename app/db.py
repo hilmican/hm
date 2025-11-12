@@ -329,6 +329,23 @@ def init_db() -> None:
                             )
                         except Exception:
                             pass
+                        # ads cache table (MySQL)
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS ads (
+                                    ad_id VARCHAR(128) PRIMARY KEY,
+                                    name TEXT NULL,
+                                    image_url TEXT NULL,
+                                    link TEXT NULL,
+                                    fetch_status TEXT NULL,
+                                    fetch_error TEXT NULL,
+                                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                )
+                                """
+                            )
+                        except Exception:
+                            pass
                         # Ensure conversations AI/contact columns exist for IG AI
                         try:
                             rows = conn.exec_driver_sql(
@@ -762,6 +779,20 @@ def init_db() -> None:
                         fetched_at DATETIME,
                         fetch_status TEXT,
                         fetch_error TEXT
+                    )
+                    """
+                )
+                # ads cache
+                conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS ads (
+                        ad_id TEXT PRIMARY KEY,
+                        name TEXT,
+                        image_url TEXT,
+                        link TEXT,
+                        fetch_status TEXT,
+                        fetch_error TEXT,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                     """
                 )

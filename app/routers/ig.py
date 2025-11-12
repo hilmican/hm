@@ -49,60 +49,64 @@ async def notify_new_message(event: dict) -> None:
 @router.get("/inbox")
 async def inbox(request: Request, limit: int = 25, q: str | None = None):
     with get_session() as session:
-        # Fetch only lightweight columns for recent messages to reduce IO
+        # Canonical conversation list based on ai_conversations, joined with latest message per convo
         from sqlalchemy import text as _text
-        sample_n = max(50, min(int(limit or 25) * 8, 400))
+        sample_n = max(50, min(int(limit or 25) * 4, 200))
+        # Build latest message per conversation (for preview/time) and intersect with ai_conversations
+        base_sql = """
+            WITH latest AS (
+                SELECT m1.*
+                FROM message m1
+                JOIN (
+                    SELECT conversation_id, MAX(timestamp_ms) AS ts
+                    FROM message
+                    WHERE conversation_id IS NOT NULL
+                    GROUP BY conversation_id
+                ) lm ON lm.conversation_id = m1.conversation_id AND lm.ts = m1.timestamp_ms
+            )
+            SELECT ac.convo_id, l.timestamp_ms, l.text, l.sender_username, l.direction,
+                   l.ig_sender_id, l.ig_recipient_id, l.ad_link, l.ad_title
+            FROM ai_conversations ac
+            LEFT JOIN latest l ON l.conversation_id = ac.convo_id
+        """
+        where_parts: list[str] = []
+        params: dict[str, object] = {}
         if q and isinstance(q, str) and q.strip():
             qq = f"%{q.lower().strip()}%"
-            rows_raw = session.exec(
-                _text(
-                    """
-                    SELECT conversation_id, timestamp_ms, text, sender_username, direction,
-                           ig_sender_id, ig_recipient_id, ad_link, ad_title
-                    FROM message
-                    WHERE conversation_id IS NOT NULL
-                      AND (
-                        (text IS NOT NULL AND LOWER(text) LIKE :qq)
-                        OR (sender_username IS NOT NULL AND LOWER(sender_username) LIKE :qq)
-                        OR EXISTS (
-                          SELECT 1 FROM ig_users
-                          WHERE (ig_users.ig_user_id = message.ig_sender_id OR ig_users.ig_user_id = message.ig_recipient_id)
-                            AND ig_users.name IS NOT NULL AND LOWER(ig_users.name) LIKE :qq
-                        )
-                        OR (ad_title IS NOT NULL AND LOWER(ad_title) LIKE :qq)
-                      )
-                    ORDER BY timestamp_ms DESC
-                    LIMIT :n
-                    """
-                ).params(qq=qq, n=int(sample_n))
-            ).all()
-        else:
-            rows_raw = session.exec(
-                _text(
-                    """
-                    SELECT conversation_id, timestamp_ms, text, sender_username, direction,
-                           ig_sender_id, ig_recipient_id, ad_link, ad_title
-                    FROM message
-                    WHERE conversation_id IS NOT NULL
-                    ORDER BY timestamp_ms DESC
-                    LIMIT :n
-                    """
-                ).params(n=int(sample_n))
-            ).all()
-        # Normalize rows into dicts for template use
+            where_parts.append("""
+                (
+                    (l.text IS NOT NULL AND LOWER(l.text) LIKE :qq)
+                    OR (l.sender_username IS NOT NULL AND LOWER(l.sender_username) LIKE :qq)
+                    OR EXISTS (
+                        SELECT 1 FROM ig_users u
+                        WHERE (u.ig_user_id = l.ig_sender_id OR u.ig_user_id = l.ig_recipient_id OR (ac.convo_id LIKE 'dm:%' AND u.ig_user_id = SUBSTR(ac.convo_id, 4)))
+                          AND (
+                            (u.name IS NOT NULL AND LOWER(u.name) LIKE :qq)
+                            OR (u.username IS NOT NULL AND LOWER(u.username) LIKE :qq)
+                          )
+                    )
+                )
+            """)
+            params["qq"] = qq
+        order_sql = " ORDER BY COALESCE(ac.ai_process_time, l.timestamp_ms) DESC LIMIT :n"
+        params["n"] = int(sample_n)
+        final_sql = base_sql + (" WHERE " + " AND ".join(where_parts) if where_parts else "") + order_sql
+        rows_raw = session.exec(_text(final_sql).params(**params)).all()
+        # Normalize rows into dicts for template use; fall back convo id when preview missing
         rows = []
         for r in rows_raw:
             try:
+                cid = (r.convo_id if hasattr(r, "convo_id") else r[0])
                 rows.append({
-                    "conversation_id": (r.conversation_id if hasattr(r, "conversation_id") else r[0]),
-                    "timestamp_ms": (r.timestamp_ms if hasattr(r, "timestamp_ms") else r[1]),
-                    "text": (r.text if hasattr(r, "text") else r[2]),
-                    "sender_username": (r.sender_username if hasattr(r, "sender_username") else r[3]),
-                    "direction": (r.direction if hasattr(r, "direction") else r[4]),
-                    "ig_sender_id": (r.ig_sender_id if hasattr(r, "ig_sender_id") else r[5]),
-                    "ig_recipient_id": (r.ig_recipient_id if hasattr(r, "ig_recipient_id") else r[6]),
-                    "ad_link": (r.ad_link if hasattr(r, "ad_link") else r[7]),
-                    "ad_title": (r.ad_title if hasattr(r, "ad_title") else r[8]),
+                    "conversation_id": cid,
+                    "timestamp_ms": (getattr(r, "timestamp_ms", None) if hasattr(r, "timestamp_ms") else (r[1] if len(r) > 1 else None)),
+                    "text": (getattr(r, "text", None) if hasattr(r, "text") else (r[2] if len(r) > 2 else None)),
+                    "sender_username": (getattr(r, "sender_username", None) if hasattr(r, "sender_username") else (r[3] if len(r) > 3 else None)),
+                    "direction": (getattr(r, "direction", None) if hasattr(r, "direction") else (r[4] if len(r) > 4 else None)),
+                    "ig_sender_id": (getattr(r, "ig_sender_id", None) if hasattr(r, "ig_sender_id") else (r[5] if len(r) > 5 else None)),
+                    "ig_recipient_id": (getattr(r, "ig_recipient_id", None) if hasattr(r, "ig_recipient_id") else (r[6] if len(r) > 6 else None)),
+                    "ad_link": (getattr(r, "ad_link", None) if hasattr(r, "ad_link") else (r[7] if len(r) > 7 else None)),
+                    "ad_title": (getattr(r, "ad_title", None) if hasattr(r, "ad_title") else (r[8] if len(r) > 8 else None)),
                 })
             except Exception:
                 continue
@@ -218,16 +222,16 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                                 labels[cid] = f"@{str(un)}"
                             if nm and cid not in names:
                                 names[cid] = str(nm)
-        except Exception:
-            pass
+            except Exception:
+                pass
         # Best-effort ad metadata from messages
         ad_map = {}
         for m in rows:
             cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
             if not cid:
                 continue
-            ad_link = (m.get("ad_link") if isinstance(m, dict) else m.ad_link)
-            ad_title = (m.get("ad_title") if isinstance(m, dict) else m.ad_title)
+            ad_link = (m.get("ad_link") if isinstance(m, dict) else getattr(m, "ad_link", None))
+            ad_title = (m.get("ad_title") if isinstance(m, dict) else getattr(m, "ad_title", None))
             if (ad_link or ad_title) and cid not in ad_map:
                 ad_map[cid] = {"link": ad_link, "title": ad_title}
         templates = request.app.state.templates
@@ -484,6 +488,18 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                     other_id = conversation_id.split(":", 1)[1] or None
             except Exception:
                 other_id = None
+        # Additional fallback: check ai_conversations for this convo id
+        if not other_id:
+            try:
+                from sqlalchemy import text as _text
+                # ai_conversations stores only convo_id; when it's dm:<id> we already handled above. Keep as safety if formats evolve.
+                row_ac = session.exec(_text("SELECT convo_id FROM ai_conversations WHERE convo_id=:cid LIMIT 1").params(cid=str(conversation_id))).first()
+                if row_ac:
+                    conv = row_ac.convo_id if hasattr(row_ac, "convo_id") else (row_ac[0] if isinstance(row_ac, (list, tuple)) else None)
+                    if isinstance(conv, str) and conv.startswith("dm:"):
+                        other_id = conv.split(":", 1)[1] or None
+            except Exception:
+                pass
         if other_id:
             # Username for page header
             try:
@@ -566,6 +582,7 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
         # Resolve per-message sender usernames via ig_users only.
         # Enqueue missing ones for background enrichment instead of fetching inline.
         usernames: dict[str, str] = {}
+        ad_ids: list[str] = []
         try:
             sender_ids: list[str] = []
             for mm in msgs:
@@ -573,6 +590,13 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                     sid = str(mm.ig_sender_id)
                     if sid not in sender_ids:
                         sender_ids.append(sid)
+                try:
+                    if mm.ad_id:
+                        aid = str(mm.ad_id)
+                        if aid not in ad_ids:
+                            ad_ids.append(aid)
+                except Exception:
+                    pass
             if sender_ids:
                 placeholders = ",".join([":p" + str(i) for i in range(len(sender_ids))])
                 from sqlalchemy import text as _text
@@ -593,6 +617,23 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                     pass
         except Exception:
             usernames = {}
+
+        # Fetch cached ads for messages in this thread
+        ads_cache: dict[str, dict[str, Any]] = {}
+        try:
+            if ad_ids:
+                placeholders = ",".join([":a" + str(i) for i in range(len(ad_ids))])
+                from sqlalchemy import text as _text
+                params = {("a" + str(i)): ad_ids[i] for i in range(len(ad_ids))}
+                rows_ad = session.exec(_text(f"SELECT ad_id, name, image_url, link FROM ads WHERE ad_id IN ({placeholders})")).params(**params).all()
+                for r in rows_ad:
+                    aid = r.ad_id if hasattr(r, "ad_id") else r[0]
+                    name = r.name if hasattr(r, "name") else (r[1] if len(r) > 1 else None)
+                    img = r.image_url if hasattr(r, "image_url") else (r[2] if len(r) > 2 else None)
+                    lnk = r.link if hasattr(r, "link") else (r[3] if len(r) > 3 else None)
+                    ads_cache[str(aid)] = {"name": name, "image_url": img, "link": lnk}
+        except Exception:
+            ads_cache = {}
 
         # Build attachment indices so template can render images (fallback: legacy attachments_json)
         att_map = {}
@@ -647,6 +688,7 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                 "att_map": att_map,
                 "att_ids_map": att_ids_map,
                 "usernames": usernames,
+            "ads_cache": ads_cache,
                 "contact_name": contact_name,
                 "contact_phone": contact_phone,
                 "contact_address": contact_address,
@@ -685,6 +727,41 @@ async def refresh_thread(conversation_id: str):
             pass
         return {"status": "error", "error": str(e)}
 
+@router.post("/admin/backfill/ai_conversations")
+def backfill_ai_conversations(limit: int = 1000):
+    # Create missing ai_conversations rows from latest messages (safety backfill)
+    from sqlalchemy import text as _text
+    created = 0
+    with get_session() as session:
+        try:
+            rows = session.exec(
+                _text(
+                    """
+                    SELECT m.conversation_id, MAX(m.timestamp_ms) AS ts
+                    FROM message m
+                    WHERE m.conversation_id IS NOT NULL
+                    GROUP BY m.conversation_id
+                    ORDER BY ts DESC
+                    LIMIT :n
+                    """
+                ).params(n=int(max(1, min(limit, 5000))))
+            ).all()
+        except Exception:
+            rows = []
+        for r in rows:
+            try:
+                cid = getattr(r, "conversation_id", None) if hasattr(r, "conversation_id") else (r[0] if len(r) > 0 else None)
+                if not cid:
+                    continue
+                session.exec(
+                    _text(
+                        "INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)"
+                    ).params(cid=str(cid))
+                )
+                created += 1
+            except Exception:
+                pass
+    return {"status": "ok", "created": created}
 @router.post("/inbox/{conversation_id}/enrich")
 def enqueue_enrich(conversation_id: str):
     # Enqueue enrich_user for the other party and enrich_page for the active page/user id

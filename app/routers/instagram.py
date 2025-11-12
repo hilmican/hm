@@ -170,12 +170,16 @@ async def receive_events(request: Request):
 					ad_id = None
 					ad_link = None
 					ad_title = None
+					ad_img = None
+					ad_name = None
 					try:
 						ref = (event.get("referral") or mobj.get("referral") or {})
 						if isinstance(ref, dict):
 							ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
 							ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
 							ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
+							ad_img = ref.get("image_url") or ref.get("thumbnail_url") or ref.get("picture") or ref.get("media_url") or None
+							ad_name = ref.get("name") or ref.get("title") or None
 					except Exception:
 						ad_id = ad_link = ad_title = None
 					ts_ms = event.get("timestamp")
@@ -202,9 +206,22 @@ async def receive_events(request: Request):
 						ad_id=ad_id,
 						ad_link=ad_link,
 						ad_title=ad_title,
+						ad_image_url=ad_img,
+						ad_name=ad_name,
 					)
 					session.add(row)
 					persisted += 1
+					# Upsert ads cache
+					try:
+						if ad_id:
+							from sqlalchemy import text as _t
+							try:
+								session.exec(_t("INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id,:n,:img,:lnk,CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+							except Exception:
+								session.exec(_t("INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id,:n,:img,:lnk,CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+							session.exec(_t("UPDATE ads SET name=COALESCE(:n,name), image_url=COALESCE(:img,image_url), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+					except Exception:
+						pass
 					# ensure attachments are tracked per-message and fetch queued
 					try:
 						session.flush()  # obtain row.id

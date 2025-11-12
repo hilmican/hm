@@ -7,6 +7,7 @@ from sqlalchemy import text
 from ..db import get_session
 from ..models import Message
 from .queue import enqueue
+from sqlalchemy import text as _sql_text
 
 
 def _ensure_ig_account(conn, igba_id: str) -> None:
@@ -115,6 +116,16 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	session.add(row)
 	# Flush to get DB id for attachments
 	session.flush()
+	# upsert ads cache
+	try:
+		if ad_id:
+			try:
+				session.exec(_sql_text("INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+			except Exception:
+				session.exec(_sql_text("INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+			session.exec(_sql_text("UPDATE ads SET name=COALESCE(:n,name), image_url=COALESCE(:img,image_url), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+	except Exception:
+		pass
 	return row.id  # type: ignore
 
 
