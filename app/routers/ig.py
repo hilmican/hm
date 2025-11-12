@@ -916,13 +916,13 @@ def backfill_ads():
 				if not aid:
 					continue
 				try:
-					session.exec(_text("INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, NULL, :lnk, CURRENT_TIMESTAMP)")).params(id=str(aid), n=(title or None), lnk=(lnk or f\"https://www.facebook.com/ads/library/?id={aid}\"))
+					session.exec(_text("INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, NULL, :lnk, CURRENT_TIMESTAMP)")).params(id=str(aid), n=(title or None), lnk=(lnk or ("https://www.facebook.com/ads/library/?id=" + str(aid))))
 					created += 1
 				except Exception:
 					# fallback for SQLite
-					session.exec(_text("INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, NULL, :lnk, CURRENT_TIMESTAMP)")).params(id=str(aid), n=(title or None), lnk=(lnk or f\"https://www.facebook.com/ads/library/?id={aid}\"))
+					session.exec(_text("INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, NULL, :lnk, CURRENT_TIMESTAMP)")).params(id=str(aid), n=(title or None), lnk=(lnk or ("https://www.facebook.com/ads/library/?id=" + str(aid))))
 				try:
-					rc = session.exec(_text("UPDATE ads SET name=COALESCE(:n,name), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=str(aid), n=(title or None), lnk=(lnk or f\"https://www.facebook.com/ads/library/?id={aid}\"))
+					rc = session.exec(_text("UPDATE ads SET name=COALESCE(:n,name), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=str(aid), n=(title or None), lnk=(lnk or ("https://www.facebook.com/ads/library/?id=" + str(aid))))
 					updated += int(getattr(rc, "rowcount", 0) or 0)
 				except Exception:
 					pass
