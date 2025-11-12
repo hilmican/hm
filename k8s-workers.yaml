@@ -13,6 +13,8 @@ spec:
       labels:
         app: hm-worker-ingest
     spec:
+      imagePullSecrets:
+        - name: my-dockerhub-secret
       volumes:
         - name: app-root
           persistentVolumeClaim:
@@ -70,6 +72,8 @@ spec:
       labels:
         app: hm-worker-enrich
     spec:
+      imagePullSecrets:
+        - name: my-dockerhub-secret
       volumes:
         - name: app-root
           persistentVolumeClaim:
@@ -127,6 +131,8 @@ spec:
       labels:
         app: hm-worker-media
     spec:
+      imagePullSecrets:
+        - name: my-dockerhub-secret
       volumes:
         - name: app-root
           persistentVolumeClaim:
