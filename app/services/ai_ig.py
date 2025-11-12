@@ -194,8 +194,6 @@ def propose_reply(conversation_id: str, customer_text: str) -> Dict[str, Any]:
 		return {}
 	return {}
 
-from __future__ import annotations
-
 import datetime as dt
 import json
 from typing import Any, Dict, Optional, Tuple, List
