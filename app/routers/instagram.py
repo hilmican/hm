@@ -86,14 +86,16 @@ async def receive_events(request: Request):
 		pass
 	_validate_signature(body, signature)
 
-	# Persist raw payload for inspection
-	try:
-		out_dir = Path("payloads")
-		out_dir.mkdir(parents=True, exist_ok=True)
-		fname = f"ig_{int(time.time()*1000)}_{len(body or b'')}" + (f"_{(signature[-6:] if signature else 'nosig')}" ) + ".json"
-		(out_dir / fname).write_bytes(body)
-	except Exception:
-		pass
+	# Persist raw payload for inspection (disabled by default to reduce disk I/O)
+	# Enable via env var: SAVE_WEBHOOK_PAYLOADS=1
+	if os.getenv("SAVE_WEBHOOK_PAYLOADS", "0") == "1":
+		try:
+			out_dir = Path("payloads")
+			out_dir.mkdir(parents=True, exist_ok=True)
+			fname = f"ig_{int(time.time()*1000)}_{len(body or b'')}" + (f"_{(signature[-6:] if signature else 'nosig')}" ) + ".json"
+			(out_dir / fname).write_bytes(body)
+		except Exception:
+			pass
 
 	try:
 		payload: Dict[str, Any] = json.loads(body.decode("utf-8"))
@@ -219,11 +221,12 @@ async def receive_events(request: Request):
 						ad_name=ad_name,
 					)
 					session.add(row)
+					session.flush()  # Flush to get row.id
 					persisted += 1
 					# Update latest_messages for inbox performance
 					try:
 						from sqlalchemy import text as _t
-						if conversation_id and ts_ms is not None:
+						if conversation_id and ts_ms is not None and row.id:
 							session.exec(
 								_t(
 									"""

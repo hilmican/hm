@@ -23,7 +23,7 @@ spec:
         - name: seed-app
           image: mediatriple/hm:0.7.6
           command: ["/bin/sh","-c"]
-          args: [ "cp -a /app/. /mnt/app/" ]
+          args: [ "if [ ! -d /mnt/app/app ] || [ ! -f /mnt/app/app/main.py ]; then cp -a /app/. /mnt/app/; fi" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
@@ -82,7 +82,7 @@ spec:
         - name: seed-app
           image: mediatriple/hm:0.7.6
           command: ["/bin/sh","-c"]
-          args: [ "cp -a /app/. /mnt/app/" ]
+          args: [ "if [ ! -d /mnt/app/app ] || [ ! -f /mnt/app/app/main.py ]; then cp -a /app/. /mnt/app/; fi" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
@@ -141,7 +141,7 @@ spec:
         - name: seed-app
           image: mediatriple/hm:0.7.6
           command: ["/bin/sh","-c"]
-          args: [ "cp -a /app/. /mnt/app/" ]
+          args: [ "if [ ! -d /mnt/app/app ] || [ ! -f /mnt/app/app/main.py ]; then cp -a /app/. /mnt/app/; fi" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
@@ -200,7 +200,7 @@ spec:
         - name: seed-app
           image: mediatriple/hm:0.7.6
           command: ["/bin/sh","-c"]
-          args: [ "cp -a /app/. /mnt/app/" ]
+          args: [ "if [ ! -d /mnt/app/app ] || [ ! -f /mnt/app/app/main.py ]; then cp -a /app/. /mnt/app/; fi" ]
           volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
