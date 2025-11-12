@@ -1,5 +1,201 @@
 from __future__ import annotations
 
+import json
+from typing import Any, Dict, List, Optional, Tuple
+
+from sqlalchemy import text as _text
+from sqlmodel import select
+
+from ..db import get_session
+from ..models import Message, Product
+from .ai import AIClient
+
+
+class AIAdapter:
+	"""Adapter to allow swapping to OpenAI Agents/Assistants later without changing call sites."""
+	def __init__(self, mode: str = "direct"):
+		self._mode = mode
+		self._client = AIClient()
+
+	def generate_json(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.2) -> Dict[str, Any]:
+		# For now, direct JSON-mode; later, branch by self._mode and call Assistants API.
+		data = self._client.generate_json(system_prompt=sys_prompt(system_prompt), user_prompt=user_prompt, temperature=temperature)
+		if isinstance(data, tuple):
+			data = data[0]
+		return data if isinstance(data, dict) else {}
+
+
+def sys_prompt(text: str) -> str:
+	"""Hook to prepend/transform system prompt if needed."""
+	return text or ""
+
+def lookup_price(sku_or_slug: str) -> Optional[float]:
+	"""Return default/unit price if available."""
+	from ..models import Item
+	with get_session() as session:
+		try:
+			# try SKU
+			row = session.exec(select(Item).where(Item.sku == sku_or_slug).limit(1)).first()
+			if row and row.price is not None:
+				return float(row.price)
+		except Exception:
+			pass
+		try:
+			# fallback by product slug/name
+			prow = session.exec(select(Product).where((Product.slug == sku_or_slug) | (Product.name == sku_or_slug)).limit(1)).first()
+			if prow and prow.default_price is not None:
+				return float(prow.default_price)
+		except Exception:
+			pass
+	return None
+
+
+def build_product_link(sku_or_slug: str) -> Optional[str]:
+	"""Best-effort product URL builder (placeholder)."""
+	try:
+		base = "https://himanshop.example.com/p/"
+		return base + sku_or_slug
+	except Exception:
+		return None
+
+
+def get_stock_snapshot(sku: str) -> Optional[dict]:
+	"""Placeholder stock snapshot; extend once stock tables are in use."""
+	try:
+		return {"sku": sku, "available": True}
+	except Exception:
+		return None
+
+
+def _detect_focus_product(conversation_id: str) -> Tuple[Optional[str], float]:
+	"""Best-effort focus product detection.
+	Returns (sku_or_slug, confidence). Currently a lightweight heuristic:
+	- use ad_id→sku mapping if present (ads_products table optional)
+	- keyword match against Product.ai_tags on last N inbound messages
+	"""
+	with get_session() as session:
+		# ad_id mapping (optional)
+		try:
+			row = session.exec(
+				_text(
+					"""
+					SELECT m.ad_id
+					FROM message m
+					WHERE m.conversation_id=:cid AND m.ad_id IS NOT NULL
+					ORDER BY m.timestamp_ms DESC, m.id DESC LIMIT 1
+					"""
+				).params(cid=str(conversation_id))
+			).first()
+			ad_id = (row.ad_id if hasattr(row, "ad_id") else (row[0] if row else None)) if row else None
+			if ad_id:
+				rp = session.exec(_text("SELECT sku FROM ads_products WHERE ad_id=:id LIMIT 1").params(id=str(ad_id))).first()
+				if rp:
+					sku = rp.sku if hasattr(rp, "sku") else (rp[0] if isinstance(rp, (list, tuple)) else None)
+					if sku:
+						return str(sku), 0.9
+		except Exception:
+			pass
+		# keyword match
+		try:
+			msgs = session.exec(
+				select(Message).where(Message.conversation_id == conversation_id).order_by(Message.timestamp_ms.desc()).limit(30)
+			).all()
+			texts = " ".join([(m.text or "") for m in msgs if (m.direction or "in") == "in"])
+			if texts.strip():
+				products: List[Product] = session.exec(select(Product)).all()  # type: ignore
+				best: Tuple[Optional[str], float] = (None, 0.0)
+				for p in products:
+					try:
+						tags = []
+						if p.ai_tags:
+							tags = json.loads(p.ai_tags) if isinstance(p.ai_tags, str) else p.ai_tags
+							if not isinstance(tags, list):
+								tags = []
+						score = 0.0
+						for t in tags:
+							if isinstance(t, str) and t and t.lower() in texts.lower():
+								score += 0.25
+						if score > best[1]:
+							best = (p.slug or p.name, min(0.95, score))
+					except Exception:
+						continue
+				return best
+		except Exception:
+			pass
+	return (None, 0.0)
+
+
+def build_prompt(conversation_id: str, customer_text: str) -> Tuple[str, str]:
+	"""Return (system_prompt, user_prompt) assembled from DB and recent context."""
+	focus, conf = _detect_focus_product(conversation_id)
+	sys_msg = ""
+	prompt_msg = ""
+	store_conf: Dict[str, Any] = {
+		"brand": "HiMan",
+		"shipping": {"carrier": "SÜRAT", "eta_business_days": "2-3", "transparent_bag": True},
+		"exchange": {"customer_to_shop": 100, "shop_to_customer": 200, "note": "Toplam ~300 TL değişim kargo"},
+		"payment_options": ["cod_cash", "cod_card"],
+	}
+	stock: List[Dict[str, Any]] = []
+	with get_session() as session:
+		# product prompts
+		try:
+			if focus:
+				pr = session.exec(_text("SELECT ai_system_msg, ai_prompt_msg FROM product WHERE slug=:s OR name=:s LIMIT 1").params(s=str(focus))).first()
+			else:
+				pr = None
+			if pr:
+				sys_msg = (pr.ai_system_msg if hasattr(pr, "ai_system_msg") else pr[0]) or ""
+				prompt_msg = (pr.ai_prompt_msg if hasattr(pr, "ai_prompt_msg") else pr[1]) or ""
+		except Exception:
+			sys_msg = prompt_msg = ""
+		# recent messages
+		try:
+			msgs = session.exec(
+				select(Message).where(Message.conversation_id == conversation_id).order_by(Message.timestamp_ms.asc()).limit(25)
+			).all()
+			history = [{"dir": (m.direction or "in"), "text": (m.text or "")} for m in msgs]
+		except Exception:
+			history = []
+	# fallback system if missing
+	if not sys_msg:
+		sys_msg = "Sen HiMan için Instagram DM satış asistanısın. Kısa ve net yanıtla; satış akışını ilerlet."
+	user_prompt = json.dumps(
+		{
+			"store": store_conf,
+			"product_focus": {"id": focus, "confidence": conf},
+			"stock": stock,
+			"history": history,
+			"customer_message": customer_text,
+			"contract": {
+				"reply": "...",
+				"intent": "...",
+				"next_action": "...",
+				"order_draft": {"items": [], "totals": {"subtotal": 0, "shipping": 0, "discount": 0, "grand_total": 0}},
+				"flags": {},
+			},
+		},
+		ensure_ascii=False,
+	)
+	return sys_msg, user_prompt
+
+
+def propose_reply(conversation_id: str, customer_text: str) -> Dict[str, Any]:
+	"""Call the AI client in JSON mode and return the parsed dict (or empty on error)."""
+	sys, usr = build_prompt(conversation_id, customer_text)
+	try:
+		client = AIClient()
+		data = client.generate_json(system_prompt=sys, user_prompt=usr, temperature=0.2)
+		if isinstance(data, tuple):
+			data = data[0]
+		if isinstance(data, dict):
+			return data
+	except Exception:
+		return {}
+	return {}
+
+from __future__ import annotations
+
 import datetime as dt
 import json
 from typing import Any, Dict, Optional, Tuple, List

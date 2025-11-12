@@ -125,6 +125,22 @@
           </div>
         </div>
       {% endfor %}
+      {% if inline_drafts and shadow and shadow.text %}
+        <div class="msg out">
+          <div class="bubble" style="border:1px dashed #93c5fd; background:#eff6ff;">
+            <div style="font-weight:600; color:#1e40af; margin-bottom:6px;">AI Öneri (gönderilmedi)</div>
+            <div style="white-space:pre-wrap; color:#111827;">{{ shadow.text }}</div>
+            <div class="meta" style="margin-top:6px;">
+              model={{ shadow.model or '-' }} · güven={{ ('%.2f' % shadow.confidence) if shadow.confidence is not none else '-' }} · sebep={{ shadow.reason or '-' }}
+            </div>
+            <div style="margin-top:8px; display:flex; gap:8px;">
+              <button id="sendDraft" class="action" type="button">Gönder</button>
+              <button id="editDraft" class="action" type="button">Düzenle</button>
+              <button id="dismissDraft" class="action" type="button" style="border-color:#ef4444;color:#ef4444">Sil</button>
+            </div>
+          </div>
+        </div>
+      {% endif %}
       {% if not messages %}
         <div class="meta">No messages cached yet.</div>
       {% endif %}
@@ -214,6 +230,9 @@
       const input = document.getElementById('replyInput');
       const useShadow = document.getElementById('useShadow');
       const dismissShadow = document.getElementById('dismissShadow');
+      const sendDraft = document.getElementById('sendDraft');
+      const editDraft = document.getElementById('editDraft');
+      const dismissDraft = document.getElementById('dismissDraft');
       useShadow?.addEventListener('click', () => {
         try {
           const txt = {{ shadow.text|tojson if shadow and shadow.text else '""' }};
@@ -230,6 +249,40 @@
           alert('Gizleme hatası');
         } finally {
           dismissShadow.disabled = false;
+        }
+      });
+      // Inline draft controls
+      sendDraft?.addEventListener('click', async () => {
+        try {
+          sendDraft.disabled = true;
+          const text = {{ shadow.text|tojson if shadow and shadow.text else '""' }};
+          if (!text) return;
+          const r = await fetch(location.pathname + '/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+          if (!r.ok) throw new Error(await r.text());
+          await fetch(location.pathname + '/shadow/dismiss', { method: 'POST' }).catch(()=>{});
+          location.reload();
+        } catch (e) {
+          alert('Gönderme hatası');
+        } finally {
+          sendDraft.disabled = false;
+        }
+      });
+      editDraft?.addEventListener('click', () => {
+        try {
+          const txt = {{ shadow.text|tojson if shadow and shadow.text else '""' }};
+          if (input && txt) { input.value = txt; input.focus(); }
+        } catch {}
+      });
+      dismissDraft?.addEventListener('click', async () => {
+        try {
+          dismissDraft.disabled = true;
+          const r = await fetch(location.pathname + '/shadow/dismiss', { method: 'POST' });
+          if (!r.ok) throw new Error('dismiss failed');
+          location.reload();
+        } catch (e) {
+          alert('Silme hatası');
+        } finally {
+          dismissDraft.disabled = false;
         }
       });
       form?.addEventListener('submit', async (e) => {

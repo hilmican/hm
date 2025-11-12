@@ -37,9 +37,9 @@ def main() -> None:
 			record_heartbeat("ingest", os.getpid(), socket.gethostname())
 		except Exception:
 			pass
-		# Prefer ingest jobs; if none, try hydrate jobs
-		log.debug("waiting for jobs: ingest|hydrate_conversation")
-		job = dequeue("ingest", timeout=1) or dequeue("hydrate_conversation", timeout=1)
+		# Prefer ingest jobs; if none, try hydrate jobs (conversation/ad)
+		log.debug("waiting for jobs: ingest|hydrate_conversation|hydrate_ad")
+		job = dequeue("ingest", timeout=1) or dequeue("hydrate_conversation", timeout=1) or dequeue("hydrate_ad", timeout=1)
 		if not job:
 			time.sleep(0.25)
 			continue
@@ -101,6 +101,21 @@ def main() -> None:
 					increment_counter("hydrate_conversation", int(inserted))
 				except Exception:
 					pass
+				delete_job(jid)
+			elif kind == "hydrate_ad":
+				ad_id = str(payload.get("ad_id") or "")
+				if not ad_id:
+					delete_job(jid)
+					continue
+				with get_session() as session:
+					# Placeholder: if name is empty, set to ad_id; in real flow, populate from your catalog/cache
+					try:
+						row = session.exec(text("SELECT name FROM ads WHERE ad_id=:id")).params(id=ad_id).first()
+						name = (row.name if hasattr(row, "name") else (row[0] if row else None)) if row else None
+						if not (name and str(name).strip()):
+							session.exec(text("UPDATE ads SET name=:n, updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=ad_id, n=ad_id)
+					except Exception:
+						pass
 				delete_job(jid)
 			else:
 				delete_job(jid)

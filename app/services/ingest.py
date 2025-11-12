@@ -93,6 +93,15 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 			ad_img = ref.get("image_url") or ref.get("thumbnail_url") or ref.get("picture") or ref.get("media_url") or None
 			ad_name = ref.get("name") or ref.get("title") or None
 			referral_json_val = json.dumps(ref, ensure_ascii=False)
+		# Also parse Ads Library id from ad_link query param when present
+		if not ad_id and ad_link and "facebook.com/ads/library" in str(ad_link):
+			try:
+				from urllib.parse import urlparse, parse_qs
+				q = parse_qs(urlparse(str(ad_link)).query)
+				aid = (q.get("id") or [None])[0]
+				ad_id = str(aid) if aid else None
+			except Exception:
+				pass
 	except Exception:
 		ad_id = ad_link = ad_title = ad_img = ad_name = None
 		referral_json_val = None

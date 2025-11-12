@@ -6,6 +6,7 @@ from typing import Any, Optional
 from sqlalchemy import text as _text
 
 from ..db import get_session
+from ..services.monitoring import increment_counter
 
 
 def touch_shadow_state(conversation_id: str, last_inbound_ms: Optional[int], *, debounce_seconds: int = 30) -> None:
@@ -79,6 +80,12 @@ def insert_draft(conversation_id: str, *, reply_text: str, model: Optional[str],
 				row_id = 0
 		except Exception:
 			row_id = 0
+		# metrics
+		try:
+			if row_id:
+				increment_counter("ai_draft", 1)
+		except Exception:
+			pass
 		return row_id
 
 

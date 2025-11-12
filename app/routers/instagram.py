@@ -191,6 +191,15 @@ async def receive_events(request: Request):
 							ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
 							ad_img = ref.get("image_url") or ref.get("thumbnail_url") or ref.get("picture") or ref.get("media_url") or None
 							ad_name = ref.get("name") or ref.get("title") or None
+						# Also try to parse Ads Library id from link query param
+						if not ad_id and ad_link and "facebook.com/ads/library" in str(ad_link):
+							try:
+								from urllib.parse import urlparse, parse_qs
+								q = parse_qs(urlparse(str(ad_link)).query)
+								aid = (q.get("id") or [None])[0]
+								ad_id = str(aid) if aid else None
+							except Exception:
+								pass
 					except Exception:
 						ad_id = ad_link = ad_title = None
 					ts_ms = event.get("timestamp")
@@ -410,6 +419,15 @@ async def receive_events(request: Request):
 							except Exception:
 								session.exec(_t("INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id,:n,:img,:lnk,CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
 							session.exec(_t("UPDATE ads SET name=COALESCE(:n,name), image_url=COALESCE(:img,image_url), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+							# If name still missing, enqueue hydrate job
+							try:
+								row_ad = session.exec(_t("SELECT name FROM ads WHERE ad_id=:id").params(id=ad_id)).first()
+								nm = (row_ad.name if hasattr(row_ad, "name") else (row_ad[0] if row_ad else None)) if row_ad else None
+								if not (nm and str(nm).strip()):
+									from ..services.queue import enqueue
+									enqueue("hydrate_ad", key=str(ad_id), payload={"ad_id": str(ad_id)})
+							except Exception:
+								pass
 					except Exception:
 						pass
 					# ensure attachments are tracked per-message and fetch queued

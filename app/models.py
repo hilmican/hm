@@ -112,6 +112,10 @@ class Product(SQLModel, table=True):
     default_unit: Optional[str] = Field(default="adet")
     default_color: Optional[str] = None
     default_price: Optional[float] = None
+    # AI prompt fields (optional, per-product overrides)
+    ai_system_msg: Optional[str] = Field(default=None, sa_column=Column(Text))
+    ai_prompt_msg: Optional[str] = Field(default=None, sa_column=Column(Text))
+    ai_tags: Optional[str] = Field(default=None, description="JSON array of keywords for focus detection")
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
@@ -200,6 +204,9 @@ class Message(SQLModel, table=True):
     conversation_id: Optional[str] = Field(default=None, index=True)
     direction: Optional[str] = Field(default=None, index=True, description="in|out")
     sender_username: Optional[str] = Field(default=None, index=True)
+    # AI assistant lifecycle (optional)
+    ai_status: Optional[str] = Field(default=None, index=True, description="draft|sent|error")
+    ai_json: Optional[str] = Field(default=None, sa_column=Column(Text))
     # ads/referral metadata (best-effort)
     ad_id: Optional[str] = Field(default=None, index=True)
     ad_link: Optional[str] = Field(default=None)

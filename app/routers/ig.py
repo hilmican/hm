@@ -698,6 +698,8 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                 }
         except Exception:
             shadow = None
+        import os as _os
+        inline_drafts = (_os.getenv("IG_INLINE_DRAFTS", "1") not in ("0", "false", "False"))
         return templates.TemplateResponse(
             "ig_thread.html",
             {
@@ -717,6 +719,7 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                 "ai_status": ai_status,
                 "ai_json": ai_json,
                 "shadow": shadow,
+                "inline_drafts": inline_drafts,
             },
         )
 
@@ -754,6 +757,7 @@ def dismiss_shadow(conversation_id: str):
 	# Mark the latest suggested shadow draft as dismissed
 	try:
 		from sqlalchemy import text as _text
+		from ..services.monitoring import increment_counter
 		with get_session() as session:
 			row = session.exec(
 				_text("SELECT id FROM ai_shadow_reply WHERE convo_id=:cid AND (status IS NULL OR status='suggested') ORDER BY id DESC LIMIT 1")
@@ -764,6 +768,10 @@ def dismiss_shadow(conversation_id: str):
 			if not rid:
 				return {"status": "ok", "changed": 0}
 			session.exec(_text("UPDATE ai_shadow_reply SET status='dismissed' WHERE id=:id").params(id=int(rid)))
+			try:
+				increment_counter("ai_draft_dismissed", 1)
+			except Exception:
+				pass
 		return {"status": "ok", "changed": 1}
 	except Exception as e:
 		return {"status": "error", "error": str(e)}
@@ -1079,6 +1087,8 @@ async def send_message(conversation_id: str, body: dict):
         except Exception:
             pass
     try:
+        from ..services.monitoring import increment_counter
+        increment_counter("sent_messages", 1)
         await notify_new_message({"type": "ig_message", "conversation_id": conv_id, "text": text_val, "timestamp_ms": now_ms})
     except Exception:
         pass

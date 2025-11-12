@@ -225,6 +225,11 @@ def init_db() -> None:
                                 conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_image_url TEXT NULL")
                             if 'ad_name' not in have_cols:
                                 conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_name TEXT NULL")
+                            # Ensure AI lifecycle columns exist
+                            if 'ai_status' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ai_status VARCHAR(16) NULL")
+                            if 'ai_json' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ai_json LONGTEXT NULL")
                         except Exception:
                             pass
                         # Ensure order.notes is LONGTEXT to prevent overflow from appended notes
@@ -473,6 +478,23 @@ def init_db() -> None:
                                 )
                                 """
                             )
+                        except Exception:
+                            pass
+                        # Ensure product AI prompt fields exist (MySQL)
+                        try:
+                            rows = conn.exec_driver_sql(
+                                """
+                                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'product'
+                                """
+                            ).fetchall()
+                            have_cols = {str(r[0]).lower() for r in rows or []}
+                            if 'ai_system_msg' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE product ADD COLUMN ai_system_msg LONGTEXT NULL")
+                            if 'ai_prompt_msg' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE product ADD COLUMN ai_prompt_msg LONGTEXT NULL")
+                            if 'ai_tags' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE product ADD COLUMN ai_tags JSON NULL")
                         except Exception:
                             pass
                         # Message timestamp and composite index to accelerate counts and latest-per-conversation lookups
