@@ -80,6 +80,8 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	ad_id = None
 	ad_link = None
 	ad_title = None
+	ad_img = None
+	ad_name = None
 	referral_json_val = None
 	try:
 		ref = (event.get("referral") or message_obj.get("referral") or {})
@@ -87,9 +89,11 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 			ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
 			ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
 			ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
+			ad_img = ref.get("image_url") or ref.get("thumbnail_url") or ref.get("picture") or ref.get("media_url") or None
+			ad_name = ref.get("name") or ref.get("title") or None
 			referral_json_val = json.dumps(ref, ensure_ascii=False)
 	except Exception:
-		ad_id = ad_link = ad_title = None
+		ad_id = ad_link = ad_title = ad_img = ad_name = None
 		referral_json_val = None
 	row = Message(
 		ig_sender_id=str(sender_id) if sender_id is not None else None,
@@ -104,6 +108,8 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 		ad_id=ad_id,
 		ad_link=ad_link,
 		ad_title=ad_title,
+		ad_image_url=ad_img,
+		ad_name=ad_name,
 		referral_json=referral_json_val,
 	)
 	session.add(row)
@@ -202,6 +208,8 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any], igba_id: str) -
 	ad_id = None
 	ad_link = None
 	ad_title = None
+	ad_img = None
+	ad_name = None
 	referral_json_val = None
 	try:
 		ref = (event.get("referral") or message_obj.get("referral") or {})
@@ -209,9 +217,11 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any], igba_id: str) -
 			ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
 			ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
 			ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
+			ad_img = ref.get("image_url") or ref.get("thumbnail_url") or ref.get("picture") or ref.get("media_url") or None
+			ad_name = ref.get("name") or ref.get("title") or None
 			referral_json_val = json.dumps(ref, ensure_ascii=False)
 	except Exception:
-		ad_id = ad_link = ad_title = None
+		ad_id = ad_link = ad_title = ad_img = ad_name = None
 		referral_json_val = None
 	row = Message(
 		ig_sender_id=str(sender_id) if sender_id is not None else None,
@@ -227,6 +237,8 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any], igba_id: str) -
 		ad_id=ad_id,
 		ad_link=ad_link,
 		ad_title=ad_title,
+		ad_image_url=ad_img,
+		ad_name=ad_name,
 		referral_json=referral_json_val,
 	)
 	session.add(row)

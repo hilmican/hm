@@ -204,6 +204,8 @@ class Message(SQLModel, table=True):
     ad_id: Optional[str] = Field(default=None, index=True)
     ad_link: Optional[str] = Field(default=None)
     ad_title: Optional[str] = Field(default=None)
+    ad_image_url: Optional[str] = Field(default=None)
+    ad_name: Optional[str] = Field(default=None)
     referral_json: Optional[str] = Field(default=None)
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 

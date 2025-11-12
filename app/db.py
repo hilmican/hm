@@ -212,6 +212,21 @@ def init_db() -> None:
                                     conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN raw_json LONGTEXT")
                         except Exception:
                             pass
+                        # Ensure new ad metadata columns exist (MySQL)
+                        try:
+                            rows = conn.exec_driver_sql(
+                                """
+                                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message'
+                                """
+                            ).fetchall()
+                            have_cols = {str(r[0]).lower() for r in rows or []}
+                            if 'ad_image_url' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_image_url TEXT NULL")
+                            if 'ad_name' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_name TEXT NULL")
+                        except Exception:
+                            pass
                         # Ensure order.notes is LONGTEXT to prevent overflow from appended notes
                         try:
                             row = conn.exec_driver_sql(
@@ -701,6 +716,10 @@ def init_db() -> None:
                         conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_link TEXT")
                     if not column_exists("message", "ad_title"):
                         conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_title TEXT")
+                    if not column_exists("message", "ad_image_url"):
+                        conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_image_url TEXT")
+                    if not column_exists("message", "ad_name"):
+                        conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_name TEXT")
                     if not column_exists("message", "referral_json"):
                         conn.exec_driver_sql("ALTER TABLE message ADD COLUMN referral_json TEXT")
 
