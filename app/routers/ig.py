@@ -127,8 +127,9 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
             if other:
                 other_ids.add(str(other))
         conversations = list(conv_map.values())[:limit]
-        # Resolve usernames preferring last inbound message's sender_username; fallback to ig_users
-        labels = {}
+        # Resolve usernames preferring last inbound message's sender_username; fallback to ig_users, also include full names
+        labels: dict[str, str] = {}
+        names: dict[str, str] = {}
         try:
             # Build map from conv -> latest inbound with sender_username
             inbound_named: dict[str, str] = {}
@@ -152,14 +153,18 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                     placeholders = ",".join([":p" + str(i) for i in range(len(other_ids))])
                     from sqlalchemy import text as _text
                     params = {("p" + str(i)): list(other_ids)[i] for i in range(len(other_ids))}
-                    rows_u = session.exec(_text(f"SELECT ig_user_id, username FROM ig_users WHERE ig_user_id IN ({placeholders})")).params(**params).all()
+                    rows_u = session.exec(_text(f"SELECT ig_user_id, username, name FROM ig_users WHERE ig_user_id IN ({placeholders})")).params(**params).all()
                     id_to_username: dict[str, str] = {}
+                    id_to_name: dict[str, str] = {}
                     ids_without_username: list[str] = []
                     for r in rows_u:
                         uid = r.ig_user_id if hasattr(r, "ig_user_id") else r[0]
                         un = r.username if hasattr(r, "username") else r[1]
+                        nm = r.name if hasattr(r, "name") else (r[2] if len(r) > 2 else None)
                         if uid and un:
                             id_to_username[str(uid)] = str(un)
+                            if nm:
+                                id_to_name[str(uid)] = str(nm)
                         elif uid:
                             ids_without_username.append(str(uid))
                     # Enqueue background enrichment instead of fetching inline
@@ -180,8 +185,12 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                                 other = m.get("ig_sender_id") if isinstance(m, dict) else m.ig_sender_id
                         except Exception:
                             other = None
-                        if other and str(other) in id_to_username:
-                            labels[cid] = f"@{id_to_username[str(other)]}"
+                        if other:
+                            sid = str(other)
+                            if sid in id_to_username:
+                                labels[cid] = f"@{id_to_username[sid]}"
+                            if sid in id_to_name:
+                                names[cid] = id_to_name[sid]
             except Exception:
                 pass
         # Best-effort ad metadata from messages
@@ -195,7 +204,7 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
             if (ad_link or ad_title) and cid not in ad_map:
                 ad_map[cid] = {"link": ad_link, "title": ad_title}
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "ad_map": ad_map, "q": (q or "")})
+        return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "names": names, "ad_map": ad_map, "q": (q or "")})
 
 
 @router.post("/inbox/refresh")
@@ -449,6 +458,7 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
             except Exception:
                 other_id = None
         if other_id:
+            # Username for page header
             try:
                 from sqlalchemy import text as _text
                 rowu = session.exec(_text("SELECT username FROM ig_users WHERE ig_user_id=:u").params(u=str(other_id))).first()
@@ -458,45 +468,49 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                         other_label = f"@{un}"
             except Exception:
                 pass
-            # Collect enrichment status and queue info
+            # Collect enrichment status and queue info (build piecemeal, never fail the whole block)
+            estatus: dict[str, Any] = {"ig_user_id": str(other_id)}
+            # Row from ig_users
             try:
                 from sqlalchemy import text as _text
                 rowe = session.exec(
                     _text("SELECT username, name, fetched_at, fetch_status, fetch_error FROM ig_users WHERE ig_user_id=:u LIMIT 1")
                 ).params(u=str(other_id)).first()
-                # jobs table (queued but not yet processed)
-                try:
-                    dialect = str(session.get_bind().dialect.name)
-                except Exception:
-                    dialect = ""
+                if rowe:
+                    estatus["username"] = getattr(rowe, "username", None) if hasattr(rowe, "username") else (rowe[0] if len(rowe) > 0 else None)
+                    estatus["name"] = getattr(rowe, "name", None) if hasattr(rowe, "name") else (rowe[1] if len(rowe) > 1 else None)
+                    estatus["fetched_at"] = getattr(rowe, "fetched_at", None) if hasattr(rowe, "fetched_at") else (rowe[2] if len(rowe) > 2 else None)
+                    estatus["fetch_status"] = getattr(rowe, "fetch_status", None) if hasattr(rowe, "fetch_status") else (rowe[3] if len(rowe) > 3 else None)
+                    estatus["fetch_error"] = getattr(rowe, "fetch_error", None) if hasattr(rowe, "fetch_error") else (rowe[4] if len(rowe) > 4 else None)
+            except Exception:
+                pass
+            # Pending job (if any)
+            try:
+                dialect = str(session.get_bind().dialect.name)
+            except Exception:
+                dialect = ""
+            try:
+                from sqlalchemy import text as _text
                 if dialect == "mysql":
                     qry_job = "SELECT `id`, `attempts`, `run_after` FROM `jobs` WHERE `kind`='enrich_user' AND `key`=:u LIMIT 1"
                 else:
                     qry_job = "SELECT id, attempts, run_after FROM jobs WHERE kind='enrich_user' AND key=:u LIMIT 1"
                 rowj = session.exec(_text(qry_job).params(u=str(other_id))).first()
-                # redis queue depth
-                qdepth = None
-                try:
-                    r = _get_redis()
-                    qdepth = int(r.llen("jobs:enrich_user"))
-                except Exception:
-                    qdepth = None
-                enrich_status = {
-                    "ig_user_id": str(other_id),
-                    "username": (rowe.username if hasattr(rowe, "username") else (rowe[0] if rowe else None)) if rowe else None,
-                    "name": (rowe.name if hasattr(rowe, "name") else (rowe[1] if rowe and len(rowe) > 1 else None)) if rowe else None,
-                    "fetched_at": (rowe.fetched_at if hasattr(rowe, "fetched_at") else (rowe[2] if rowe and len(rowe) > 2 else None)) if rowe else None,
-                    "fetch_status": (rowe.fetch_status if hasattr(rowe, "fetch_status") else (rowe[3] if rowe and len(rowe) > 3 else None)) if rowe else None,
-                    "fetch_error": (rowe.fetch_error if hasattr(rowe, "fetch_error") else (rowe[4] if rowe and len(rowe) > 4 else None)) if rowe else None,
-                    "job": {
-                        "id": (rowj.id if hasattr(rowj, "id") else (rowj[0] if rowj else None)) if rowj else None,
-                        "attempts": (rowj.attempts if hasattr(rowj, "attempts") else (rowj[1] if rowj and len(rowj) > 1 else None)) if rowj else None,
-                        "run_after": (rowj.run_after if hasattr(rowj, "run_after") else (rowj[2] if rowj and len(rowj) > 2 else None)) if rowj else None,
-                    },
-                    "queue_depth": qdepth,
-                }
+                if rowj:
+                    estatus["job"] = {
+                        "id": getattr(rowj, "id", None) if hasattr(rowj, "id") else (rowj[0] if len(rowj) > 0 else None),
+                        "attempts": getattr(rowj, "attempts", None) if hasattr(rowj, "attempts") else (rowj[1] if len(rowj) > 1 else None),
+                        "run_after": getattr(rowj, "run_after", None) if hasattr(rowj, "run_after") else (rowj[2] if len(rowj) > 2 else None),
+                    }
             except Exception:
-                enrich_status = None
+                pass
+            # Queue depth
+            try:
+                r = _get_redis()
+                estatus["queue_depth"] = int(r.llen("jobs:enrich_user"))
+            except Exception:
+                pass
+            enrich_status = estatus
             # Try to fetch contact info from conversations table
             try:
                 from sqlalchemy import text as _text
