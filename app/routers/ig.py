@@ -178,45 +178,6 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                             labels[cid] = f"@{id_to_username[str(other)]}"
             except Exception:
                 pass
-        # Build avatar map via ig_users.profile_pic_url and enqueue enrich for those missing
-        avatars: dict[str, str] = {}
-        if other_ids:
-            try:
-                placeholders = ",".join([":u" + str(i) for i in range(len(other_ids))])
-                from sqlalchemy import text as _text
-                params = {("u" + str(i)): list(other_ids)[i] for i in range(len(other_ids))}
-                rows_pp = session.exec(
-                    _text(f"SELECT ig_user_id, profile_pic_url FROM ig_users WHERE ig_user_id IN ({placeholders})")
-                ).params(**params).all()
-                id_to_avatar: dict[str, str] = {}
-                ids_without_pp: list[str] = []
-                for r in rows_pp:
-                    uid = r.ig_user_id if hasattr(r, "ig_user_id") else r[0]
-                    pp = r.profile_pic_url if hasattr(r, "profile_pic_url") else (r[1] if len(r) > 1 else None)
-                    if uid and pp:
-                        id_to_avatar[str(uid)] = str(pp)
-                    elif uid:
-                        ids_without_pp.append(str(uid))
-                # Enqueue enrich to also populate avatars where missing
-                try:
-                    for uid in ids_without_pp[: min(50, len(ids_without_pp))]:
-                        enqueue("enrich_user", key=str(uid), payload={"ig_user_id": str(uid)})
-                except Exception:
-                    pass
-                for cid, m in conv_map.items():
-                    other = None
-                    try:
-                        direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
-                        if direction == "out":
-                            other = m.get("ig_recipient_id") if isinstance(m, dict) else m.ig_recipient_id
-                        else:
-                            other = m.get("ig_sender_id") if isinstance(m, dict) else m.ig_sender_id
-                    except Exception:
-                        other = None
-                    if other and str(other) in id_to_avatar:
-                        avatars[cid] = id_to_avatar[str(other)]
-            except Exception:
-                avatars = {}
         # Best-effort ad metadata from messages
         ad_map = {}
         for m in rows:
@@ -228,7 +189,7 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
             if (ad_link or ad_title) and cid not in ad_map:
                 ad_map[cid] = {"link": ad_link, "title": ad_title}
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "avatars": avatars, "ad_map": ad_map, "q": (q or "")})
+        return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "ad_map": ad_map, "q": (q or "")})
 
 
 @router.post("/inbox/refresh")

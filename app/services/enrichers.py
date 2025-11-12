@@ -35,19 +35,11 @@ async def enrich_user(ig_user_id: str) -> bool:
 		import httpx
 		token, _, _ = _get_base_token_and_id()
 		base = f"https://graph.facebook.com/{GRAPH_VERSION}"
-		# 1) Always fetch username and name (these should be allowed for IGBusinessScopedID)
+		# Fetch only username and name (no profile picture)
 		async with httpx.AsyncClient() as client:
 			data_basic = await graph_get(client, base + f"/{ig_user_id}", {"access_token": token, "fields": "username,name"})
 		username = data_basic.get("username") or data_basic.get("name")
 		name = data_basic.get("name")
-		pp = None
-		# 2) Try to fetch profile picture separately; if not supported, ignore without failing the whole enrichment
-		try:
-			async with httpx.AsyncClient() as client:
-				data_pp = await graph_get(client, base + f"/{ig_user_id}", {"access_token": token, "fields": "profile_picture_url"})
-			pp = data_pp.get("profile_picture_url") or data_pp.get("profile_pic")
-		except Exception:
-			pp = None
 	except Exception as e:
 		with get_session() as session:
 			session.exec(
@@ -61,10 +53,10 @@ async def enrich_user(ig_user_id: str) -> bool:
 			text(
 				"""
 				UPDATE ig_users
-				SET username=:u, name=:n, profile_pic_url=COALESCE(:p, profile_pic_url), fetched_at=CURRENT_TIMESTAMP, fetch_status='ok', fetch_error=NULL
+				SET username=:u, name=:n, fetched_at=CURRENT_TIMESTAMP, fetch_status='ok', fetch_error=NULL
 				WHERE ig_user_id=:id
 				"""
-			).params(u=username, n=name, p=pp, id=ig_user_id)
+			).params(u=username, n=name, id=ig_user_id)
 		)
 	return True
 
