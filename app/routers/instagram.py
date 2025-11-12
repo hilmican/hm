@@ -220,6 +220,41 @@ async def receive_events(request: Request):
 					)
 					session.add(row)
 					persisted += 1
+					# Update latest_messages for inbox performance
+					try:
+						from sqlalchemy import text as _t
+						if conversation_id and ts_ms is not None:
+							session.exec(
+								_t(
+									"""
+									INSERT INTO latest_messages(convo_id, message_id, timestamp_ms, text, sender_username, direction, ig_sender_id, ig_recipient_id, ad_link, ad_title)
+									VALUES (:cid, :mid, :ts, :txt, :sun, :dir, :sid, :rid, :alink, :atitle)
+									ON DUPLICATE KEY UPDATE
+									  message_id=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(message_id), latest_messages.message_id),
+									  timestamp_ms=GREATEST(COALESCE(latest_messages.timestamp_ms,0), VALUES(timestamp_ms)),
+									  text=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(text), latest_messages.text),
+									  sender_username=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(sender_username), latest_messages.sender_username),
+									  direction=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(direction), latest_messages.direction),
+									  ig_sender_id=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ig_sender_id), latest_messages.ig_sender_id),
+									  ig_recipient_id=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ig_recipient_id), latest_messages.ig_recipient_id),
+									  ad_link=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ad_link), latest_messages.ad_link),
+									  ad_title=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ad_title), latest_messages.ad_title)
+									"""
+								)
+							).params(
+								cid=str(conversation_id),
+								mid=int(row.id),
+								ts=int(ts_ms) if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit() else 0,
+								txt=(text_val or ""),
+								sun=None,
+								dir=(direction or "in"),
+								sid=(str(sender_id) if sender_id is not None else None),
+								rid=(str(recipient_id) if recipient_id is not None else None),
+								alink=ad_link,
+								atitle=ad_title,
+							)
+					except Exception:
+						pass
 					# Start/refresh AI shadow debounce for inbound messages
 					try:
 						if (direction or "in") == "in" and conversation_id:

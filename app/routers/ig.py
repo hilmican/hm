@@ -48,27 +48,15 @@ async def notify_new_message(event: dict) -> None:
 
 @router.get("/inbox")
 async def inbox(request: Request, limit: int = 25, q: str | None = None):
-    with get_session() as session:
-        # Canonical conversation list based on ai_conversations, joined with latest message per convo
-        from sqlalchemy import text as _text
-        sample_n = max(50, min(int(limit or 25) * 4, 200))
-        # Build latest message per conversation (for preview/time) and intersect with ai_conversations
-        base_sql = """
-            WITH latest AS (
-                SELECT m1.*
-                FROM message m1
-                JOIN (
-                    SELECT conversation_id, MAX(timestamp_ms) AS ts
-                    FROM message
-                    WHERE conversation_id IS NOT NULL
-                    GROUP BY conversation_id
-                ) lm ON lm.conversation_id = m1.conversation_id AND lm.ts = m1.timestamp_ms
-            )
-            SELECT ac.convo_id, l.timestamp_ms, l.text, l.sender_username, l.direction,
-                   l.ig_sender_id, l.ig_recipient_id, l.ad_link, l.ad_title
-            FROM ai_conversations ac
-            LEFT JOIN latest l ON l.conversation_id = ac.convo_id
-        """
+		with get_session() as session:
+			# Use materialized latest_messages to avoid heavy CTE scans
+			from sqlalchemy import text as _text
+			base_sql = """
+				SELECT ac.convo_id, lm.timestamp_ms, lm.text, lm.sender_username, lm.direction,
+				       lm.ig_sender_id, lm.ig_recipient_id, lm.ad_link, lm.ad_title
+				FROM ai_conversations ac
+				LEFT JOIN latest_messages lm ON lm.convo_id = ac.convo_id
+			"""
         where_parts: list[str] = []
         params: dict[str, object] = {}
         if q and isinstance(q, str) and q.strip():

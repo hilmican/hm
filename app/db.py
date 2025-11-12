@@ -395,6 +395,16 @@ def init_db() -> None:
                                 conn.exec_driver_sql("CREATE INDEX idx_conversations_ai_process_time ON conversations(ai_process_time)")
                             except Exception:
                                 pass
+                            # Message composite index for inbox (idempotent)
+                            try:
+                                conn.exec_driver_sql("CREATE INDEX idx_message_conv_ts ON message(conversation_id, timestamp_ms)")
+                            except Exception:
+                                pass
+                            # Username index for labels
+                            try:
+                                conn.exec_driver_sql("CREATE INDEX idx_ig_users_username ON ig_users(username)")
+                            except Exception:
+                                pass
                         except Exception:
                             pass
                         # Ensure `order`.ig_conversation_id exists for linking back to IG threads
@@ -1059,6 +1069,11 @@ def init_db() -> None:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_message_conv_ts ON message(conversation_id, timestamp_ms)")
                 except Exception:
                     pass
+                # Username index for labels
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ig_users_username ON ig_users(username)")
+                except Exception:
+                    pass
                 # Lightweight migrations for conversations.hydrated_at (pre-existing tables)
                 try:
                     rows = conn.exec_driver_sql("PRAGMA table_info('conversations')").fetchall()
@@ -1123,6 +1138,27 @@ def init_db() -> None:
                     pass
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_shadow_reply_status ON ai_shadow_reply(status)")
+                except Exception:
+                    pass
+                # latest message materialized view table (SQLite)
+                conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS latest_messages (
+                        convo_id TEXT PRIMARY KEY,
+                        message_id INTEGER,
+                        timestamp_ms BIGINT,
+                        text TEXT,
+                        sender_username TEXT,
+                        direction TEXT,
+                        ig_sender_id TEXT,
+                        ig_recipient_id TEXT,
+                        ad_link TEXT,
+                        ad_title TEXT
+                    )
+                    """
+                )
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_latest_ts ON latest_messages(timestamp_ms)")
                 except Exception:
                     pass
             return
