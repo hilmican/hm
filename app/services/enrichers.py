@@ -3,10 +3,13 @@ import datetime as dt
 from typing import Optional
 
 from sqlalchemy import text
+import logging
 
 from ..db import get_session
 from .instagram_api import fetch_user_username, _get_base_token_and_id, GRAPH_VERSION, _get as graph_get
 import httpx
+
+_log = logging.getLogger("enricher")
 
 
 def _ttl_hours(env_key: str, default: int) -> int:
@@ -28,6 +31,10 @@ async def enrich_user(ig_user_id: str) -> bool:
 				except Exception:
 					fa = None
 			if fa and (dt.datetime.utcnow() - fa) < dt.timedelta(hours=_ttl_hours("USER_TTL_HOURS", 48)):
+				try:
+					_log.info("enrich_user: skip TTL uid=%s fetched_at=%s", ig_user_id, fa)
+				except Exception:
+					pass
 				return False
 	# Fetch full profile fields instead of only username to enable avatars in UI
 	try:
@@ -40,7 +47,15 @@ async def enrich_user(ig_user_id: str) -> bool:
 			data_basic = await graph_get(client, base + f"/{ig_user_id}", {"access_token": token, "fields": "username,name"})
 		username = data_basic.get("username") or data_basic.get("name")
 		name = data_basic.get("name")
+		try:
+			_log.info("enrich_user: graph ok uid=%s username=%s name=%s", ig_user_id, username, name)
+		except Exception:
+			pass
 	except Exception as e:
+		try:
+			_log.warning("enrich_user: graph error uid=%s err=%s", ig_user_id, e)
+		except Exception:
+			pass
 		with get_session() as session:
 			session.exec(
 				text("UPDATE ig_users SET fetch_status='error', fetch_error=:e WHERE ig_user_id=:id").params(
@@ -59,10 +74,14 @@ async def enrich_user(ig_user_id: str) -> bool:
 					).params(u=str(ig_user_id))
 				).first()
 				if row:
-                    # row could be RowMapping or tuple
+					# row could be RowMapping or tuple
 					val = row.sender_username if hasattr(row, "sender_username") else (row[0] if isinstance(row, (list, tuple)) else None)
 					if isinstance(val, str) and val.strip():
 						username = val.strip()
+			try:
+				_log.info("enrich_user: fallback from messages uid=%s username=%s", ig_user_id, username)
+			except Exception:
+				pass
 		except Exception:
 			pass
 	with get_session() as session:
@@ -75,6 +94,10 @@ async def enrich_user(ig_user_id: str) -> bool:
 				"""
 			).params(u=username, n=name, id=ig_user_id)
 		)
+	try:
+		_log.info("enrich_user: done uid=%s username=%s", ig_user_id, username)
+	except Exception:
+		pass
 	return True
 
 

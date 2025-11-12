@@ -27,6 +27,22 @@
     <h3>AI Çıktısı</h3>
     {% if ai_status %}<div class="meta">Durum: {{ ai_status }}</div>{% endif %}
     <pre id="aiBox" style="background:#0b1021;color:#e5e7eb; padding:12px; border-radius:8px; max-height:300px; overflow:auto; white-space:pre-wrap;">{{ ai_json or 'Henüz AI verisi yok.' }}</pre>
+    <div style="margin-top:12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
+      <h4 style="margin:0 0 8px 0; color:#111827;">Zenginleştirme Durumu</h4>
+      {% if enrich %}
+        <div class="meta">Kullanıcı: {{ enrich.username or '-' }} {% if enrich.name %} ({{ enrich.name }}){% endif %}</div>
+        <div class="meta">Durum: {{ enrich.fetch_status or 'bilinmiyor' }} {% if enrich.fetched_at %}· fetched_at: {{ enrich.fetched_at }}{% endif %}</div>
+        {% if enrich.fetch_error %}<div class="meta">Hata: {{ enrich.fetch_error }}</div>{% endif %}
+        <div class="meta">Kuyruk (enrich_user) uzunluğu: {{ enrich.queue_depth if enrich.queue_depth is not none else '-' }}</div>
+        {% if enrich.job and enrich.job.id %}
+          <div class="meta">Bekleyen iş: #{{ enrich.job.id }} · attempts={{ enrich.job.attempts or 0 }} {% if enrich.job.run_after %}· run_after={{ enrich.job.run_after }}{% endif %}</div>
+        {% else %}
+          <div class="meta">Bekleyen enrich_user işi yok.</div>
+        {% endif %}
+      {% else %}
+        <div class="meta">Zenginleştirme bilgisi mevcut değil.</div>
+      {% endif %}
+    </div>
     {% if contact_name or contact_phone or contact_address or linked_order_id %}
       <div style="margin-top:12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
         <h4 style="margin:0 0 8px 0; color:#111827;">Çıkarılan Bilgiler</h4>

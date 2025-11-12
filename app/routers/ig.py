@@ -392,6 +392,7 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
         contact_name = None
         contact_phone = None
         contact_address = None
+        enrich_status: dict[str, Any] | None = None
         linked_order_id = None
         ai_status = None
         ai_json = None
@@ -445,6 +446,45 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                         other_label = f"@{un}"
             except Exception:
                 pass
+            # Collect enrichment status and queue info
+            try:
+                from sqlalchemy import text as _text
+                rowe = session.exec(
+                    _text("SELECT username, name, fetched_at, fetch_status, fetch_error FROM ig_users WHERE ig_user_id=:u LIMIT 1")
+                ).params(u=str(other_id)).first()
+                # jobs table (queued but not yet processed)
+                try:
+                    dialect = str(session.get_bind().dialect.name)
+                except Exception:
+                    dialect = ""
+                if dialect == "mysql":
+                    qry_job = "SELECT `id`, `attempts`, `run_after` FROM `jobs` WHERE `kind`='enrich_user' AND `key`=:u LIMIT 1"
+                else:
+                    qry_job = "SELECT id, attempts, run_after FROM jobs WHERE kind='enrich_user' AND key=:u LIMIT 1"
+                rowj = session.exec(_text(qry_job).params(u=str(other_id))).first()
+                # redis queue depth
+                qdepth = None
+                try:
+                    r = _get_redis()
+                    qdepth = int(r.llen("jobs:enrich_user"))
+                except Exception:
+                    qdepth = None
+                enrich_status = {
+                    "ig_user_id": str(other_id),
+                    "username": (rowe.username if hasattr(rowe, "username") else (rowe[0] if rowe else None)) if rowe else None,
+                    "name": (rowe.name if hasattr(rowe, "name") else (rowe[1] if rowe and len(rowe) > 1 else None)) if rowe else None,
+                    "fetched_at": (rowe.fetched_at if hasattr(rowe, "fetched_at") else (rowe[2] if rowe and len(rowe) > 2 else None)) if rowe else None,
+                    "fetch_status": (rowe.fetch_status if hasattr(rowe, "fetch_status") else (rowe[3] if rowe and len(rowe) > 3 else None)) if rowe else None,
+                    "fetch_error": (rowe.fetch_error if hasattr(rowe, "fetch_error") else (rowe[4] if rowe and len(rowe) > 4 else None)) if rowe else None,
+                    "job": {
+                        "id": (rowj.id if hasattr(rowj, "id") else (rowj[0] if rowj else None)) if rowj else None,
+                        "attempts": (rowj.attempts if hasattr(rowj, "attempts") else (rowj[1] if rowj and len(rowj) > 1 else None)) if rowj else None,
+                        "run_after": (rowj.run_after if hasattr(rowj, "run_after") else (rowj[2] if rowj and len(rowj) > 2 else None)) if rowj else None,
+                    },
+                    "queue_depth": qdepth,
+                }
+            except Exception:
+                enrich_status = None
             # Try to fetch contact info from conversations table
             try:
                 from sqlalchemy import text as _text
@@ -550,6 +590,7 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                 "conversation_id": conversation_id,
                 "messages": msgs,
                 "other_label": other_label,
+                "enrich": enrich_status,
                 "att_map": att_map,
                 "att_ids_map": att_ids_map,
                 "usernames": usernames,
