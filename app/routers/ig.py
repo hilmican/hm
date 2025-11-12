@@ -790,6 +790,75 @@ def backfill_ai_conversations(limit: int = 1000):
             except Exception:
                 pass
     return {"status": "ok", "created": created}
+
+@router.post("/admin/backfill/latest")
+def backfill_latest_messages(limit: int = 50000):
+	# Populate latest_messages from message table (MySQL/SQLite compatible)
+	from sqlalchemy import text as _text
+	created = 0
+	try:
+		with get_session() as session:
+			# MySQL 8 and SQLite both support CTE; but also provide fallback
+			sql_cte = """
+				WITH lm AS (
+					SELECT conversation_id, MAX(COALESCE(timestamp_ms,0)) AS ts
+					FROM message
+					WHERE conversation_id IS NOT NULL
+					GROUP BY conversation_id
+					ORDER BY ts DESC
+					LIMIT :n
+				)
+				INSERT INTO latest_messages(convo_id, message_id, timestamp_ms, text, sender_username, direction, ig_sender_id, ig_recipient_id, ad_link, ad_title)
+				SELECT m.conversation_id, m.id, COALESCE(m.timestamp_ms,0), m.text, m.sender_username, m.direction, m.ig_sender_id, m.ig_recipient_id, m.ad_link, m.ad_title
+				FROM message m
+				JOIN lm ON lm.conversation_id = m.conversation_id AND lm.ts = COALESCE(m.timestamp_ms,0)
+				ON CONFLICT(convo_id) DO UPDATE SET
+				  message_id=excluded.message_id,
+				  timestamp_ms=excluded.timestamp_ms,
+				  text=excluded.text,
+				  sender_username=excluded.sender_username,
+				  direction=excluded.direction,
+				  ig_sender_id=excluded.ig_sender_id,
+				  ig_recipient_id=excluded.ig_recipient_id,
+				  ad_link=excluded.ad_link,
+				  ad_title=excluded.ad_title
+			"""
+			try:
+				res = session.exec(_text(sql_cte).params(n=int(max(1000, min(limit, 200000)))) )
+				created = int(getattr(res, "rowcount", 0) or 0)
+			except Exception:
+				# MySQL fallback using ON DUPLICATE KEY UPDATE without CTE
+				sql_mysql = """
+					INSERT INTO latest_messages(convo_id, message_id, timestamp_ms, text, sender_username, direction, ig_sender_id, ig_recipient_id, ad_link, ad_title)
+					SELECT t.conversation_id, t.id, t.ts, t.text, t.sender_username, t.direction, t.ig_sender_id, t.ig_recipient_id, t.ad_link, t.ad_title
+					FROM (
+						SELECT m.conversation_id, m.id, COALESCE(m.timestamp_ms,0) AS ts, m.text, m.sender_username, m.direction, m.ig_sender_id, m.ig_recipient_id, m.ad_link, m.ad_title
+						FROM message m
+						JOIN (
+							SELECT conversation_id, MAX(COALESCE(timestamp_ms,0)) AS ts
+							FROM message
+							WHERE conversation_id IS NOT NULL
+							GROUP BY conversation_id
+						) lm ON lm.conversation_id = m.conversation_id AND lm.ts = COALESCE(m.timestamp_ms,0)
+						ORDER BY ts DESC
+						LIMIT :n
+					) AS t
+					ON DUPLICATE KEY UPDATE
+					  message_id=VALUES(message_id),
+					  timestamp_ms=VALUES(timestamp_ms),
+					  text=VALUES(text),
+					  sender_username=VALUES(sender_username),
+					  direction=VALUES(direction),
+					  ig_sender_id=VALUES(ig_sender_id),
+					  ig_recipient_id=VALUES(ig_recipient_id),
+					  ad_link=VALUES(ad_link),
+					  ad_title=VALUES(ad_title)
+				"""
+				res = session.exec(_text(sql_mysql).params(n=int(max(1000, min(limit, 200000)))) )
+				created = int(getattr(res, "rowcount", 0) or 0)
+	except Exception:
+		created = 0
+	return {"status": "ok", "upserted": created}
 @router.post("/inbox/{conversation_id}/enrich")
 def enqueue_enrich(conversation_id: str):
     # Enqueue enrich_user for the other party and enrich_page for the active page/user id

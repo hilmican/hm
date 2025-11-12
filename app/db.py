@@ -346,6 +346,30 @@ def init_db() -> None:
                             )
                         except Exception:
                             pass
+                        # latest message materialized view (MySQL)
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS latest_messages (
+                                    convo_id VARCHAR(128) PRIMARY KEY,
+                                    message_id INT NULL,
+                                    timestamp_ms BIGINT NULL,
+                                    text LONGTEXT NULL,
+                                    sender_username TEXT NULL,
+                                    direction VARCHAR(8) NULL,
+                                    ig_sender_id VARCHAR(64) NULL,
+                                    ig_recipient_id VARCHAR(64) NULL,
+                                    ad_link TEXT NULL,
+                                    ad_title TEXT NULL
+                                )
+                                """
+                            )
+                            try:
+                                conn.exec_driver_sql("CREATE INDEX idx_latest_ts ON latest_messages(timestamp_ms)")
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
                         # Ensure conversations AI/contact columns exist for IG AI
                         try:
                             rows = conn.exec_driver_sql(
