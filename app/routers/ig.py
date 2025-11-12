@@ -10,6 +10,7 @@ from sqlmodel import select
 from ..services.instagram_api import sync_latest_conversations
 from ..services.queue import enqueue
 from ..services.instagram_api import _get_base_token_and_id, GRAPH_VERSION
+from ..services.queue import _get_redis
 import json
 from pathlib import Path
 from fastapi.responses import FileResponse, RedirectResponse
@@ -200,6 +201,30 @@ async def refresh_inbox(limit: int = 25):
         return {"status": "ok", "saved": 0}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+@router.post("/inbox/clear-enrich")
+def clear_enrich_queues():
+    # Purge Redis lists for enrich jobs and delete queued rows from jobs table
+    cleared: dict[str, int] = {"redis": 0, "db": 0}
+    try:
+        r = _get_redis()
+        # delete lists atomically; DEL returns number of keys removed
+        n = int(r.delete("jobs:enrich_user", "jobs:enrich_page"))
+        cleared["redis"] = n
+    except Exception:
+        pass
+    try:
+        from sqlalchemy import text as _text
+        with get_session() as session:
+            res = session.exec(_text("DELETE FROM jobs WHERE kind IN ('enrich_user','enrich_page')"))
+            try:
+                cleared["db"] = int(getattr(res, "rowcount", 0))
+            except Exception:
+                cleared["db"] = 0
+    except Exception:
+        pass
+    return {"status": "ok", "cleared": cleared}
 
 
 @router.websocket("/ws")
