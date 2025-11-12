@@ -81,44 +81,44 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
 			params["n"] = int(sample_n)
 			final_sql = base_sql + (" WHERE " + " AND ".join(where_parts) if where_parts else "") + order_sql
 			rows_raw = session.exec(_text(final_sql).params(**params)).all()
-        # Normalize rows into dicts for template use; fall back convo id when preview missing
-        rows = []
-        for r in rows_raw:
-            try:
-                cid = (r.convo_id if hasattr(r, "convo_id") else r[0])
-                rows.append({
-                    "conversation_id": cid,
-                    "timestamp_ms": (getattr(r, "timestamp_ms", None) if hasattr(r, "timestamp_ms") else (r[1] if len(r) > 1 else None)),
-                    "text": (getattr(r, "text", None) if hasattr(r, "text") else (r[2] if len(r) > 2 else None)),
-                    "sender_username": (getattr(r, "sender_username", None) if hasattr(r, "sender_username") else (r[3] if len(r) > 3 else None)),
-                    "direction": (getattr(r, "direction", None) if hasattr(r, "direction") else (r[4] if len(r) > 4 else None)),
-                    "ig_sender_id": (getattr(r, "ig_sender_id", None) if hasattr(r, "ig_sender_id") else (r[5] if len(r) > 5 else None)),
-                    "ig_recipient_id": (getattr(r, "ig_recipient_id", None) if hasattr(r, "ig_recipient_id") else (r[6] if len(r) > 6 else None)),
-                    "ad_link": (getattr(r, "ad_link", None) if hasattr(r, "ad_link") else (r[7] if len(r) > 7 else None)),
-                    "ad_title": (getattr(r, "ad_title", None) if hasattr(r, "ad_title") else (r[8] if len(r) > 8 else None)),
-                })
-            except Exception:
-                continue
-        conv_map = {}
-        other_ids: set[str] = set()
-        for m in rows:
-            cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
-            if not cid:
-                continue
-            if cid not in conv_map:
-                conv_map[cid] = m
-            # Determine the other party id for this message
-            other = None
-            try:
-                direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
-                if direction == "out":
-                    other = m.get("ig_recipient_id") if isinstance(m, dict) else m.ig_recipient_id
-                else:
-                    other = m.get("ig_sender_id") if isinstance(m, dict) else m.ig_sender_id
-            except Exception:
-                other = None
-            if other:
-                other_ids.add(str(other))
+			# Normalize rows into dicts for template use; fall back convo id when preview missing
+			rows = []
+			for r in rows_raw:
+				try:
+					cid = (r.convo_id if hasattr(r, "convo_id") else r[0])
+					rows.append({
+						"conversation_id": cid,
+						"timestamp_ms": (getattr(r, "timestamp_ms", None) if hasattr(r, "timestamp_ms") else (r[1] if len(r) > 1 else None)),
+						"text": (getattr(r, "text", None) if hasattr(r, "text") else (r[2] if len(r) > 2 else None)),
+						"sender_username": (getattr(r, "sender_username", None) if hasattr(r, "sender_username") else (r[3] if len(r) > 3 else None)),
+						"direction": (getattr(r, "direction", None) if hasattr(r, "direction") else (r[4] if len(r) > 4 else None)),
+						"ig_sender_id": (getattr(r, "ig_sender_id", None) if hasattr(r, "ig_sender_id") else (r[5] if len(r) > 5 else None)),
+						"ig_recipient_id": (getattr(r, "ig_recipient_id", None) if hasattr(r, "ig_recipient_id") else (r[6] if len(r) > 6 else None)),
+						"ad_link": (getattr(r, "ad_link", None) if hasattr(r, "ad_link") else (r[7] if len(r) > 7 else None)),
+						"ad_title": (getattr(r, "ad_title", None) if hasattr(r, "ad_title") else (r[8] if len(r) > 8 else None)),
+					})
+				except Exception:
+					continue
+			conv_map = {}
+			other_ids: set[str] = set()
+			for m in rows:
+				cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
+				if not cid:
+					continue
+				if cid not in conv_map:
+					conv_map[cid] = m
+				# Determine the other party id for this message
+				other = None
+				try:
+					direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
+					if direction == "out":
+						other = m.get("ig_recipient_id") if isinstance(m, dict) else m.ig_recipient_id
+					else:
+						other = m.get("ig_sender_id") if isinstance(m, dict) else m.ig_sender_id
+				except Exception:
+					other = None
+				if other:
+					other_ids.add(str(other))
         conversations = list(conv_map.values())[:limit]
         # Resolve usernames preferring last inbound message's sender_username; fallback to ig_users, also include full names
         labels: dict[str, str] = {}
