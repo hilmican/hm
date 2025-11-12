@@ -289,6 +289,23 @@ async def receive_events(request: Request):
 										atitle=ad_title,
 									)
 								)
+							# Ensure ai_conversations entry exists so inbox can display the conversation
+							try:
+								# Try SQLite syntax first (INSERT OR IGNORE)
+								try:
+									session.exec(_t("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)").params(cid=str(conversation_id)))
+								except Exception:
+									# Fallback for MySQL (INSERT IGNORE)
+									try:
+										session.exec(_t("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)").params(cid=str(conversation_id)))
+									except Exception:
+										# Final fallback: check if exists first, then insert
+										exists = session.exec(_t("SELECT 1 FROM ai_conversations WHERE convo_id=:cid LIMIT 1").params(cid=str(conversation_id))).first()
+										if not exists:
+											session.exec(_t("INSERT INTO ai_conversations(convo_id) VALUES (:cid)").params(cid=str(conversation_id)))
+							except Exception:
+								# Best-effort only; don't fail the webhook if this fails
+								pass
 							# Context manager will commit automatically
 						except Exception as e:
 							try:
