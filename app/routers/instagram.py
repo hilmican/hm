@@ -223,6 +223,34 @@ async def receive_events(request: Request):
 					session.add(row)
 					session.flush()  # Flush to get row.id
 					persisted += 1
+					# Ensure ai_conversations entry exists FIRST so inbox can display the conversation
+					# This must happen before latest_messages update to ensure conversation appears even if update fails
+					if conversation_id:
+						try:
+							from sqlalchemy import text as _t
+							# Try SQLite syntax first (INSERT OR IGNORE)
+							try:
+								session.exec(_t("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)").params(cid=str(conversation_id)))
+							except Exception:
+								# Fallback for MySQL (INSERT IGNORE)
+								try:
+									session.exec(_t("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)").params(cid=str(conversation_id)))
+								except Exception as e_mysql:
+									# Final fallback: check if exists first, then insert
+									try:
+										exists = session.exec(_t("SELECT 1 FROM ai_conversations WHERE convo_id=:cid LIMIT 1").params(cid=str(conversation_id))).first()
+										if not exists:
+											session.exec(_t("INSERT INTO ai_conversations(convo_id) VALUES (:cid)").params(cid=str(conversation_id)))
+									except Exception as e_final:
+										try:
+											_log.warning("webhook: failed to create ai_conversations cid=%s err=%s", conversation_id, str(e_final)[:200])
+										except Exception:
+											pass
+						except Exception as e:
+							try:
+								_log.warning("webhook: failed to ensure ai_conversations cid=%s err=%s", conversation_id, str(e)[:200])
+							except Exception:
+								pass
 					# Update latest_messages for inbox performance
 					if conversation_id and ts_ms is not None and row.id:
 						try:
@@ -289,23 +317,6 @@ async def receive_events(request: Request):
 										atitle=ad_title,
 									)
 								)
-							# Ensure ai_conversations entry exists so inbox can display the conversation
-							try:
-								# Try SQLite syntax first (INSERT OR IGNORE)
-								try:
-									session.exec(_t("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)").params(cid=str(conversation_id)))
-								except Exception:
-									# Fallback for MySQL (INSERT IGNORE)
-									try:
-										session.exec(_t("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)").params(cid=str(conversation_id)))
-									except Exception:
-										# Final fallback: check if exists first, then insert
-										exists = session.exec(_t("SELECT 1 FROM ai_conversations WHERE convo_id=:cid LIMIT 1").params(cid=str(conversation_id))).first()
-										if not exists:
-											session.exec(_t("INSERT INTO ai_conversations(convo_id) VALUES (:cid)").params(cid=str(conversation_id)))
-							except Exception:
-								# Best-effort only; don't fail the webhook if this fails
-								pass
 							# Context manager will commit automatically
 						except Exception as e:
 							try:
