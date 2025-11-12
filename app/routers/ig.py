@@ -77,7 +77,19 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
             """)
             params["qq"] = qq
         sample_n = max(50, min(int(limit or 25) * 4, 200))
-        order_sql = " ORDER BY COALESCE(ac.ai_process_time, lm.timestamp_ms) DESC LIMIT :n"
+        bind = session.get_bind()
+        dialect_name = ""
+        try:
+            if bind is not None and getattr(bind, "dialect", None):
+                dialect_name = bind.dialect.name.lower()
+        except Exception:
+            dialect_name = ""
+        if dialect_name == "mysql":
+            order_sql = " ORDER BY COALESCE(ac.ai_process_time, FROM_UNIXTIME(lm.timestamp_ms/1000)) DESC LIMIT :n"
+        elif dialect_name == "sqlite":
+            order_sql = " ORDER BY COALESCE(ac.ai_process_time, datetime(lm.timestamp_ms/1000, 'unixepoch')) DESC LIMIT :n"
+        else:
+            order_sql = " ORDER BY COALESCE(ac.ai_process_time, lm.timestamp_ms) DESC LIMIT :n"
         params["n"] = int(sample_n)
         final_sql = base_sql + (" WHERE " + " AND ".join(where_parts) if where_parts else "") + order_sql
         rows_raw = session.exec(_text(final_sql).params(**params)).all()
