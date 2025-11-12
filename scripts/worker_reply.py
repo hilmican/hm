@@ -54,7 +54,7 @@ def main() -> None:
 						FROM ai_shadow_state
 						WHERE (status IN ('pending','paused') OR status IS NULL)
 						  AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
-						ORDER BY next_attempt_at NULLS FIRST
+						ORDER BY (next_attempt_at IS NULL) DESC, next_attempt_at ASC
 						LIMIT 20
 						"""
 					)
