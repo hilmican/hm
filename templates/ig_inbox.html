@@ -28,6 +28,9 @@
       {% for m in conversations %}
         <div class="conv">
           <div>
+            {% if avatars and avatars.get(m.conversation_id) %}
+              <img src="{{ avatars.get(m.conversation_id) }}" alt="pp" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:8px;vertical-align:middle" />
+            {% endif %}
             <a href="/ig/inbox/{{ m.conversation_id }}">{{ labels.get(m.conversation_id) or m.conversation_id }}</a>
             {% if labels.get(m.conversation_id) %}
               <a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ labels.get(m.conversation_id)[1:] }}">profil ↗</a>

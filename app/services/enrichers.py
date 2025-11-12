@@ -29,17 +29,36 @@ async def enrich_user(ig_user_id: str) -> bool:
 					fa = None
 			if fa and (dt.datetime.utcnow() - fa) < dt.timedelta(hours=_ttl_hours("USER_TTL_HOURS", 48)):
 				return False
+	# Fetch full profile fields instead of only username to enable avatars in UI
 	try:
-		username = await fetch_user_username(ig_user_id)
+		from .instagram_api import _get as graph_get, GRAPH_VERSION, _get_base_token_and_id
+		import httpx
+		token, _, _ = _get_base_token_and_id()
+		base = f"https://graph.facebook.com/{GRAPH_VERSION}"
+		path = f"/{ig_user_id}"
+		params = {"access_token": token, "fields": "username,name,profile_picture_url"}
+		async with httpx.AsyncClient() as client:
+			data = await graph_get(client, base + path, params)
+		username = data.get("username") or data.get("name")
+		name = data.get("name")
+		pp = data.get("profile_picture_url") or data.get("profile_pic")
 	except Exception as e:
 		with get_session() as session:
-			session.exec(text("UPDATE ig_users SET fetch_status='error', fetch_error=:e WHERE ig_user_id=:id").params(id=ig_user_id, e=str(e)))
+			session.exec(
+				text("UPDATE ig_users SET fetch_status='error', fetch_error=:e WHERE ig_user_id=:id").params(
+					id=ig_user_id, e=str(e)
+				)
+			)
 		return False
 	with get_session() as session:
 		session.exec(
 			text(
-				"UPDATE ig_users SET username=:u, fetched_at=CURRENT_TIMESTAMP, fetch_status='ok' WHERE ig_user_id=:id"
-			).params(u=username, id=ig_user_id)
+				"""
+				UPDATE ig_users
+				SET username=:u, name=:n, profile_pic_url=:p, fetched_at=CURRENT_TIMESTAMP, fetch_status='ok', fetch_error=NULL
+				WHERE ig_user_id=:id
+				"""
+			).params(u=username, n=name, p=pp, id=ig_user_id)
 		)
 	return True
 
