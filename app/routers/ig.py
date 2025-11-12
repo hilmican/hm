@@ -193,6 +193,33 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                                 names[cid] = id_to_name[sid]
             except Exception:
                 pass
+        # Last-resort: conversation ids that are dm:<ig_user_id> but still missing a label
+        try:
+            dm_missing = [cid for cid in conv_map.keys() if (cid not in labels and isinstance(cid, str) and cid.startswith("dm:"))]
+            if dm_missing:
+                dm_ids = []
+                for cid in dm_missing:
+                    try:
+                        dm_ids.append(cid.split(":", 1)[1])
+                    except Exception:
+                        continue
+                if dm_ids:
+                    placeholders = ",".join([":d" + str(i) for i in range(len(dm_ids))])
+                    from sqlalchemy import text as _text
+                    params = {("d" + str(i)): dm_ids[i] for i in range(len(dm_ids))}
+                    rows_dm = session.exec(_text(f"SELECT ig_user_id, username, name FROM ig_users WHERE ig_user_id IN ({placeholders})")).params(**params).all()
+                    for r in rows_dm:
+                        uid = r.ig_user_id if hasattr(r, "ig_user_id") else r[0]
+                        un = r.username if hasattr(r, "username") else r[1]
+                        nm = r.name if hasattr(r, "name") else (r[2] if len(r) > 2 else None)
+                        if uid and un:
+                            cid = f"dm:{uid}"
+                            if cid not in labels:
+                                labels[cid] = f"@{str(un)}"
+                            if nm and cid not in names:
+                                names[cid] = str(nm)
+        except Exception:
+            pass
         # Best-effort ad metadata from messages
         ad_map = {}
         for m in rows:
