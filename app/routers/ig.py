@@ -60,7 +60,7 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
 			where_parts: list[str] = []
 			params: dict[str, object] = {}
 			if q and isinstance(q, str) and q.strip():
-				qq = f\"%{q.lower().strip()}%\"
+				qq = f"%{q.lower().strip()}%"
 				where_parts.append("""
 					(
 						(lm.text IS NOT NULL AND LOWER(lm.text) LIKE :qq)
