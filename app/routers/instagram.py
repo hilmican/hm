@@ -227,35 +227,68 @@ async def receive_events(request: Request):
 					if conversation_id and ts_ms is not None and row.id:
 						try:
 							from sqlalchemy import text as _t
-							session.exec(
-								_t(
-									"""
-									INSERT INTO latest_messages(convo_id, message_id, timestamp_ms, text, sender_username, direction, ig_sender_id, ig_recipient_id, ad_link, ad_title)
-									VALUES (:cid, :mid, :ts, :txt, :sun, :dir, :sid, :rid, :alink, :atitle)
-									ON DUPLICATE KEY UPDATE
-									  message_id=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(message_id), latest_messages.message_id),
-									  timestamp_ms=GREATEST(COALESCE(latest_messages.timestamp_ms,0), VALUES(timestamp_ms)),
-									  text=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(text), latest_messages.text),
-									  sender_username=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(sender_username), latest_messages.sender_username),
-									  direction=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(direction), latest_messages.direction),
-									  ig_sender_id=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ig_sender_id), latest_messages.ig_sender_id),
-									  ig_recipient_id=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ig_recipient_id), latest_messages.ig_recipient_id),
-									  ad_link=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ad_link), latest_messages.ad_link),
-									  ad_title=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ad_title), latest_messages.ad_title)
-									"""
+							# Try SQLite syntax first (ON CONFLICT)
+							try:
+								session.exec(
+									_t(
+										"""
+										INSERT INTO latest_messages(convo_id, message_id, timestamp_ms, text, sender_username, direction, ig_sender_id, ig_recipient_id, ad_link, ad_title)
+										VALUES (:cid, :mid, :ts, :txt, :sun, :dir, :sid, :rid, :alink, :atitle)
+										ON CONFLICT(convo_id) DO UPDATE SET
+										  message_id=CASE WHEN excluded.timestamp_ms >= COALESCE(latest_messages.timestamp_ms,0) THEN excluded.message_id ELSE latest_messages.message_id END,
+										  timestamp_ms=GREATEST(COALESCE(latest_messages.timestamp_ms,0), excluded.timestamp_ms),
+										  text=CASE WHEN excluded.timestamp_ms >= COALESCE(latest_messages.timestamp_ms,0) THEN excluded.text ELSE latest_messages.text END,
+										  sender_username=CASE WHEN excluded.timestamp_ms >= COALESCE(latest_messages.timestamp_ms,0) THEN excluded.sender_username ELSE latest_messages.sender_username END,
+										  direction=CASE WHEN excluded.timestamp_ms >= COALESCE(latest_messages.timestamp_ms,0) THEN excluded.direction ELSE latest_messages.direction END,
+										  ig_sender_id=CASE WHEN excluded.timestamp_ms >= COALESCE(latest_messages.timestamp_ms,0) THEN excluded.ig_sender_id ELSE latest_messages.ig_sender_id END,
+										  ig_recipient_id=CASE WHEN excluded.timestamp_ms >= COALESCE(latest_messages.timestamp_ms,0) THEN excluded.ig_recipient_id ELSE latest_messages.ig_recipient_id END,
+										  ad_link=CASE WHEN excluded.timestamp_ms >= COALESCE(latest_messages.timestamp_ms,0) THEN excluded.ad_link ELSE latest_messages.ad_link END,
+										  ad_title=CASE WHEN excluded.timestamp_ms >= COALESCE(latest_messages.timestamp_ms,0) THEN excluded.ad_title ELSE latest_messages.ad_title END
+										"""
+									).params(
+										cid=str(conversation_id),
+										mid=int(row.id),
+										ts=int(ts_ms) if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit() else 0,
+										txt=(text_val or ""),
+										sun=None,
+										dir=(direction or "in"),
+										sid=(str(sender_id) if sender_id is not None else None),
+										rid=(str(recipient_id) if recipient_id is not None else None),
+										alink=ad_link,
+										atitle=ad_title,
+									)
 								)
-							).params(
-								cid=str(conversation_id),
-								mid=int(row.id),
-								ts=int(ts_ms) if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit() else 0,
-								txt=(text_val or ""),
-								sun=None,
-								dir=(direction or "in"),
-								sid=(str(sender_id) if sender_id is not None else None),
-								rid=(str(recipient_id) if recipient_id is not None else None),
-								alink=ad_link,
-								atitle=ad_title,
-							)
+							except Exception:
+								# Fallback for MySQL (ON DUPLICATE KEY UPDATE)
+								session.exec(
+									_t(
+										"""
+										INSERT INTO latest_messages(convo_id, message_id, timestamp_ms, text, sender_username, direction, ig_sender_id, ig_recipient_id, ad_link, ad_title)
+										VALUES (:cid, :mid, :ts, :txt, :sun, :dir, :sid, :rid, :alink, :atitle)
+										ON DUPLICATE KEY UPDATE
+										  message_id=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(message_id), latest_messages.message_id),
+										  timestamp_ms=GREATEST(COALESCE(latest_messages.timestamp_ms,0), VALUES(timestamp_ms)),
+										  text=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(text), latest_messages.text),
+										  sender_username=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(sender_username), latest_messages.sender_username),
+										  direction=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(direction), latest_messages.direction),
+										  ig_sender_id=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ig_sender_id), latest_messages.ig_sender_id),
+										  ig_recipient_id=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ig_recipient_id), latest_messages.ig_recipient_id),
+										  ad_link=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ad_link), latest_messages.ad_link),
+										  ad_title=IF(VALUES(timestamp_ms) >= COALESCE(latest_messages.timestamp_ms,0), VALUES(ad_title), latest_messages.ad_title)
+										"""
+									).params(
+										cid=str(conversation_id),
+										mid=int(row.id),
+										ts=int(ts_ms) if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit() else 0,
+										txt=(text_val or ""),
+										sun=None,
+										dir=(direction or "in"),
+										sid=(str(sender_id) if sender_id is not None else None),
+										rid=(str(recipient_id) if recipient_id is not None else None),
+										alink=ad_link,
+										atitle=ad_title,
+									)
+								)
 							# Context manager will commit automatically
 						except Exception as e:
 							try:
