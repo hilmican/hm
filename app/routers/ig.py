@@ -64,6 +64,11 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                       AND (
                         (text IS NOT NULL AND LOWER(text) LIKE :qq)
                         OR (sender_username IS NOT NULL AND LOWER(sender_username) LIKE :qq)
+                        OR EXISTS (
+                          SELECT 1 FROM ig_users
+                          WHERE (ig_users.ig_user_id = message.ig_sender_id OR ig_users.ig_user_id = message.ig_recipient_id)
+                            AND ig_users.name IS NOT NULL AND LOWER(ig_users.name) LIKE :qq
+                        )
                         OR (ad_title IS NOT NULL AND LOWER(ad_title) LIKE :qq)
                       )
                     ORDER BY timestamp_ms DESC
@@ -436,6 +441,13 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                     break
             except Exception:
                 continue
+        # Fallback: derive other id from conversation_id format "dm:<ig_user_id>"
+        if not other_id:
+            try:
+                if isinstance(conversation_id, str) and conversation_id.startswith("dm:"):
+                    other_id = conversation_id.split(":", 1)[1] or None
+            except Exception:
+                other_id = None
         if other_id:
             try:
                 from sqlalchemy import text as _text

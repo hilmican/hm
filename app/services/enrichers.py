@@ -103,6 +103,25 @@ async def enrich_user(ig_user_id: str) -> bool:
 		_log.info("enrich_user: done uid=%s username=%s updated_rows=%s", ig_user_id, username, updated)
 	except Exception:
 		pass
+	# If no row was updated, insert a new ig_users row (idempotent)
+	if 'updated' in locals() and updated == 0:
+		try:
+			with get_session() as session:
+				# Try SQLite-style first; fall back to MySQL
+				try:
+					session.exec(
+						text(
+							"INSERT OR IGNORE INTO ig_users(ig_user_id, username, name, fetched_at, fetch_status) VALUES (:id, :u, :n, CURRENT_TIMESTAMP, 'ok')"
+						).params(id=ig_user_id, u=username, n=name)
+					)
+				except Exception:
+					session.exec(
+						text(
+							"INSERT IGNORE INTO ig_users(ig_user_id, username, name, fetched_at, fetch_status) VALUES (:id, :u, :n, CURRENT_TIMESTAMP, 'ok')"
+						).params(id=ig_user_id, u=username, n=name)
+					)
+		except Exception:
+			pass
 	return True
 
 
@@ -123,18 +142,40 @@ async def enrich_page(igba_id: str) -> bool:
 	token, entity_id, is_page = _get_base_token_and_id()
 	base = f"https://graph.facebook.com/{GRAPH_VERSION}"
 	path = f"/{igba_id}"
-	params = {"access_token": token, "fields": "username,name,profile_picture_url"}
+	params = {"access_token": token, "fields": "username,name"}
 	async with httpx.AsyncClient() as client:
 		data = await graph_get(client, base + path, params)
 		username = data.get("username")
 		name = data.get("name")
-		pp = data.get("profile_picture_url") or data.get("profile_pic")
 	with get_session() as session:
-		session.exec(
+		# Try UPDATE first; if no row affected, INSERT
+		res = session.exec(
 			text(
-				"UPDATE ig_accounts SET username=:u, name=:n, profile_pic_url=:p, updated_at=CURRENT_TIMESTAMP WHERE igba_id=:id"
-			).params(u=username, n=name, p=pp, id=igba_id)
+				"UPDATE ig_accounts SET username=:u, name=:n, updated_at=CURRENT_TIMESTAMP WHERE igba_id=:id"
+			).params(u=username, n=name, id=igba_id)
 		)
+		rc = 0
+		try:
+			rc = int(getattr(res, "rowcount", 0))
+		except Exception:
+			rc = 0
+		if rc == 0:
+			try:
+				# Dialect-aware insert
+				with session.get_bind().begin() as conn:  # type: ignore
+					try:
+						conn.exec_driver_sql(
+							"INSERT OR IGNORE INTO ig_accounts(igba_id, username, name, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+							(igba_id, username, name),
+						)
+					except Exception:
+						# MySQL
+						conn.exec_driver_sql(
+							"INSERT IGNORE INTO ig_accounts(igba_id, username, name, updated_at) VALUES (%s, %s, %s, CURRENT_TIMESTAMP)",
+							(igba_id, username, name),
+						)
+			except Exception:
+				pass
 	return True
 
 
