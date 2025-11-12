@@ -52,26 +52,30 @@ def main() -> None:
         kind = job.get("kind")
         payload = job.get("payload") or {}
         try:
-            log.info("dequeued jid=%s kind=%s key=%s", jid, kind, job.get("key"))
+            log.info("dequeued jid=%s kind=%s key=%s payload=%s", jid, kind, job.get("key"), json.dumps(payload, ensure_ascii=False))
         except Exception:
             pass
         try:
             if kind == "enrich_user":
                 uid = str(payload.get("ig_user_id") or job.get("key"))
+                log.info("enrich_user start uid=%s", uid)
                 asyncio.run(enrich_user(uid))
                 try:
                     increment_counter("enrich_user", 1)
                     increment_counter("enrich_success", 1)
                 except Exception:
                     pass
+                log.info("enrich_user done uid=%s", uid)
             elif kind == "enrich_page":
                 gid = str(payload.get("igba_id") or job.get("key"))
+                log.info("enrich_page start igba_id=%s", gid)
                 asyncio.run(enrich_page(gid))
                 try:
                     increment_counter("enrich_page", 1)
                     increment_counter("enrich_success", 1)
                 except Exception:
                     pass
+                log.info("enrich_page done igba_id=%s", gid)
             elif kind == "ig_ai_process_run":
                 payload = payload or {}
                 rid = int(payload.get("run_id") or 0) or int(job.get("key") or 0)

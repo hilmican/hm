@@ -42,6 +42,11 @@
       {% else %}
         <div class="meta">Zenginleştirme bilgisi mevcut değil.</div>
       {% endif %}
+      <div style="margin-top:8px;">
+        <button id="enrichNow" class="action" style="margin-right:6px">Şimdi Zenginleştir</button>
+        <button id="hydrateNow" class="action" style="margin-right:6px">Hydrate Now</button>
+        <button id="statusRefresh" class="action">Durumu Yenile</button>
+      </div>
     </div>
     {% if contact_name or contact_phone or contact_address or linked_order_id %}
       <div style="margin-top:12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
@@ -133,6 +138,33 @@
           if (!r.ok) throw new Error('refresh failed');
           location.reload();
         } catch (e) { alert('Refresh error'); }
+      });
+      // Manual enrich enqueue
+      const enrichBtn = document.getElementById('enrichNow');
+      enrichBtn?.addEventListener('click', async () => {
+        enrichBtn.disabled = true; const prev = enrichBtn.textContent; enrichBtn.textContent = 'Kuyruğa ekleniyor...';
+        try {
+          const r = await fetch(location.pathname + '/enrich', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
+          alert('Kuyruğa eklendi: ' + JSON.stringify(js.queued || {}));
+          location.reload();
+        } catch (e) { alert('Kuyruğa ekleme hatası'); }
+        finally { enrichBtn.disabled = false; enrichBtn.textContent = prev; }
+      });
+      const statusBtn = document.getElementById('statusRefresh');
+      statusBtn?.addEventListener('click', () => location.reload());
+      const hydrateBtn = document.getElementById('hydrateNow');
+      hydrateBtn?.addEventListener('click', async () => {
+        hydrateBtn.disabled = true; const prev = hydrateBtn.textContent; hydrateBtn.textContent = 'Kuyruğa ekleniyor...';
+        try {
+          const r = await fetch(location.pathname + '/hydrate', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
+          alert('Hydrate kuyruğa eklendi: ' + (js.key || ''));
+          location.reload();
+        } catch (e) { alert('Hydrate kuyruğa ekleme hatası'); }
+        finally { hydrateBtn.disabled = false; hydrateBtn.textContent = prev; }
       });
       // Live updates via WebSocket: reload when new message arrives for this conversation
       let wsConnected = false;

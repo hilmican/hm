@@ -632,6 +632,87 @@ async def refresh_thread(conversation_id: str):
             pass
         return {"status": "error", "error": str(e)}
 
+@router.post("/inbox/{conversation_id}/enrich")
+def enqueue_enrich(conversation_id: str):
+    # Enqueue enrich_user for the other party and enrich_page for the active page/user id
+    other_id: str | None = None
+    igba_id: str | None = None
+    with get_session() as session:
+        # Try conversations table first (reliable)
+        try:
+            from sqlalchemy import text as _text
+            row = session.exec(
+                _text("SELECT igba_id, ig_user_id FROM conversations WHERE convo_id=:cid LIMIT 1")
+            ).params(cid=str(conversation_id)).first()
+            if row:
+                igba_id = str(getattr(row, "igba_id", None) or (row[0] if len(row) > 0 else "") or "")
+                other_id = str(getattr(row, "ig_user_id", None) or (row[1] if len(row) > 1 else "") or "")
+        except Exception:
+            pass
+        # Fallback for legacy conversation_id formats
+        if not other_id and conversation_id.startswith("dm:"):
+            try:
+                other_id = conversation_id.split(":", 1)[1] or None
+            except Exception:
+                other_id = None
+        if not igba_id:
+            try:
+                _, entity_id, _ = _get_base_token_and_id()
+                igba_id = str(entity_id)
+            except Exception:
+                igba_id = None
+    if not other_id:
+        raise HTTPException(status_code=400, detail="Could not resolve IG user id for conversation")
+    queued = {"enrich_user": False, "enrich_page": False}
+    try:
+        enqueue("enrich_user", key=str(other_id), payload={"ig_user_id": str(other_id)})
+        queued["enrich_user"] = True
+    except Exception:
+        pass
+    if igba_id:
+        try:
+            enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})
+            queued["enrich_page"] = True
+        except Exception:
+            pass
+    return {"status": "ok", "queued": queued, "ig_user_id": other_id, "igba_id": igba_id}
+
+@router.post("/inbox/{conversation_id}/hydrate")
+def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
+    # Enqueue hydrate_conversation for this thread (igba_id + ig_user_id)
+    other_id: str | None = None
+    igba_id: str | None = None
+    with get_session() as session:
+        try:
+            from sqlalchemy import text as _text
+            row = session.exec(
+                _text("SELECT igba_id, ig_user_id FROM conversations WHERE convo_id=:cid LIMIT 1")
+            ).params(cid=str(conversation_id)).first()
+            if row:
+                igba_id = str(getattr(row, "igba_id", None) or (row[0] if len(row) > 0 else "") or "")
+                other_id = str(getattr(row, "ig_user_id", None) or (row[1] if len(row) > 1 else "") or "")
+        except Exception:
+            pass
+        if not other_id and conversation_id.startswith("dm:"):
+            try:
+                other_id = conversation_id.split(":", 1)[1] or None
+            except Exception:
+                other_id = None
+        if not igba_id:
+            try:
+                _, entity_id, _ = _get_base_token_and_id()
+                igba_id = str(entity_id)
+            except Exception:
+                igba_id = None
+    if not (igba_id and other_id):
+        raise HTTPException(status_code=400, detail="Could not resolve identifiers to hydrate")
+    key = f"{igba_id}:{other_id}"
+    try:
+        enqueue("hydrate_conversation", key=key, payload={"igba_id": str(igba_id), "ig_user_id": str(other_id), "max_messages": int(max_messages)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"enqueue_failed: {e}")
+    return {"status": "ok", "queued": True, "key": key, "igba_id": igba_id, "ig_user_id": other_id, "max_messages": int(max_messages)}
+
 
 @router.get("/debug/env")
 def debug_env():

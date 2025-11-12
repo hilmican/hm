@@ -85,7 +85,7 @@ async def enrich_user(ig_user_id: str) -> bool:
 		except Exception:
 			pass
 	with get_session() as session:
-		session.exec(
+		res = session.exec(
 			text(
 				"""
 				UPDATE ig_users
@@ -95,7 +95,12 @@ async def enrich_user(ig_user_id: str) -> bool:
 			).params(u=username, n=name, id=ig_user_id)
 		)
 	try:
-		_log.info("enrich_user: done uid=%s username=%s", ig_user_id, username)
+		updated = 0
+		try:
+			updated = int(getattr(res, "rowcount", 0))  # type: ignore
+		except Exception:
+			updated = 0
+		_log.info("enrich_user: done uid=%s username=%s updated_rows=%s", ig_user_id, username, updated)
 	except Exception:
 		pass
 	return True
