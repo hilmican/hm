@@ -57,29 +57,30 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
 				FROM ai_conversations ac
 				LEFT JOIN latest_messages lm ON lm.convo_id = ac.convo_id
 			"""
-        where_parts: list[str] = []
-        params: dict[str, object] = {}
-        if q and isinstance(q, str) and q.strip():
-            qq = f"%{q.lower().strip()}%"
-            where_parts.append("""
-                (
-                    (l.text IS NOT NULL AND LOWER(l.text) LIKE :qq)
-                    OR (l.sender_username IS NOT NULL AND LOWER(l.sender_username) LIKE :qq)
-                    OR EXISTS (
-                        SELECT 1 FROM ig_users u
-                        WHERE (u.ig_user_id = l.ig_sender_id OR u.ig_user_id = l.ig_recipient_id OR (ac.convo_id LIKE 'dm:%' AND u.ig_user_id = SUBSTR(ac.convo_id, 4)))
-                          AND (
-                            (u.name IS NOT NULL AND LOWER(u.name) LIKE :qq)
-                            OR (u.username IS NOT NULL AND LOWER(u.username) LIKE :qq)
-                          )
-                    )
-                )
-            """)
-            params["qq"] = qq
-        order_sql = " ORDER BY COALESCE(ac.ai_process_time, l.timestamp_ms) DESC LIMIT :n"
-        params["n"] = int(sample_n)
-        final_sql = base_sql + (" WHERE " + " AND ".join(where_parts) if where_parts else "") + order_sql
-        rows_raw = session.exec(_text(final_sql).params(**params)).all()
+			where_parts: list[str] = []
+			params: dict[str, object] = {}
+			if q and isinstance(q, str) and q.strip():
+				qq = f\"%{q.lower().strip()}%\"
+				where_parts.append("""
+					(
+						(lm.text IS NOT NULL AND LOWER(lm.text) LIKE :qq)
+						OR (lm.sender_username IS NOT NULL AND LOWER(lm.sender_username) LIKE :qq)
+						OR EXISTS (
+							SELECT 1 FROM ig_users u
+							WHERE (u.ig_user_id = lm.ig_sender_id OR u.ig_user_id = lm.ig_recipient_id OR (ac.convo_id LIKE 'dm:%' AND u.ig_user_id = SUBSTR(ac.convo_id, 4)))
+							  AND (
+								(u.name IS NOT NULL AND LOWER(u.name) LIKE :qq)
+								OR (u.username IS NOT NULL AND LOWER(u.username) LIKE :qq)
+							  )
+						)
+					)
+				""")
+				params["qq"] = qq
+			sample_n = max(50, min(int(limit or 25) * 4, 200))
+			order_sql = " ORDER BY COALESCE(ac.ai_process_time, lm.timestamp_ms) DESC LIMIT :n"
+			params["n"] = int(sample_n)
+			final_sql = base_sql + (" WHERE " + " AND ".join(where_parts) if where_parts else "") + order_sql
+			rows_raw = session.exec(_text(final_sql).params(**params)).all()
         # Normalize rows into dicts for template use; fall back convo id when preview missing
         rows = []
         for r in rows_raw:
