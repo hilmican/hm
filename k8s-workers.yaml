@@ -19,12 +19,6 @@ spec:
         - name: app-root
           persistentVolumeClaim:
             claimName: hm-app-root
-      initContainers:
-        - name: seed-app
-          image: mediatriple/hm:0.7.6
-          command: ["/bin/sh","-c"]
-          args: [ "if [ ! -d /mnt/app/app ] || [ ! -f /mnt/app/app/main.py ]; then cp -a /app/. /mnt/app/; fi" ]
-          volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
           image: mediatriple/hm:0.7.6
@@ -78,12 +72,6 @@ spec:
         - name: app-root
           persistentVolumeClaim:
             claimName: hm-app-root
-      initContainers:
-        - name: seed-app
-          image: mediatriple/hm:0.7.6
-          command: ["/bin/sh","-c"]
-          args: [ "if [ ! -d /mnt/app/app ] || [ ! -f /mnt/app/app/main.py ]; then cp -a /app/. /mnt/app/; fi" ]
-          volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
           image: mediatriple/hm:0.7.6
@@ -137,12 +125,6 @@ spec:
         - name: app-root
           persistentVolumeClaim:
             claimName: hm-app-root
-      initContainers:
-        - name: seed-app
-          image: mediatriple/hm:0.7.6
-          command: ["/bin/sh","-c"]
-          args: [ "if [ ! -d /mnt/app/app ] || [ ! -f /mnt/app/app/main.py ]; then cp -a /app/. /mnt/app/; fi" ]
-          volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
           image: mediatriple/hm:0.7.6
@@ -196,12 +178,6 @@ spec:
         - name: app-root
           persistentVolumeClaim:
             claimName: hm-app-root
-      initContainers:
-        - name: seed-app
-          image: mediatriple/hm:0.7.6
-          command: ["/bin/sh","-c"]
-          args: [ "if [ ! -d /mnt/app/app ] || [ ! -f /mnt/app/app/main.py ]; then cp -a /app/. /mnt/app/; fi" ]
-          volumeMounts: [ { name: app-root, mountPath: /mnt/app } ]
       containers:
         - name: worker
           image: mediatriple/hm:0.7.6

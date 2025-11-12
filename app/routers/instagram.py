@@ -224,9 +224,9 @@ async def receive_events(request: Request):
 					session.flush()  # Flush to get row.id
 					persisted += 1
 					# Update latest_messages for inbox performance
-					try:
-						from sqlalchemy import text as _t
-						if conversation_id and ts_ms is not None and row.id:
+					if conversation_id and ts_ms is not None and row.id:
+						try:
+							from sqlalchemy import text as _t
 							session.exec(
 								_t(
 									"""
@@ -256,8 +256,17 @@ async def receive_events(request: Request):
 								alink=ad_link,
 								atitle=ad_title,
 							)
-					except Exception:
-						pass
+							# Context manager will commit automatically
+						except Exception as e:
+							try:
+								_log.warning("webhook: failed to update latest_messages cid=%s mid=%s ts=%s err=%s", conversation_id, row.id, ts_ms, str(e)[:200])
+							except Exception:
+								pass
+					else:
+						try:
+							_log.debug("webhook: skipped latest_messages update cid=%s ts=%s row_id=%s", conversation_id, ts_ms, row.id if hasattr(row, 'id') else None)
+						except Exception:
+							pass
 					# Start/refresh AI shadow debounce for inbound messages
 					try:
 						if (direction or "in") == "in" and conversation_id:
