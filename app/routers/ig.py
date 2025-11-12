@@ -195,8 +195,8 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                                 labels[cid] = f"@{id_to_username[sid]}"
                             if sid in id_to_name:
                                 names[cid] = id_to_name[sid]
-            except Exception:
-                pass
+        except Exception:
+            pass
         # Last-resort: conversation ids that are dm:<ig_user_id> but still missing a label
         try:
             dm_missing = [cid for cid in conv_map.keys() if (cid not in labels and isinstance(cid, str) and cid.startswith("dm:"))]
