@@ -48,6 +48,23 @@ async def enrich_user(ig_user_id: str) -> bool:
 				)
 			)
 		return False
+	# Fallback: if username is still empty, try to infer from recent messages we have
+	if not username:
+		try:
+			from sqlalchemy import text as _text
+			with get_session() as session:
+				row = session.exec(
+					_text(
+						"SELECT sender_username FROM message WHERE ig_sender_id=:u AND sender_username IS NOT NULL ORDER BY timestamp_ms DESC, id DESC LIMIT 1"
+					).params(u=str(ig_user_id))
+				).first()
+				if row:
+                    # row could be RowMapping or tuple
+					val = row.sender_username if hasattr(row, "sender_username") else (row[0] if isinstance(row, (list, tuple)) else None)
+					if isinstance(val, str) and val.strip():
+						username = val.strip()
+		except Exception:
+			pass
 	with get_session() as session:
 		session.exec(
 			text(

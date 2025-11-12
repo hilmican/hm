@@ -166,6 +166,14 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any], igba_id: str) -
 		row = exists
 		return int(row.id if hasattr(row, "id") else row[0])
 	sender_id = (event.get("from") or event.get("sender") or {}).get("id")
+	# Best-effort capture of username when hydrating via Graph messages API
+	sender_username = None
+	try:
+		un = (event.get("from") or {}).get("username")
+		if isinstance(un, str) and un.strip():
+			sender_username = un.strip()
+	except Exception:
+		sender_username = None
 	recipient_id = None
 	try:
 		to = (event.get("to") or {}).get("data") or []
@@ -215,6 +223,7 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any], igba_id: str) -
 		raw_json=json.dumps(event, ensure_ascii=False),
 		conversation_id=conversation_id,
 		direction=direction,
+		sender_username=sender_username,
 		ad_id=ad_id,
 		ad_link=ad_link,
 		ad_title=ad_title,
