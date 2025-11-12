@@ -115,16 +115,36 @@ discover_by_prefix() {
 
 expand_requested() {
   local r
+  declare -a RESULTS
   for r in "$@"; do
-    if exists "$r"; then echo "$r"; continue; fi
+    if exists "$r"; then 
+      RESULTS+=("$r")
+      continue
+    fi
     local d
     local found=0
     for d in "${ALL[@]}"; do
-      if starts_with "$r" "$d"; then echo "$d"; found=1; fi
+      if starts_with "$r" "$d"; then 
+        # Check if already in RESULTS to avoid duplicates
+        local already=0
+        for res in "${RESULTS[@]}"; do
+          if [[ "$res" == "$d" ]]; then
+            already=1
+            break
+          fi
+        done
+        if [[ $already -eq 0 ]]; then
+          RESULTS+=("$d")
+        fi
+        found=1
+      fi
     done
     if [[ $found -eq 0 ]]; then
       echo "Warning: deployment '$r' not found in namespace '$NS'" >&2
     fi
+  done
+  for res in "${RESULTS[@]}"; do
+    echo "$res"
   done
 }
 
@@ -140,6 +160,22 @@ fi
 while IFS= read -r line; do
   [[ -n "$line" ]] && TARGETS+=("$line")
 done <<< "$EXP_RAW"
+
+# Deduplicate TARGETS array (compatible with older bash)
+declare -a UNIQ_TARGETS
+for d in "${TARGETS[@]:-}"; do
+  found=0
+  for u in "${UNIQ_TARGETS[@]:-}"; do
+    if [[ "$u" == "$d" ]]; then
+      found=1
+      break
+    fi
+  done
+  if [[ $found -eq 0 ]]; then
+    UNIQ_TARGETS+=("$d")
+  fi
+done
+TARGETS=("${UNIQ_TARGETS[@]:-}")
 
 if ! $INCLUDE_REDIS; then
   # filter out hm-redis unless explicitly requested
@@ -163,7 +199,39 @@ if $LIST_ONLY; then exit 0; fi
 
 for d in "${TARGETS[@]}"; do
   echo "→ Restarting deployment/$d"
-  $K -n "$NS" rollout restart deploy "$d"
+  # Get current replica count
+  current_replicas="$($K -n "$NS" get deploy "$d" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")"
+  if [[ -z "$current_replicas" ]] || [[ "$current_replicas" == "0" ]]; then
+    current_replicas=1
+  fi
+  
+  echo "  Scaling down to 0 replicas..."
+  $K -n "$NS" scale deploy "$d" --replicas=0
+  
+  echo "  Waiting for pods to terminate..."
+  # Wait for all pods to be terminated
+  timeout=60
+  elapsed=0
+  while [[ $elapsed -lt $timeout ]]; do
+    pod_count="$($K -n "$NS" get pods -l "app=$d" --no-headers 2>/dev/null | grep -v "Terminating" | wc -l | tr -d ' ' || echo "0")"
+    if [[ "$pod_count" == "0" ]]; then
+      break
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+  
+  if [[ $elapsed -ge $timeout ]]; then
+    echo "  ⚠️  Warning: Some pods may still be terminating, proceeding anyway"
+  else
+    echo "  All pods terminated"
+  fi
+  
+  # Brief pause to ensure cleanup
+  sleep 2
+  
+  echo "  Scaling back up to $current_replicas replicas..."
+  $K -n "$NS" scale deploy "$d" --replicas="$current_replicas"
 done
 
 if $WAIT; then
