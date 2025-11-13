@@ -26,6 +26,8 @@
       <button id="clearEnrich" style="background:#ef4444">Enrich Kuyruğunu Temizle</button>
       <button id="backfillAds" style="background:#10b981">Reklamları Geri Doldur</button>
       <button id="backfillAiLatest" style="background:#0ea5e9">Son Mesajları Geri Doldur</button>
+      <button id="mergeGraph" style="background:#6366f1">Graph CID'e Birleştir</button>
+      <button id="normalizeDm" style="background:#22c55e">dm:&lt;id&gt; Normalize</button>
       <form method="post" action="/ig/admin/backfill/ai_latest" style="display:inline;">
         <button type="submit" class="meta" style="background:#fff;color:#2563eb;border:1px solid #2563eb;">(Form ile gönder)</button>
       </form>
@@ -132,6 +134,32 @@
           alert('Kuyruğa eklendi: ' + (js.enqueued||0));
         } catch (e) { alert('Enrich hatası'); }
         finally { enrichUsersBtn.disabled = false; enrichUsersBtn.textContent = prev; }
+      });
+      const mergeBtn = document.getElementById('mergeGraph');
+      mergeBtn?.addEventListener('click', async () => {
+        if (!confirm('Tüm uygun dm:<id> konuşmalar Graph CID\'e taşınsın mı?')) return;
+        mergeBtn.disabled = true; const prev = mergeBtn.textContent; mergeBtn.textContent = 'Birleştiriliyor...';
+        try {
+          const r = await fetch('/ig/admin/merge_to_graph_conversation_ids', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
+          alert('Birleştirme tamamlandı.\nİncelenen: ' + (js.considered||0) + '\nTaşınan: ' + (js.migrated||0));
+          location.reload();
+        } catch (e) { alert('Birleştirme hatası'); }
+        finally { mergeBtn.disabled = false; mergeBtn.textContent = prev; }
+      });
+      const normalizeBtn = document.getElementById('normalizeDm');
+      normalizeBtn?.addEventListener('click', async () => {
+        if (!confirm('Eski mesajlarda dm:<id> conversation_id normalize edilsin mi?')) return;
+        normalizeBtn.disabled = true; const prev = normalizeBtn.textContent; normalizeBtn.textContent = 'Normalize ediliyor...';
+        try {
+          const r = await fetch('/ig/admin/normalize_dm_conversation_ids', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
+          alert('Normalize tamamlandı.\nİncelenen: ' + (js.considered||0) + '\nDüzeltilen: ' + (js.normalized||0));
+          location.reload();
+        } catch (e) { alert('Normalize hatası'); }
+        finally { normalizeBtn.disabled = false; normalizeBtn.textContent = prev; }
       });
 
       function fmtTs(){

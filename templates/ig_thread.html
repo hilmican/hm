@@ -63,6 +63,11 @@
         <button id="hydrateNow" class="action" style="margin-right:6px">Hydrate Now</button>
         <button id="statusRefresh" class="action">Durumu Yenile</button>
       </div>
+      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="btnMergeGraph" class="action" title="dm:<id> → Graph CID'e taşı" style="background:#0ea5e9">Graph CID'e Birleştir</button>
+        <button id="btnNormalizeDm" class="action" title="Eski mesajlarda dm:&lt;id&gt; conversation_id düzelt" style="background:#10b981">dm:&lt;id&gt; Normalize</button>
+        <button id="btnBackfillAi" class="action" title="ai_conversations son mesaj alanlarını geri doldur" style="background:#6366f1">AI Özetlerini Geri Doldur</button>
+      </div>
     </div>
     {% if contact_name or contact_phone or contact_address or linked_order_id %}
       <div style="margin-top:12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
@@ -236,6 +241,46 @@
           location.reload();
         } catch (e) { alert('Hydrate kuyruğa ekleme hatası'); }
         finally { hydrateBtn.disabled = false; hydrateBtn.textContent = prev; }
+      });
+      // Admin helpers
+      const btnMergeGraph = document.getElementById('btnMergeGraph');
+      btnMergeGraph?.addEventListener('click', async () => {
+        if (!confirm('Tüm uygun dm:<id> konuşmalar Graph CID\'e taşınsın mı?')) return;
+        btnMergeGraph.disabled = true; const prev = btnMergeGraph.textContent; btnMergeGraph.textContent = 'Birleştiriliyor...';
+        try {
+          const r = await fetch('/ig/admin/merge_to_graph_conversation_ids', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
+          alert('Birleştirme tamamlandı.\nİncelenen: ' + (js.considered||0) + '\nTaşınan: ' + (js.migrated||0));
+          location.reload();
+        } catch (e) { alert('Birleştirme hatası'); }
+        finally { btnMergeGraph.disabled = false; btnMergeGraph.textContent = prev; }
+      });
+      const btnNormalizeDm = document.getElementById('btnNormalizeDm');
+      btnNormalizeDm?.addEventListener('click', async () => {
+        if (!confirm('Eski mesajlarda dm:<id> conversation_id normalize edilsin mi?')) return;
+        btnNormalizeDm.disabled = true; const prev = btnNormalizeDm.textContent; btnNormalizeDm.textContent = 'Normalize ediliyor...';
+        try {
+          const r = await fetch('/ig/admin/normalize_dm_conversation_ids', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
+          alert('Normalize tamamlandı.\nİncelenen: ' + (js.considered||0) + '\nDüzeltilen: ' + (js.normalized||0));
+          location.reload();
+        } catch (e) { alert('Normalize hatası'); }
+        finally { btnNormalizeDm.disabled = false; btnNormalizeDm.textContent = prev; }
+      });
+      const btnBackfillAi = document.getElementById('btnBackfillAi');
+      btnBackfillAi?.addEventListener('click', async () => {
+        if (!confirm('ai_conversations son mesaj alanları geri doldurulsun mu?')) return;
+        btnBackfillAi.disabled = true; const prev = btnBackfillAi.textContent; btnBackfillAi.textContent = 'Geri dolduruluyor...';
+        try {
+          const r = await fetch('/ig/admin/backfill/ai_latest', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
+          alert('Geri doldurma tamamlandı.\nGüncellenen: ' + (js.updated||0) + '\nİşlenen: ' + (js.considered||0));
+          location.reload();
+        } catch (e) { alert('Geri doldurma hatası'); }
+        finally { btnBackfillAi.disabled = false; btnBackfillAi.textContent = prev; }
       });
       // Live updates via WebSocket: reload when new message arrives for this conversation
       let wsConnected = false;
