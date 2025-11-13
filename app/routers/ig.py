@@ -1081,6 +1081,22 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
     return {"status": "ok", "queued": True, "key": key, "igba_id": igba_id, "ig_user_id": other_id, "max_messages": int(max_messages)}
 
 
+@router.get("/queue/status")
+def queue_status():
+	"""Return approximate queue sizes for related workers."""
+	out = {"ingest": None, "hydrate_conversation": None, "enrich_user": None, "enrich_page": None}
+	try:
+		r = _get_redis()
+		out["ingest"] = int(r.llen("jobs:ingest"))
+		out["hydrate_conversation"] = int(r.llen("jobs:hydrate_conversation"))
+		out["enrich_user"] = int(r.llen("jobs:enrich_user"))
+		out["enrich_page"] = int(r.llen("jobs:enrich_page"))
+	except Exception:
+		# keep None to indicate unavailable
+		pass
+	return {"status": "ok", "queues": out}
+
+
 @router.get("/debug/env")
 def debug_env():
     """Lightweight diagnostics: show which token path is active (page vs user) and env presence.

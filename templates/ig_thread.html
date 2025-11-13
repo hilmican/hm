@@ -184,12 +184,25 @@
       // Manual enrich enqueue
       const enrichBtn = document.getElementById('enrichNow');
       enrichBtn?.addEventListener('click', async () => {
-        enrichBtn.disabled = true; const prev = enrichBtn.textContent; enrichBtn.textContent = 'Kuyruğa ekleniyor...';
+        enrichBtn.disabled = true; const prev = enrichBtn.textContent; enrichBtn.textContent = 'Kuyruk kontrol ediliyor...';
         try {
+          // Check queue sizes first
+          let before = {};
+          try {
+            const qs = await fetch('/ig/queue/status');
+            before = await qs.json();
+          } catch {}
+          enrichBtn.textContent = 'Kuyruğa ekleniyor...';
           const r = await fetch(location.pathname + '/enrich', { method: 'POST' });
           const js = await r.json().catch(()=>({}));
           if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
-          alert('Kuyruğa eklendi: ' + JSON.stringify(js.queued || {}));
+          // Get queue sizes after
+          let after = {};
+          try {
+            const qs2 = await fetch('/ig/queue/status');
+            after = await qs2.json();
+          } catch {}
+          alert('Enrich işi eklendi.\nÖnce: ' + JSON.stringify((before.queues||{})) + '\nSonra: ' + JSON.stringify((after.queues||{})));
           location.reload();
         } catch (e) { alert('Kuyruğa ekleme hatası'); }
         finally { enrichBtn.disabled = false; enrichBtn.textContent = prev; }
@@ -198,12 +211,25 @@
       statusBtn?.addEventListener('click', () => location.reload());
       const hydrateBtn = document.getElementById('hydrateNow');
       hydrateBtn?.addEventListener('click', async () => {
-        hydrateBtn.disabled = true; const prev = hydrateBtn.textContent; hydrateBtn.textContent = 'Kuyruğa ekleniyor...';
+        hydrateBtn.disabled = true; const prev = hydrateBtn.textContent; hydrateBtn.textContent = 'Kuyruk kontrol ediliyor...';
         try {
+          // Check queue sizes first
+          let before = {};
+          try {
+            const qs = await fetch('/ig/queue/status');
+            before = await qs.json();
+          } catch {}
+          hydrateBtn.textContent = 'Kuyruğa ekleniyor...';
           const r = await fetch(location.pathname + '/hydrate', { method: 'POST' });
           const js = await r.json().catch(()=>({}));
           if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
-          alert('Hydrate kuyruğa eklendi: ' + (js.key || ''));
+          // Get queue sizes after
+          let after = {};
+          try {
+            const qs2 = await fetch('/ig/queue/status');
+            after = await qs2.json();
+          } catch {}
+          alert('Hydrate kuyruğa eklendi: ' + (js.key || '') + '\nÖnce: ' + JSON.stringify((before.queues||{})) + '\nSonra: ' + JSON.stringify((after.queues||{})));
           location.reload();
         } catch (e) { alert('Hydrate kuyruğa ekleme hatası'); }
         finally { hydrateBtn.disabled = false; hydrateBtn.textContent = prev; }
