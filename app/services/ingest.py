@@ -140,7 +140,29 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	# Upsert ai_conversations last-* fields
 	try:
 		from sqlalchemy import text as _text
-		if conversation_id and timestamp_ms is not None:
+		# Robust timestamp normalization (mirror webhook path)
+		ts_val = None
+		try:
+			if isinstance(timestamp_ms, (int, float)):
+				ts_val = int(timestamp_ms)
+			elif isinstance(timestamp_ms, str):
+				digits = "".join(ch for ch in timestamp_ms if ch.isdigit())
+				if digits:
+					ts_val = int(digits)
+		except Exception:
+			ts_val = None
+		if ts_val is None:
+			try:
+				ts_val = int(row.timestamp_ms) if row.timestamp_ms is not None else None
+			except Exception:
+				ts_val = None
+		if ts_val is None:
+			try:
+				import time as _t
+				ts_val = int(_t.time() * 1000)
+			except Exception:
+				ts_val = None
+		if conversation_id and ts_val is not None:
 			# ensure placeholder exists
 			try:
 				session.exec(_sql_text("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
@@ -170,7 +192,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 					).params(
 						cid=str(conversation_id),
 						mid=int(row.id),
-						ts=int(timestamp_ms),
+						ts=int(ts_val),
 						txt=(text_val or ""),
 						dir=(direction or "in"),
 						sid=(str(sender_id) if sender_id is not None else None),
@@ -202,7 +224,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 						).params(
 							cid=str(conversation_id),
 							mid=int(row.id),
-							ts=int(timestamp_ms) if timestamp_ms is not None else 0,
+							ts=int(ts_val),
 							txt=(text_val or ""),
 							dir=(direction or "in"),
 							sid=(str(sender_id) if sender_id is not None else None),

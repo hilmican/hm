@@ -25,6 +25,10 @@
       <button id="refresh">Yenile</button>
       <button id="clearEnrich" style="background:#ef4444">Enrich Kuyruğunu Temizle</button>
       <button id="backfillAds" style="background:#10b981">Reklamları Geri Doldur</button>
+      <button id="backfillAiLatest" style="background:#0ea5e9">Son Mesajları Geri Doldur</button>
+      <form method="post" action="/ig/admin/backfill/ai_latest" style="display:inline;">
+        <button type="submit" class="meta" style="background:#fff;color:#2563eb;border:1px solid #2563eb;">(Form ile gönder)</button>
+      </form>
     </div>
     <div id="list">
       {% for m in conversations %}
@@ -99,6 +103,19 @@
           location.reload();
         } catch (e) { alert('Geri doldurma hatası'); }
         finally { backfillBtn.disabled = false; backfillBtn.textContent = prev; }
+      });
+      const backfillLatestBtn = document.getElementById('backfillAiLatest');
+      backfillLatestBtn?.addEventListener('click', async () => {
+        if (!confirm('Son mesaj özetlerini (ai_conversations) geri doldurmak ister misiniz?')) return;
+        backfillLatestBtn.disabled = true; const prev = backfillLatestBtn.textContent; backfillLatestBtn.textContent = 'Geri dolduruluyor...';
+        try {
+          const r = await fetch('/ig/admin/backfill/ai_latest', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
+          alert('Geri doldurma tamamlandı.\nGüncellenen: ' + (js.updated||0) + '\nİşlenen: ' + (js.considered||0));
+          location.reload();
+        } catch (e) { alert('Geri doldurma hatası'); }
+        finally { backfillLatestBtn.disabled = false; backfillLatestBtn.textContent = prev; }
       });
 
       function fmtTs(){

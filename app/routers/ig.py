@@ -94,12 +94,8 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                 dialect_name = bind.dialect.name.lower()
         except Exception:
             dialect_name = ""
-        if dialect_name == "mysql":
-            order_sql = " ORDER BY COALESCE(ac.ai_process_time, FROM_UNIXTIME(ac.last_message_timestamp_ms/1000)) DESC LIMIT :n"
-        elif dialect_name == "sqlite":
-            order_sql = " ORDER BY COALESCE(ac.ai_process_time, datetime(ac.last_message_timestamp_ms/1000, 'unixepoch')) DESC LIMIT :n"
-        else:
-            order_sql = " ORDER BY COALESCE(ac.ai_process_time, ac.last_message_timestamp_ms) DESC LIMIT :n"
+        # Sort strictly by last message timestamp (ms since epoch), newest first
+        order_sql = " ORDER BY ac.last_message_timestamp_ms DESC LIMIT :n"
         params["n"] = int(sample_n)
         final_sql = base_sql + (" WHERE " + " AND ".join(where_parts) if where_parts else "") + order_sql
         rows_raw = session.exec(_text(final_sql).params(**params)).all()
