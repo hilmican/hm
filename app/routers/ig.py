@@ -20,6 +20,7 @@ import httpx
 import os
 from ..services.ai_ig import _detect_focus_product
 from fastapi import Form
+from fastapi import Request
 
 
 router = APIRouter(prefix="/ig", tags=["instagram"])
@@ -950,6 +951,25 @@ def backfill_ads():
 			pass
 	return {"status": "ok", "created": int(created), "updated": int(updated)}
 
+@router.post("/admin/enrich/users-errors")
+def enrich_users_with_errors(limit: int = 2000):
+	from sqlalchemy import text as _text
+	enqueued = 0
+	with get_session() as session:
+		try:
+			rows = session.exec(_text("SELECT ig_user_id FROM ig_users WHERE fetch_status='error' LIMIT :n")).params(n=int(max(1, min(limit, 10000)))).all()
+		except Exception:
+			rows = []
+		for r in rows:
+			try:
+				uid = r.ig_user_id if hasattr(r, "ig_user_id") else (r[0] if len(r) > 0 else None)
+				if not uid:
+					continue
+				enqueue("enrich_user", key=str(uid), payload={"ig_user_id": str(uid)})
+				enqueued += 1
+			except Exception:
+				continue
+	return {"status": "ok", "enqueued": int(enqueued)}
 @router.post("/admin/backfill/ai_latest")
 def backfill_ai_latest(limit: int = 50000):
     # Populate ai_conversations last-* fields from message table; migrate hydrated_at best-effort

@@ -297,10 +297,21 @@ async def receive_events(request: Request):
 								session.exec(_t("UPDATE ig_users SET username=COALESCE(:uname, username), last_seen_at=CURRENT_TIMESTAMP WHERE ig_user_id=:id").params(id=str(other_party_id), uname=username_param))
 							except Exception:
 								pass
-						except Exception:
-							pass
-						try:
-							enqueue("enrich_user", key=str(other_party_id), payload={"ig_user_id": str(other_party_id)})
+							# Conditionally enqueue enrich: only when missing or fetch_status not ok
+							try:
+								rowu = session.exec(_t("SELECT fetch_status FROM ig_users WHERE ig_user_id=:id").params(id=str(other_party_id))).first()
+							except Exception:
+								rowu = None
+							fs = None
+							try:
+								fs = (rowu.fetch_status if hasattr(rowu, "fetch_status") else (rowu[0] if isinstance(rowu, (list, tuple)) else None)) if rowu else None
+							except Exception:
+								fs = None
+							if fs is None or str(fs).lower() != "ok":
+								try:
+									enqueue("enrich_user", key=str(other_party_id), payload={"ig_user_id": str(other_party_id)})
+								except Exception:
+									pass
 						except Exception:
 							pass
 					if igba_id:

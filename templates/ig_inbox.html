@@ -29,6 +29,10 @@
       <form method="post" action="/ig/admin/backfill/ai_latest" style="display:inline;">
         <button type="submit" class="meta" style="background:#fff;color:#2563eb;border:1px solid #2563eb;">(Form ile gönder)</button>
       </form>
+      <button id="enrichUsersErrors" style="background:#f59e0b">Hatalı Kullanıcıları Enrich Et</button>
+      <form method="post" action="/ig/admin/enrich/users-errors" style="display:inline;">
+        <button type="submit" class="meta" style="background:#fff;color:#2563eb;border:1px solid #2563eb;">(Form ile gönder)</button>
+      </form>
     </div>
     <div id="list">
       {% for m in conversations %}
@@ -116,6 +120,18 @@
           location.reload();
         } catch (e) { alert('Geri doldurma hatası'); }
         finally { backfillLatestBtn.disabled = false; backfillLatestBtn.textContent = prev; }
+      });
+      const enrichUsersBtn = document.getElementById('enrichUsersErrors');
+      enrichUsersBtn?.addEventListener('click', async () => {
+        if (!confirm('fetch_status=error olan tüm kullanıcıları enrich kuyruğuna eklemek ister misiniz?')) return;
+        enrichUsersBtn.disabled = true; const prev = enrichUsersBtn.textContent; enrichUsersBtn.textContent = 'Kuyruğa ekleniyor...';
+        try {
+          const r = await fetch('/ig/admin/enrich/users-errors', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
+          alert('Kuyruğa eklendi: ' + (js.enqueued||0));
+        } catch (e) { alert('Enrich hatası'); }
+        finally { enrichUsersBtn.disabled = false; enrichUsersBtn.textContent = prev; }
       });
 
       function fmtTs(){

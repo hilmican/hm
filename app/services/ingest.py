@@ -579,7 +579,17 @@ def handle(raw_event_id: int) -> int:
 							_create_attachment_stubs(session, msg_id, str(mid), attachments)
 						# enrichers (idempotent via jobs table uniqueness)
 						if sender_id:
-							enqueue("enrich_user", key=str(sender_id), payload={"ig_user_id": str(sender_id)})
+							try:
+								rowu = session.exec(text("SELECT fetch_status FROM ig_users WHERE ig_user_id=:id").params(id=str(sender_id))).first()
+							except Exception:
+								rowu = None
+							fs = None
+							try:
+								fs = (rowu.fetch_status if hasattr(rowu, "fetch_status") else (rowu[0] if isinstance(rowu, (list, tuple)) else None)) if rowu else None
+							except Exception:
+								fs = None
+							if fs is None or str(fs).lower() != "ok":
+								enqueue("enrich_user", key=str(sender_id), payload={"ig_user_id": str(sender_id)})
 						enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})
 				# Additionally handle referral-only webhook events (messaging_referrals)
 				try:
