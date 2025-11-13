@@ -75,7 +75,7 @@ def create_app() -> FastAPI:
 			_fmt = _lg.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
 			_h = _lg.StreamHandler()
 			_h.setFormatter(_fmt)
-			for lname in ("instagram.webhook", "graph.api", "ingest.upsert"):
+		for lname in ("instagram.webhook", "instagram.inbox", "graph.api", "ingest.upsert"):
 				lg = _lg.getLogger(lname)
 				lg.setLevel(_lg.INFO)
 				# avoid duplicate handlers

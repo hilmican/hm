@@ -1829,6 +1829,24 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
         pass
     if not (igba_id and other_id):
         raise HTTPException(status_code=400, detail=f"Could not resolve identifiers to hydrate; cid={conversation_id} igba_id={igba_id} other_id={other_id}")
+    # Best-effort: persist conversations mapping for future actions
+    try:
+        from sqlalchemy import text as _text
+        with get_session() as session:
+            conv_key = f"{str(igba_id)}:{str(other_id)}"
+            try:
+                session.exec(_text("INSERT OR IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count) VALUES (:cv, :g, :u, CURRENT_TIMESTAMP, 0)")).params(cv=conv_key, g=str(igba_id), u=str(other_id))
+            except Exception:
+                try:
+                    session.exec(_text("INSERT IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count) VALUES (:cv, :g, :u, CURRENT_TIMESTAMP, 0)")).params(cv=conv_key, g=str(igba_id), u=str(other_id))
+                except Exception:
+                    pass
+            try:
+                session.exec(_text("UPDATE conversations SET graph_conversation_id=:gc WHERE convo_id=:cv")).params(gc=str(conversation_id), cv=conv_key)
+            except Exception:
+                pass
+    except Exception:
+        pass
     key = f"{igba_id}:{other_id}"
     try:
         enqueue("hydrate_conversation", key=key, payload={"igba_id": str(igba_id), "ig_user_id": str(other_id), "max_messages": int(max_messages)})
