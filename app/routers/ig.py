@@ -55,7 +55,7 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
         from sqlalchemy import text as _text
         base_sql = """
             SELECT ac.convo_id, lm.timestamp_ms, lm.text, lm.sender_username, lm.direction,
-                   lm.ig_sender_id, lm.ig_recipient_id, lm.ad_link, lm.ad_title
+                   lm.ig_sender_id, lm.ig_recipient_id, lm.ad_link, lm.ad_title, lm.message_id
             FROM ai_conversations ac
             LEFT JOIN latest_messages lm ON lm.convo_id = ac.convo_id
         """
@@ -110,6 +110,7 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                     "ig_recipient_id": (getattr(r, "ig_recipient_id", None) if hasattr(r, "ig_recipient_id") else (r[6] if len(r) > 6 else None)),
                     "ad_link": (getattr(r, "ad_link", None) if hasattr(r, "ad_link") else (r[7] if len(r) > 7 else None)),
                     "ad_title": (getattr(r, "ad_title", None) if hasattr(r, "ad_title") else (r[8] if len(r) > 8 else None)),
+                    "message_id": (getattr(r, "message_id", None) if hasattr(r, "message_id") else (r[9] if len(r) > 9 else None)),
                 })
             except Exception:
                 continue
@@ -227,16 +228,55 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                             labels[cid] = f"@{str(un)}"
                         if nm and cid not in names:
                             names[cid] = str(nm)
-        # Best-effort ad metadata from messages
+        # Best-effort ad metadata from messages; include ad_id via lm.message_id -> message.ad_id lookup
         ad_map = {}
-        for m in rows:
-            cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
-            if not cid:
-                continue
-            ad_link = (m.get("ad_link") if isinstance(m, dict) else getattr(m, "ad_link", None))
-            ad_title = (m.get("ad_title") if isinstance(m, dict) else getattr(m, "ad_title", None))
-            if (ad_link or ad_title) and cid not in ad_map:
-                ad_map[cid] = {"link": ad_link, "title": ad_title}
+        try:
+            msg_ids: list[int] = []
+            for m in rows:
+                try:
+                    mid = m.get("message_id") if isinstance(m, dict) else getattr(m, "message_id", None)
+                    if mid is not None:
+                        mi = int(mid)
+                        if mi not in msg_ids:
+                            msg_ids.append(mi)
+                except Exception:
+                    continue
+            id_map: dict[int, dict[str, Any]] = {}
+            if msg_ids:
+                placeholders = ",".join([":m" + str(i) for i in range(len(msg_ids))])
+                from sqlalchemy import text as _text
+                params = {("m" + str(i)): int(msg_ids[i]) for i in range(len(msg_ids))}
+                rows_m = session.exec(_text(f"SELECT id, ad_id FROM message WHERE id IN ({placeholders})")).params(**params).all()
+                for r in rows_m:
+                    rid = r.id if hasattr(r, "id") else r[0]
+                    aid = r.ad_id if hasattr(r, "ad_id") else (r[1] if len(r) > 1 else None)
+                    id_map[int(rid)] = {"ad_id": (str(aid) if aid is not None else None)}
+            for m in rows:
+                cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
+                if not cid:
+                    continue
+                ad_link = (m.get("ad_link") if isinstance(m, dict) else getattr(m, "ad_link", None))
+                ad_title = (m.get("ad_title") if isinstance(m, dict) else getattr(m, "ad_title", None))
+                mid = (m.get("message_id") if isinstance(m, dict) else getattr(m, "message_id", None))
+                ad_id_val = None
+                try:
+                    if mid is not None and int(mid) in id_map:
+                        ad_id_val = id_map[int(mid)].get("ad_id")
+                except Exception:
+                    ad_id_val = None
+                if (ad_link or ad_title or ad_id_val) and cid not in ad_map:
+                    ad_map[cid] = {"link": ad_link, "title": ad_title, "id": ad_id_val}
+        except Exception:
+            # fallback to link/title only
+            ad_map = {}
+            for m in rows:
+                cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
+                if not cid:
+                    continue
+                ad_link = (m.get("ad_link") if isinstance(m, dict) else getattr(m, "ad_link", None))
+                ad_title = (m.get("ad_title") if isinstance(m, dict) else getattr(m, "ad_title", None))
+                if (ad_link or ad_title) and cid not in ad_map:
+                    ad_map[cid] = {"link": ad_link, "title": ad_title}
         templates = request.app.state.templates
         return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "names": names, "ad_map": ad_map, "q": (q or "")})
 

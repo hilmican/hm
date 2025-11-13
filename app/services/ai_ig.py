@@ -149,6 +149,60 @@ def build_prompt(conversation_id: str, customer_text: str) -> Tuple[str, str]:
 				prompt_msg = (pr.ai_prompt_msg if hasattr(pr, "ai_prompt_msg") else pr[1]) or ""
 		except Exception:
 			sys_msg = prompt_msg = ""
+		# inventory snapshot for AI: include price/colors/sizes for focused product
+		try:
+			if focus:
+				# Try to resolve by SKU
+				rowi = session.exec(_text("SELECT sku, name, color, size, price, product_id FROM item WHERE sku=:s LIMIT 1").params(s=str(focus))).first()
+				if rowi:
+					sku = getattr(rowi, "sku", None) if hasattr(rowi, "sku") else (rowi[0] if len(rowi) > 0 else None)
+					name = getattr(rowi, "name", None) if hasattr(rowi, "name") else (rowi[1] if len(rowi) > 1 else None)
+					color = getattr(rowi, "color", None) if hasattr(rowi, "color") else (rowi[2] if len(rowi) > 2 else None)
+					size = getattr(rowi, "size", None) if hasattr(rowi, "size") else (rowi[3] if len(rowi) > 3 else None)
+					price = getattr(rowi, "price", None) if hasattr(rowi, "price") else (rowi[4] if len(rowi) > 4 else None)
+					pid = getattr(rowi, "product_id", None) if hasattr(rowi, "product_id") else (rowi[5] if len(rowi) > 5 else None)
+					if sku:
+						stock.append({"sku": sku, "name": name, "color": color, "size": size, "price": price})
+					# include siblings to expose available variants
+					if pid is not None:
+						try:
+							rows_sib = session.exec(_text("SELECT sku, name, color, size, price FROM item WHERE product_id=:pid LIMIT 200").params(pid=int(pid))).all()
+						except Exception:
+							rows_sib = []
+						for r in rows_sib:
+							try:
+                                # support both SQLModel rows and tuples
+								sku2 = r.sku if hasattr(r, "sku") else r[0]
+								name2 = r.name if hasattr(r, "name") else (r[1] if len(r) > 1 else None)
+								color2 = r.color if hasattr(r, "color") else (r[2] if len(r) > 2 else None)
+								size2 = r.size if hasattr(r, "size") else (r[3] if len(r) > 3 else None)
+								price2 = r.price if hasattr(r, "price") else (r[4] if len(r) > 4 else None)
+								if isinstance(sku2, str) and not any(it.get("sku") == sku2 for it in stock):
+									stock.append({"sku": sku2, "name": name2, "color": color2, "size": size2, "price": price2})
+							except Exception:
+								continue
+				else:
+					# Fallback: resolve product by slug/name
+					rowp = session.exec(_text("SELECT id FROM product WHERE slug=:s OR name=:s LIMIT 1").params(s=str(focus))).first()
+					pid2 = (rowp.id if hasattr(rowp, "id") else (rowp[0] if rowp else None)) if rowp else None
+					if pid2 is not None:
+						try:
+							rows_it = session.exec(_text("SELECT sku, name, color, size, price FROM item WHERE product_id=:pid LIMIT 200").params(pid=int(pid2))).all()
+						except Exception:
+							rows_it = []
+						for r in rows_it:
+							try:
+								sku2 = r.sku if hasattr(r, "sku") else r[0]
+								name2 = r.name if hasattr(r, "name") else (r[1] if len(r) > 1 else None)
+								color2 = r.color if hasattr(r, "color") else (r[2] if len(r) > 2 else None)
+								size2 = r.size if hasattr(r, "size") else (r[3] if len(r) > 3 else None)
+								price2 = r.price if hasattr(r, "price") else (r[4] if len(r) > 4 else None)
+								stock.append({"sku": sku2, "name": name2, "color": color2, "size": size2, "price": price2})
+							except Exception:
+								continue
+		except Exception:
+			# keep empty stock on any failure
+			stock = []
 		# recent messages
 		try:
 			msgs = session.exec(
