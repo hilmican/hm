@@ -1061,8 +1061,8 @@ def normalize_dm_conversation_ids(limit: int = 20000):
                 other = (rid if d == "out" else sid)
                 if other and (not (isinstance(conv, str) and conv.startswith("dm:"))):
                     session.exec(
-                        _text("UPDATE message SET conversation_id=:cid WHERE id=:id")
-                    ).params(cid=f"dm:{other}", id=int(mid))
+                        _text("UPDATE message SET conversation_id=:cid WHERE id=:id").params(cid=f"dm:{other}", id=int(mid))
+                    )
                     updated += 1
             except Exception:
                 continue
@@ -1112,14 +1112,14 @@ def merge_to_graph_conversation_ids(limit: int = 5000):
                     continue
                 dm_id = f"dm:{ig_user_id}"
                 # Messages
-                session.exec(_text("UPDATE message SET conversation_id=:g WHERE conversation_id=:d")).params(g=str(graph_id), d=str(dm_id))
+                session.exec(_text("UPDATE message SET conversation_id=:g WHERE conversation_id=:d").params(g=str(graph_id), d=str(dm_id)))
                 # Orders
                 try:
-                    session.exec(_text('UPDATE "order" SET ig_conversation_id=:g WHERE ig_conversation_id=:d')).params(g=str(graph_id), d=str(dm_id))
+                    session.exec(_text('UPDATE "order" SET ig_conversation_id=:g WHERE ig_conversation_id=:d').params(g=str(graph_id), d=str(dm_id)))
                 except Exception:
                     # MySQL backticks
                     try:
-                        session.exec(_text("UPDATE `order` SET ig_conversation_id=:g WHERE ig_conversation_id=:d")).params(g=str(graph_id), d=str(dm_id))
+                        session.exec(_text("UPDATE `order` SET ig_conversation_id=:g WHERE ig_conversation_id=:d").params(g=str(graph_id), d=str(dm_id)))
                     except Exception:
                         pass
                 # ai_conversations upsert copy
@@ -1174,7 +1174,7 @@ def merge_to_graph_conversation_ids(limit: int = 5000):
                         pass
                 # Remove old dm row if exists
                 try:
-                    session.exec(_text("DELETE FROM ai_conversations WHERE convo_id=:d")).params(d=str(dm_id))
+                    session.exec(_text("DELETE FROM ai_conversations WHERE convo_id=:d").params(d=str(dm_id)))
                 except Exception:
                     pass
                 migrated += 1
@@ -1250,13 +1250,13 @@ def merge_this_thread_to_graph(conversation_id: str, max_messages: int = 50):
         with get_session() as session:
             dm_id = str(conversation_id)
             # Messages
-            session.exec(_text("UPDATE message SET conversation_id=:g WHERE conversation_id=:d")).params(g=str(graph_id), d=str(dm_id))
+            session.exec(_text("UPDATE message SET conversation_id=:g WHERE conversation_id=:d").params(g=str(graph_id), d=str(dm_id)))
             # Orders
             try:
-                session.exec(_text('UPDATE "order" SET ig_conversation_id=:g WHERE ig_conversation_id=:d')).params(g=str(graph_id), d=str(dm_id))
+                session.exec(_text('UPDATE "order" SET ig_conversation_id=:g WHERE ig_conversation_id=:d').params(g=str(graph_id), d=str(dm_id)))
             except Exception:
                 try:
-                    session.exec(_text("UPDATE `order` SET ig_conversation_id=:g WHERE ig_conversation_id=:d")).params(g=str(graph_id), d=str(dm_id))
+                    session.exec(_text("UPDATE `order` SET ig_conversation_id=:g WHERE ig_conversation_id=:d").params(g=str(graph_id), d=str(dm_id)))
                 except Exception:
                     pass
             # ai_conversations upsert copy
@@ -1309,7 +1309,7 @@ def merge_this_thread_to_graph(conversation_id: str, max_messages: int = 50):
                     pass
             # Remove old dm row if exists
             try:
-                session.exec(_text("DELETE FROM ai_conversations WHERE convo_id=:d")).params(d=str(dm_id))
+                session.exec(_text("DELETE FROM ai_conversations WHERE convo_id=:d").params(d=str(dm_id)))
             except Exception:
                 pass
             migrated = 1
