@@ -358,10 +358,22 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		except Exception:
 			pass
 		return None
-	message_obj = event.get("message") or {}
-	if not message_obj:
-		return None
-	mid = message_obj.get("mid") or message_obj.get("id") or event.get("id")
+	# Normalize message field differences between webhook (dict) and Graph fetch (string)
+	raw_message_field = event.get("message")
+	message_obj: Dict[str, Any] = {}
+	text_val: Optional[str] = None
+	if isinstance(raw_message_field, dict):
+		message_obj = raw_message_field
+		text_val = raw_message_field.get("message") or raw_message_field.get("text")
+	elif isinstance(raw_message_field, str):
+		# Graph messages API returns the text as a plain string under "message"
+		text_val = raw_message_field
+		message_obj = {}
+	else:
+		message_obj = {}
+		text_val = None
+	# Determine message id from multiple possible locations
+	mid = (message_obj.get("mid") if isinstance(message_obj, dict) else None) or (message_obj.get("id") if isinstance(message_obj, dict) else None) or event.get("id")
 	if not mid:
 		return None
 	exists = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid").params(mid=str(mid))).first()
@@ -383,8 +395,8 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		recipient_id = to[0].get("id") if to else None
 	except Exception:
 		recipient_id = None
-	text_val = message_obj.get("message") or message_obj.get("text")
-	attachments = message_obj.get("attachments")
+	# Attachments may be top-level (Graph fetch) or nested under message (webhook)
+	attachments = event.get("attachments") or (message_obj.get("attachments") if isinstance(message_obj, dict) else None)
 	# Story reply (rare in Graph fetch; best-effort if present)
 	story_id = None
 	story_url = None
