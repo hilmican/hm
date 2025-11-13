@@ -17,7 +17,7 @@ from ..services.queue import enqueue
 from ..models import Message
 from ..services.instagram_api import _get_base_token_and_id, fetch_user_username, GRAPH_VERSION, _get as graph_get
 import httpx
-from .ig import notify_new_message
+from .websocket_handlers import notify_new_message
 import logging
 from ..services.monitoring import increment_counter
 from starlette.requests import ClientDisconnect

@@ -6,7 +6,7 @@ from typing import Any
 import json
 import time
 import httpx
-import os
+import os as _os
 from datetime import datetime as _d
 
 from ..db import get_session
