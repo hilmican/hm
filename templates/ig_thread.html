@@ -245,13 +245,18 @@
       // Admin helpers
       const btnMergeGraph = document.getElementById('btnMergeGraph');
       btnMergeGraph?.addEventListener('click', async () => {
-        if (!confirm('Tüm uygun dm:<id> konuşmalar Graph CID\'e taşınsın mı?')) return;
+        if (!confirm('Bu konuşmayı Graph CID\'e taşı?')) return;
         btnMergeGraph.disabled = true; const prev = btnMergeGraph.textContent; btnMergeGraph.textContent = 'Birleştiriliyor...';
         try {
-          const r = await fetch('/ig/admin/merge_to_graph_conversation_ids', { method: 'POST' });
+          const r = await fetch(location.pathname + '/merge-to-graph', { method: 'POST' });
           const js = await r.json().catch(()=>({}));
           if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
-          alert('Birleştirme tamamlandı.\nİncelenen: ' + (js.considered||0) + '\nTaşınan: ' + (js.migrated||0));
+          alert('Tamamlandı. Graph CID: ' + (js.graph_conversation_id||'') );
+          // Redirect to new Graph CID if we were on dm:<id>
+          if (js.graph_conversation_id) {
+            location.href = '/ig/inbox/' + js.graph_conversation_id;
+            return;
+          }
           location.reload();
         } catch (e) { alert('Birleştirme hatası'); }
         finally { btnMergeGraph.disabled = false; btnMergeGraph.textContent = prev; }

@@ -461,6 +461,27 @@ def trigger_debug_conversation(conversation_id: str):
 
 @router.get("/inbox/{conversation_id}")
 def thread(request: Request, conversation_id: str, limit: int = 100):
+    # If this is a legacy dm:<ig_user_id> and we have a known Graph conversation id, redirect
+    if isinstance(conversation_id, str) and conversation_id.startswith("dm:"):
+        try:
+            other_id = conversation_id.split(":", 1)[1]
+        except Exception:
+            other_id = None
+        if other_id:
+            try:
+                from sqlalchemy import text as _text
+                with get_session() as session:
+                    rowc = session.exec(
+                        _text(
+                            "SELECT graph_conversation_id FROM conversations WHERE ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1"
+                        ).params(u=str(other_id))
+                    ).first()
+                    if rowc:
+                        gcid = rowc.graph_conversation_id if hasattr(rowc, "graph_conversation_id") else (rowc[0] if len(rowc) > 0 else None)
+                        if gcid and str(gcid) != conversation_id:
+                            return RedirectResponse(url=f"/ig/inbox/{gcid}", status_code=HTTP_303_SEE_OTHER)
+            except Exception:
+                pass
     with get_session() as session:
         msgs = session.exec(
             select(Message)
@@ -1160,6 +1181,121 @@ def merge_to_graph_conversation_ids(limit: int = 5000):
             except Exception:
                 continue
     return {"status": "ok", "considered": int(considered), "migrated": int(migrated)}
+
+
+@router.post("/inbox/{conversation_id}/merge-to-graph")
+def merge_this_thread_to_graph(conversation_id: str, max_messages: int = 50):
+    """Resolve Graph conversation id for this thread and migrate legacy dm:<id> rows to it."""
+    # Only meaningful for dm:<ig_user_id>
+    if not (isinstance(conversation_id, str) and conversation_id.startswith("dm:")):
+        return {"status": "ok", "message": "already_graph_or_unsupported"}
+    try:
+        other_id = conversation_id.split(":", 1)[1]
+    except Exception:
+        return {"status": "error", "error": "invalid_dm_conversation_id"}
+    # Resolve active page/user id for fetching
+    try:
+        _, entity_id, _ = _get_base_token_and_id()
+        igba_id = str(entity_id)
+    except Exception as e:
+        return {"status": "error", "error": f"resolve_token_failed: {e}"}
+    # Ensure mapping exists by fetching a small sample (also updates conversations.graph_conversation_id best-effort)
+    try:
+        import asyncio as _aio
+        loop = _aio.get_event_loop()
+        from ..services.instagram_api import fetch_thread_messages as _ftm
+        loop.run_until_complete(_ftm(igba_id, str(other_id), limit=max(1, min(int(max_messages or 50), 200))))
+    except Exception:
+        pass
+    # Read mapping
+    graph_id = None
+    try:
+        from sqlalchemy import text as _text
+        with get_session() as session:
+            rowc = session.exec(
+                _text(
+                    "SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u ORDER BY last_message_at DESC LIMIT 1"
+                ).params(g=str(igba_id), u=str(other_id))
+            ).first()
+            if rowc:
+                graph_id = rowc.graph_conversation_id if hasattr(rowc, "graph_conversation_id") else (rowc[0] if len(rowc) > 0 else None)
+    except Exception:
+        graph_id = None
+    if not graph_id:
+        return {"status": "error", "error": "graph_conversation_id_not_found"}
+    # Perform targeted migration using same logic as bulk endpoint
+    migrated = 0
+    try:
+        from sqlalchemy import text as _text
+        with get_session() as session:
+            dm_id = str(conversation_id)
+            # Messages
+            session.exec(_text("UPDATE message SET conversation_id=:g WHERE conversation_id=:d")).params(g=str(graph_id), d=str(dm_id))
+            # Orders
+            try:
+                session.exec(_text('UPDATE "order" SET ig_conversation_id=:g WHERE ig_conversation_id=:d')).params(g=str(graph_id), d=str(dm_id))
+            except Exception:
+                try:
+                    session.exec(_text("UPDATE `order` SET ig_conversation_id=:g WHERE ig_conversation_id=:d")).params(g=str(graph_id), d=str(dm_id))
+                except Exception:
+                    pass
+            # ai_conversations upsert copy
+            try:
+                session.exec(
+                    _text(
+                        """
+                        INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at)
+                        SELECT :g, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at
+                        FROM ai_conversations WHERE convo_id=:d
+                        ON CONFLICT(convo_id) DO UPDATE SET
+                          last_message_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_id ELSE ai_conversations.last_message_id END,
+                          last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), excluded.last_message_timestamp_ms),
+                          last_message_text=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_text ELSE ai_conversations.last_message_text END,
+                          last_message_direction=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_direction ELSE ai_conversations.last_message_direction END,
+                          last_sender_username=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_sender_username ELSE ai_conversations.last_sender_username END,
+                          ig_sender_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_sender_id ELSE ai_conversations.ig_sender_id END,
+                          ig_recipient_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_recipient_id ELSE ai_conversations.ig_recipient_id END,
+                          last_ad_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_id ELSE ai_conversations.last_ad_id END,
+                          last_ad_link=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_link ELSE ai_conversations.last_ad_link END,
+                          last_ad_title=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_title ELSE ai_conversations.last_ad_title END,
+                          hydrated_at=COALESCE(ai_conversations.hydrated_at, excluded.hydrated_at)
+                        """
+                    ).params(g=str(graph_id), d=str(dm_id))
+                )
+            except Exception:
+                try:
+                    session.exec(
+                        _text(
+                            """
+                            INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at)
+                            SELECT :g, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at
+                            FROM ai_conversations WHERE convo_id=:d
+                            ON DUPLICATE KEY UPDATE
+                              last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
+                              last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
+                              last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
+                              last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
+                              last_sender_username=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_sender_username), ai_conversations.last_sender_username),
+                              ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
+                              ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
+                              last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
+                              last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
+                              last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title),
+                              hydrated_at=COALESCE(ai_conversations.hydrated_at, VALUES(hydrated_at))
+                            """
+                        ).params(g=str(graph_id), d=str(dm_id))
+                    )
+                except Exception:
+                    pass
+            # Remove old dm row if exists
+            try:
+                session.exec(_text("DELETE FROM ai_conversations WHERE convo_id=:d")).params(d=str(dm_id))
+            except Exception:
+                pass
+            migrated = 1
+    except Exception as e:
+        return {"status": "error", "error": f"migrate_failed: {e}"}
+    return {"status": "ok", "graph_conversation_id": str(graph_id), "migrated": int(migrated)}
 
 @router.post("/admin/enrich/users-errors")
 def enrich_users_with_errors(limit: int = 2000):
