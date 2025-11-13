@@ -18,6 +18,8 @@ from ..models import Message
 from ..services.instagram_api import _get_base_token_and_id, fetch_user_username, GRAPH_VERSION, _get as graph_get
 import httpx
 from .websocket_handlers import notify_new_message
+from .webhook_enrichers import enrich_user_if_missing, enrich_ad_if_missing, enrich_story_if_missing, enrich_conversation_if_missing
+from .media_downloader import create_attachment_records, download_message_attachments
 import logging
 from ..services.monitoring import increment_counter
 from starlette.requests import ClientDisconnect
@@ -138,45 +140,50 @@ async def receive_events(request: Request):
 				row = session.exec(text("SELECT id FROM raw_events WHERE uniq_hash = :h").params(h=uniq_hash)).first()
 				if row:
 					saved_raw += 1
-					try:
-						enqueue("ingest", key=str(row.id), payload={"raw_event_id": int(row.id)})
-					except Exception:
-						pass
+					# Skip queuing ingest job - we'll process immediately below
 			except Exception:
 				# ignore duplicates or insert errors to keep webhook fast
 				pass
 	try:
-		_log.info("IG webhook POST: enqueued ingest for entries=%d raw_saved=%d", len(entries), saved_raw)
+		_log.info("IG webhook POST: saved raw events for entries=%d raw_saved=%d", len(entries), saved_raw)
 	except Exception:
 		pass
 
-	# Additionally, persist minimal Message rows immediately (no Graph calls)
-	# so that inbox can render even if workers or Graph are unavailable.
+	# Process messages immediately with synchronous enrichment
+	# This replaces the old queuing approach with immediate API calls
 	try:
-		with get_session() as session:
-			persisted = 0
-			for entry in entries:
-				messaging_events: List[Dict[str, Any]] = entry.get("messaging") or []
-				if not messaging_events and entry.get("changes"):
-					for change in entry.get("changes", []):
-						val = change.get("value") or {}
-						if isinstance(val, dict) and val.get("messaging"):
-							messaging_events.extend(val.get("messaging", []))
-				for event in messaging_events:
-					mobj = event.get("message") or {}
-					if not mobj or mobj.get("is_deleted"):
-						continue
-					mid = mobj.get("mid") or mobj.get("id")
-					if not mid:
-						continue
-					# idempotent insert by ig_message_id
-					exists = session.exec(select(Message).where(Message.ig_message_id == str(mid))).first()
-					if exists:
-						continue
-					sender_id = (event.get("sender") or {}).get("id")
-					recipient_id = (event.get("recipient") or {}).get("id")
-					text_val = mobj.get("text")
-					attachments = mobj.get("attachments")
+		# Create HTTP client for API calls
+		async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+			with get_session() as session:
+				persisted = 0
+				enriched_users = 0
+				enriched_conversations = 0
+				enriched_ads = 0
+				enriched_stories = 0
+				downloaded_media = 0
+
+				for entry in entries:
+					messaging_events: List[Dict[str, Any]] = entry.get("messaging") or []
+					if not messaging_events and entry.get("changes"):
+						for change in entry.get("changes", []):
+							val = change.get("value") or {}
+							if isinstance(val, dict) and val.get("messaging"):
+								messaging_events.extend(val.get("messaging", []))
+					for event in messaging_events:
+						mobj = event.get("message") or {}
+						if not mobj or mobj.get("is_deleted"):
+							continue
+						mid = mobj.get("mid") or mobj.get("id")
+						if not mid:
+							continue
+						# idempotent insert by ig_message_id
+						exists = session.exec(select(Message).where(Message.ig_message_id == str(mid))).first()
+						if exists:
+							continue
+						sender_id = (event.get("sender") or {}).get("id")
+						recipient_id = (event.get("recipient") or {}).get("id")
+						text_val = mobj.get("text")
+						attachments = mobj.get("attachments")
 					# Story reply (best-effort)
 					story_id = None
 					story_url = None
@@ -221,46 +228,45 @@ async def receive_events(request: Request):
 							direction = "out"
 					except Exception:
 						pass
-					other_party_id = recipient_id if direction == "out" else sender_id
-					# Prefer Graph conversation id when possible; fallback to dm:<ig_user_id>
-					conversation_id = None
-					gcid_before = None
-					gcid_after = None
-					try:
-						if other_party_id and igba_id:
-							from sqlalchemy import text as _t
-							# Try existing mapping first
-							row_map = session.exec(
-								_t("SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1").params(g=str(igba_id), u=str(other_party_id))
-							).first()
-							if row_map:
-								gcid_before = (row_map.graph_conversation_id if hasattr(row_map, "graph_conversation_id") else (row_map[0] if len(row_map) > 0 else None))
-							# If missing, resolve via lightweight Graph call (persisting the mapping), then re-check
-							if not gcid_before:
-								try:
-									from ..services.instagram_api import fetch_thread_messages as _ftm
-									msgs = await _ftm(str(igba_id), str(other_party_id), limit=1)
-									_ = len(msgs)  # force eval; side-effect persisted mapping
-								except Exception as ex_ftm:
-									try:
-										_log.info("wb.map: ftm failed igba=%s user=%s err=%s", str(igba_id), str(other_party_id), str(ex_ftm)[:160])
-									except Exception:
-										pass
-								row_map2 = session.exec(
-									_t("SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1").params(g=str(igba_id), u=str(other_party_id))
-								).first()
-								if row_map2:
-									gcid_after = (row_map2.graph_conversation_id if hasattr(row_map2, "graph_conversation_id") else (row_map2[0] if len(row_map2) > 0 else None))
-							else:
-								gcid_after = gcid_before
-							if gcid_after:
-								conversation_id = str(gcid_after)
-					except Exception as ex_map:
+						other_party_id = recipient_id if direction == "out" else sender_id
+
+						# SYNCHRONOUS ENRICHMENT: Check and enrich missing data immediately
+						if other_party_id:
+							# Enrich user if missing
+							user_result = await enrich_user_if_missing(session, str(other_party_id), client)
+							if user_result:
+								enriched_users += 1
+
+						if ad_id:
+							# Enrich ad if missing
+							ad_result = await enrich_ad_if_missing(session, str(ad_id), client)
+							if ad_result:
+								enriched_ads += 1
+
+						if story_id:
+							# Enrich story if missing
+							story_result = await enrich_story_if_missing(session, str(story_id), client)
+							if story_result:
+								enriched_stories += 1
+
+						# Prefer Graph conversation id when possible; fallback to dm:<ig_user_id>
 						conversation_id = None
+						gcid_before = None
+						gcid_after = None
 						try:
-							_log.info("wb.map: exception igba=%s user=%s err=%s", str(igba_id), str(other_party_id), str(ex_map)[:160])
-						except Exception:
-							pass
+							if other_party_id and igba_id:
+								# Use synchronous conversation enrichment
+								from .webhook_enrichers import enrich_conversation_if_missing
+								graph_conv_id = await enrich_conversation_if_missing(session, str(igba_id), str(other_party_id), client)
+								if graph_conv_id:
+									conversation_id = graph_conv_id
+									enriched_conversations += 1
+						except Exception as ex_map:
+							conversation_id = None
+							try:
+								_log.info("wb.map: exception igba=%s user=%s err=%s", str(igba_id), str(other_party_id), str(ex_map)[:160])
+							except Exception:
+								pass
 					if conversation_id is None:
 						conversation_id = (f"dm:{other_party_id}" if other_party_id is not None else None)
 					# Diagnostic: log chosen conversation id
@@ -355,28 +361,10 @@ async def receive_events(request: Request):
 								session.exec(_t("UPDATE ig_users SET username=COALESCE(:uname, username), last_seen_at=CURRENT_TIMESTAMP WHERE ig_user_id=:id").params(id=str(other_party_id), uname=username_param))
 							except Exception:
 								pass
-							# Conditionally enqueue enrich: only when missing or fetch_status not ok
-							try:
-								rowu = session.exec(_t("SELECT fetch_status FROM ig_users WHERE ig_user_id=:id").params(id=str(other_party_id))).first()
-							except Exception:
-								rowu = None
-							fs = None
-							try:
-								fs = (rowu.fetch_status if hasattr(rowu, "fetch_status") else (rowu[0] if isinstance(rowu, (list, tuple)) else None)) if rowu else None
-							except Exception:
-								fs = None
-							if fs is None or str(fs).lower() != "ok":
-								try:
-									enqueue("enrich_user", key=str(other_party_id), payload={"ig_user_id": str(other_party_id)})
-								except Exception:
-									pass
+							# User enrichment is now done synchronously above
 						except Exception:
 							pass
-					if igba_id:
-						try:
-							enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})
-						except Exception:
-							pass
+					# Page enrichment could be added here if needed synchronously
 					# Ensure ai_conversations exists and update last-* fields atomically
 					if conversation_id and ts_val is not None and row.id:
 						try:
@@ -478,15 +466,7 @@ async def receive_events(request: Request):
 							except Exception:
 								session.exec(_t("INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id,:n,:img,:lnk,CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
 							session.exec(_t("UPDATE ads SET name=COALESCE(:n,name), image_url=COALESCE(:img,image_url), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
-							# If name still missing, enqueue hydrate job
-							try:
-								row_ad = session.exec(_t("SELECT name FROM ads WHERE ad_id=:id").params(id=ad_id)).first()
-								nm = (row_ad.name if hasattr(row_ad, "name") else (row_ad[0] if row_ad else None)) if row_ad else None
-								if not (nm and str(nm).strip()):
-									from ..services.queue import enqueue
-									enqueue("hydrate_ad", key=str(ad_id), payload={"ad_id": str(ad_id)})
-							except Exception:
-								pass
+							# Ad enrichment is now done synchronously above
 						# story cache
 						if story_id:
 							from sqlalchemy import text as _t
@@ -504,52 +484,25 @@ async def receive_events(request: Request):
 										session.exec(_t("INSERT INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
 					except Exception:
 						pass
-					# ensure attachments are tracked per-message and fetch queued
-					try:
-						session.flush()  # obtain row.id
-						if attachments:
-							# reuse ingestion helper to normalize and enqueue fetch jobs
+						# SYNCHRONOUS MEDIA DOWNLOAD: Download attachments immediately
+						try:
+							session.flush()  # obtain row.id
+							if attachments:
+								from .media_downloader import create_attachment_records, download_message_attachments
+								# Create attachment records first
+								create_attachment_records(session, int(row.id), str(mid), attachments)
+								# Download attachments synchronously
+								downloaded_paths = await download_message_attachments(session, int(row.id), str(mid), attachments, client)
+								downloaded_media += len(downloaded_paths)
+								try:
+									_log.info("webhook: downloaded %d media files for msg %s", len(downloaded_paths), str(mid))
+								except Exception:
+									pass
+						except Exception as e:
 							try:
-								from ..services.ingest import _create_attachment_stubs as _ins_atts
-								_ins_atts(session, int(row.id), str(mid), attachments)  # type: ignore[arg-type]
+								_log.warning("webhook: failed to process attachments for msg %s: %s", str(mid), str(e))
 							except Exception:
-								# fallback: minimal inline insertion (same logic)
-								items = []
-								if isinstance(attachments, list):
-									items = attachments
-								elif isinstance(attachments, dict) and isinstance(attachments.get("data"), list):
-									items = attachments.get("data") or []
-								for idx, att in enumerate(items):
-									kind = "file"
-									try:
-										ptype = (att.get("type") or att.get("mime_type") or "").lower()
-										if "image" in ptype:
-											kind = "image"
-										elif "video" in ptype:
-											kind = "video"
-										elif "audio" in ptype:
-											kind = "audio"
-									except Exception:
-										kind = "file"
-									gid = None
-									try:
-										gid = att.get("id") or (att.get("payload") or {}).get("id")
-									except Exception:
-										gid = None
-									session.exec(text(
-										"INSERT INTO attachments(message_id, kind, graph_id, position, fetch_status) "
-										"VALUES (:mid, :kind, :gid, :pos, 'pending')"
-									)).params(mid=int(row.id), kind=kind, gid=gid, pos=idx)
-									try:
-										enqueue("fetch_media", key=f"{int(row.id)}:{idx}", payload={"message_id": int(row.id), "position": idx})
-										try:
-											_log.info("webhook: queued fetch_media mid=%s pos=%s msg_row=%s", str(mid), idx, int(row.id))
-										except Exception:
-											pass
-									except Exception:
-										pass
-					except Exception:
-						pass
+								pass
 					# ensure conversation row exists and enqueue one-time hydration (idempotent via jobs uniqueness)
 					try:
 						if other_party_id:
@@ -575,20 +528,14 @@ async def receive_events(request: Request):
 									)).params(cid=f"{igba_id}:{str(other_party_id)}")
 							except Exception:
 								pass
-							enqueue("hydrate_conversation", key=f"{igba_id}:{str(other_party_id)}", payload={"igba_id": str(igba_id), "ig_user_id": str(other_party_id), "max_messages": 200})
+							# Conversation enrichment is now done synchronously above
 							try:
-								_log.info("webhook: enqueue hydrate convo=%s:%s", str(igba_id), str(other_party_id))
+								_log.info("webhook: processed convo=%s:%s", str(igba_id), str(other_party_id))
 							except Exception:
 								pass
 					except Exception:
 						pass
-					# enqueue enrich jobs for user and page similar to ingest path
-					try:
-						if sender_id:
-							enqueue("enrich_user", key=str(sender_id), payload={"ig_user_id": str(sender_id)})
-						enqueue("enrich_page", key=str(entry.get("id") or ""), payload={"igba_id": str(entry.get("id") or "")})
-					except Exception:
-						pass
+					# All enrichment is now done synchronously above
 				# Best-effort: notify live clients via WebSocket about the new message
 				try:
 					await notify_new_message({
@@ -599,41 +546,10 @@ async def receive_events(request: Request):
 					})
 				except Exception:
 					pass
-					# ensure attachments are tracked and fetched asynchronously
-					try:
-						session.flush()
-						if attachments:
-							items = []
-							if isinstance(attachments, list):
-								items = attachments
-							elif isinstance(attachments, dict) and isinstance(attachments.get("data"), list):
-								items = attachments.get("data") or []
-							for idx, att in enumerate(items):
-								kind = "file"
-								try:
-									ptype = (att.get("type") or att.get("mime_type") or "").lower()
-									if "image" in ptype:
-										kind = "image"
-									elif "video" in ptype:
-										kind = "video"
-									elif "audio" in ptype:
-										kind = "audio"
-								except Exception:
-									pass
-								gid = None
-								try:
-									gid = att.get("id") or (att.get("payload") or {}).get("id")
-								except Exception:
-									gid = None
-								session.exec(text(
-									"INSERT INTO attachments(message_id, kind, graph_id, position, fetch_status) "
-									"VALUES (:mid, :kind, :gid, :pos, 'pending')"
-								)).params(mid=int(row.id), kind=kind, gid=gid, pos=idx)
-								enqueue("fetch_media", key=f"{int(row.id)}:{idx}", payload={"message_id": int(row.id), "position": idx})
-					except Exception:
-						pass
+					# Attachments are now processed synchronously above
 		try:
-			_log.info("IG webhook POST: inserted messages=%d (direct path)", persisted)
+			_log.info("IG webhook POST: inserted messages=%d, enriched users=%d, conversations=%d, ads=%d, stories=%d, downloaded media=%d",
+					 persisted, enriched_users, enriched_conversations, enriched_ads, enriched_stories, downloaded_media)
 		except Exception:
 			pass
 		# Handle referral-only webhook events (messaging_referrals) to tag latest message with ad metadata
@@ -734,5 +650,6 @@ async def get_media(ig_message_id: str, idx: int):
 		media_type = mime or r.headers.get("content-type") or "image/jpeg"
 		headers = {"Cache-Control": "public, max-age=86400"}
 		return StreamingResponse(iter([r.content]), media_type=media_type, headers=headers)
+
 
 
