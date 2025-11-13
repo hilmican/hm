@@ -279,6 +279,14 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
         msgs = await fetch_messages(conv_id, limit=min(max(limit, 1), 200))
     except Exception:
         msgs = []
+    # Annotate messages with the Graph conversation id so downstream upsert can store under Graph id
+    try:
+        if isinstance(msgs, list):
+            for m in msgs:
+                if isinstance(m, dict):
+                    m["__graph_conversation_id"] = str(conv_id)
+    except Exception:
+        pass
     try:
         _log.info("ftm.end ok count=%s", len(msgs) if isinstance(msgs, list) else None)
     except Exception:
@@ -327,6 +335,8 @@ async def sync_latest_conversations(limit: int = 25) -> int:
                     ts_ms = int(dt_obj.timestamp() * 1000) if dt_obj else None
                 except Exception:
                     ts_ms = None
+                # Store under Graph conversation id (authoritative id)
+                conv_id_norm = cid
                 row = Message(
                     ig_sender_id=str(frm) if frm else None,
                     ig_recipient_id=str(recipient_id) if recipient_id else None,
@@ -335,7 +345,7 @@ async def sync_latest_conversations(limit: int = 25) -> int:
                     attachments_json=None,
                     timestamp_ms=ts_ms,
                     raw_json=None,
-                    conversation_id=cid,
+                    conversation_id=conv_id_norm,
                     direction=direction,
                     sender_username=frm_username,
                 )

@@ -422,7 +422,17 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 			direction = "out"
 	except Exception:
 		pass
-	conversation_id = f"dm:{(recipient_id if direction=='out' else sender_id)}" if ((recipient_id if direction=='out' else sender_id) is not None) else None
+	# Prefer Graph conversation id when hydrate provides it; fallback to dm:<ig_user_id>
+	graph_cid = None
+	try:
+		graph_cid = event.get("__graph_conversation_id")
+	except Exception:
+		graph_cid = None
+	conversation_id = (
+		str(graph_cid) if graph_cid else (
+			f"dm:{(recipient_id if direction=='out' else sender_id)}" if ((recipient_id if direction=='out' else sender_id) is not None) else None
+		)
+	)
 	# Ad/referral extraction (best-effort)
 	ad_id = None
 	ad_link = None

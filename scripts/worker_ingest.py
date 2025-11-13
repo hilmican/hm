@@ -136,7 +136,19 @@ def main() -> None:
 							log.warning("hydrate upsert err convo=%s:%s ev=%s ev_type=%s err=%s", igba_id, ig_user_id, ev_id, type(ev).__name__, e)
 					# mark conversation hydrated (ai_conversations)
 					try:
-						cid_ai = f"dm:{ig_user_id}"
+						# Prefer Graph conversation id from fetched messages; fallback to dm:<ig_user_id>
+						cid_ai = None
+						try:
+							if isinstance(msgs, list):
+								for _m in msgs:
+                                    # first dict with annotation wins
+									if isinstance(_m, dict) and _m.get("__graph_conversation_id"):
+										cid_ai = str(_m.get("__graph_conversation_id"))
+										break
+						except Exception:
+							cid_ai = None
+						if not cid_ai:
+							cid_ai = f"dm:{ig_user_id}"
 						# ensure ai_conversations row exists
 						try:
 							session.exec(text("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=cid_ai)
