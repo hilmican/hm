@@ -724,8 +724,13 @@ async def get_media(ig_message_id: str, idx: int):
 		raise HTTPException(status_code=404, detail="Media not found")
 	# fetch and stream
 	async with httpx.AsyncClient() as client:
-		r = await client.get(url, timeout=30, follow_redirects=True)
-		r.raise_for_status()
+		try:
+			r = await client.get(url, timeout=30, follow_redirects=True)
+			r.raise_for_status()
+		except httpx.HTTPStatusError as e:
+			if getattr(e.response, "status_code", None) == 404:
+				raise HTTPException(status_code=404, detail="Media not found")
+			raise HTTPException(status_code=502, detail="Media fetch failed")
 		media_type = mime or r.headers.get("content-type") or "image/jpeg"
 		headers = {"Cache-Control": "public, max-age=86400"}
 		return StreamingResponse(iter([r.content]), media_type=media_type, headers=headers)

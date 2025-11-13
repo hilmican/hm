@@ -1803,6 +1803,30 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
                         other_id = str(sid) if sid else (str(rid) if rid else None)
             except Exception:
                 pass
+        # Additional fallback: infer from ai_conversations (last known sender/recipient)
+        if not other_id:
+            try:
+                from sqlalchemy import text as _text
+                rowac = session.exec(
+                    _text("SELECT ig_sender_id, ig_recipient_id FROM ai_conversations WHERE convo_id=:cid ORDER BY last_message_timestamp_ms DESC LIMIT 1")
+                ).params(cid=str(conversation_id)).first()
+                if rowac:
+                    sid = getattr(rowac, "ig_sender_id", None) if hasattr(rowac, "ig_sender_id") else (rowac[0] if len(rowac) > 0 else None)
+                    rid = getattr(rowac, "ig_recipient_id", None) if hasattr(rowac, "ig_recipient_id") else (rowac[1] if len(rowac) > 1 else None)
+                    try:
+                        _, owner_id, _ = _get_base_token_and_id()
+                        if sid and str(sid) == str(owner_id):
+                            other_id = str(rid) if rid else None
+                        else:
+                            other_id = str(sid) if sid else None
+                    except Exception:
+                        other_id = str(sid) if sid else (str(rid) if rid else None)
+                try:
+                    _log.info("hydrate.resolve.ai_conversations cid=%s other_id=%s", str(conversation_id), str(other_id))
+                except Exception:
+                    pass
+            except Exception:
+                pass
         # Final fallback: derive by fetching recent messages from Graph for this conversation id
         if not other_id:
             try:
