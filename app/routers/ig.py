@@ -1680,11 +1680,35 @@ def enqueue_enrich(conversation_id: str):
                         other_id = str(sid) if sid else (str(rid) if rid else None)
             except Exception:
                 pass
+        # Additional fallback: infer from ai_conversations (last known sender/recipient)
+        if not other_id:
+            try:
+                from sqlalchemy import text as _text
+                rowac = session.exec(
+                    _text("SELECT ig_sender_id, ig_recipient_id FROM ai_conversations WHERE convo_id=:cid ORDER BY last_message_timestamp_ms DESC LIMIT 1")
+                ).params(cid=str(conversation_id)).first()
+                if rowac:
+                    sid = getattr(rowac, "ig_sender_id", None) if hasattr(rowac, "ig_sender_id") else (rowac[0] if len(rowac) > 0 else None)
+                    rid = getattr(rowac, "ig_recipient_id", None) if hasattr(rowac, "ig_recipient_id") else (rowac[1] if len(rowac) > 1 else None)
+                    try:
+                        _, owner_id, _ = _get_base_token_and_id()
+                        if sid and str(sid) == str(owner_id):
+                            other_id = str(rid) if rid else None
+                        else:
+                            other_id = str(sid) if sid else None
+                    except Exception:
+                        other_id = str(sid) if sid else (str(rid) if rid else None)
+            except Exception:
+                pass
         # Final fallback: derive by fetching recent messages from Graph for this conversation id
         if not other_id:
             try:
                 import asyncio as _aio
-                loop = _aio.get_event_loop()
+                try:
+                    loop = _aio.get_event_loop()
+                except RuntimeError:
+                    loop = _aio.new_event_loop()
+                    _aio.set_event_loop(loop)
                 from ..services.instagram_api import fetch_messages as _fm, _get_base_token_and_id as _gb
                 _, owner_id, _ = _gb()
                 msgs = loop.run_until_complete(_fm(str(conversation_id), limit=10))
@@ -1731,7 +1755,32 @@ def enqueue_enrich(conversation_id: str):
             except Exception:
                 igba_id = None
     if not other_id:
-        raise HTTPException(status_code=400, detail="Could not resolve IG user id for conversation")
+        # Fallback: enqueue GCID hydrate and best-effort enrich_page; return ok with debug
+        debug: dict[str, object] = {}
+        try:
+            token, ident, is_page = _get_base_token_and_id()
+            debug["active_path"] = ("page" if is_page else "user")
+            debug["owner_id"] = str(ident)
+        except Exception as e:
+            debug["env_resolve_error"] = str(e)
+        debug["cid_kind"] = ("dm" if conversation_id.startswith("dm:") else "graph")
+        debug["igba_id"] = (str(igba_id) if igba_id else None)
+        # enqueue hydrate_by_conversation_id for Graph CIDs
+        fallback_enqueued = False
+        if not conversation_id.startswith("dm:"):
+            try:
+                enqueue("hydrate_by_conversation_id", key=str(conversation_id), payload={"conversation_id": str(conversation_id), "max_messages": 50})
+                fallback_enqueued = True
+            except Exception:
+                fallback_enqueued = False
+        # best-effort: enrich_page even if user unresolved
+        try:
+            if igba_id:
+                enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})
+                debug["page_enrich_enqueued"] = True
+        except Exception:
+            debug["page_enrich_enqueued"] = False
+        return {"status": "ok", "queued": {"hydrate_by_cid": fallback_enqueued, "enrich_user": False, "enrich_page": bool(igba_id)}, "conversation_id": conversation_id, "debug": debug}
     queued = {"enrich_user": False, "enrich_page": False}
     try:
         enqueue("enrich_user", key=str(other_id), payload={"ig_user_id": str(other_id)})
@@ -1831,7 +1880,11 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
         if not other_id:
             try:
                 import asyncio as _aio
-                loop = _aio.get_event_loop()
+                try:
+                    loop = _aio.get_event_loop()
+                except RuntimeError:
+                    loop = _aio.new_event_loop()
+                    _aio.set_event_loop(loop)
                 from ..services.instagram_api import fetch_messages as _fm, _get_base_token_and_id as _gb
                 _, owner_id, _ = _gb()
                 msgs = loop.run_until_complete(_fm(str(conversation_id), limit=10))
