@@ -5,7 +5,7 @@ from typing import Optional
 
 from app.services.queue import dequeue, delete_job, increment_attempts
 from app.services.ingest import handle as handle_ingest
-from app.services.instagram_api import fetch_thread_messages, fetch_message_details
+from app.services.instagram_api import fetch_thread_messages, fetch_message_details, fetch_messages
 from app.services.ingest import upsert_message_from_ig_event
 from app.services.monitoring import increment_counter
 from app.db import get_session
@@ -37,9 +37,14 @@ def main() -> None:
 			record_heartbeat("ingest", os.getpid(), socket.gethostname())
 		except Exception:
 			pass
-		# Prefer ingest jobs; if none, try hydrate jobs (conversation/ad)
-		log.debug("waiting for jobs: ingest|hydrate_conversation|hydrate_ad")
-		job = dequeue("ingest", timeout=1) or dequeue("hydrate_conversation", timeout=1) or dequeue("hydrate_ad", timeout=1)
+		# Prefer ingest jobs; if none, try hydrate jobs (conversation/ad/by_cid)
+		log.debug("waiting for jobs: ingest|hydrate_conversation|hydrate_by_conversation_id|hydrate_ad")
+		job = (
+			dequeue("ingest", timeout=1)
+			or dequeue("hydrate_conversation", timeout=1)
+			or dequeue("hydrate_by_conversation_id", timeout=1)
+			or dequeue("hydrate_ad", timeout=1)
+		)
 		if not job:
 			time.sleep(0.25)
 			continue
@@ -161,6 +166,61 @@ def main() -> None:
 					except Exception:
 						pass
 				log.info("hydrate ok jid=%s convo=%s:%s msgs=%s", jid, igba_id, ig_user_id, inserted)
+				try:
+					increment_counter("hydrate_conversation", int(inserted))
+				except Exception:
+					pass
+				delete_job(jid)
+			elif kind == "hydrate_by_conversation_id":
+				conversation_id = str(payload.get("conversation_id") or "")
+				limit = int(payload.get("max_messages") or 200)
+				if not conversation_id:
+					delete_job(jid)
+					continue
+				msgs = []
+				try:
+					msgs = __import__("asyncio").get_event_loop().run_until_complete(fetch_messages(conversation_id, limit=limit))
+				except Exception as e:
+					log.warning("hydrate by cid fetch fail jid=%s cid=%s err=%s", jid, conversation_id, e)
+					increment_attempts(jid)
+					time.sleep(1)
+					continue
+				try:
+					raw_count = (len(msgs) if isinstance(msgs, list) else None)
+					first_keys = list(msgs[0].keys())[:8] if msgs and isinstance(msgs[0], dict) else []
+					log.info("hydrate by cid: fetched count=%s first_keys=%s", raw_count, first_keys)
+				except Exception:
+					pass
+				inserted = 0
+				with get_session() as session:
+					for ev in (msgs or []):
+						try:
+							if isinstance(ev, dict):
+								ev["__graph_conversation_id"] = str(conversation_id)
+							mid = upsert_message_from_ig_event(session, ev, "")
+							if mid:
+								inserted += 1
+						except Exception as e:
+							try:
+								ev_id = ev.get("id") if hasattr(ev, "get") else (ev if isinstance(ev, str) else None)
+							except Exception:
+								ev_id = None
+							log.warning("hydrate by cid upsert err cid=%s ev=%s ev_type=%s err=%s", conversation_id, ev_id, type(ev).__name__, e)
+					try:
+						from sqlalchemy import text as _t
+						session.exec(_t("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
+					except Exception:
+						try:
+							from sqlalchemy import text as _t
+							session.exec(_t("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
+						except Exception:
+							pass
+					try:
+						from sqlalchemy import text as _t
+						session.exec(_t("UPDATE ai_conversations SET hydrated_at=CURRENT_TIMESTAMP WHERE convo_id=:cid")).params(cid=str(conversation_id))
+					except Exception:
+						pass
+				log.info("hydrate by cid ok jid=%s cid=%s msgs=%s", jid, conversation_id, inserted)
 				try:
 					increment_counter("hydrate_conversation", int(inserted))
 				except Exception:

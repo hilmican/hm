@@ -1867,7 +1867,30 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
     except Exception:
         pass
     if not (igba_id and other_id):
-        raise HTTPException(status_code=400, detail=f"Could not resolve identifiers to hydrate; cid={conversation_id} igba_id={igba_id} other_id={other_id}")
+        # If we at least have a Graph conversation id, enqueue a GCID-based hydrate as a fallback
+        fallback_enqueued = False
+        debug: dict[str, object] = {}
+        try:
+            token, ident, is_page = _get_base_token_and_id()
+            debug["active_path"] = ("page" if is_page else "user")
+            debug["owner_id"] = str(ident)
+        except Exception as e:
+            debug["env_resolve_error"] = str(e)
+        debug["cid_kind"] = ("dm" if conversation_id.startswith("dm:") else "graph")
+        debug["igba_id"] = (str(igba_id) if igba_id else None)
+        debug["other_id"] = (str(other_id) if other_id else None)
+        if not other_id and not conversation_id.startswith("dm:"):
+            try:
+                enqueue("hydrate_by_conversation_id", key=str(conversation_id), payload={"conversation_id": str(conversation_id), "max_messages": int(max_messages)})
+                fallback_enqueued = True
+            except Exception:
+                fallback_enqueued = False
+        if fallback_enqueued:
+            return {"status": "ok", "queued": True, "fallback": "hydrate_by_conversation_id", "conversation_id": conversation_id, "debug": debug}
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not resolve identifiers to hydrate; cid={conversation_id} igba_id={igba_id} other_id={other_id}; debug={debug}"
+        )
     # Best-effort: persist conversations mapping for future actions
     try:
         from sqlalchemy import text as _text
