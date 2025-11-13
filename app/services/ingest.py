@@ -429,6 +429,20 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		ts = event.get("created_time") or event.get("timestamp")
 		if isinstance(ts, (int, float)):
 			ts_ms = int(ts)
+		elif isinstance(ts, str):
+			# Normalize common Graph formats like "2025-11-13T14:25:43+0000" or ISO8601
+			try:
+				from datetime import datetime as _dt
+				val = ts.replace("+0000", "+00:00")
+				ts_ms = int(_dt.fromisoformat(val).timestamp() * 1000)
+			except Exception:
+				# Fallback: keep only digits to accommodate "1763034242207" style strings
+				digits = "".join(ch for ch in ts if ch.isdigit())
+				if digits:
+					try:
+						ts_ms = int(digits)
+					except Exception:
+						ts_ms = None
 	except Exception:
 		ts_ms = None
 	direction = "in"
