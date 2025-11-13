@@ -224,6 +224,8 @@ async def receive_events(request: Request):
 					other_party_id = recipient_id if direction == "out" else sender_id
 					# Prefer Graph conversation id when possible; fallback to dm:<ig_user_id>
 					conversation_id = None
+					gcid_before = None
+					gcid_after = None
 					try:
 						if other_party_id and igba_id:
 							from sqlalchemy import text as _t
@@ -231,28 +233,50 @@ async def receive_events(request: Request):
 							row_map = session.exec(
 								_t("SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1")
 							).params(g=str(igba_id), u=str(other_party_id)).first()
-							gcid = None
 							if row_map:
-								gcid = (row_map.graph_conversation_id if hasattr(row_map, "graph_conversation_id") else (row_map[0] if len(row_map) > 0 else None))
+								gcid_before = (row_map.graph_conversation_id if hasattr(row_map, "graph_conversation_id") else (row_map[0] if len(row_map) > 0 else None))
 							# If missing, resolve via lightweight Graph call (persisting the mapping), then re-check
-							if not gcid:
+							if not gcid_before:
 								try:
 									from ..services.instagram_api import fetch_thread_messages as _ftm
 									msgs = await _ftm(str(igba_id), str(other_party_id), limit=1)
 									_ = len(msgs)  # force eval; side-effect persisted mapping
-								except Exception:
-									pass
+								except Exception as ex_ftm:
+									try:
+										_log.info("wb.map: ftm failed igba=%s user=%s err=%s", str(igba_id), str(other_party_id), str(ex_ftm)[:160])
+									except Exception:
+										pass
 								row_map2 = session.exec(
 									_t("SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1")
 								).params(g=str(igba_id), u=str(other_party_id)).first()
 								if row_map2:
-									gcid = (row_map2.graph_conversation_id if hasattr(row_map2, "graph_conversation_id") else (row_map2[0] if len(row_map2) > 0 else None))
-							if gcid:
-								conversation_id = str(gcid)
-					except Exception:
+									gcid_after = (row_map2.graph_conversation_id if hasattr(row_map2, "graph_conversation_id") else (row_map2[0] if len(row_map2) > 0 else None))
+							else:
+								gcid_after = gcid_before
+							if gcid_after:
+								conversation_id = str(gcid_after)
+					except Exception as ex_map:
 						conversation_id = None
+						try:
+							_log.info("wb.map: exception igba=%s user=%s err=%s", str(igba_id), str(other_party_id), str(ex_map)[:160])
+						except Exception:
+							pass
 					if conversation_id is None:
 						conversation_id = (f"dm:{other_party_id}" if other_party_id is not None else None)
+					# Diagnostic: log chosen conversation id
+					try:
+						_log.info(
+							"wb.msg route mid=%s owner=%s other=%s dir=%s map_before=%s map_after=%s final_cid=%s",
+							str(mid),
+							str(igba_id),
+							str(other_party_id),
+							str(direction),
+							str(gcid_before),
+							str(gcid_after),
+							str(conversation_id),
+						)
+					except Exception:
+						pass
 					row = Message(
 						ig_sender_id=str(sender_id) if sender_id is not None else None,
 						ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
@@ -274,6 +298,10 @@ async def receive_events(request: Request):
 					session.add(row)
 					session.flush()  # Flush to get row.id
 					persisted += 1
+					try:
+						_log.info("wb.msg saved mid=%s id=%s cid=%s ts=%s", str(mid), int(row.id), str(conversation_id), str(ts_ms))
+					except Exception:
+						pass
 
 					ts_val = None
 					try:
