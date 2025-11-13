@@ -477,6 +477,21 @@ def init_db() -> None:
                                 conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_run_id INTEGER NULL")
                             if 'graph_conversation_id' not in have_cols:
                                 conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN graph_conversation_id VARCHAR(128) NULL")
+                            else:
+                                # Widen graph_conversation_id if too short for full Graph CIDs
+                                try:
+                                    row_len = conn.exec_driver_sql(
+                                        """
+                                        SELECT CHARACTER_MAXIMUM_LENGTH
+                                        FROM INFORMATION_SCHEMA.COLUMNS
+                                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversations' AND COLUMN_NAME = 'graph_conversation_id'
+                                        """
+                                    ).fetchone()
+                                    maxlen = int(row_len[0]) if row_len and row_len[0] is not None else None
+                                    if maxlen is not None and maxlen < 256:
+                                        conn.exec_driver_sql("ALTER TABLE conversations MODIFY COLUMN graph_conversation_id VARCHAR(512) NULL")
+                                except Exception:
+                                    pass
                             # Helpful indexes
                             try:
                                 conn.exec_driver_sql("CREATE INDEX idx_conversations_ai_processed ON conversations(ai_processed_at)")
@@ -543,7 +558,7 @@ def init_db() -> None:
                             conn.exec_driver_sql(
                                 """
                                 CREATE TABLE IF NOT EXISTS ai_conversations (
-                                    convo_id VARCHAR(128) PRIMARY KEY,
+                                    convo_id VARCHAR(512) PRIMARY KEY,
                                     ai_process_time DATETIME NULL,
                                     ai_status VARCHAR(32) NULL,
                                     ai_json LONGTEXT NULL,
@@ -553,6 +568,20 @@ def init_db() -> None:
                                 )
                                 """
                             )
+                        except Exception:
+                            pass
+                        # Ensure ai_conversations.convo_id is wide enough (older installs used 128)
+                        try:
+                            row_len = conn.exec_driver_sql(
+                                """
+                                SELECT CHARACTER_MAXIMUM_LENGTH
+                                FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ai_conversations' AND COLUMN_NAME = 'convo_id'
+                                """
+                            ).fetchone()
+                            maxlen = int(row_len[0]) if row_len and row_len[0] is not None else None
+                            if maxlen is not None and maxlen < 256:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations MODIFY COLUMN convo_id VARCHAR(512)")
                         except Exception:
                             pass
                         # Ensure product AI prompt fields exist (MySQL)
