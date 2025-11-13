@@ -19,6 +19,7 @@ import time
 import httpx
 import os
 from ..services.ai_ig import _detect_focus_product
+from fastapi import Form
 
 
 router = APIRouter(prefix="/ig", tags=["instagram"])

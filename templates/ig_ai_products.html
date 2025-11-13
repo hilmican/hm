@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Ürün AI Mesajları — {{ focus }}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .field { margin-bottom: 12px; }
+      label { display:block; font-weight:600; margin-bottom:6px; color:#111827; }
+      textarea { width:100%; min-height:160px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:8px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      input[type="text"] { width:100%; padding:10px 12px; border:1px solid #e5e7eb; border-radius:8px; }
+      button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:10px 14px; cursor:pointer }
+      .meta { color:#6b7280; font-size:12px; }
+      .row { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+      .box { border:1px solid #e5e7eb; border-radius:10px; padding:12px; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>Ürün AI Mesajları</h1>
+    <div class="meta">Odak: {{ name }} (slug: {{ focus }})</div>
+    <form method="post" action="/ig/ai/products/save" style="margin-top:16px">
+      <input type="hidden" name="focus" value="{{ focus }}" />
+      <div class="field">
+        <label>Sistem Mesajı (ai_system_msg)</label>
+        <textarea name="ai_system_msg" placeholder="Sistem talimatları">{{ ai_system_msg }}</textarea>
+      </div>
+      <div class="field">
+        <label>Prompt Mesajı (ai_prompt_msg)</label>
+        <textarea name="ai_prompt_msg" placeholder="Ürün/paket/ifadeler...">{{ ai_prompt_msg }}</textarea>
+      </div>
+      <button type="submit">Kaydet</button>
+    </form>
+
+    <div class="row" style="margin-top:18px">
+      <div class="box">
+        <h3 style="margin:0 0 8px 0">Reklam Eşlemesi</h3>
+        <div class="meta" style="margin-bottom:6px">Bu ürüne ait Facebook Ads Library ID’lerini ekleyin.</div>
+        <form method="post" action="/ig/ads/map">
+          <div class="field">
+            <label>Ad ID (Ads Library id=...)</label>
+            <input type="text" name="ad_id" placeholder="120235971585560789" />
+          </div>
+          <div class="field">
+            <label>Product ID (opsiyonel)</label>
+            <input type="text" name="product_id" placeholder="örn. 42" />
+          </div>
+          <div class="field">
+            <label>SKU (opsiyonel)</label>
+            <input type="text" name="sku" placeholder="örn. PANT-SLIM-ANTR" />
+          </div>
+          <button type="submit">Eşle</button>
+        </form>
+      </div>
+      <div class="box">
+        <h3 style="margin:0 0 8px 0">İpucu</h3>
+        <div class="meta">
+          Bu düzenlemeler AI cevaplarında kullanılacak. Ads Library ID eşlemesi, bu reklama cevap veren konuşmalar için ürün odağını otomatik belirler.
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+
+
+

@@ -351,6 +351,22 @@ def init_db() -> None:
                             )
                         except Exception:
                             pass
+                        # ads to product mapping table (MySQL)
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS ads_products (
+                                    ad_id VARCHAR(128) PRIMARY KEY,
+                                    product_id INTEGER NULL,
+                                    sku VARCHAR(128) NULL,
+                                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                    INDEX idx_ads_products_product (product_id),
+                                    INDEX idx_ads_products_sku (sku)
+                                )
+                                """
+                            )
+                        except Exception:
+                            pass
                         # latest message materialized view (MySQL)
                         try:
                             conn.exec_driver_sql(
