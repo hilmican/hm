@@ -127,6 +127,10 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
       page across conversations until found (best-effort).
     - Then fetch messages for that conversation id.
     """
+    try:
+        _log.info("ftm.begin igba=%s ig_user_id=%s limit=%s", str(igba_id), str(ig_user_id), int(limit))
+    except Exception:
+        pass
     # 0) Try cached Graph conversation id from our DB
     cached_id: Optional[str] = None
     try:
@@ -144,8 +148,16 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
         cached_id = None
     if cached_id:
         try:
+            _log.info("ftm.cached conv_id=%s", str(cached_id))
+        except Exception:
+            pass
+        try:
             msgs = await fetch_messages(str(cached_id), limit=min(max(limit, 1), 200))
             # If we successfully fetched something (including empty because of recent-only), return it.
+            try:
+                _log.info("ftm.cached.fetch ok count=%s", len(msgs) if isinstance(msgs, list) else None)
+            except Exception:
+                pass
             return msgs
         except Exception:
             # Fall back to discovery if cached id is stale/invalid
@@ -180,16 +192,28 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
             except Exception:
                 data = {}
             convs = data.get("data", []) or []
+            try:
+                _log.info("ftm.page page=%s convs=%s", page_no, len(convs))
+            except Exception:
+                pass
             for c in convs:
                 cid = str(c.get("id"))
                 parts = ((c.get("participants") or {}).get("data") or [])
                 ids = {str(p.get("id")) for p in parts if p.get("id")}
                 # Prefer exact match: user + one of owner ids
                 if (ig_user_id in ids) and (ids & owner_candidates):
+                    try:
+                        _log.info("ftm.match participants ids_size=%s found_cid=%s", len(ids), cid)
+                    except Exception:
+                        pass
                     conv_id = cid
                     break
                 # Fallback candidate: at least the user is a participant; verify by fetching messages later
                 if ig_user_id in ids:
+                    try:
+                        _log.info("ftm.candidate cid=%s ids_size=%s", cid, len(ids))
+                    except Exception:
+                        pass
                     convo_candidates.append(cid)
             if conv_id:
                 break
@@ -203,6 +227,10 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
                 next_url = None
         # Fallback: scan a limited number of candidate conversations by checking their messages
         if not conv_id and convo_candidates:
+            try:
+                _log.info("ftm.scan candidates=%s", len(convo_candidates))
+            except Exception:
+                pass
             for cid in convo_candidates[:20]:
                 try:
                     sample = await fetch_messages(cid, limit=10)
@@ -214,12 +242,20 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
                     to = (((m.get("to") or {}) or {}).get("data") or [])
                     recips = {str(x.get("id")) for x in to if x.get("id")}
                     if str(ig_user_id) == str(frm) or str(ig_user_id) in recips:
+                        try:
+                            _log.info("ftm.scan found cid=%s", cid)
+                        except Exception:
+                            pass
                         conv_id = cid
                         found = True
                         break
                 if found:
                     break
     if not conv_id:
+        try:
+            _log.info("ftm.end no_conversation_found igba=%s ig_user_id=%s", str(igba_id), str(ig_user_id))
+        except Exception:
+            pass
         return []
     # Persist mapping for future runs
     try:
@@ -239,9 +275,14 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
     except Exception:
         pass
     try:
+        _log.info("ftm.fetch_messages conv_id=%s", str(conv_id))
         msgs = await fetch_messages(conv_id, limit=min(max(limit, 1), 200))
     except Exception:
         msgs = []
+    try:
+        _log.info("ftm.end ok count=%s", len(msgs) if isinstance(msgs, list) else None)
+    except Exception:
+        pass
     return msgs
 
 async def fetch_user_username(user_id: str) -> Optional[str]:
