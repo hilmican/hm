@@ -231,8 +231,8 @@ async def receive_events(request: Request):
 							from sqlalchemy import text as _t
 							# Try existing mapping first
 							row_map = session.exec(
-								_t("SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1")
-							).params(g=str(igba_id), u=str(other_party_id)).first()
+								_t("SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1").params(g=str(igba_id), u=str(other_party_id))
+							).first()
 							if row_map:
 								gcid_before = (row_map.graph_conversation_id if hasattr(row_map, "graph_conversation_id") else (row_map[0] if len(row_map) > 0 else None))
 							# If missing, resolve via lightweight Graph call (persisting the mapping), then re-check
@@ -247,8 +247,8 @@ async def receive_events(request: Request):
 									except Exception:
 										pass
 								row_map2 = session.exec(
-									_t("SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1")
-								).params(g=str(igba_id), u=str(other_party_id)).first()
+									_t("SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1").params(g=str(igba_id), u=str(other_party_id))
+								).first()
 								if row_map2:
 									gcid_after = (row_map2.graph_conversation_id if hasattr(row_map2, "graph_conversation_id") else (row_map2[0] if len(row_map2) > 0 else None))
 							else:
