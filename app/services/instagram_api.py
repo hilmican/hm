@@ -101,6 +101,23 @@ async def fetch_messages(conversation_id: str, limit: int = 50) -> List[Dict[str
         return data.get("data", [])
 
 
+async def fetch_message_details(message_id: str) -> Dict[str, Any]:
+    """Fetch one message by id with full fields. Used when conversation fetch returns only IDs."""
+    token, _, _ = _get_base_token_and_id()
+    base = f"https://graph.facebook.com/{GRAPH_VERSION}"
+    fields = (
+        "id,from{id,username},to,created_time,"
+        "message,referral,"
+        "attachments{id,mime_type,file_url,image_data{url,preview_url}}"
+    )
+    path = f"/{message_id}"
+    params = {"access_token": token, "fields": fields, "platform": "instagram"}
+    async with httpx.AsyncClient() as client:
+        data = await _get(client, base + path, params)
+        # Some responses wrap in {id:..., ...}; return the object itself
+        return data
+
+
 async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200) -> List[Dict[str, Any]]:
     """Fetch latest N messages for a thread defined by page/user pair.
 

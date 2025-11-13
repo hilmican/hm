@@ -5,7 +5,7 @@ from typing import Optional
 
 from app.services.queue import dequeue, delete_job, increment_attempts
 from app.services.ingest import handle as handle_ingest
-from app.services.instagram_api import fetch_thread_messages
+from app.services.instagram_api import fetch_thread_messages, fetch_message_details
 from app.services.ingest import upsert_message_from_ig_event
 from app.services.monitoring import increment_counter
 from app.db import get_session
@@ -81,6 +81,33 @@ def main() -> None:
 					increment_attempts(jid)
 					time.sleep(1)
 					continue
+				# If Graph sometimes returns only message IDs (strings), fetch details
+				try:
+					if isinstance(msgs, list) and any(isinstance(m, str) for m in msgs):
+						log.info("hydrate: normalizing %s bare message ids via detail fetch", len([m for m in msgs if isinstance(m, str)]))
+						import asyncio as _aio
+						loop = _aio.get_event_loop()
+						norm_msgs = []
+						for m in msgs:
+							if isinstance(m, dict):
+								norm_msgs.append(m)
+							elif isinstance(m, str):
+								try:
+									det = loop.run_until_complete(fetch_message_details(m))
+									if isinstance(det, dict):
+										norm_msgs.append(det)
+									else:
+										log.warning("hydrate: detail not dict mid=%s got=%s", m, type(det).__name__)
+								except Exception as de:
+									log.warning("hydrate: detail fetch failed mid=%s err=%s", m, de)
+						msgs = norm_msgs
+						try:
+							first_keys = list(msgs[0].keys())[:8] if msgs and isinstance(msgs[0], dict) else []
+							log.info("hydrate: normalized messages count=%s first_keys=%s", len(msgs), first_keys)
+						except Exception:
+							pass
+				except Exception:
+					pass
 				inserted = 0
 				with get_session() as session:
 					for ev in msgs:
@@ -89,7 +116,12 @@ def main() -> None:
 							if mid:
 								inserted += 1
 						except Exception as e:
-							log.warning("hydrate upsert err convo=%s:%s ev=%s err=%s", igba_id, ig_user_id, ev.get("id"), e)
+							# Safe logging when ev may be a string
+							try:
+								ev_id = ev.get("id") if hasattr(ev, "get") else (ev if isinstance(ev, str) else None)
+							except Exception:
+								ev_id = None
+							log.warning("hydrate upsert err convo=%s:%s ev=%s err=%s", igba_id, ig_user_id, ev_id, e)
 					# mark conversation hydrated (ai_conversations)
 					try:
 						cid_ai = f"dm:{ig_user_id}"
