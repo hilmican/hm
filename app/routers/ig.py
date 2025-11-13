@@ -1723,7 +1723,7 @@ def enqueue_enrich(conversation_id: str):
                 try:
                     _log.info("hydrate.resolve.graph_scan_error cid=%s err=%s", str(conversation_id), str(ex_gs)[:160])
                 except Exception:
-                pass
+                    pass
         if not igba_id:
             try:
                 _, entity_id, _ = _get_base_token_and_id()
