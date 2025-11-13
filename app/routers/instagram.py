@@ -88,7 +88,7 @@ async def receive_events(request: Request):
 		pass
 	_validate_signature(body, signature)
 
-	# Persist raw payload for inspection (disabled by default to reduce disk I/O)
+	# Persist raw payload for inspection (temporarily enabled for debugging)
 	# Enable via env var: SAVE_WEBHOOK_PAYLOADS=1
 	if os.getenv("SAVE_WEBHOOK_PAYLOADS", "0") == "1":
 		try:
@@ -101,6 +101,7 @@ async def receive_events(request: Request):
 
 	try:
 		payload: Dict[str, Any] = json.loads(body.decode("utf-8"))
+		_log.info("IG webhook POST: parsed payload with object=%s, entries=%d", payload.get("object"), len(payload.get("entry", [])))
 	except Exception:
 		try:
 			_log.warning("IG webhook POST: invalid JSON, body_len=%d", len(body or b""))
@@ -152,6 +153,7 @@ async def receive_events(request: Request):
 	# Process messages immediately with synchronous enrichment
 	# This replaces the old queuing approach with immediate API calls
 	try:
+		_log.info("IG webhook POST: starting message processing for %d entries", len(entries))
 		# Create HTTP client for API calls
 		async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
 			with get_session() as session:
@@ -163,344 +165,363 @@ async def receive_events(request: Request):
 				downloaded_media = 0
 
 				for entry in entries:
+					_log.info("IG webhook POST: processing entry with id=%s", entry.get("id"))
 					messaging_events: List[Dict[str, Any]] = entry.get("messaging") or []
+
+					# Handle Instagram changes format (different from Facebook Messenger)
 					if not messaging_events and entry.get("changes"):
 						for change in entry.get("changes", []):
-							val = change.get("value") or {}
-							if isinstance(val, dict) and val.get("messaging"):
-								messaging_events.extend(val.get("messaging", []))
+							if isinstance(change, dict) and change.get("field") == "messages":
+								val = change.get("value")
+								if isinstance(val, dict) and val.get("message"):
+									# Convert Instagram changes format to messaging format
+									messaging_event = {
+										"sender": val.get("from", {}),
+										"recipient": val.get("to", {}),
+										"timestamp": val.get("timestamp"),
+										"message": val.get("message", {})
+									}
+									messaging_events.append(messaging_event)
+
+					_log.info("IG webhook POST: found %d messaging events in entry", len(messaging_events))
 					for event in messaging_events:
-						mobj = event.get("message") or {}
-						if not mobj or mobj.get("is_deleted"):
-							continue
-						mid = mobj.get("mid") or mobj.get("id")
-						if not mid:
-							continue
-						# idempotent insert by ig_message_id
-						exists = session.exec(select(Message).where(Message.ig_message_id == str(mid))).first()
-						if exists:
-							continue
-						sender_id = (event.get("sender") or {}).get("id")
-						recipient_id = (event.get("recipient") or {}).get("id")
-						text_val = mobj.get("text")
-						attachments = mobj.get("attachments")
-					# Story reply (best-effort)
-					story_id = None
-					story_url = None
-					try:
-						story_obj = ((mobj.get("reply_to") or {}).get("story") or {})
-						story_id = str(story_obj.get("id") or "") or None
-						story_url = story_obj.get("url") or None
-					except Exception:
-						story_id = None
-						story_url = None
-					# Ad/referral (best-effort)
-					ad_id = None
-					ad_link = None
-					ad_title = None
-					ad_img = None
-					ad_name = None
-					try:
-						ref = (event.get("referral") or mobj.get("referral") or {})
-						if isinstance(ref, dict):
-							ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
-							ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
-							ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
-							ad_img = ref.get("image_url") or ref.get("thumbnail_url") or ref.get("picture") or ref.get("media_url") or None
-							ad_name = ref.get("name") or ref.get("title") or None
-						# Also try to parse Ads Library id from link query param
-						if not ad_id and ad_link and "facebook.com/ads/library" in str(ad_link):
+						try:
+							_log.info("IG webhook POST: processing messaging event")
+							mobj = event.get("message") or {}
+							if not mobj or mobj.get("is_deleted"):
+								_log.info("IG webhook POST: skipping deleted or empty message")
+								continue
+							mid = mobj.get("mid") or mobj.get("id")
+							if not mid:
+								_log.info("IG webhook POST: skipping message without mid/id")
+								continue
+							# idempotent insert by ig_message_id
+							exists = session.exec(select(Message).where(Message.ig_message_id == str(mid))).first()
+							if exists:
+								continue
+							sender_id = (event.get("sender") or {}).get("id") or (event.get("from") or {}).get("id")
+							recipient_id = (event.get("recipient") or {}).get("id") or (event.get("to") or {}).get("id")
+							text_val = mobj.get("text")
+							attachments = mobj.get("attachments")
+							# Story reply (best-effort)
+							story_id = None
+							story_url = None
 							try:
-								from urllib.parse import urlparse, parse_qs
-								q = parse_qs(urlparse(str(ad_link)).query)
-								aid = (q.get("id") or [None])[0]
-								ad_id = str(aid) if aid else None
+								story_obj = ((mobj.get("reply_to") or {}).get("story") or {})
+								story_id = str(story_obj.get("id") or "") or None
+								story_url = story_obj.get("url") or None
+							except Exception:
+								story_id = None
+								story_url = None
+							# Ad/referral (best-effort)
+							ad_id = None
+							ad_link = None
+							ad_title = None
+							ad_img = None
+							ad_name = None
+							try:
+								ref = (event.get("referral") or mobj.get("referral") or {})
+								if isinstance(ref, dict):
+									ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
+									ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
+									ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
+									ad_img = ref.get("image_url") or ref.get("thumbnail_url") or ref.get("picture") or ref.get("media_url") or None
+									ad_name = ref.get("name") or ref.get("title") or None
+								# Also try to parse Ads Library id from link query param
+								if not ad_id and ad_link and "facebook.com/ads/library" in str(ad_link):
+									try:
+										from urllib.parse import urlparse, parse_qs
+										q = parse_qs(urlparse(str(ad_link)).query)
+										aid = (q.get("id") or [None])[0]
+										ad_id = str(aid) if aid else None
+									except Exception:
+										pass
+							except Exception:
+								ad_id = ad_link = ad_title = None
+							ts_ms = event.get("timestamp")
+							# derive direction using entry.id when available
+							igba_id = str(entry.get("id")) if entry.get("id") is not None else None
+							direction = "in"
+							try:
+								if sender_id and igba_id and str(sender_id) == str(igba_id):
+									direction = "out"
 							except Exception:
 								pass
-					except Exception:
-						ad_id = ad_link = ad_title = None
-					ts_ms = event.get("timestamp")
-					# derive direction using entry.id when available
-					igba_id = str(entry.get("id")) if entry.get("id") is not None else None
-					direction = "in"
-					try:
-						if sender_id and igba_id and str(sender_id) == str(igba_id):
-							direction = "out"
-					except Exception:
-						pass
-						other_party_id = recipient_id if direction == "out" else sender_id
+							other_party_id = recipient_id if direction == "out" else sender_id
 
-						# SYNCHRONOUS ENRICHMENT: Check and enrich missing data immediately
-						if other_party_id:
-							# Enrich user if missing
-							user_result = await enrich_user_if_missing(session, str(other_party_id), client)
-							if user_result:
-								enriched_users += 1
+							# SYNCHRONOUS ENRICHMENT: Check and enrich missing data immediately
+							if other_party_id:
+								# Enrich user if missing
+								user_result = await enrich_user_if_missing(session, str(other_party_id), client)
+								if user_result:
+									enriched_users += 1
 
-						if ad_id:
-							# Enrich ad if missing
-							ad_result = await enrich_ad_if_missing(session, str(ad_id), client)
-							if ad_result:
-								enriched_ads += 1
+							if ad_id:
+								# Enrich ad if missing
+								ad_result = await enrich_ad_if_missing(session, str(ad_id), client)
+								if ad_result:
+									enriched_ads += 1
 
-						if story_id:
-							# Enrich story if missing
-							story_result = await enrich_story_if_missing(session, str(story_id), client)
-							if story_result:
-								enriched_stories += 1
+							if story_id:
+								# Enrich story if missing
+								story_result = await enrich_story_if_missing(session, str(story_id), client)
+								if story_result:
+									enriched_stories += 1
 
-						# Prefer Graph conversation id when possible; fallback to dm:<ig_user_id>
-						conversation_id = None
-						gcid_before = None
-						gcid_after = None
-						try:
-							if other_party_id and igba_id:
-								# Use synchronous conversation enrichment
-								from .webhook_enrichers import enrich_conversation_if_missing
-								graph_conv_id = await enrich_conversation_if_missing(session, str(igba_id), str(other_party_id), client)
-								if graph_conv_id:
-									conversation_id = graph_conv_id
-									enriched_conversations += 1
-						except Exception as ex_map:
+							# Prefer Graph conversation id when possible; fallback to dm:<ig_user_id>
 							conversation_id = None
 							try:
-								_log.info("wb.map: exception igba=%s user=%s err=%s", str(igba_id), str(other_party_id), str(ex_map)[:160])
-							except Exception:
-								pass
-					if conversation_id is None:
-						conversation_id = (f"dm:{other_party_id}" if other_party_id is not None else None)
-					# Diagnostic: log chosen conversation id
-					try:
-						_log.info(
-							"wb.msg route mid=%s owner=%s other=%s dir=%s map_before=%s map_after=%s final_cid=%s",
-							str(mid),
-							str(igba_id),
-							str(other_party_id),
-							str(direction),
-							str(gcid_before),
-							str(gcid_after),
-							str(conversation_id),
-						)
-					except Exception:
-						pass
-					row = Message(
-						ig_sender_id=str(sender_id) if sender_id is not None else None,
-						ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
-						ig_message_id=str(mid),
-						text=text_val,
-						attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
-						timestamp_ms=int(ts_ms) if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit() else None,
-						raw_json=json.dumps(event, ensure_ascii=False),
-						conversation_id=conversation_id,
-						direction=direction,
-						story_id=story_id,
-						story_url=story_url,
-						ad_id=ad_id,
-						ad_link=ad_link,
-						ad_title=ad_title,
-						ad_image_url=ad_img,
-						ad_name=ad_name,
-					)
-					session.add(row)
-					session.flush()  # Flush to get row.id
-					persisted += 1
-					try:
-						_log.info("wb.msg saved mid=%s id=%s cid=%s ts=%s", str(mid), int(row.id), str(conversation_id), str(ts_ms))
-					except Exception:
-						pass
-
-					ts_val = None
-					try:
-						if isinstance(ts_ms, (int, float)):
-							ts_val = int(ts_ms)
-						elif isinstance(ts_ms, str):
-							digits = "".join(ch for ch in ts_ms if ch.isdigit())
-							if digits:
-								ts_val = int(digits)
-					except Exception:
-						ts_val = None
-					if ts_val is None:
-						try:
-							ts_val = int(row.timestamp_ms) if row.timestamp_ms is not None else None
-						except Exception:
-							ts_val = None
-					if ts_val is None:
-						try:
-							ts_val = int(time.time() * 1000)
-						except Exception:
-							ts_val = None
-					if ts_val is not None and getattr(row, "timestamp_ms", None) is None:
-						try:
-							row.timestamp_ms = ts_val
-						except Exception:
-							pass
-
-					sender_info = event.get("sender") or {}
-					recipient_info = event.get("recipient") or {}
-					sender_username_val = sender_info.get("username") or sender_info.get("name")
-					recipient_username_val = recipient_info.get("username") or recipient_info.get("name")
-					other_username_val = recipient_username_val if (direction == "out") else sender_username_val
-					username_param = str(other_username_val).strip() if other_username_val else None
-					if sender_username_val:
-						try:
-							row.sender_username = str(sender_username_val)
-						except Exception:
-							pass
-
-					if other_party_id:
-						try:
-							from sqlalchemy import text as _t
-							try:
-								session.exec(_t("INSERT OR IGNORE INTO ig_users(ig_user_id, username, last_seen_at) VALUES (:id, :uname, CURRENT_TIMESTAMP)").params(id=str(other_party_id), uname=username_param))
-							except Exception:
+								if other_party_id and igba_id:
+									# Use synchronous conversation enrichment
+									from .webhook_enrichers import enrich_conversation_if_missing
+									graph_conv_id = await enrich_conversation_if_missing(session, str(igba_id), str(other_party_id), client)
+									if graph_conv_id:
+										conversation_id = graph_conv_id
+										enriched_conversations += 1
+							except Exception as ex_map:
+								conversation_id = None
 								try:
-									session.exec(_t("INSERT IGNORE INTO ig_users(ig_user_id, username, last_seen_at) VALUES (:id, :uname, CURRENT_TIMESTAMP)").params(id=str(other_party_id), uname=username_param))
+									_log.info("wb.map: exception igba=%s user=%s err=%s", str(igba_id), str(other_party_id), str(ex_map)[:160])
 								except Exception:
 									pass
+							if conversation_id is None:
+								conversation_id = (f"dm:{other_party_id}" if other_party_id is not None else None)
+							# Diagnostic: log chosen conversation id
 							try:
-								session.exec(_t("UPDATE ig_users SET username=COALESCE(:uname, username), last_seen_at=CURRENT_TIMESTAMP WHERE ig_user_id=:id").params(id=str(other_party_id), uname=username_param))
-							except Exception:
-								pass
-							# User enrichment is now done synchronously above
-						except Exception:
-							pass
-					# Page enrichment could be added here if needed synchronously
-					# Ensure ai_conversations exists and update last-* fields atomically
-					if conversation_id and ts_val is not None and row.id:
-						try:
-							from sqlalchemy import text as _t
-							# create placeholder if missing (SQLite or MySQL)
-							try:
-								session.exec(_t("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
-							except Exception:
-								try:
-                                    # MySQL
-									session.exec(_t("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
-								except Exception:
-									pass
-							# SQLite upsert (no subselects to avoid MySQL 1093 equivalent issues)
-							try:
-								session.exec(
-									_t(
-										"""
-										INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
-										VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
-										ON CONFLICT(convo_id) DO UPDATE SET
-										  last_message_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_id ELSE ai_conversations.last_message_id END,
-										  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), excluded.last_message_timestamp_ms),
-										  last_message_text=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_text ELSE ai_conversations.last_message_text END,
-										  last_message_direction=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_direction ELSE ai_conversations.last_message_direction END,
-										  last_sender_username=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_sender_username ELSE ai_conversations.last_sender_username END,
-										  ig_sender_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_sender_id ELSE ai_conversations.ig_sender_id END,
-										  ig_recipient_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_recipient_id ELSE ai_conversations.ig_recipient_id END,
-										  last_ad_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_id ELSE ai_conversations.last_ad_id END,
-										  last_ad_link=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_link ELSE ai_conversations.last_ad_link END,
-										  last_ad_title=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_title ELSE ai_conversations.last_ad_title END
-										"""
-									).params(
-										cid=str(conversation_id),
-										mid=int(row.id),
-										ts=int(ts_val) if ts_val is not None else 0,
-										txt=(text_val or ""),
-										dir=(direction or "in"),
-										sun=username_param,
-										sid=(str(sender_id) if sender_id is not None else None),
-										rid=(str(recipient_id) if recipient_id is not None else None),
-										adid=(str(ad_id) if ad_id is not None else None),
-										alink=ad_link,
-										atitle=ad_title,
-									)
+								_log.info(
+									"wb.msg route mid=%s owner=%s other=%s dir=%s final_cid=%s",
+									str(mid),
+									str(igba_id),
+									str(other_party_id),
+									str(direction),
+									str(conversation_id),
 								)
 							except Exception:
-								# MySQL upsert (no subselects referencing same table)
-								session.exec(
-									_t(
-										"""
-										INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
-										VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
-										ON DUPLICATE KEY UPDATE
-										  last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
-										  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
-										  last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
-										  last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
-										  last_sender_username=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_sender_username), ai_conversations.last_sender_username),
-										  ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
-										  ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
-										  last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
-										  last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
-										  last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title)
-										"""
-									).params(
-										cid=str(conversation_id),
-										mid=int(row.id),
-										ts=int(ts_val) if ts_val is not None else 0,
-										txt=(text_val or ""),
-										dir=(direction or "in"),
-										sun=username_param,
-										sid=(str(sender_id) if sender_id is not None else None),
-										rid=(str(recipient_id) if recipient_id is not None else None),
-										adid=(str(ad_id) if ad_id is not None else None),
-										alink=ad_link,
-										atitle=ad_title,
-									)
-								)
-						except Exception as e:
+								pass
+							row = Message(
+								ig_sender_id=str(sender_id) if sender_id is not None else None,
+								ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
+								ig_message_id=str(mid),
+								text=text_val,
+								attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
+								timestamp_ms=int(ts_ms) if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit() else None,
+								raw_json=json.dumps(event, ensure_ascii=False),
+								conversation_id=conversation_id,
+								direction=direction,
+								story_id=story_id,
+								story_url=story_url,
+								ad_id=ad_id,
+								ad_link=ad_link,
+								ad_title=ad_title,
+								ad_image_url=ad_img,
+								ad_name=ad_name,
+							)
+							session.add(row)
+							session.flush()  # Flush to get row.id
+							session.commit()  # Commit the transaction
+							persisted += 1
 							try:
-								_log.warning("webhook: failed to upsert ai_conversations cid=%s mid=%s ts=%s err=%s", conversation_id, row.id, ts_val, str(e)[:200])
+								_log.info("wb.msg saved mid=%s id=%s cid=%s ts=%s", str(mid), int(row.id), str(conversation_id), str(ts_ms))
 							except Exception:
 								pass
-					# Start/refresh AI shadow debounce for inbound messages
-					try:
-						if (direction or "in") == "in" and conversation_id:
-							from ..services.ai_shadow import touch_shadow_state
-							tsv = int(ts_val) if ts_val is not None else None
-							touch_shadow_state(str(conversation_id), tsv)
-					except Exception:
-						pass
-					# Upsert ads and stories cache
-					try:
-						if ad_id:
-							from sqlalchemy import text as _t
+
+							ts_val = None
 							try:
-								session.exec(_t("INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id,:n,:img,:lnk,CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+								if isinstance(ts_ms, (int, float)):
+									ts_val = int(ts_ms)
+								elif isinstance(ts_ms, str):
+									digits = "".join(ch for ch in ts_ms if ch.isdigit())
+									if digits:
+										ts_val = int(digits)
 							except Exception:
-								session.exec(_t("INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id,:n,:img,:lnk,CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
-							session.exec(_t("UPDATE ads SET name=COALESCE(:n,name), image_url=COALESCE(:img,image_url), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
-							# Ad enrichment is now done synchronously above
-						# story cache
-						if story_id:
-							from sqlalchemy import text as _t
-							try:
-								session.exec(_t("INSERT OR IGNORE INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
-							except Exception:
+								ts_val = None
+							if ts_val is None:
 								try:
-									session.exec(_t("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
+									ts_val = int(row.timestamp_ms) if row.timestamp_ms is not None else None
 								except Exception:
-                                    # fall back to update or plain insert
-									exists = session.exec(_t("SELECT 1 FROM stories WHERE story_id=:id LIMIT 1")).params(id=str(story_id)).first()
-									if exists:
-										session.exec(_t("UPDATE stories SET url=COALESCE(:url,url), updated_at=CURRENT_TIMESTAMP WHERE story_id=:id")).params(id=str(story_id), url=(str(story_url) if story_url else None))
-									else:
-										session.exec(_t("INSERT INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
-					except Exception:
-						pass
-						# SYNCHRONOUS MEDIA DOWNLOAD: Download attachments immediately
-						try:
-							session.flush()  # obtain row.id
-							if attachments:
-								from .media_downloader import create_attachment_records, download_message_attachments
-								# Create attachment records first
-								create_attachment_records(session, int(row.id), str(mid), attachments)
-								# Download attachments synchronously
-								downloaded_paths = await download_message_attachments(session, int(row.id), str(mid), attachments, client)
-								downloaded_media += len(downloaded_paths)
+									ts_val = None
+							if ts_val is None:
 								try:
-									_log.info("webhook: downloaded %d media files for msg %s", len(downloaded_paths), str(mid))
+									ts_val = int(time.time() * 1000)
+								except Exception:
+									ts_val = None
+							if ts_val is not None and getattr(row, "timestamp_ms", None) is None:
+								try:
+									row.timestamp_ms = ts_val
+								except Exception:
+									pass
+
+							sender_info = event.get("sender") or event.get("from") or {}
+							recipient_info = event.get("recipient") or event.get("to") or {}
+							sender_username_val = sender_info.get("username") or sender_info.get("name")
+							recipient_username_val = recipient_info.get("username") or recipient_info.get("name")
+							other_username_val = recipient_username_val if (direction == "out") else sender_username_val
+							username_param = str(other_username_val).strip() if other_username_val else None
+							if sender_username_val:
+								try:
+									row.sender_username = str(sender_username_val)
+								except Exception:
+									pass
+
+							if other_party_id:
+								try:
+									from sqlalchemy import text as _t
+									try:
+										session.exec(_t("INSERT OR IGNORE INTO ig_users(ig_user_id, username, last_seen_at) VALUES (:id, :uname, CURRENT_TIMESTAMP)").params(id=str(other_party_id), uname=username_param))
+									except Exception:
+										try:
+											session.exec(_t("INSERT IGNORE INTO ig_users(ig_user_id, username, last_seen_at) VALUES (:id, :uname, CURRENT_TIMESTAMP)").params(id=str(other_party_id), uname=username_param))
+										except Exception:
+											pass
+									try:
+										session.exec(_t("UPDATE ig_users SET username=COALESCE(:uname, username), last_seen_at=CURRENT_TIMESTAMP WHERE ig_user_id=:id").params(id=str(other_party_id), uname=username_param))
+									except Exception:
+										pass
+									# User enrichment is now done synchronously above
+								except Exception:
+									pass
+							# Page enrichment could be added here if needed synchronously
+							# Ensure ai_conversations exists and update last-* fields atomically
+							if conversation_id and ts_val is not None and row.id:
+								try:
+									from sqlalchemy import text as _t
+									# create placeholder if missing (SQLite or MySQL)
+									try:
+										session.exec(_t("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
+									except Exception:
+										try:
+											# MySQL
+											session.exec(_t("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
+										except Exception:
+											pass
+									# SQLite upsert (no subselects to avoid MySQL 1093 equivalent issues)
+									try:
+										session.exec(
+											_t(
+												"""
+												INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
+												VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
+												ON CONFLICT(convo_id) DO UPDATE SET
+												  last_message_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_id ELSE ai_conversations.last_message_id END,
+												  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), excluded.last_message_timestamp_ms),
+												  last_message_text=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_text ELSE ai_conversations.last_message_text END,
+												  last_message_direction=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_direction ELSE ai_conversations.last_message_direction END,
+												  last_sender_username=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_sender_username ELSE ai_conversations.last_sender_username END,
+												  ig_sender_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_sender_id ELSE ai_conversations.ig_sender_id END,
+												  ig_recipient_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_recipient_id ELSE ai_conversations.ig_recipient_id END,
+												  last_ad_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_id ELSE ai_conversations.last_ad_id END,
+												  last_ad_link=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_link ELSE ai_conversations.last_ad_link END,
+												  last_ad_title=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_title ELSE ai_conversations.last_ad_title END
+												"""
+											).params(
+												cid=str(conversation_id),
+												mid=int(row.id),
+												ts=int(ts_val) if ts_val is not None else 0,
+												txt=(text_val or ""),
+												dir=(direction or "in"),
+												sun=username_param,
+												sid=(str(sender_id) if sender_id is not None else None),
+												rid=(str(recipient_id) if recipient_id is not None else None),
+												adid=(str(ad_id) if ad_id is not None else None),
+												alink=ad_link,
+												atitle=ad_title,
+											)
+										)
+									except Exception:
+										# MySQL upsert (no subselects referencing same table)
+										session.exec(
+											_t(
+												"""
+												INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
+												VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
+												ON DUPLICATE KEY UPDATE
+												  last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
+												  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
+												  last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
+												  last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
+												  last_sender_username=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_sender_username), ai_conversations.last_sender_username),
+												  ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
+												  ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
+												  last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
+												  last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
+												  last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title)
+												"""
+											).params(
+												cid=str(conversation_id),
+												mid=int(row.id),
+												ts=int(ts_val) if ts_val is not None else 0,
+												txt=(text_val or ""),
+												dir=(direction or "in"),
+												sun=username_param,
+												sid=(str(sender_id) if sender_id is not None else None),
+												rid=(str(recipient_id) if recipient_id is not None else None),
+												adid=(str(ad_id) if ad_id is not None else None),
+												alink=ad_link,
+												atitle=ad_title,
+											)
+										)
+								except Exception as e:
+									try:
+										_log.warning("webhook: failed to upsert ai_conversations cid=%s mid=%s ts=%s err=%s", conversation_id, row.id, ts_val, str(e)[:200])
+									except Exception:
+										pass
+							# Start/refresh AI shadow debounce for inbound messages
+							try:
+								if (direction or "in") == "in" and conversation_id:
+									from ..services.ai_shadow import touch_shadow_state
+									tsv = int(ts_val) if ts_val is not None else None
+									touch_shadow_state(str(conversation_id), tsv)
+							except Exception:
+								pass
+							# Upsert ads and stories cache
+							try:
+								if ad_id:
+									from sqlalchemy import text as _t
+									try:
+										session.exec(_t("INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id,:n,:img,:lnk,CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+									except Exception:
+										session.exec(_t("INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id,:n,:img,:lnk,CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+									session.exec(_t("UPDATE ads SET name=COALESCE(:n,name), image_url=COALESCE(:img,image_url), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+									# Ad enrichment is now done synchronously above
+								# story cache
+								if story_id:
+									from sqlalchemy import text as _t
+									try:
+										session.exec(_t("INSERT OR IGNORE INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
+									except Exception:
+										try:
+											session.exec(_t("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
+										except Exception:
+											# fall back to update or plain insert
+											exists = session.exec(_t("SELECT 1 FROM stories WHERE story_id=:id LIMIT 1")).params(id=str(story_id)).first()
+											if exists:
+												session.exec(_t("UPDATE stories SET url=COALESCE(:url,url), updated_at=CURRENT_TIMESTAMP WHERE story_id=:id")).params(id=str(story_id), url=(str(story_url) if story_url else None))
+											else:
+												session.exec(_t("INSERT INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
+							except Exception:
+								pass
+							# SYNCHRONOUS MEDIA DOWNLOAD: Download attachments immediately
+							try:
+								session.flush()  # obtain row.id
+								if attachments:
+									from .media_downloader import create_attachment_records, download_message_attachments
+									# Create attachment records first
+									create_attachment_records(session, int(row.id), str(mid), attachments)
+									# Download attachments synchronously
+									downloaded_paths = await download_message_attachments(session, int(row.id), str(mid), attachments, client)
+									downloaded_media += len(downloaded_paths)
+									try:
+										_log.info("webhook: downloaded %d media files for msg %s", len(downloaded_paths), str(mid))
+									except Exception:
+										pass
+							except Exception as e:
+								try:
+									_log.warning("webhook: failed to process attachments for msg %s: %s", str(mid), str(e))
 								except Exception:
 									pass
 						except Exception as e:
 							try:
-								_log.warning("webhook: failed to process attachments for msg %s: %s", str(mid), str(e))
+								_log.error("IG webhook POST: failed to process message event: %s", str(e))
 							except Exception:
 								pass
 					# ensure conversation row exists and enqueue one-time hydration (idempotent via jobs uniqueness)
@@ -589,9 +610,12 @@ async def receive_events(request: Request):
 				increment_counter("messages", int(persisted))
 		except Exception:
 			pass
-	except Exception:
+	except Exception as e:
 		# best-effort: ignore failures here; ingestion worker will backfill later
-		pass
+		try:
+			_log.error("IG webhook POST: message processing failed with error: %s", str(e))
+		except Exception:
+			pass
 	return {"status": "ok", "raw_saved": saved_raw}
 
 
