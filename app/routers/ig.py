@@ -65,8 +65,12 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                    ac.last_ad_link AS ad_link,
                    ac.last_ad_title AS ad_title,
                    ac.last_message_id AS message_id,
-                   ac.last_ad_id AS last_ad_id
+                   ac.last_ad_id AS last_ad_id,
+                   u.username AS other_username,
+                   u.name AS other_name
             FROM ai_conversations ac
+            LEFT JOIN ig_users u
+              ON u.ig_user_id = CASE WHEN ac.last_message_direction='out' THEN ac.ig_recipient_id ELSE ac.ig_sender_id END
         """
         where_parts: list[str] = []
         params: dict[str, object] = {}
@@ -117,6 +121,8 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                     "ad_title": (getattr(r, "ad_title", None) if hasattr(r, "ad_title") else (r[8] if len(r) > 8 else None)),
                     "message_id": (getattr(r, "message_id", None) if hasattr(r, "message_id") else (r[9] if len(r) > 9 else None)),
                     "last_ad_id": (getattr(r, "last_ad_id", None) if hasattr(r, "last_ad_id") else (r[10] if len(r) > 10 else None)),
+                    "other_username": (getattr(r, "other_username", None) if hasattr(r, "other_username") else (r[11] if len(r) > 11 else None)),
+                    "other_name": (getattr(r, "other_name", None) if hasattr(r, "other_name") else (r[12] if len(r) > 12 else None)),
                 })
             except Exception:
                 continue
@@ -151,6 +157,16 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                 cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
                 if not cid:
                     continue
+                # Prefer directly joined other_username/other_name if present
+                try:
+                    ou = (m.get("other_username") if isinstance(m, dict) else getattr(m, "other_username", None))
+                    onm = (m.get("other_name") if isinstance(m, dict) else getattr(m, "other_name", None))
+                    if ou and cid not in labels:
+                        labels[cid] = f"@{str(ou)}"
+                    if onm and cid not in names:
+                        names[cid] = str(onm)
+                except Exception:
+                    pass
                 direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
                 sender_username = (m.get("sender_username") if isinstance(m, dict) else m.sender_username) or ""
                 if direction == "in" and sender_username.strip() and cid not in inbound_named:
