@@ -94,6 +94,8 @@ async def fetch_messages(conversation_id: str, limit: int = 50) -> List[Dict[str
     )
     path = f"/{conversation_id}/messages"
     params = {"access_token": token, "limit": limit, "fields": fields}
+    # Ensure Instagram platform is selected; without this Graph may return only bare ids
+    params["platform"] = "instagram"
     async with httpx.AsyncClient() as client:
         data = await _get(client, base + path, params)
         return data.get("data", [])
