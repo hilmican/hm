@@ -77,7 +77,24 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	except Exception:
 		pass
 	other_party_id = recipient_id if direction == "out" else sender_id
-	conversation_id = f"dm:{other_party_id}" if other_party_id is not None else None
+	# Prefer Graph conversation id when we have a mapping for this page/user pair
+	conversation_id = None
+	try:
+		if other_party_id is not None and igba_id:
+			from sqlalchemy import text as _t
+			row_map = session.exec(
+				_t(
+					"SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1"
+				).params(g=str(igba_id), u=str(other_party_id))
+			).first()
+			if row_map:
+				gcid = getattr(row_map, "graph_conversation_id", None) if hasattr(row_map, "graph_conversation_id") else (row_map[0] if isinstance(row_map, (list, tuple)) else None)
+				if gcid:
+					conversation_id = str(gcid)
+	except Exception:
+		conversation_id = None
+	if conversation_id is None:
+		conversation_id = f"dm:{other_party_id}" if other_party_id is not None else None
 	text_val = message_obj.get("text")
 	attachments = message_obj.get("attachments")
 	# Story reply (best-effort)
