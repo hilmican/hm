@@ -28,6 +28,7 @@
       <button id="backfillAiLatest" style="background:#0ea5e9">Son Mesajları Geri Doldur</button>
       <button id="mergeGraph" style="background:#6366f1">Graph CID'e Birleştir</button>
       <button id="normalizeDm" style="background:#22c55e">dm:&lt;id&gt; Normalize</button>
+      <button id="resetIg" style="background:#ef4444">IG Verilerini Sıfırla</button>
       <form method="post" action="/ig/admin/backfill/ai_latest" style="display:inline;">
         <button type="submit" class="meta" style="background:#fff;color:#2563eb;border:1px solid #2563eb;">(Form ile gönder)</button>
       </form>
@@ -160,6 +161,19 @@
           location.reload();
         } catch (e) { alert('Normalize hatası'); }
         finally { normalizeBtn.disabled = false; normalizeBtn.textContent = prev; }
+      });
+      const resetBtn = document.getElementById('resetIg');
+      resetBtn?.addEventListener('click', async () => {
+        if (!confirm('UYARI: Bu işlem IG mesajları, kullanıcıları ve IG AI verilerini SİLER. Devam edilsin mi?')) return;
+        resetBtn.disabled = true; const prev = resetBtn.textContent; resetBtn.textContent = 'Sıfırlanıyor...';
+        try {
+          const r = await fetch('/ig/admin/reset/instagram', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(JSON.stringify(js||{}));
+          alert('Sıfırlandı: ' + JSON.stringify(js.cleared || {}));
+          location.reload();
+        } catch (e) { alert('Sıfırlama hatası'); }
+        finally { resetBtn.disabled = false; resetBtn.textContent = prev; }
       });
 
       function fmtTs(){

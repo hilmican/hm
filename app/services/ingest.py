@@ -94,6 +94,31 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	except Exception:
 		conversation_id = None
 	if conversation_id is None:
+		# On first messages, resolve mapping via lightweight fetch and retry
+		try:
+			if other_party_id is not None and igba_id:
+				import asyncio as _aio
+				loop = _aio.get_event_loop()
+				# This call persists mapping into conversations.graph_conversation_id
+				from .instagram_api import fetch_thread_messages as _ftm
+				try:
+					loop.run_until_complete(_ftm(str(igba_id), str(other_party_id), limit=1))
+				except Exception:
+					pass
+				# retry lookup
+				from sqlalchemy import text as _t
+				row_map2 = session.exec(
+					_t(
+						"SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1"
+					).params(g=str(igba_id), u=str(other_party_id))
+				).first()
+				if row_map2:
+					gcid2 = getattr(row_map2, "graph_conversation_id", None) if hasattr(row_map2, "graph_conversation_id") else (row_map2[0] if isinstance(row_map2, (list, tuple)) else None)
+					if gcid2:
+						conversation_id = str(gcid2)
+		except Exception:
+			conversation_id = None
+	if conversation_id is None:
 		conversation_id = f"dm:{other_party_id}" if other_party_id is not None else None
 	text_val = message_obj.get("text")
 	attachments = message_obj.get("attachments")

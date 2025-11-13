@@ -1017,6 +1017,75 @@ def backfill_ads():
 			pass
 	return {"status": "ok", "created": int(created), "updated": int(updated)}
 
+@router.post("/admin/reset/instagram")
+def reset_instagram_data():
+    """Dangerous: Clear Instagram-related data only.
+
+    Tables affected:
+      - attachments, message
+      - ai_conversations, ai_shadow_state, ai_shadow_reply
+      - ig_users, ig_accounts
+      - conversations
+      - ads, stories (and MySQL mapping tables ads_products, stories_products) if present
+      - ig_ai_run, ig_ai_result
+      - jobs rows for kinds: ingest, hydrate_conversation, hydrate_ad, enrich_user, enrich_page, fetch_media
+    Also clears Redis queues for the same kinds (best-effort).
+    """
+    cleared: dict[str, int] = {"redis": 0}
+    # Clear Redis queues (best-effort)
+    try:
+        r = _get_redis()
+        n = int(r.delete(
+            "jobs:ingest",
+            "jobs:hydrate_conversation",
+            "jobs:hydrate_ad",
+            "jobs:enrich_user",
+            "jobs:enrich_page",
+            "jobs:fetch_media",
+        ))
+        cleared["redis"] = n
+    except Exception:
+        pass
+    # Delete rows in dependency-safe order
+    from sqlalchemy import text as _text
+    counts: dict[str, int] = {}
+    with get_session() as session:
+        def run(q: str, params: dict | None = None, key: str | None = None) -> None:
+            try:
+                res = session.exec(_text(q).params(**(params or {})))
+                if key is not None:
+                    try:
+                        counts[key] = int(getattr(res, "rowcount", 0) or 0)
+                    except Exception:
+                        counts[key] = 0
+            except Exception:
+                if key is not None:
+                    counts[key] = 0
+        # attachments before message
+        run("DELETE FROM attachments", key="attachments")
+        run("DELETE FROM message", key="message")
+        # AI shadow and summaries
+        run("DELETE FROM ai_shadow_reply", key="ai_shadow_reply")
+        run("DELETE FROM ai_shadow_state", key="ai_shadow_state")
+        run("DELETE FROM ai_conversations", key="ai_conversations")
+        # Instagram entities
+        run("DELETE FROM ig_users", key="ig_users")
+        run("DELETE FROM ig_accounts", key="ig_accounts")
+        # Conversations (IG cache)
+        run("DELETE FROM conversations", key="conversations")
+        # Ads / Stories caches (tables exist in both SQLite/MySQL with same names)
+        run("DELETE FROM ads", key="ads")
+        run("DELETE FROM stories", key="stories")
+        # Optional mapping tables (MySQL-only); ignore errors on SQLite
+        run("DELETE FROM ads_products", key="ads_products")
+        run("DELETE FROM stories_products", key="stories_products")
+        # AI run history
+        run("DELETE FROM ig_ai_result", key="ig_ai_result")
+        run("DELETE FROM ig_ai_run", key="ig_ai_run")
+        # Jobs by kind
+        run("DELETE FROM jobs WHERE kind IN ('ingest','hydrate_conversation','hydrate_ad','enrich_user','enrich_page','fetch_media')", key="jobs")
+    return {"status": "ok", "cleared": {**counts, **cleared}}
+
 
 @router.post("/admin/normalize_dm_conversation_ids")
 def normalize_dm_conversation_ids(limit: int = 20000):
