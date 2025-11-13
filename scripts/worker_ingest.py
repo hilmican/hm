@@ -83,23 +83,24 @@ def main() -> None:
 					continue
 				# If Graph sometimes returns only message IDs (strings), fetch details
 				try:
-					if isinstance(msgs, list) and any(isinstance(m, str) for m in msgs):
-						log.info("hydrate: normalizing %s bare message ids via detail fetch", len([m for m in msgs if isinstance(m, str)]))
+					if isinstance(msgs, list) and any(not isinstance(m, dict) for m in msgs):
+						cnt = len([m for m in msgs if not isinstance(m, dict)])
+						log.info("hydrate: normalizing %s non-dict messages via detail fetch", cnt)
 						import asyncio as _aio
 						loop = _aio.get_event_loop()
 						norm_msgs = []
 						for m in msgs:
 							if isinstance(m, dict):
 								norm_msgs.append(m)
-							elif isinstance(m, str):
+							else:
 								try:
-									det = loop.run_until_complete(fetch_message_details(m))
+									det = loop.run_until_complete(fetch_message_details(str(m)))
 									if isinstance(det, dict):
 										norm_msgs.append(det)
 									else:
-										log.warning("hydrate: detail not dict mid=%s got=%s", m, type(det).__name__)
+										log.warning("hydrate: detail not dict mid=%s got=%s", str(m), type(det).__name__)
 								except Exception as de:
-									log.warning("hydrate: detail fetch failed mid=%s err=%s", m, de)
+									log.warning("hydrate: detail fetch failed mid=%s err=%s", str(m), de)
 						msgs = norm_msgs
 						try:
 							first_keys = list(msgs[0].keys())[:8] if msgs and isinstance(msgs[0], dict) else []

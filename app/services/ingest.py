@@ -326,13 +326,16 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		try:
 			import asyncio as _aio
 			loop = _aio.get_event_loop()
-			detail = loop.run_until_complete(fetch_message_details(event))
+			detail = loop.run_until_complete(fetch_message_details(str(event)))
 			if isinstance(detail, dict):
 				event = detail
 			else:
 				return None
 		except Exception:
 			return None
+	# Defensive: if event is still not a dict, bail
+	if not isinstance(event, dict):
+		return None
 	message_obj = event.get("message") or {}
 	if not message_obj:
 		return None
