@@ -90,10 +90,18 @@ def main() -> None:
 								inserted += 1
 						except Exception as e:
 							log.warning("hydrate upsert err convo=%s:%s ev=%s err=%s", igba_id, ig_user_id, ev.get("id"), e)
-					# mark conversation hydrated
+					# mark conversation hydrated (ai_conversations)
 					try:
-						session.exec(text("UPDATE conversations SET hydrated_at=CURRENT_TIMESTAMP WHERE convo_id=:cid OR (igba_id=:g AND ig_user_id=:u)"))\
-							.params(cid=f"{igba_id}:{ig_user_id}", g=igba_id, u=ig_user_id)
+						cid_ai = f"dm:{ig_user_id}"
+						# ensure ai_conversations row exists
+						try:
+							session.exec(text("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=cid_ai)
+						except Exception:
+							try:
+								session.exec(text("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=cid_ai)
+							except Exception:
+								pass
+						session.exec(text("UPDATE ai_conversations SET hydrated_at=CURRENT_TIMESTAMP WHERE convo_id=:cid")).params(cid=cid_ai)
 					except Exception:
 						pass
 				log.info("hydrate ok jid=%s convo=%s:%s msgs=%s", jid, igba_id, ig_user_id, inserted)

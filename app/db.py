@@ -154,6 +154,43 @@ def init_db() -> None:
                                     pass
                         except Exception:
                             pass
+                        # Extend ai_conversations with last-* metadata and hydration (MySQL)
+                        try:
+                            rows = conn.exec_driver_sql(
+                                """
+                                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ai_conversations'
+                                """
+                            ).fetchall()
+                            have_cols = {str(r[0]).lower() for r in rows or []}
+                            if 'last_message_id' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_message_id INT NULL")
+                            if 'last_message_timestamp_ms' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_message_timestamp_ms BIGINT NULL")
+                            if 'last_message_text' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_message_text LONGTEXT NULL")
+                            if 'last_message_direction' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_message_direction VARCHAR(8) NULL")
+                            if 'last_sender_username' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_sender_username TEXT NULL")
+                            if 'ig_sender_id' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN ig_sender_id VARCHAR(64) NULL")
+                            if 'ig_recipient_id' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN ig_recipient_id VARCHAR(64) NULL")
+                            if 'last_ad_id' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_ad_id VARCHAR(128) NULL")
+                            if 'last_ad_link' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_ad_link TEXT NULL")
+                            if 'last_ad_title' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_ad_title TEXT NULL")
+                            if 'hydrated_at' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN hydrated_at DATETIME NULL")
+                            try:
+                                conn.exec_driver_sql("CREATE INDEX idx_ai_conv_last_ts ON ai_conversations(last_message_timestamp_ms)")
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
                         # Up-size potentially long text fields
                         try:
                             row = conn.exec_driver_sql(
@@ -367,30 +404,50 @@ def init_db() -> None:
                             )
                         except Exception:
                             pass
-                        # latest message materialized view (MySQL)
+                        # Stories cache and mapping (MySQL)
                         try:
                             conn.exec_driver_sql(
                                 """
-                                CREATE TABLE IF NOT EXISTS latest_messages (
-                                    convo_id VARCHAR(128) PRIMARY KEY,
-                                    message_id INT NULL,
-                                    timestamp_ms BIGINT NULL,
-                                    text LONGTEXT NULL,
-                                    sender_username TEXT NULL,
-                                    direction VARCHAR(8) NULL,
-                                    ig_sender_id VARCHAR(64) NULL,
-                                    ig_recipient_id VARCHAR(64) NULL,
-                                    ad_link TEXT NULL,
-                                    ad_title TEXT NULL
+                                CREATE TABLE IF NOT EXISTS stories (
+                                    story_id VARCHAR(128) PRIMARY KEY,
+                                    url TEXT NULL,
+                                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                                 )
                                 """
                             )
-                            try:
-                                conn.exec_driver_sql("CREATE INDEX idx_latest_ts ON latest_messages(timestamp_ms)")
-                            except Exception:
-                                pass
                         except Exception:
                             pass
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS stories_products (
+                                    story_id VARCHAR(128) PRIMARY KEY,
+                                    product_id INTEGER NULL,
+                                    sku VARCHAR(128) NULL,
+                                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                    INDEX idx_stories_products_product (product_id),
+                                    INDEX idx_stories_products_sku (sku)
+                                )
+                                """
+                            )
+                        except Exception:
+                            pass
+                        # Ensure message has story_id/story_url (MySQL)
+                        try:
+                            rows = conn.exec_driver_sql(
+                                """
+                                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message'
+                                """
+                            ).fetchall()
+                            have_cols = {str(r[0]).lower() for r in rows or []}
+                            if 'story_id' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN story_id VARCHAR(128) NULL")
+                            if 'story_url' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN story_url TEXT NULL")
+                        except Exception:
+                            pass
+                        # latest_messages deprecated: creation removed
                         # Ensure conversations AI/contact columns exist for IG AI
                         try:
                             rows = conn.exec_driver_sql(
@@ -909,20 +966,7 @@ def init_db() -> None:
                     )
                     """
                 )
-                # conversations table
-                conn.exec_driver_sql(
-                    """
-                    CREATE TABLE IF NOT EXISTS conversations (
-                        convo_id TEXT PRIMARY KEY,
-                        igba_id TEXT NOT NULL,
-                        ig_user_id TEXT NOT NULL,
-                        last_message_at DATETIME NOT NULL,
-                        unread_count INTEGER NOT NULL DEFAULT 0,
-                        hydrated_at DATETIME,
-                        UNIQUE (igba_id, ig_user_id)
-                    )
-                    """
-                )
+                -- conversations table deprecated: creation removed
                 # ai_conversations table for AI processing watermark keyed by message.conversation_id
                 conn.exec_driver_sql(
                     """
@@ -937,6 +981,38 @@ def init_db() -> None:
                 )
                 try:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_conv_time ON ai_conversations(ai_process_time)")
+                except Exception:
+                    pass
+                # Extend ai_conversations with last-* metadata (SQLite)
+                try:
+                    rows = conn.exec_driver_sql("PRAGMA table_info('ai_conversations')").fetchall()
+                    have = {r[1] for r in rows}
+                    if 'last_message_id' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_message_id INTEGER")
+                    if 'last_message_timestamp_ms' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_message_timestamp_ms BIGINT")
+                    if 'last_message_text' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_message_text TEXT")
+                    if 'last_message_direction' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_message_direction TEXT")
+                    if 'last_sender_username' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_sender_username TEXT")
+                    if 'ig_sender_id' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN ig_sender_id TEXT")
+                    if 'ig_recipient_id' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN ig_recipient_id TEXT")
+                    if 'last_ad_id' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_ad_id TEXT")
+                    if 'last_ad_link' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_ad_link TEXT")
+                    if 'last_ad_title' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN last_ad_title TEXT")
+                    if 'hydrated_at' not in have:
+                        conn.exec_driver_sql("ALTER TABLE ai_conversations ADD COLUMN hydrated_at DATETIME")
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_conv_last_ts ON ai_conversations(last_message_timestamp_ms)")
                 except Exception:
                     pass
                 # Ensure conversations AI/contact columns exist (idempotent ALTERs)
@@ -1202,27 +1278,7 @@ def init_db() -> None:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_shadow_reply_status ON ai_shadow_reply(status)")
                 except Exception:
                     pass
-                # latest message materialized view table (SQLite)
-                conn.exec_driver_sql(
-                    """
-                    CREATE TABLE IF NOT EXISTS latest_messages (
-                        convo_id TEXT PRIMARY KEY,
-                        message_id INTEGER,
-                        timestamp_ms BIGINT,
-                        text TEXT,
-                        sender_username TEXT,
-                        direction TEXT,
-                        ig_sender_id TEXT,
-                        ig_recipient_id TEXT,
-                        ad_link TEXT,
-                        ad_title TEXT
-                    )
-                    """
-                )
-                try:
-                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_latest_ts ON latest_messages(timestamp_ms)")
-                except Exception:
-                    pass
+                -- latest_messages table deprecated: creation removed
             return
         except Exception as e:
             last_err = e

@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Story’i Ürüne Bağla</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .meta { color:#6b7280; font-size:12px; }
+      .card { border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin:12px 0; background:#f9fafb; }
+      input { padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; }
+      label { display:block; font-size:13px; color:#111827; margin-bottom:6px; }
+      .row { display:flex; gap:8px; align-items:center; }
+      button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:10px 12px; cursor:pointer; }
+      a { color:#2563eb; text-decoration:none; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>Story’i Ürüne Bağla</h1>
+    <div class="card">
+      <div class="row">
+        <div>
+          <div><strong>Story ID:</strong> {{ story.story_id or '-' }}</div>
+          {% if story.url %}<div><a href="{{ story.url }}" target="_blank" rel="noopener">Story link ↗</a></div>{% endif %}
+          {% if story.updated_at %}<div class="meta">Güncellendi: {{ story.updated_at }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 8px 0;">Mevcut Bağlantı</h3>
+      <div class="meta">SKU: {{ mapping.sku or '-' }} · Product ID: {{ mapping.product_id or '-' }}</div>
+    </div>
+    <form method="post" action="/stories/{{ story.story_id or '' }}/save" style="margin-top:12px;">
+      <div style="display:grid; gap:12px; max-width:420px;">
+        <div>
+          <label>SKU (tercih edilir)</label>
+          <input type="text" name="sku" placeholder="örn. HM-LEATHER-001-BLACK-XL" value="{{ mapping.sku or '' }}" style="width:100%;" />
+        </div>
+        <div>
+          <label>Product ID (opsiyonel)</label>
+          <input type="number" name="product_id" placeholder="örn. 42" value="{{ mapping.product_id or '' }}" style="width:100%;" />
+        </div>
+        <div>
+          <button type="submit">Kaydet</button>
+          {% if story and story.story_id %}<a style="margin-left:8px" href="/ig/inbox?q={{ story.story_id }}">İnboxta ara</a>{% endif %}
+        </div>
+      </div>
+    </form>
+  </body>
+  </html>
+
+

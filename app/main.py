@@ -14,6 +14,7 @@ from .routers import legal
 from .routers import ig
 from .routers import ig_ai
 from .routers import ads
+from .routers import stories
 from .routers import noc
 from .routers import costs
 from collections import deque
@@ -185,6 +186,7 @@ def create_app() -> FastAPI:
 	app.include_router(ig.router)
 	app.include_router(ig_ai.router)
 	app.include_router(ads.router)
+	app.include_router(stories.router)
 	app.include_router(reports.router, prefix="/reports", tags=["reports"]) 
 	app.include_router(noc.router)
 	app.include_router(costs.router, prefix="/costs", tags=["costs"])

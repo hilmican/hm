@@ -51,13 +51,21 @@ async def notify_new_message(event: dict) -> None:
 @router.get("/inbox")
 async def inbox(request: Request, limit: int = 25, q: str | None = None):
     with get_session() as session:
-        # Use materialized latest_messages to avoid heavy CTE scans
+        # Use ai_conversations as single source for inbox list
         from sqlalchemy import text as _text
         base_sql = """
-            SELECT ac.convo_id, lm.timestamp_ms, lm.text, lm.sender_username, lm.direction,
-                   lm.ig_sender_id, lm.ig_recipient_id, lm.ad_link, lm.ad_title, lm.message_id
+            SELECT ac.convo_id,
+                   ac.last_message_timestamp_ms AS timestamp_ms,
+                   ac.last_message_text AS text,
+                   ac.last_sender_username AS sender_username,
+                   ac.last_message_direction AS direction,
+                   ac.ig_sender_id,
+                   ac.ig_recipient_id,
+                   ac.last_ad_link AS ad_link,
+                   ac.last_ad_title AS ad_title,
+                   ac.last_message_id AS message_id,
+                   ac.last_ad_id AS last_ad_id
             FROM ai_conversations ac
-            LEFT JOIN latest_messages lm ON lm.convo_id = ac.convo_id
         """
         where_parts: list[str] = []
         params: dict[str, object] = {}
@@ -65,11 +73,11 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
             qq = f"%{q.lower().strip()}%"
             where_parts.append("""
                 (
-                    (lm.text IS NOT NULL AND LOWER(lm.text) LIKE :qq)
-                    OR (lm.sender_username IS NOT NULL AND LOWER(lm.sender_username) LIKE :qq)
+                    (ac.last_message_text IS NOT NULL AND LOWER(ac.last_message_text) LIKE :qq)
+                    OR (ac.last_sender_username IS NOT NULL AND LOWER(ac.last_sender_username) LIKE :qq)
                     OR EXISTS (
                         SELECT 1 FROM ig_users u
-                        WHERE (u.ig_user_id = lm.ig_sender_id OR u.ig_user_id = lm.ig_recipient_id OR (ac.convo_id LIKE 'dm:%' AND u.ig_user_id = SUBSTR(ac.convo_id, 4)))
+                        WHERE (u.ig_user_id = ac.ig_sender_id OR u.ig_user_id = ac.ig_recipient_id OR (ac.convo_id LIKE 'dm:%' AND u.ig_user_id = SUBSTR(ac.convo_id, 4)))
                           AND (
                             (u.name IS NOT NULL AND LOWER(u.name) LIKE :qq)
                             OR (u.username IS NOT NULL AND LOWER(u.username) LIKE :qq)
@@ -87,11 +95,11 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
         except Exception:
             dialect_name = ""
         if dialect_name == "mysql":
-            order_sql = " ORDER BY COALESCE(ac.ai_process_time, FROM_UNIXTIME(lm.timestamp_ms/1000)) DESC LIMIT :n"
+            order_sql = " ORDER BY COALESCE(ac.ai_process_time, FROM_UNIXTIME(ac.last_message_timestamp_ms/1000)) DESC LIMIT :n"
         elif dialect_name == "sqlite":
-            order_sql = " ORDER BY COALESCE(ac.ai_process_time, datetime(lm.timestamp_ms/1000, 'unixepoch')) DESC LIMIT :n"
+            order_sql = " ORDER BY COALESCE(ac.ai_process_time, datetime(ac.last_message_timestamp_ms/1000, 'unixepoch')) DESC LIMIT :n"
         else:
-            order_sql = " ORDER BY COALESCE(ac.ai_process_time, lm.timestamp_ms) DESC LIMIT :n"
+            order_sql = " ORDER BY COALESCE(ac.ai_process_time, ac.last_message_timestamp_ms) DESC LIMIT :n"
         params["n"] = int(sample_n)
         final_sql = base_sql + (" WHERE " + " AND ".join(where_parts) if where_parts else "") + order_sql
         rows_raw = session.exec(_text(final_sql).params(**params)).all()
@@ -111,6 +119,7 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                     "ad_link": (getattr(r, "ad_link", None) if hasattr(r, "ad_link") else (r[7] if len(r) > 7 else None)),
                     "ad_title": (getattr(r, "ad_title", None) if hasattr(r, "ad_title") else (r[8] if len(r) > 8 else None)),
                     "message_id": (getattr(r, "message_id", None) if hasattr(r, "message_id") else (r[9] if len(r) > 9 else None)),
+                    "last_ad_id": (getattr(r, "last_ad_id", None) if hasattr(r, "last_ad_id") else (r[10] if len(r) > 10 else None)),
                 })
             except Exception:
                 continue
@@ -228,42 +237,16 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                             labels[cid] = f"@{str(un)}"
                         if nm and cid not in names:
                             names[cid] = str(nm)
-        # Best-effort ad metadata from messages; include ad_id via lm.message_id -> message.ad_id lookup
+        # Best-effort ad metadata using ai_conversations last_* fields
         ad_map = {}
         try:
-            msg_ids: list[int] = []
-            for m in rows:
-                try:
-                    mid = m.get("message_id") if isinstance(m, dict) else getattr(m, "message_id", None)
-                    if mid is not None:
-                        mi = int(mid)
-                        if mi not in msg_ids:
-                            msg_ids.append(mi)
-                except Exception:
-                    continue
-            id_map: dict[int, dict[str, Any]] = {}
-            if msg_ids:
-                placeholders = ",".join([":m" + str(i) for i in range(len(msg_ids))])
-                from sqlalchemy import text as _text
-                params = {("m" + str(i)): int(msg_ids[i]) for i in range(len(msg_ids))}
-                rows_m = session.exec(_text(f"SELECT id, ad_id FROM message WHERE id IN ({placeholders})")).params(**params).all()
-                for r in rows_m:
-                    rid = r.id if hasattr(r, "id") else r[0]
-                    aid = r.ad_id if hasattr(r, "ad_id") else (r[1] if len(r) > 1 else None)
-                    id_map[int(rid)] = {"ad_id": (str(aid) if aid is not None else None)}
             for m in rows:
                 cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
                 if not cid:
                     continue
                 ad_link = (m.get("ad_link") if isinstance(m, dict) else getattr(m, "ad_link", None))
                 ad_title = (m.get("ad_title") if isinstance(m, dict) else getattr(m, "ad_title", None))
-                mid = (m.get("message_id") if isinstance(m, dict) else getattr(m, "message_id", None))
-                ad_id_val = None
-                try:
-                    if mid is not None and int(mid) in id_map:
-                        ad_id_val = id_map[int(mid)].get("ad_id")
-                except Exception:
-                    ad_id_val = None
+                ad_id_val = (m.get("last_ad_id") if isinstance(m, dict) else getattr(m, "last_ad_id", None))
                 if (ad_link or ad_title or ad_id_val) and cid not in ad_map:
                     ad_map[cid] = {"link": ad_link, "title": ad_title, "id": ad_id_val}
         except Exception:
@@ -970,6 +953,158 @@ def backfill_ads():
 		except Exception:
 			pass
 	return {"status": "ok", "created": int(created), "updated": int(updated)}
+
+@router.post("/admin/backfill/ai_latest")
+def backfill_ai_latest(limit: int = 50000):
+    # Populate ai_conversations last-* fields from message table; migrate hydrated_at best-effort
+    from sqlalchemy import text as _text
+    updated = 0
+    considered = 0
+    with get_session() as session:
+        # Fetch conversation ids with their latest timestamp (ordered)
+        try:
+            rows = session.exec(
+                _text(
+                    """
+                    SELECT m.conversation_id, MAX(m.timestamp_ms) AS ts
+                    FROM message m
+                    WHERE m.conversation_id IS NOT NULL
+                    GROUP BY m.conversation_id
+                    ORDER BY ts DESC
+                    LIMIT :n
+                    """
+                ).params(n=int(max(1, min(limit, 100000))))
+            ).all()
+        except Exception:
+            rows = []
+        for r in rows:
+            try:
+                cid = r.conversation_id if hasattr(r, "conversation_id") else (r[0] if len(r) > 0 else None)
+                if not cid:
+                    continue
+                considered += 1
+                # Load last message for this conversation
+                rm = session.exec(
+                    _text(
+                        """
+                        SELECT id, timestamp_ms, text, direction, sender_username, ig_sender_id, ig_recipient_id, ad_id, ad_link, ad_title
+                        FROM message
+                        WHERE conversation_id=:cid
+                        ORDER BY timestamp_ms DESC, id DESC
+                        LIMIT 1
+                        """
+                    ).params(cid=str(cid))
+                ).first()
+                if not rm:
+                    continue
+                mid = getattr(rm, "id", None) if hasattr(rm, "id") else (rm[0] if len(rm) > 0 else None)
+                ts = getattr(rm, "timestamp_ms", None) if hasattr(rm, "timestamp_ms") else (rm[1] if len(rm) > 1 else None)
+                txt = getattr(rm, "text", None) if hasattr(rm, "text") else (rm[2] if len(rm) > 2 else None)
+                dirn = getattr(rm, "direction", None) if hasattr(rm, "direction") else (rm[3] if len(rm) > 3 else None)
+                sun = getattr(rm, "sender_username", None) if hasattr(rm, "sender_username") else (rm[4] if len(rm) > 4 else None)
+                sid = getattr(rm, "ig_sender_id", None) if hasattr(rm, "ig_sender_id") else (rm[5] if len(rm) > 5 else None)
+                rid = getattr(rm, "ig_recipient_id", None) if hasattr(rm, "ig_recipient_id") else (rm[6] if len(rm) > 6 else None)
+                adid = getattr(rm, "ad_id", None) if hasattr(rm, "ad_id") else (rm[7] if len(rm) > 7 else None)
+                alink = getattr(rm, "ad_link", None) if hasattr(rm, "ad_link") else (rm[8] if len(rm) > 8 else None)
+                atitle = getattr(rm, "ad_title", None) if hasattr(rm, "ad_title") else (rm[9] if len(rm) > 9 else None)
+                # ensure ai_conversations row exists
+                try:
+                    session.exec(_text("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(cid))
+                except Exception:
+                    try:
+                        session.exec(_text("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(cid))
+                    except Exception:
+                        pass
+                # migrate hydrated_at best-effort from conversations where ig_user_id matches dm:<id>
+                try:
+                    dm_id = None
+                    if isinstance(cid, str) and cid.startswith("dm:"):
+                        try:
+                            dm_id = cid.split(":", 1)[1]
+                        except Exception:
+                            dm_id = None
+                    if dm_id:
+                        row_h = session.exec(_text("SELECT MAX(hydrated_at) FROM conversations WHERE ig_user_id=:u")).params(u=str(dm_id)).first()
+                        hyd_at = None
+                        if row_h is not None:
+                            hyd_at = row_h[0] if isinstance(row_h, (list, tuple)) else getattr(row_h, "MAX(hydrated_at)", None)
+                        if hyd_at:
+                            session.exec(_text("UPDATE ai_conversations SET hydrated_at=COALESCE(hydrated_at, :h) WHERE convo_id=:cid")).params(cid=str(cid), h=hyd_at)
+                except Exception:
+                    pass
+                # upsert last-* fields (SQLite then MySQL)
+                try:
+                    session.exec(
+                        _text(
+                            """
+                            INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
+                            VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
+                            ON CONFLICT(convo_id) DO UPDATE SET
+                              last_message_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_id ELSE ai_conversations.last_message_id END,
+                              last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), excluded.last_message_timestamp_ms),
+                              last_message_text=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_text ELSE ai_conversations.last_message_text END,
+                              last_message_direction=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_direction ELSE ai_conversations.last_message_direction END,
+                              last_sender_username=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_sender_username ELSE ai_conversations.last_sender_username END,
+                              ig_sender_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_sender_id ELSE ai_conversations.ig_sender_id END,
+                              ig_recipient_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_recipient_id ELSE ai_conversations.ig_recipient_id END,
+                              last_ad_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_id ELSE ai_conversations.last_ad_id END,
+                              last_ad_link=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_link ELSE ai_conversations.last_ad_link END,
+                              last_ad_title=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_title ELSE ai_conversations.last_ad_title END
+                            """
+                        ).params(
+                            cid=str(cid),
+                            mid=int(mid) if mid is not None else None,
+                            ts=int(ts) if ts is not None else None,
+                            txt=(txt or ""),
+                            dir=(dirn or "in"),
+                            sun=(sun or None),
+                            sid=(str(sid) if sid is not None else None),
+                            rid=(str(rid) if rid is not None else None),
+                            adid=(str(adid) if adid is not None else None),
+                            alink=alink,
+                            atitle=atitle,
+                        )
+                    )
+                    updated += 1
+                except Exception:
+                    try:
+                        session.exec(
+                            _text(
+                                """
+                                INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
+                                VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
+                                ON DUPLICATE KEY UPDATE
+                                  last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
+                                  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
+                                  last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
+                                  last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
+                                  last_sender_username=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_sender_username), ai_conversations.last_sender_username),
+                                  ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
+                                  ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
+                                  last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
+                                  last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
+                                  last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title)
+                                """
+                            ).params(
+                                cid=str(cid),
+                                mid=int(mid) if mid is not None else None,
+                                ts=int(ts) if ts is not None else None,
+                                txt=(txt or ""),
+                                dir=(dirn or "in"),
+                                sun=(sun or None),
+                                sid=(str(sid) if sid is not None else None),
+                                rid=(str(rid) if rid is not None else None),
+                                adid=(str(adid) if adid is not None else None),
+                                alink=alink,
+                                atitle=atitle,
+                            )
+                        )
+                        updated += 1
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+    return {"status": "ok", "updated": int(updated), "considered": int(considered)}
 
 @router.post("/admin/backfill/latest")
 def backfill_latest_messages(limit: int = 50000):
