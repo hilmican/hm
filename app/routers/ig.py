@@ -705,16 +705,45 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
                 placeholders = ",".join([":p" + str(i) for i in range(len(msg_ids))])
                 from sqlalchemy import text as _text
                 params = {("p" + str(i)): int(msg_ids[i]) for i in range(len(msg_ids))}
-                rows = session.exec(_text(f"SELECT id, message_id, position FROM attachments WHERE message_id IN ({placeholders}) ORDER BY position ASC")).params(**params).all()
+                # Only include attachments that are already fetched to avoid 404s on /ig/media/local/*
+                rows = session.exec(_text(f"SELECT id, message_id, position, storage_path, fetch_status FROM attachments WHERE message_id IN ({placeholders}) ORDER BY position ASC")).params(**params).all()
                 for r in rows:
                     att_id = r.id if hasattr(r, "id") else r[0]
                     m_id = r.message_id if hasattr(r, "message_id") else r[1]
                     pos = r.position if hasattr(r, "position") else r[2]
+                    sp = r.storage_path if hasattr(r, "storage_path") else (r[3] if len(r) > 3 else None)
+                    fs = r.fetch_status if hasattr(r, "fetch_status") else (r[4] if len(r) > 4 else None)
                     mid = msgid_to_mid.get(int(m_id)) or ""
-                    if mid:
+                    # Only map to local ids when we actually have a file on disk
+                    if mid and sp and str(sp).strip() and str(fs or "").lower() == "ok":
                         att_ids_map.setdefault(mid, []).append(int(att_id))
         except Exception:
             att_ids_map = {}
+        # Additionally, if attachments_json is missing but we have attachment rows,
+        # build a positions list so template can stream directly from Graph.
+        try:
+            if msg_ids:
+                from sqlalchemy import text as _text
+                placeholders = ",".join([":q" + str(i) for i in range(len(msg_ids))])
+                params = {("q" + str(i)): int(msg_ids[i]) for i in range(len(msg_ids))}
+                rows_pos = session.exec(_text(f"SELECT message_id, position FROM attachments WHERE message_id IN ({placeholders}) ORDER BY position ASC")).params(**params).all()
+                # message_id -> [positions...]
+                tmp: dict[int, list[int]] = {}
+                for r in rows_pos:
+                    m_id = r.message_id if hasattr(r, "message_id") else r[0]
+                    pos = r.position if hasattr(r, "position") else (r[1] if len(r) > 1 else None)
+                    if m_id is None or pos is None:
+                        continue
+                    tmp.setdefault(int(m_id), []).append(int(pos))
+                # convert to ig_message_id -> positions only when attachments_json did not already provide mapping
+                for mid_internal, positions in tmp.items():
+                    mid = msgid_to_mid.get(int(mid_internal)) or ""
+                    if not mid:
+                        continue
+                    if mid not in att_map and positions:
+                        att_map[mid] = positions
+        except Exception:
+            pass
         templates = request.app.state.templates
         # Fetch latest AI shadow draft (suggested) for this conversation
         shadow = None
