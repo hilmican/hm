@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from ..db import get_session
 from ..models import Message
+from .instagram_api import fetch_message_details  # type: ignore
 from .queue import enqueue
 from sqlalchemy import text as _sql_text
 
@@ -315,11 +316,23 @@ def _create_attachment_stubs(session, message_id: int, mid: str, attachments: An
 		enqueue("fetch_media", key=f"{message_id}:{idx}", payload={"message_id": message_id, "position": idx})
 
 
-def upsert_message_from_ig_event(session, event: Dict[str, Any], igba_id: str) -> Optional[int]:
+def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: str) -> Optional[int]:
 	"""Insert message if missing, return internal message_id.
 
 	This mirrors webhook/ingestion logic and enqueues media fetch where needed.
 	"""
+	# Normalize: if Graph returned only an id string, fetch full message details
+	if isinstance(event, str):
+		try:
+			import asyncio as _aio
+			loop = _aio.get_event_loop()
+			detail = loop.run_until_complete(fetch_message_details(event))
+			if isinstance(detail, dict):
+				event = detail
+			else:
+				return None
+		except Exception:
+			return None
 	message_obj = event.get("message") or {}
 	if not message_obj:
 		return None
