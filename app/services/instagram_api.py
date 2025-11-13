@@ -84,7 +84,14 @@ async def fetch_conversations(limit: int = 25) -> List[Dict[str, Any]]:
 async def fetch_messages(conversation_id: str, limit: int = 50) -> List[Dict[str, Any]]:
     token, _, _ = _get_base_token_and_id()
     base = f"https://graph.facebook.com/{GRAPH_VERSION}"
-    fields = "id,from{id,username},to,created_time,message,attachments"
+    # Request referral metadata and richer attachments to enable ad-context + image rendering after hydrate
+    fields = (
+        "id,from{id,username},to,created_time,"
+        "message,referral,"  # ad reply context (best-effort; ignored if unavailable)
+        "attachments{"
+        "id,mime_type,file_url,image_data{url,preview_url}"
+        "}"
+    )
     path = f"/{conversation_id}/messages"
     params = {"access_token": token, "limit": limit, "fields": fields}
     async with httpx.AsyncClient() as client:
