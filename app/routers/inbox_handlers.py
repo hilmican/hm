@@ -104,12 +104,11 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
             if other:
                 other_ids.add(str(other))
         conversations = list(conv_map.values())[:limit]
-        # Resolve usernames preferring last inbound message's sender_username; fallback to ig_users, also include full names
-        labels: dict[str, str] = {}
+        # Create display names prioritizing usernames over conversation IDs
+        display_names: dict[str, str] = {}
         names: dict[str, str] = {}
         try:
-            # Build map from conv -> latest inbound with sender_username
-            inbound_named: dict[str, str] = {}
+            # Build map from conv -> display name (username preferred)
             for m in rows:
                 cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
                 if not cid:
@@ -118,24 +117,27 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                 try:
                     ou = (m.get("other_username") if isinstance(m, dict) else getattr(m, "other_username", None))
                     onm = (m.get("other_name") if isinstance(m, dict) else getattr(m, "other_name", None))
-                    if ou and cid not in labels:
-                        labels[cid] = f"@{str(ou)}"
-                    if onm and cid not in names:
+                    if ou:
+                        display_names[cid] = f"@{str(ou)}"
+                    elif cid.startswith("dm:"):
+                        # For dm: conversations, extract username from the ID part
+                        try:
+                            dm_id = cid.split(":", 1)[1]
+                            display_names[cid] = f"@{dm_id}"
+                        except:
+                            display_names[cid] = cid
+                    else:
+                        display_names[cid] = cid
+                    if onm:
                         names[cid] = str(onm)
                 except Exception:
                     pass
-                direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
-                sender_username = (m.get("sender_username") if isinstance(m, dict) else m.sender_username) or ""
-                if direction == "in" and sender_username.strip() and cid not in inbound_named:
-                    inbound_named[cid] = str(sender_username).strip()
-            for cid, un in inbound_named.items():
-                labels[cid] = f"@{un}"
         except Exception:
             pass
         # Fallback via ig_users when inbox usernames missing; if missing there, enqueue background enrich jobs
         if other_ids:
             try:
-                missing = [cid for cid in conv_map.keys() if cid not in labels]
+                missing = [cid for cid in conv_map.keys() if cid not in display_names]
                 if missing:
                     placeholders = ",".join([":p" + str(i) for i in range(len(other_ids))])
                     from sqlalchemy import text as _text
@@ -161,7 +163,7 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                     except Exception:
                         pass
                     for cid, m in conv_map.items():
-                        if cid in labels:
+                        if cid in display_names:
                             continue
                         other = None
                         try:
@@ -175,13 +177,22 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                         if other:
                             sid = str(other)
                             if sid in id_to_username:
-                                labels[cid] = f"@{id_to_username[sid]}"
+                                display_names[cid] = f"@{id_to_username[sid]}"
+                            elif cid.startswith("dm:"):
+                                # For dm: conversations, try to extract username from the ID part
+                                try:
+                                    dm_id = cid.split(":", 1)[1]
+                                    display_names[cid] = f"@{dm_id}"
+                                except:
+                                    display_names[cid] = cid
+                            else:
+                                display_names[cid] = cid
                             if sid in id_to_name:
                                 names[cid] = id_to_name[sid]
             except Exception:
                 pass
-        # Last-resort: conversation ids that are dm:<ig_user_id> but still missing a label
-        dm_missing = [cid for cid in conv_map.keys() if (cid not in labels and isinstance(cid, str) and cid.startswith("dm:"))]
+        # Last-resort: conversation ids that are dm:<ig_user_id> but still missing a display name
+        dm_missing = [cid for cid in conv_map.keys() if (cid not in display_names and isinstance(cid, str) and cid.startswith("dm:"))]
         if dm_missing:
             dm_ids = []
             for cid in dm_missing:
@@ -203,8 +214,8 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                     nm = r.name if hasattr(r, "name") else (r[2] if len(r) > 2 else None)
                     if uid and un:
                         cid = f"dm:{uid}"
-                        if cid not in labels:
-                            labels[cid] = f"@{str(un)}"
+                        if cid not in display_names:
+                            display_names[cid] = f"@{str(un)}"
                         if nm and cid not in names:
                             names[cid] = str(nm)
         # Best-effort ad metadata using ai_conversations last_* fields
@@ -230,6 +241,8 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                 ad_title = (m.get("ad_title") if isinstance(m, dict) else getattr(m, "ad_title", None))
                 if (ad_link or ad_title) and cid not in ad_map:
                     ad_map[cid] = {"link": ad_link, "title": ad_title}
+        # For backward compatibility, set labels to display_names
+        labels = display_names
         templates = request.app.state.templates
         return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "names": names, "ad_map": ad_map, "q": (q or "")})
 
