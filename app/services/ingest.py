@@ -7,6 +7,8 @@ from sqlalchemy import text
 from ..db import get_session
 from ..models import Message
 from .instagram_api import fetch_message_details  # type: ignore
+import logging as _lg
+_log_up = _lg.getLogger("ingest.upsert")
 from .queue import enqueue
 from sqlalchemy import text as _sql_text
 
@@ -326,15 +328,35 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		try:
 			import asyncio as _aio
 			loop = _aio.get_event_loop()
+			try:
+				_log_up.info("upsert: received str id=%s; fetching details", str(event)[:120])
+			except Exception:
+				pass
 			detail = loop.run_until_complete(fetch_message_details(str(event)))
 			if isinstance(detail, dict):
+				try:
+					_log_up.info("upsert: fetched details keys=%s", list(detail.keys())[:8])
+				except Exception:
+					pass
 				event = detail
 			else:
+				try:
+					_log_up.warning("upsert: detail fetch returned non-dict for id=%s type=%s", str(event)[:120], type(detail).__name__)
+				except Exception:
+					pass
 				return None
 		except Exception:
+			try:
+				_log_up.warning("upsert: detail fetch failed for id=%s", str(event)[:120])
+			except Exception:
+				pass
 			return None
 	# Defensive: if event is still not a dict, bail
 	if not isinstance(event, dict):
+		try:
+			_log_up.warning("upsert: event not dict after normalization type=%s", type(event).__name__)
+		except Exception:
+			pass
 		return None
 	message_obj = event.get("message") or {}
 	if not message_obj:

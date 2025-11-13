@@ -81,6 +81,17 @@ def main() -> None:
 					increment_attempts(jid)
 					time.sleep(1)
 					continue
+				# Step log: raw fetch summary
+				try:
+					raw_count = (len(msgs) if isinstance(msgs, list) else None)
+					raw_types = list({type(m).__name__ for m in (msgs or [])}) if isinstance(msgs, list) else []
+					first_sample = None
+					if isinstance(msgs, list) and msgs:
+						s0 = msgs[0]
+						first_sample = (s0 if isinstance(s0, dict) else str(s0))[:160]
+					log.info("hydrate: raw fetched count=%s types=%s first_sample=%s", raw_count, raw_types, first_sample)
+				except Exception:
+					pass
 				# If Graph sometimes returns only message IDs (strings), fetch details
 				try:
 					if isinstance(msgs, list) and any(not isinstance(m, dict) for m in msgs):
@@ -122,7 +133,7 @@ def main() -> None:
 								ev_id = ev.get("id") if hasattr(ev, "get") else (ev if isinstance(ev, str) else None)
 							except Exception:
 								ev_id = None
-							log.warning("hydrate upsert err convo=%s:%s ev=%s err=%s", igba_id, ig_user_id, ev_id, e)
+							log.warning("hydrate upsert err convo=%s:%s ev=%s ev_type=%s err=%s", igba_id, ig_user_id, ev_id, type(ev).__name__, e)
 					# mark conversation hydrated (ai_conversations)
 					try:
 						cid_ai = f"dm:{ig_user_id}"
