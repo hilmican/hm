@@ -1736,6 +1736,10 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
     # Enqueue hydrate_conversation for this thread (igba_id + ig_user_id)
     other_id: str | None = None
     igba_id: str | None = None
+    try:
+        _log.info("hydrate.begin cid=%s", str(conversation_id))
+    except Exception:
+        pass
     with get_session() as session:
         try:
             from sqlalchemy import text as _text
@@ -1819,8 +1823,12 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
                 igba_id = str(entity_id)
             except Exception:
                 igba_id = None
+    try:
+        _log.info("hydrate.resolve.final cid=%s igba_id=%s other_id=%s", str(conversation_id), str(igba_id), str(other_id))
+    except Exception:
+        pass
     if not (igba_id and other_id):
-        raise HTTPException(status_code=400, detail="Could not resolve identifiers to hydrate")
+        raise HTTPException(status_code=400, detail=f"Could not resolve identifiers to hydrate; cid={conversation_id} igba_id={igba_id} other_id={other_id}")
     key = f"{igba_id}:{other_id}"
     try:
         enqueue("hydrate_conversation", key=key, payload={"igba_id": str(igba_id), "ig_user_id": str(other_id), "max_messages": int(max_messages)})
