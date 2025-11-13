@@ -104,10 +104,34 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
 
     Strategy:
     - First resolve the conversation id by listing page/user conversations and
-      matching the participant set. Page across conversations until found
-      (best-effort).
+      matching the participant set. Prefer cached mapping when available; otherwise
+      page across conversations until found (best-effort).
     - Then fetch messages for that conversation id.
     """
+    # 0) Try cached Graph conversation id from our DB
+    cached_id: Optional[str] = None
+    try:
+        from sqlalchemy import text as _t
+        from ..db import get_session as _gs
+        with _gs() as session:
+            row = session.exec(
+                _t(
+                    "SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u ORDER BY last_message_at DESC LIMIT 1"
+                ).params(g=str(igba_id), u=str(ig_user_id))
+            ).first()
+            if row:
+                cached_id = (row.graph_conversation_id if hasattr(row, "graph_conversation_id") else (row[0] if len(row) > 0 else None)) or None
+    except Exception:
+        cached_id = None
+    if cached_id:
+        try:
+            msgs = await fetch_messages(str(cached_id), limit=min(max(limit, 1), 200))
+            # If we successfully fetched something (including empty because of recent-only), return it.
+            return msgs
+        except Exception:
+            # Fall back to discovery if cached id is stale/invalid
+            pass
+
     token, entity_id, is_page = _get_base_token_and_id()
     base = f"https://graph.facebook.com/{GRAPH_VERSION}"
     fields = "id,updated_time,participants,unread_count"
@@ -146,6 +170,23 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
                 next_url = None
     if not conv_id:
         return []
+    # Persist mapping for future runs
+    try:
+        from sqlalchemy import text as _t
+        from ..db import get_session as _gs
+        with _gs() as session:
+            # Best-effort: update existing rows for this pair
+            session.exec(
+                _t(
+                    """
+                    UPDATE conversations
+                    SET graph_conversation_id=:cid
+                    WHERE igba_id=:g AND ig_user_id=:u
+                    """
+                ).params(cid=str(conv_id), g=str(igba_id), u=str(ig_user_id))
+            )
+    except Exception:
+        pass
     try:
         msgs = await fetch_messages(conv_id, limit=min(max(limit, 1), 200))
     except Exception:

@@ -475,6 +475,8 @@ def init_db() -> None:
                                 conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN linked_order_id INTEGER NULL")
                             if 'ai_run_id' not in have_cols:
                                 conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_run_id INTEGER NULL")
+                            if 'graph_conversation_id' not in have_cols:
+                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN graph_conversation_id VARCHAR(128) NULL")
                             # Helpful indexes
                             try:
                                 conn.exec_driver_sql("CREATE INDEX idx_conversations_ai_processed ON conversations(ai_processed_at)")
@@ -1038,6 +1040,8 @@ def init_db() -> None:
                         add_cols.append(("linked_order_id", "INTEGER"))
                     if 'ai_run_id' not in have:
                         add_cols.append(("ai_run_id", "INTEGER"))
+                    if 'graph_conversation_id' not in have:
+                        add_cols.append(("graph_conversation_id", "TEXT"))
                     for name, typ in add_cols:
                         try:
                             conn.exec_driver_sql(f"ALTER TABLE conversations ADD COLUMN {name} {typ}")
