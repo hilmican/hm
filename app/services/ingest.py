@@ -176,8 +176,8 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 				session.exec(
 					_sql_text(
 						"""
-						INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at)
-						VALUES (:cid, :mid, :ts, :txt, :dir, NULL, :sid, :rid, :adid, :alink, :atitle, (SELECT hydrated_at FROM ai_conversations WHERE convo_id=:cid))
+						INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
+						VALUES (:cid, :mid, :ts, :txt, :dir, NULL, :sid, :rid, :adid, :alink, :atitle)
 						ON CONFLICT(convo_id) DO UPDATE SET
 						  last_message_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_id ELSE ai_conversations.last_message_id END,
 						  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), excluded.last_message_timestamp_ms),
@@ -208,8 +208,8 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 					session.exec(
 						_sql_text(
 							"""
-							INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at)
-							VALUES (:cid, :mid, :ts, :txt, :dir, NULL, :sid, :rid, :adid, :alink, :atitle, (SELECT hydrated_at FROM ai_conversations WHERE convo_id=:cid))
+							INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
+							VALUES (:cid, :mid, :ts, :txt, :dir, NULL, :sid, :rid, :adid, :alink, :atitle)
 							ON DUPLICATE KEY UPDATE
 							  last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
 							  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
@@ -234,10 +234,12 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 							atitle=ad_title,
 						)
 					)
-				except Exception:
-					pass
-	except Exception:
-		pass
+				except Exception as e:
+					import logging as _lg
+					_lg.getLogger("ingest.upsert").warning("ingest upsert ai_conversations failed cid=%s mid=%s ts=%s err=%s", str(conversation_id), str(row.id), str(ts_val), str(e)[:200])
+	except Exception as e:
+		import logging as _lg
+		_lg.getLogger("ingest.upsert").warning("ingest upsert outer failed cid=%s mid=%s err=%s", str(conversation_id), str(getattr(row, 'id', None)), str(e)[:200])
 	# upsert ads cache
 	try:
 		if ad_id:
@@ -429,8 +431,8 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any], igba_id: str) -
 				session.exec(
 					_t(
 						"""
-						INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at)
-						VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle, (SELECT hydrated_at FROM ai_conversations WHERE convo_id=:cid))
+						INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
+						VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
 						ON CONFLICT(convo_id) DO UPDATE SET
 						  last_message_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_id ELSE ai_conversations.last_message_id END,
 						  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), excluded.last_message_timestamp_ms),
@@ -457,13 +459,13 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any], igba_id: str) -
 						atitle=ad_title,
 					)
 				)
-			except Exception:
+			except Exception as e:
 				try:
 					session.exec(
 						_t(
 							"""
-							INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at)
-							VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle, (SELECT hydrated_at FROM ai_conversations WHERE convo_id=:cid))
+							INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
+							VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
 							ON DUPLICATE KEY UPDATE
 							  last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
 							  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
@@ -490,8 +492,9 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any], igba_id: str) -
 							atitle=ad_title,
 						)
 					)
-				except Exception:
-					pass
+				except Exception as e2:
+					import logging as _lg
+					_lg.getLogger("ingest.upsert").warning("hydrate upsert ai_conversations failed cid=%s mid=%s ts=%s err=%s first_err=%s", str(conversation_id), str(row.id), str(ts_ms), str(e2)[:200], str(e)[:120])
 	except Exception:
 		pass
 	# story cache
