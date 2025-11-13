@@ -1221,6 +1221,26 @@ def merge_this_thread_to_graph(conversation_id: str, max_messages: int = 50):
                 graph_id = rowc.graph_conversation_id if hasattr(rowc, "graph_conversation_id") else (rowc[0] if len(rowc) > 0 else None)
     except Exception:
         graph_id = None
+    # Fallback: infer graph conversation id from latest message rows if mapping missing
+    if not graph_id:
+        try:
+            from sqlalchemy import text as _text
+            with get_session() as session:
+                rowm = session.exec(
+                    _text(
+                        """
+                        SELECT conversation_id
+                        FROM message
+                        WHERE (ig_sender_id=:u OR ig_recipient_id=:u) AND conversation_id IS NOT NULL AND conversation_id NOT LIKE 'dm:%'
+                        ORDER BY timestamp_ms DESC, id DESC
+                        LIMIT 1
+                        """
+                    ).params(u=str(other_id))
+                ).first()
+                if rowm:
+                    graph_id = rowm.conversation_id if hasattr(rowm, "conversation_id") else (rowm[0] if len(rowm) > 0 else None)
+        except Exception:
+            graph_id = None
     if not graph_id:
         return {"status": "error", "error": "graph_conversation_id_not_found"}
     # Perform targeted migration using same logic as bulk endpoint

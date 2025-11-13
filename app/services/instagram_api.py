@@ -262,16 +262,39 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
         from sqlalchemy import text as _t
         from ..db import get_session as _gs
         with _gs() as session:
-            # Best-effort: update existing rows for this pair
-            session.exec(
-                _t(
-                    """
-                    UPDATE conversations
-                    SET graph_conversation_id=:cid
-                    WHERE igba_id=:g AND ig_user_id=:u
-                    """
-                ).params(cid=str(conv_id), g=str(igba_id), u=str(ig_user_id))
-            )
+            # Ensure conversations row exists for this pair, then set graph_conversation_id
+            convo_row_id = f"{igba_id}:{ig_user_id}"
+            # Insert-or-ignore row with minimal fields (SQLite/MySQL compatible)
+            try:
+                session.exec(
+                    _t(
+                        """
+                        INSERT OR IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count)
+                        VALUES (:cv, :g, :u, CURRENT_TIMESTAMP, 0)
+                        """
+                    ).params(cv=str(convo_row_id), g=str(igba_id), u=str(ig_user_id))
+                )
+            except Exception:
+                try:
+                    session.exec(
+                        _t(
+                            """
+                            INSERT IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count)
+                            VALUES (:cv, :g, :u, CURRENT_TIMESTAMP, 0)
+                            """
+                        ).params(cv=str(convo_row_id), g=str(igba_id), u=str(ig_user_id))
+                    )
+                except Exception:
+                    pass
+            # Set or update mapping to Graph conversation id
+            try:
+                session.exec(
+                    _t(
+                        "UPDATE conversations SET graph_conversation_id=:cid WHERE igba_id=:g AND ig_user_id=:u"
+                    ).params(cid=str(conv_id), g=str(igba_id), u=str(ig_user_id))
+                )
+            except Exception:
+                pass
     except Exception:
         pass
     try:
