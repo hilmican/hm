@@ -144,6 +144,16 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
     async with httpx.AsyncClient() as client:
         next_url: Optional[str] = base + path
         next_params: Dict[str, Any] = params
+        # Owner candidates: page id (entity_id) and IG business user id when available
+        owner_candidates = {str(entity_id)}
+        try:
+            ig_business_id = os.getenv("IG_USER_ID")
+            if ig_business_id:
+                owner_candidates.add(str(ig_business_id))
+        except Exception:
+            pass
+        # Potential candidates to deep-check via messages (fallback)
+        convo_candidates: list[str] = []
         while page_no < max_pages and next_url:
             page_no += 1
             try:
@@ -155,9 +165,13 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
                 cid = str(c.get("id"))
                 parts = ((c.get("participants") or {}).get("data") or [])
                 ids = {str(p.get("id")) for p in parts if p.get("id")}
-                if igba_id in ids and ig_user_id in ids:
+                # Prefer exact match: user + one of owner ids
+                if (ig_user_id in ids) and (ids & owner_candidates):
                     conv_id = cid
                     break
+                # Fallback candidate: at least the user is a participant; verify by fetching messages later
+                if ig_user_id in ids:
+                    convo_candidates.append(cid)
             if conv_id:
                 break
             # advance pagination
@@ -168,6 +182,24 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
                 next_params = {}  # the 'next' URL already contains the token and fields
             else:
                 next_url = None
+        # Fallback: scan a limited number of candidate conversations by checking their messages
+        if not conv_id and convo_candidates:
+            for cid in convo_candidates[:20]:
+                try:
+                    sample = await fetch_messages(cid, limit=10)
+                except Exception:
+                    sample = []
+                found = False
+                for m in (sample or []):
+                    frm = ((m.get("from") or {}) or {}).get("id")
+                    to = (((m.get("to") or {}) or {}).get("data") or [])
+                    recips = {str(x.get("id")) for x in to if x.get("id")}
+                    if str(ig_user_id) == str(frm) or str(ig_user_id) in recips:
+                        conv_id = cid
+                        found = True
+                        break
+                if found:
+                    break
     if not conv_id:
         return []
     # Persist mapping for future runs
