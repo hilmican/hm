@@ -69,6 +69,21 @@ def create_app() -> FastAPI:
 
 	@app.on_event("startup")
 	def _startup() -> None:
+		# Ensure application loggers output to stdout (uvicorn doesn't auto-configure custom loggers)
+		try:
+			import logging as _lg
+			_fmt = _lg.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+			_h = _lg.StreamHandler()
+			_h.setFormatter(_fmt)
+			for lname in ("instagram.webhook", "graph.api", "ingest.upsert"):
+				lg = _lg.getLogger(lname)
+				lg.setLevel(_lg.INFO)
+				# avoid duplicate handlers
+				if not any(isinstance(h, _lg.StreamHandler) for h in lg.handlers):
+					lg.addHandler(_h)
+				lg.propagate = False
+		except Exception:
+			pass
 		init_db()
 		# Load i18n catalogs
 		try:
