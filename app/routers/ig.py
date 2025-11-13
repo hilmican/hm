@@ -1642,12 +1642,44 @@ def enqueue_enrich(conversation_id: str):
                 other_id = str(getattr(row, "ig_user_id", None) or (row[1] if len(row) > 1 else "") or "")
         except Exception:
             pass
+        # If convo_id wasn't found, try resolving by Graph conversation id mapping
+        if not other_id:
+            try:
+                from sqlalchemy import text as _text
+                rowg = session.exec(
+                    _text("SELECT igba_id, ig_user_id FROM conversations WHERE graph_conversation_id=:gc LIMIT 1")
+                ).params(gc=str(conversation_id)).first()
+                if rowg:
+                    igba_id = str(getattr(rowg, "igba_id", None) or (rowg[0] if len(rowg) > 0 else "") or "")
+                    other_id = str(getattr(rowg, "ig_user_id", None) or (rowg[1] if len(rowg) > 1 else "") or "")
+            except Exception:
+                pass
         # Fallback for legacy conversation_id formats
         if not other_id and conversation_id.startswith("dm:"):
             try:
                 other_id = conversation_id.split(":", 1)[1] or None
             except Exception:
                 other_id = None
+        # Last-resort: infer other_id from latest message rows for this conversation id
+        if not other_id:
+            try:
+                from sqlalchemy import text as _text
+                rmsg = session.exec(
+                    _text("SELECT ig_sender_id, ig_recipient_id FROM message WHERE conversation_id=:cid ORDER BY timestamp_ms DESC, id DESC LIMIT 1")
+                ).params(cid=str(conversation_id)).first()
+                if rmsg:
+                    sid = getattr(rmsg, "ig_sender_id", None) if hasattr(rmsg, "ig_sender_id") else (rmsg[0] if len(rmsg) > 0 else None)
+                    rid = getattr(rmsg, "ig_recipient_id", None) if hasattr(rmsg, "ig_recipient_id") else (rmsg[1] if len(rmsg) > 1 else None)
+                    try:
+                        _, owner_id, _ = _get_base_token_and_id()
+                        if sid and str(sid) == str(owner_id):
+                            other_id = str(rid) if rid else None
+                        else:
+                            other_id = str(sid) if sid else None
+                    except Exception:
+                        other_id = str(sid) if sid else (str(rid) if rid else None)
+            except Exception:
+                pass
         if not igba_id:
             try:
                 _, entity_id, _ = _get_base_token_and_id()
@@ -1686,11 +1718,43 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
                 other_id = str(getattr(row, "ig_user_id", None) or (row[1] if len(row) > 1 else "") or "")
         except Exception:
             pass
+        # Resolve via Graph conversation id mapping if convo_id row missing
+        if not other_id:
+            try:
+                from sqlalchemy import text as _text
+                rowg = session.exec(
+                    _text("SELECT igba_id, ig_user_id FROM conversations WHERE graph_conversation_id=:gc LIMIT 1")
+                ).params(gc=str(conversation_id)).first()
+                if rowg:
+                    igba_id = str(getattr(rowg, "igba_id", None) or (rowg[0] if len(rowg) > 0 else "") or "")
+                    other_id = str(getattr(rowg, "ig_user_id", None) or (rowg[1] if len(rowg) > 1 else "") or "")
+            except Exception:
+                pass
         if not other_id and conversation_id.startswith("dm:"):
             try:
                 other_id = conversation_id.split(":", 1)[1] or None
             except Exception:
                 other_id = None
+        # Last-resort: infer other_id from latest messages when viewing by Graph CID
+        if not other_id:
+            try:
+                from sqlalchemy import text as _text
+                rmsg = session.exec(
+                    _text("SELECT ig_sender_id, ig_recipient_id FROM message WHERE conversation_id=:cid ORDER BY timestamp_ms DESC, id DESC LIMIT 1")
+                ).params(cid=str(conversation_id)).first()
+                if rmsg:
+                    sid = getattr(rmsg, "ig_sender_id", None) if hasattr(rmsg, "ig_sender_id") else (rmsg[0] if len(rmsg) > 0 else None)
+                    rid = getattr(rmsg, "ig_recipient_id", None) if hasattr(rmsg, "ig_recipient_id") else (rmsg[1] if len(rmsg) > 1 else None)
+                    try:
+                        _, owner_id, _ = _get_base_token_and_id()
+                        if sid and str(sid) == str(owner_id):
+                            other_id = str(rid) if rid else None
+                        else:
+                            other_id = str(sid) if sid else None
+                    except Exception:
+                        other_id = str(sid) if sid else (str(rid) if rid else None)
+            except Exception:
+                pass
         if not igba_id:
             try:
                 _, entity_id, _ = _get_base_token_and_id()
