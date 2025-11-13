@@ -1680,6 +1680,35 @@ def enqueue_enrich(conversation_id: str):
                         other_id = str(sid) if sid else (str(rid) if rid else None)
             except Exception:
                 pass
+        # Final fallback: derive by fetching recent messages from Graph for this conversation id
+        if not other_id:
+            try:
+                import asyncio as _aio
+                loop = _aio.get_event_loop()
+                from ..services.instagram_api import fetch_messages as _fm, _get_base_token_and_id as _gb
+                _, owner_id, _ = _gb()
+                msgs = loop.run_until_complete(_fm(str(conversation_id), limit=10))
+                uid: str | None = None
+                for m in (msgs or []):
+                    try:
+                        frm = (m.get("from") or {}).get("id")
+                        if frm and str(frm) != str(owner_id):
+                            uid = str(frm)
+                            break
+                        to = (((m.get("to") or {}) or {}).get("data") or [])
+                        for t in to:
+                            tid = t.get("id")
+                            if tid and str(tid) != str(owner_id):
+                                uid = str(tid)
+                                break
+                        if uid:
+                            break
+                    except Exception:
+                        continue
+                if uid:
+                    other_id = uid
+            except Exception:
+                pass
         if not igba_id:
             try:
                 _, entity_id, _ = _get_base_token_and_id()
@@ -1753,6 +1782,35 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
                             other_id = str(sid) if sid else None
                     except Exception:
                         other_id = str(sid) if sid else (str(rid) if rid else None)
+            except Exception:
+                pass
+        # Final fallback: derive by fetching recent messages from Graph for this conversation id
+        if not other_id:
+            try:
+                import asyncio as _aio
+                loop = _aio.get_event_loop()
+                from ..services.instagram_api import fetch_messages as _fm, _get_base_token_and_id as _gb
+                _, owner_id, _ = _gb()
+                msgs = loop.run_until_complete(_fm(str(conversation_id), limit=10))
+                uid: str | None = None
+                for m in (msgs or []):
+                    try:
+                        frm = (m.get("from") or {}).get("id")
+                        if frm and str(frm) != str(owner_id):
+                            uid = str(frm)
+                            break
+                        to = (((m.get("to") or {}) or {}).get("data") or [])
+                        for t in to:
+                            tid = t.get("id")
+                            if tid and str(tid) != str(owner_id):
+                                uid = str(tid)
+                                break
+                        if uid:
+                            break
+                    except Exception:
+                        continue
+                if uid:
+                    other_id = uid
             except Exception:
                 pass
         if not igba_id:
