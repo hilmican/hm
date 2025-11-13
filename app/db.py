@@ -966,7 +966,7 @@ def init_db() -> None:
                     )
                     """
                 )
-                -- conversations table deprecated: creation removed
+                # conversations table deprecated: creation removed
                 # ai_conversations table for AI processing watermark keyed by message.conversation_id
                 conn.exec_driver_sql(
                     """
@@ -1278,7 +1278,7 @@ def init_db() -> None:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_shadow_reply_status ON ai_shadow_reply(status)")
                 except Exception:
                     pass
-                -- latest_messages table deprecated: creation removed
+                # latest_messages table deprecated: creation removed
             return
         except Exception as e:
             last_err = e
