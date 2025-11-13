@@ -1688,6 +1688,13 @@ def enqueue_enrich(conversation_id: str):
                 from ..services.instagram_api import fetch_messages as _fm, _get_base_token_and_id as _gb
                 _, owner_id, _ = _gb()
                 msgs = loop.run_until_complete(_fm(str(conversation_id), limit=10))
+                try:
+                    _log.info("hydrate.resolve.graph_scan msgs_len=%s owner=%s", (len(msgs) if isinstance(msgs, list) else None), str(owner_id))
+                    if isinstance(msgs, list) and msgs:
+                        m0 = msgs[0] if isinstance(msgs[0], dict) else {}
+                        _log.info("hydrate.resolve.graph_scan first.from=%s first.to_count=%s", str(((m0.get('from') or {}) or {}).get('id')), len((((m0.get('to') or {}) or {}).get('data') or [])))
+                except Exception:
+                    pass
                 uid: str | None = None
                 for m in (msgs or []):
                     try:
@@ -1707,7 +1714,15 @@ def enqueue_enrich(conversation_id: str):
                         continue
                 if uid:
                     other_id = uid
-            except Exception:
+                else:
+                    try:
+                        _log.info("hydrate.resolve.graph_scan_no_uid cid=%s owner=%s", str(conversation_id), str(owner_id))
+                    except Exception:
+                        pass
+            except Exception as ex_gs:
+                try:
+                    _log.info("hydrate.resolve.graph_scan_error cid=%s err=%s", str(conversation_id), str(ex_gs)[:160])
+                except Exception:
                 pass
         if not igba_id:
             try:
