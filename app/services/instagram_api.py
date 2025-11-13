@@ -104,21 +104,46 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
 
     Strategy:
     - First resolve the conversation id by listing page/user conversations and
-      matching the participant set (best-effort and limited).
+      matching the participant set. Page across conversations until found
+      (best-effort).
     - Then fetch messages for that conversation id.
     """
-    try:
-        convs = await fetch_conversations(limit=50)
-    except Exception:
-        convs = []
+    token, entity_id, is_page = _get_base_token_and_id()
+    base = f"https://graph.facebook.com/{GRAPH_VERSION}"
+    fields = "id,updated_time,participants,unread_count"
+    path = f"/{entity_id}/conversations"
+    params = {"access_token": token, "limit": 50, "fields": fields, "platform": "instagram"}
     conv_id: Optional[str] = None
-    for c in convs:
-        cid = str(c.get("id"))
-        parts = ((c.get("participants") or {}).get("data") or [])
-        ids = {str(p.get("id")) for p in parts if p.get("id")}
-        if igba_id in ids and ig_user_id in ids:
-            conv_id = cid
-            break
+    # Page through up to max_pages of conversations to find the matching participant set
+    max_pages = 10
+    page_no = 0
+    async with httpx.AsyncClient() as client:
+        next_url: Optional[str] = base + path
+        next_params: Dict[str, Any] = params
+        while page_no < max_pages and next_url:
+            page_no += 1
+            try:
+                data = await _get(client, next_url, next_params)
+            except Exception:
+                data = {}
+            convs = data.get("data", []) or []
+            for c in convs:
+                cid = str(c.get("id"))
+                parts = ((c.get("participants") or {}).get("data") or [])
+                ids = {str(p.get("id")) for p in parts if p.get("id")}
+                if igba_id in ids and ig_user_id in ids:
+                    conv_id = cid
+                    break
+            if conv_id:
+                break
+            # advance pagination
+            paging = data.get("paging") or {}
+            nurl = paging.get("next")
+            if nurl and isinstance(nurl, str) and nurl.strip():
+                next_url = nurl
+                next_params = {}  # the 'next' URL already contains the token and fields
+            else:
+                next_url = None
     if not conv_id:
         return []
     try:
