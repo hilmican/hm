@@ -363,8 +363,8 @@ class IGUser(SQLModel, table=True):
 class IGAiDebugRun(SQLModel, table=True):
     __tablename__ = "ig_ai_debug_run"
     id: Optional[int] = Field(default=None, primary_key=True)
-	# Store internal conversation id as string for backward compatibility; callers pass int->str
-	conversation_id: str = Field(index=True)
+    # Store internal conversation id as string for backward compatibility; callers pass int->str
+    conversation_id: str = Field(index=True)
     job_id: Optional[int] = Field(default=None, index=True)
     ai_run_id: Optional[int] = Field(default=None, index=True)
     status: str = Field(default="pending", index=True)
