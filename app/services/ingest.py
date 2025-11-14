@@ -15,20 +15,22 @@ from sqlalchemy import text as _sql_text
 
 
 def _ensure_ig_account(conn, igba_id: str) -> None:
+	"""Ensure ig_accounts row exists for given igba_id (MySQL dialect)."""
 	conn.exec_driver_sql(
 		"""
-		INSERT OR IGNORE INTO ig_accounts(igba_id, updated_at)
-		VALUES (?, CURRENT_TIMESTAMP)
+		INSERT IGNORE INTO ig_accounts(igba_id, updated_at)
+		VALUES (%s, CURRENT_TIMESTAMP)
 		""",
 		(igba_id,),
 	)
 
 
 def _ensure_ig_user(conn, ig_user_id: str) -> None:
+	"""Ensure ig_users row exists for given ig_user_id (MySQL dialect)."""
 	conn.exec_driver_sql(
 		"""
-		INSERT OR IGNORE INTO ig_users(ig_user_id)
-		VALUES (?)
+		INSERT IGNORE INTO ig_users(ig_user_id)
+		VALUES (%s)
 		""",
 		(ig_user_id,),
 	)
@@ -706,13 +708,11 @@ def handle(raw_event_id: int) -> int:
 					try:
 						other_party_id = (event.get("recipient") or {}).get("id") if ((event.get("sender") or {}).get("id") == igba_id) else (event.get("sender") or {}).get("id")
 						cid = f"dm:{str(other_party_id)}"
+						# MySQL dialect: create ai_conversations row if missing
 						try:
-							conn.exec_driver_sql("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (?)", (cid,))
+							conn.exec_driver_sql("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (%s)", (cid,))  # type: ignore
 						except Exception:
-							try:
-								conn.exec_driver_sql("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (%s)", (cid,))  # type: ignore
-							except Exception:
-								pass
+							pass
 						# one-time hydration enqueue if not hydrated (ai_conversations)
 						row_h = session.exec(text("SELECT hydrated_at FROM ai_conversations WHERE convo_id=:cid").params(cid=cid)).first()
 						need_hydrate = (not row_h) or (not (row_h.hydrated_at if hasattr(row_h, 'hydrated_at') else (row_h[0] if isinstance(row_h,(list,tuple)) else None)))
