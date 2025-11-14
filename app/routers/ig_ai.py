@@ -553,7 +553,7 @@ def link_suggest_page(request: Request, start: str | None = None, end: str | Non
                             ORDER BY COALESCE(m.timestamp_ms,0) DESC, m.id DESC
                             LIMIT 1
                             """
-                        ).params(p=f\"%{last10}%\")
+                        ).params(p=f"%{last10}%")
                     ).first()
                     if rowc:
                         convo_id = rowc.conversation_id if hasattr(rowc, \"conversation_id\") else rowc[0]
@@ -699,8 +699,8 @@ def unlinked_purchases(request: Request, q: str | None = None, start: str | None
     if q:
         # Search in contact fields (when present) or AI JSON (on ig_users)
         where.append("(LOWER(COALESCE(u.contact_name,'')) LIKE :qq OR COALESCE(u.contact_phone,'') LIKE :qp OR LOWER(COALESCE(u.ai_json,'')) LIKE :qa)")
-        qs = f\"%{q.lower()}%\"
-        params.update({\"qq\": qs, \"qa\": qs, \"qp\": f\"%{q}%\"} )
+        qs = f"%{q.lower()}%"
+        params.update({"qq": qs, "qa": qs, "qp": f"%{q}%"} )
     # Build via subquery to filter on last_ts window
     sql = (
         "SELECT t.convo_id, u.contact_name, u.contact_phone, u.contact_address, "
