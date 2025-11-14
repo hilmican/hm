@@ -556,7 +556,7 @@ def link_suggest_page(request: Request, start: str | None = None, end: str | Non
                         ).params(p=f"%{last10}%")
                     ).first()
                     if rowc:
-                        convo_id = rowc.conversation_id if hasattr(rowc, \"conversation_id\") else rowc[0]
+                        convo_id = rowc.conversation_id if hasattr(rowc, "conversation_id") else rowc[0]
                 except Exception:
                     convo_id = None
             # Fallback: search messages.text for digits
