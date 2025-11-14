@@ -98,7 +98,13 @@ async def fetch_messages(conversation_id: str, limit: int = 50) -> List[Dict[str
     params["platform"] = "instagram"
     async with httpx.AsyncClient() as client:
         data = await _get(client, base + path, params)
-        return data.get("data", [])
+        msgs = data.get("data", []) or []
+        # Annotate each message with the Graph conversation id so downstream ingestion
+        # can persist Message.conversation_id using this stable identifier.
+        for m in msgs:
+            if isinstance(m, dict):
+                m["__graph_conversation_id"] = str(conversation_id)
+        return msgs
 
 
 async def fetch_message_details(message_id: str) -> Dict[str, Any]:
