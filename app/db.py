@@ -181,6 +181,21 @@ def init_db() -> None:
                                     conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN raw_json LONGTEXT")
                         except Exception:
                             pass
+                        # Ensure message.referral_json is LONGTEXT as well (ads context blobs can be large)
+                        try:
+                            row = conn.exec_driver_sql(
+                                """
+                                SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                                FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'referral_json'
+                                """
+                            ).fetchone()
+                            if row is not None:
+                                dtype = str(row[0]).lower()
+                                if dtype in ("varchar", "char", "text", "tinytext", "mediumtext"):
+                                    conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN referral_json LONGTEXT")
+                        except Exception:
+                            pass
                         # Ensure new ad metadata columns exist (MySQL)
                         try:
                             rows = conn.exec_driver_sql(
@@ -1004,7 +1019,7 @@ def init_db() -> None:
                 conn.exec_driver_sql(
                     """
                     CREATE TABLE IF NOT EXISTS attachments (
-                        id INTEGER PRIMARY KEY,
+                        id INTEGER PRIMARY KEY AUTO_INCREMENT,
                         message_id INTEGER NOT NULL,
                         kind TEXT NOT NULL,
                         graph_id TEXT,
