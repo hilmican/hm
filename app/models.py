@@ -273,7 +273,6 @@ class Conversation(SQLModel, table=True):
     last_message_timestamp_ms: Optional[int] = Field(
         default=None,
         sa_column=Column(BigInteger),
-        index=True,
         description="Timestamp in ms since epoch of the last message",
     )
     last_message_text: Optional[str] = Field(default=None)
