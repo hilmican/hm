@@ -732,22 +732,8 @@ def handle(raw_event_id: int) -> int:
 						# Synchronous user creation with data fetch + initial hydrate for new users
 						_ensure_ig_user_with_data(session, str(sender_id), str(igba_id))
 					mid = message_obj.get("mid") or message_obj.get("id")
-					# ensure ai_conversations row exists and possibly enqueue hydration
-					try:
-						other_party_id = (event.get("recipient") or {}).get("id") if ((event.get("sender") or {}).get("id") == igba_id) else (event.get("sender") or {}).get("id")
-						cid = f"dm:{str(other_party_id)}"
-						# MySQL dialect: create ai_conversations row if missing
-						try:
-							conn.exec_driver_sql("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (%s)", (cid,))  # type: ignore
-						except Exception:
-							pass
-						# one-time hydration enqueue if not hydrated (ai_conversations)
-						row_h = session.exec(text("SELECT hydrated_at FROM ai_conversations WHERE convo_id=:cid").params(cid=cid)).first()
-						need_hydrate = (not row_h) or (not (row_h.hydrated_at if hasattr(row_h, 'hydrated_at') else (row_h[0] if isinstance(row_h,(list,tuple)) else None)))
-						if need_hydrate:
-							enqueue("hydrate_conversation", key=cid, payload={"igba_id": str(igba_id), "ig_user_id": str(other_party_id), "max_messages": 200})
-					except Exception:
-						pass
+					# Message-level upsert now owns ai_conversations updates keyed by Graph CID;
+					# skip creating dm:<id> ai_conversations placeholders to avoid duplicate threads.
 					msg_id = _insert_message(session, event, igba_id)
 					if msg_id:
 						inserted += 1
