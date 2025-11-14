@@ -115,23 +115,13 @@ async def receive_events(request: Request):
 				raw_event_id = row.id if hasattr(row, "id") else row[0]
 				saved_raw += 1
 			else:
-				# Insert raw event and get ID
-				try:
-					# Try SQLite/MySQL RETURNING syntax
-					result = session.exec(text("INSERT INTO raw_events (uniq_hash, payload_json) VALUES (:h, :p) RETURNING id").params(h=uniq_hash, p=json.dumps(payload)))
-					raw_event_id = result.first()
-					if raw_event_id:
-						raw_event_id = raw_event_id.id if hasattr(raw_event_id, "id") else raw_event_id[0]
-					session.commit()
-					saved_raw += 1
-				except Exception:
-					# Fallback: insert without RETURNING, then query
-					session.exec(text("INSERT INTO raw_events (uniq_hash, payload_json) VALUES (:h, :p)").params(h=uniq_hash, p=json.dumps(payload)))
-					session.commit()
-					# Get the ID we just inserted
-					row = session.exec(text("SELECT id FROM raw_events WHERE uniq_hash = :h").params(h=uniq_hash)).first()
-					if row:
-						raw_event_id = row.id if hasattr(row, "id") else row[0]
+				# Insert raw event, then get ID
+				session.exec(text("INSERT INTO raw_events (uniq_hash, payload) VALUES (:h, :p)").params(h=uniq_hash, p=json.dumps(payload)))
+				session.commit()
+				# Get the ID we just inserted
+				row = session.exec(text("SELECT id FROM raw_events WHERE uniq_hash = :h").params(h=uniq_hash)).first()
+				if row:
+					raw_event_id = row.id if hasattr(row, "id") else row[0]
 					saved_raw += 1
 		except Exception:
 			# ignore duplicates or insert errors to keep webhook fast
