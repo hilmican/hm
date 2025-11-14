@@ -263,7 +263,7 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
         except Exception:
             pass
         return []
-    # Persist mapping for future runs
+    # Persist mapping for future runs and merge any legacy dm:<ig_user_id> rows
     try:
         from sqlalchemy import text as _t
         from ..db import get_session as _gs
@@ -300,6 +300,49 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
                     ).params(cid=str(conv_id), g=str(igba_id), u=str(ig_user_id))
                 )
             except Exception:
+                pass
+            # Automatic per-user merge: migrate any legacy dm:<ig_user_id> rows to this Graph CID
+            try:
+                dm_id = f"dm:{ig_user_id}"
+                # Messages
+                session.exec(
+                    _t("UPDATE message SET conversation_id=:g WHERE conversation_id=:d").params(
+                        g=str(conv_id), d=str(dm_id)
+                    )
+                )
+                # ai_conversations upsert copy (MySQL path, mirroring admin bulk merge)
+                session.exec(
+                    _t(
+                        """
+                        INSERT INTO ai_conversations(
+                            convo_id, last_message_id, last_message_timestamp_ms, last_message_text,
+                            last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id,
+                            last_ad_id, last_ad_link, last_ad_title, hydrated_at
+                        )
+                        SELECT
+                            :g, last_message_id, last_message_timestamp_ms, last_message_text,
+                            last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id,
+                            last_ad_id, last_ad_link, last_ad_title, hydrated_at
+                        FROM ai_conversations WHERE convo_id=:d
+                        ON DUPLICATE KEY UPDATE
+                          last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
+                          last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
+                          last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
+                          last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
+                          last_sender_username=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_sender_username), ai_conversations.last_sender_username),
+                          ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
+                          ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
+                          last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
+                          last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
+                          last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title),
+                          hydrated_at=COALESCE(ai_conversations.hydrated_at, VALUES(hydrated_at))
+                        """
+                    ).params(g=str(conv_id), d=str(dm_id))
+                )
+                # Remove old dm row if exists
+                session.exec(_t("DELETE FROM ai_conversations WHERE convo_id=:d").params(d=str(dm_id)))
+            except Exception:
+                # Best-effort; never fail fetch_thread_messages because of merge
                 pass
     except Exception:
         pass
