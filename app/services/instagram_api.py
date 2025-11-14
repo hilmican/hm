@@ -263,87 +263,27 @@ async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200)
         except Exception:
             pass
         return []
-    # Persist mapping for future runs and merge any legacy dm:<ig_user_id> rows
+    # Persist mapping for future runs using the unified conversations table
     try:
         from sqlalchemy import text as _t
         from ..db import get_session as _gs
+        from .ingest import _get_or_create_conversation_id as _get_conv_id  # lazy import to avoid cycles
         with _gs() as session:
-            # Ensure conversations row exists for this pair, then set graph_conversation_id
-            convo_row_id = f"{igba_id}:{ig_user_id}"
-            # Insert-or-ignore row with minimal fields (SQLite/MySQL compatible)
-            try:
-                session.exec(
-                    _t(
-                        """
-                        INSERT OR IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count)
-                        VALUES (:cv, :g, :u, CURRENT_TIMESTAMP, 0)
-                        """
-                    ).params(cv=str(convo_row_id), g=str(igba_id), u=str(ig_user_id))
-                )
-            except Exception:
+            convo_pk = _get_conv_id(session, str(igba_id), str(ig_user_id))
+            if convo_pk is not None:
                 try:
                     session.exec(
                         _t(
                             """
-                            INSERT IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count)
-                            VALUES (:cv, :g, :u, CURRENT_TIMESTAMP, 0)
+                            UPDATE conversations
+                            SET graph_conversation_id=:cid, hydrated_at=COALESCE(hydrated_at, CURRENT_TIMESTAMP)
+                            WHERE id=:cid_int
                             """
-                        ).params(cv=str(convo_row_id), g=str(igba_id), u=str(ig_user_id))
+                        ).params(cid=str(conv_id), cid_int=int(convo_pk))
                     )
                 except Exception:
+                    # Best-effort; mapping can also be established later by other flows
                     pass
-            # Set or update mapping to Graph conversation id
-            try:
-                session.exec(
-                    _t(
-                        "UPDATE conversations SET graph_conversation_id=:cid WHERE igba_id=:g AND ig_user_id=:u"
-                    ).params(cid=str(conv_id), g=str(igba_id), u=str(ig_user_id))
-                )
-            except Exception:
-                pass
-            # Automatic per-user merge: migrate any legacy dm:<ig_user_id> rows to this Graph CID
-            try:
-                dm_id = f"dm:{ig_user_id}"
-                # Messages
-                session.exec(
-                    _t("UPDATE message SET conversation_id=:g WHERE conversation_id=:d").params(
-                        g=str(conv_id), d=str(dm_id)
-                    )
-                )
-                # ai_conversations upsert copy (MySQL path, mirroring admin bulk merge)
-                session.exec(
-                    _t(
-                        """
-                        INSERT INTO ai_conversations(
-                            convo_id, last_message_id, last_message_timestamp_ms, last_message_text,
-                            last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id,
-                            last_ad_id, last_ad_link, last_ad_title, hydrated_at
-                        )
-                        SELECT
-                            :g, last_message_id, last_message_timestamp_ms, last_message_text,
-                            last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id,
-                            last_ad_id, last_ad_link, last_ad_title, hydrated_at
-                        FROM ai_conversations WHERE convo_id=:d
-                        ON DUPLICATE KEY UPDATE
-                          last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
-                          last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
-                          last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
-                          last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
-                          last_sender_username=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_sender_username), ai_conversations.last_sender_username),
-                          ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
-                          ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
-                          last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
-                          last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
-                          last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title),
-                          hydrated_at=COALESCE(ai_conversations.hydrated_at, VALUES(hydrated_at))
-                        """
-                    ).params(g=str(conv_id), d=str(dm_id))
-                )
-                # Remove old dm row if exists
-                session.exec(_t("DELETE FROM ai_conversations WHERE convo_id=:d").params(d=str(dm_id)))
-            except Exception:
-                # Best-effort; never fail fetch_thread_messages because of merge
-                pass
     except Exception:
         pass
     try:
@@ -379,6 +319,8 @@ async def sync_latest_conversations(limit: int = 25) -> int:
     conversations = await fetch_conversations(limit=limit)
     saved = 0
     with get_session() as session:
+        from .ingest import _get_or_create_conversation_id as _get_conv_id
+
         for conv in conversations:
             cid = str(conv.get("id"))
             msgs = await fetch_messages(cid, limit=50)
@@ -407,8 +349,19 @@ async def sync_latest_conversations(limit: int = 25) -> int:
                     ts_ms = int(dt_obj.timestamp() * 1000) if dt_obj else None
                 except Exception:
                     ts_ms = None
-                # Store under Graph conversation id (authoritative id)
-                conv_id_norm = cid
+
+                # Resolve or create internal Conversation row using (page, other_user)
+                other_party_id = recipient_id if direction == "out" else frm
+                convo_pk = None
+                try:
+                    convo_pk = _get_conv_id(
+                        session,
+                        str(owner_id),
+                        str(other_party_id) if other_party_id is not None else None,
+                    )
+                except Exception:
+                    convo_pk = None
+
                 row = Message(
                     ig_sender_id=str(frm) if frm else None,
                     ig_recipient_id=str(recipient_id) if recipient_id else None,
@@ -417,7 +370,7 @@ async def sync_latest_conversations(limit: int = 25) -> int:
                     attachments_json=None,
                     timestamp_ms=ts_ms,
                     raw_json=None,
-                    conversation_id=conv_id_norm,
+                    conversation_id=int(convo_pk) if convo_pk is not None else None,
                     direction=direction,
                     sender_username=frm_username,
                 )

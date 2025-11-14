@@ -26,18 +26,30 @@ def _now_ms() -> int:
 	return int(_utcnow().timestamp() * 1000)
 
 
-def _postpone(convo_id: str, *, increment: bool = True) -> None:
+def _postpone(conversation_id: int, *, increment: bool = True) -> None:
 	with get_session() as session:
 		next_at = _utcnow() + dt.timedelta(seconds=POSTPONE_WINDOW_SECONDS)
 		if increment:
-			session.exec(_text("UPDATE ai_shadow_state SET postpone_count=postpone_count+1, status='paused', next_attempt_at=:na, updated_at=CURRENT_TIMESTAMP WHERE convo_id=:cid").params(na=next_at.isoformat(" "), cid=convo_id))
+			session.exec(
+				_text(
+					"UPDATE ai_shadow_state SET postpone_count=postpone_count+1, status='paused', next_attempt_at=:na, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+				).params(na=next_at.isoformat(" "), cid=int(conversation_id))
+			)
 		else:
-			session.exec(_text("UPDATE ai_shadow_state SET status='paused', next_attempt_at=:na, updated_at=CURRENT_TIMESTAMP WHERE convo_id=:cid").params(na=next_at.isoformat(" "), cid=convo_id))
+			session.exec(
+				_text(
+					"UPDATE ai_shadow_state SET status='paused', next_attempt_at=:na, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+				).params(na=next_at.isoformat(" "), cid=int(conversation_id))
+			)
 
 
-def _set_status(convo_id: str, status: str) -> None:
+def _set_status(conversation_id: int, status: str) -> None:
 	with get_session() as session:
-		session.exec(_text("UPDATE ai_shadow_state SET status=:s, updated_at=CURRENT_TIMESTAMP WHERE convo_id=:cid").params(s=status, cid=convo_id))
+		session.exec(
+			_text(
+				"UPDATE ai_shadow_state SET status=:s, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+			).params(s=status, cid=int(conversation_id))
+		)
 
 
 def main() -> None:
@@ -80,7 +92,11 @@ def main() -> None:
 			continue
 
 		for st in due:
-			cid = str(st.get("convo_id") or "")
+			cid = st.get("convo_id") or st.get("conversation_id") or st.get("id") or st.get("cid")
+			try:
+				cid = int(cid) if cid is not None else None
+			except Exception:
+				cid = None
 			if not cid:
 				continue
 			last_ms = int(st.get("last_inbound_ms") or 0)
@@ -96,14 +112,15 @@ def main() -> None:
 			try:
 				with get_session() as session:
 					session.exec(
-						_text("UPDATE ai_shadow_state SET status='running', next_attempt_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE convo_id=:cid")
-						.params(cid=cid)
+						_text(
+							"UPDATE ai_shadow_state SET status='running', next_attempt_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+						).params(cid=int(cid))
 					)
 			except Exception:
 				continue
 			# Generate draft
 			try:
-				data = draft_reply(cid, limit=40, include_meta=False)
+				data = draft_reply(int(cid), limit=40, include_meta=False)
 				reply_text = (data.get("reply_text") or "").strip()
 				if not reply_text:
 					_set_status(cid, "error")
@@ -114,11 +131,11 @@ def main() -> None:
 						session.exec(
 							_text(
 								"""
-								INSERT INTO ai_shadow_reply(convo_id, reply_text, model, confidence, reason, json_meta, attempt_no, status, created_at)
+								INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, attempt_no, status, created_at)
 								VALUES(:cid, :txt, :model, :conf, :reason, NULL, :att, 'suggested', CURRENT_TIMESTAMP)
 								"""
 							).params(
-								cid=cid,
+								cid=int(cid),
 								txt=reply_text,
 								model=str(data.get("model") or ""),
 								conf=(float(data.get("confidence") or 0.6)),

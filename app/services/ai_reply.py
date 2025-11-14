@@ -36,18 +36,20 @@ def _system_prompt() -> str:
 	)
 
 
-def draft_reply(conversation_id: str, *, limit: int = 40, include_meta: bool = False) -> Dict[str, Any]:
+def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = False) -> Dict[str, Any]:
 	"""Create a suggested reply (shadow) for a conversation using the last N messages."""
 	client = AIClient(model=os.getenv("AI_SHADOW_MODEL", "gpt-4o-mini"))
 	if not client.enabled:
 		raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")
 	with get_session() as session:
-		msgs = session.exec(
-			select(Message)
-			.where(Message.conversation_id == conversation_id)
-			.order_by(Message.timestamp_ms.asc())
-			.limit(max(1, min(limit, 100)))
-		).all()
+		msgs = (
+			session.exec(
+				select(Message)
+				.where(Message.conversation_id == int(conversation_id))
+				.order_by(Message.timestamp_ms.asc())
+				.limit(max(1, min(limit, 100)))
+			).all()
+		)
 		simple: List[Dict[str, Any]] = []
 		for m in msgs:
 			try:

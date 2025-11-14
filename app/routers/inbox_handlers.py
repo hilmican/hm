@@ -9,25 +9,25 @@ router = APIRouter()
 @router.get("/inbox")
 async def inbox(request: Request, limit: int = 25, q: str | None = None):
     with get_session() as session:
-        # Use ai_conversations as single source for inbox list
+        # Use unified conversations table as single source for inbox list
         from sqlalchemy import text as _text
         base_sql = """
-            SELECT ac.convo_id,
-                   ac.last_message_timestamp_ms AS timestamp_ms,
-                   ac.last_message_text AS text,
-                   ac.last_sender_username AS sender_username,
-                   ac.last_message_direction AS direction,
-                   ac.ig_sender_id,
-                   ac.ig_recipient_id,
-                   ac.last_ad_link AS ad_link,
-                   ac.last_ad_title AS ad_title,
-                   ac.last_message_id AS message_id,
-                   ac.last_ad_id AS last_ad_id,
+            SELECT c.id AS convo_id,
+                   c.last_message_timestamp_ms AS timestamp_ms,
+                   c.last_message_text AS text,
+                   c.last_sender_username AS sender_username,
+                   c.last_message_direction AS direction,
+                   c.ig_sender_id,
+                   c.ig_recipient_id,
+                   c.last_ad_link AS ad_link,
+                   c.last_ad_title AS ad_title,
+                   c.last_message_id AS message_id,
+                   c.last_ad_id AS last_ad_id,
                    u.username AS other_username,
                    u.name AS other_name
-            FROM ai_conversations ac
+            FROM conversations c
             LEFT JOIN ig_users u
-              ON u.ig_user_id = CASE WHEN ac.last_message_direction='out' THEN ac.ig_recipient_id ELSE ac.ig_sender_id END
+              ON u.ig_user_id = CASE WHEN c.last_message_direction='out' THEN c.ig_recipient_id ELSE c.ig_sender_id END
         """
         where_parts: list[str] = []
         params: dict[str, object] = {}
@@ -35,11 +35,11 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
             qq = f"%{q.lower().strip()}%"
             where_parts.append("""
                 (
-                    (ac.last_message_text IS NOT NULL AND LOWER(ac.last_message_text) LIKE :qq)
-                    OR (ac.last_sender_username IS NOT NULL AND LOWER(ac.last_sender_username) LIKE :qq)
+                    (c.last_message_text IS NOT NULL AND LOWER(c.last_message_text) LIKE :qq)
+                    OR (c.last_sender_username IS NOT NULL AND LOWER(c.last_sender_username) LIKE :qq)
                     OR EXISTS (
                         SELECT 1 FROM ig_users u
-                        WHERE (u.ig_user_id = ac.ig_sender_id OR u.ig_user_id = ac.ig_recipient_id OR (ac.convo_id LIKE 'dm:%' AND u.ig_user_id = SUBSTR(ac.convo_id, 4)))
+                        WHERE (u.ig_user_id = c.ig_sender_id OR u.ig_user_id = c.ig_recipient_id)
                           AND (
                             (u.name IS NOT NULL AND LOWER(u.name) LIKE :qq)
                             OR (u.username IS NOT NULL AND LOWER(u.username) LIKE :qq)
@@ -57,7 +57,7 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
         except Exception:
             dialect_name = ""
         # Sort strictly by last message timestamp (ms since epoch), newest first
-        order_sql = " ORDER BY ac.last_message_timestamp_ms DESC LIMIT :n"
+        order_sql = " ORDER BY c.last_message_timestamp_ms DESC LIMIT :n"
         params["n"] = int(sample_n)
         final_sql = base_sql + (" WHERE " + " AND ".join(where_parts) if where_parts else "") + order_sql
         rows_raw = session.exec(_text(final_sql).params(**params)).all()
@@ -119,15 +119,8 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                     onm = (m.get("other_name") if isinstance(m, dict) else getattr(m, "other_name", None))
                     if ou:
                         display_names[cid] = f"@{str(ou)}"
-                    elif cid.startswith("dm:"):
-                        # For dm: conversations, extract username from the ID part
-                        try:
-                            dm_id = cid.split(":", 1)[1]
-                            display_names[cid] = f"@{dm_id}"
-                        except:
-                            display_names[cid] = cid
                     else:
-                        display_names[cid] = cid
+                        display_names[cid] = str(cid)
                     if onm:
                         names[cid] = str(onm)
                 except Exception:
@@ -178,46 +171,13 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                             sid = str(other)
                             if sid in id_to_username:
                                 display_names[cid] = f"@{id_to_username[sid]}"
-                            elif cid.startswith("dm:"):
-                                # For dm: conversations, try to extract username from the ID part
-                                try:
-                                    dm_id = cid.split(":", 1)[1]
-                                    display_names[cid] = f"@{dm_id}"
-                                except:
-                                    display_names[cid] = cid
                             else:
-                                display_names[cid] = cid
+                                display_names[cid] = str(cid)
                             if sid in id_to_name:
                                 names[cid] = id_to_name[sid]
             except Exception:
                 pass
-        # Last-resort: conversation ids that are dm:<ig_user_id> but still missing a display name
-        dm_missing = [cid for cid in conv_map.keys() if (cid not in display_names and isinstance(cid, str) and cid.startswith("dm:"))]
-        if dm_missing:
-            dm_ids = []
-            for cid in dm_missing:
-                try:
-                    dm_ids.append(cid.split(":", 1)[1])
-                except Exception:
-                    continue
-            if dm_ids:
-                placeholders = ",".join([":d" + str(i) for i in range(len(dm_ids))])
-                from sqlalchemy import text as _text
-                params = {("d" + str(i)): dm_ids[i] for i in range(len(dm_ids))}
-                try:
-                    rows_dm = session.exec(_text(f"SELECT ig_user_id, username, name FROM ig_users WHERE ig_user_id IN ({placeholders})")).params(**params).all()
-                except Exception:
-                    rows_dm = []
-                for r in rows_dm:
-                    uid = r.ig_user_id if hasattr(r, "ig_user_id") else r[0]
-                    un = r.username if hasattr(r, "username") else r[1]
-                    nm = r.name if hasattr(r, "name") else (r[2] if len(r) > 2 else None)
-                    if uid and un:
-                        cid = f"dm:{uid}"
-                        if cid not in display_names:
-                            display_names[cid] = f"@{str(un)}"
-                        if nm and cid not in names:
-                            names[cid] = str(nm)
+        # Last-resort: conversations still missing a display name – leave as numeric id
         # Best-effort ad metadata using ai_conversations last_* fields
         ad_map = {}
         try:

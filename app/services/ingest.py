@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import text
 
 from ..db import get_session
-from ..models import Message
+from ..models import Message, Conversation, IGUser
 from .instagram_api import fetch_message_details  # type: ignore
 import logging as _lg
 _log = _lg.getLogger("ingest")
@@ -61,7 +61,7 @@ def _ensure_ig_user_with_data(session, ig_user_id: str, igba_id: str | None = No
 		import asyncio
 
 		loop = asyncio.get_event_loop()
-		# Use the async enrich_user function
+		# Use the async enrich_user function (idempotent: checks fetch_status='ok' internally)
 		from .enrichers import enrich_user
 
 		result = loop.run_until_complete(enrich_user(ig_user_id))
@@ -69,14 +69,15 @@ def _ensure_ig_user_with_data(session, ig_user_id: str, igba_id: str | None = No
 			_log.info("ingest: user %s enriched synchronously", ig_user_id)
 		else:
 			_log.debug("ingest: user %s already had data or fetch failed", ig_user_id)
-		# If this was a brand-new user and we know the page id, hydrate a small sample
-		# of their thread so that messages are stored under the Graph conversation id
-		# from the very beginning.
+		# If this was a brand-new user and we know the page id, hydrate their thread once
+		# so that messages populate the canonical Conversation row from the beginning.
 		if (not user_existed) and igba_id:
 			try:
 				from .instagram_api import fetch_thread_messages as _ftm
 
-				_log.info("ingest: hydrating new user thread igba_id=%s ig_user_id=%s", str(igba_id), str(ig_user_id))
+				_log.info(
+					"ingest: hydrating new user thread igba_id=%s ig_user_id=%s", str(igba_id), str(ig_user_id)
+				)
 				loop.run_until_complete(_ftm(str(igba_id), str(ig_user_id), limit=20))
 			except Exception as he:
 				_log.warning(
@@ -95,26 +96,184 @@ def _ensure_ig_user_with_data(session, ig_user_id: str, igba_id: str | None = No
 			pass
 
 
-def _upsert_conversation(conn, igba_id: str, ig_user_id: str, ts_ms: Optional[int]) -> str:
-	convo_id = f"{igba_id}:{ig_user_id}"
-	conn.exec_driver_sql(
-		"""
-		INSERT OR IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count)
-		VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), 0)
-		""",
-		(convo_id, igba_id, ig_user_id, dt.datetime.utcfromtimestamp((ts_ms or 0) / 1000) if ts_ms else None),
-	)
-	# update last_message_at if newer
-	if ts_ms:
-		conn.exec_driver_sql(
-			"""
-			UPDATE conversations
-			SET last_message_at = MAX(last_message_at, ?)
-			WHERE convo_id = ?
-			""",
-			(dt.datetime.utcfromtimestamp(ts_ms / 1000), convo_id),
+def _get_or_create_conversation_id(
+	session, igba_id: str, ig_user_id: Optional[str]
+) -> Optional[int]:
+	"""
+	Resolve or create the canonical Conversation row for (igba_id, ig_user_id).
+
+	Returns the internal conversations.id primary key, or None when other_party
+	cannot be determined.
+	"""
+	if not igba_id or not ig_user_id:
+		return None
+	from sqlalchemy import text as _t
+
+	# Try fast path: existing row for this (page, user) pair
+	row = session.exec(
+		_t("SELECT id FROM conversations WHERE igba_id=:g AND ig_user_id=:u ORDER BY id ASC LIMIT 1").params(
+			g=str(igba_id), u=str(ig_user_id)
 		)
-	return convo_id
+	).first()
+	if row:
+		try:
+			return int(getattr(row, "id", row[0]))
+		except Exception:
+			return None
+
+	# Insert minimal row; timestamps and summary fields will be updated by caller.
+	now_dt = dt.datetime.utcnow()
+	try:
+		session.exec(
+			_t(
+				"""
+				INSERT INTO conversations(igba_id, ig_user_id, last_message_at, unread_count)
+				VALUES (:g, :u, :ts, 0)
+				"""
+			).params(g=str(igba_id), u=str(ig_user_id), ts=now_dt)
+		)
+	except Exception:
+		# Best-effort; fall through to lookup.
+		pass
+	row2 = session.exec(
+		_t("SELECT id FROM conversations WHERE igba_id=:g AND ig_user_id=:u ORDER BY id ASC LIMIT 1").params(
+			g=str(igba_id), u=str(ig_user_id)
+		)
+	).first()
+	if not row2:
+		return None
+	try:
+		return int(getattr(row2, "id", row2[0]))
+	except Exception:
+		return None
+
+
+def _update_conversation_summary_from_message(
+	session,
+	conversation_pk: Optional[int],
+	ts_raw: Any,
+	*,
+	message_row: Message,
+	text_val: Optional[str],
+	direction: Optional[str],
+	sender_id: Optional[str],
+	recipient_id: Optional[str],
+	ad_id: Optional[str],
+	ad_link: Optional[str],
+	ad_title: Optional[str],
+) -> None:
+	"""
+	Update conversations last-* summary fields from a newly inserted Message.
+
+	Behaves like the old ai_conversations upsert logic: only advances summary when
+	the new message timestamp is newer than the stored one.
+	"""
+	if not conversation_pk:
+		return
+	try:
+		from sqlalchemy import text as _text
+
+		# Normalize timestamp
+		ts_val: Optional[int] = None
+		try:
+			if isinstance(ts_raw, (int, float)):
+				ts_val = int(ts_raw)
+			elif isinstance(ts_raw, str):
+				digits = "".join(ch for ch in ts_raw if ch.isdigit())
+				if digits:
+					ts_val = int(digits)
+		except Exception:
+			ts_val = None
+		if ts_val is None:
+			try:
+				ts_val = int(message_row.timestamp_ms) if message_row.timestamp_ms is not None else None
+			except Exception:
+				ts_val = None
+		if ts_val is None:
+			try:
+				import time as _t
+
+				ts_val = int(_t.time() * 1000)
+			except Exception:
+				ts_val = None
+		if ts_val is None:
+			return
+		ts_dt = None
+		try:
+			ts_dt = dt.datetime.utcfromtimestamp(ts_val / 1000.0)
+		except Exception:
+			ts_dt = None
+		session.exec(
+			_text(
+				"""
+				UPDATE conversations
+				SET
+				  last_message_id = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :mid
+				    ELSE last_message_id
+				  END,
+				  last_message_timestamp_ms = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :ts
+				    ELSE last_message_timestamp_ms
+				  END,
+				  last_message_text = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :txt
+				    ELSE last_message_text
+				  END,
+				  last_message_direction = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :dir
+				    ELSE last_message_direction
+				  END,
+				  ig_sender_id = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :sid
+				    ELSE ig_sender_id
+				  END,
+				  ig_recipient_id = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :rid
+				    ELSE ig_recipient_id
+				  END,
+				  last_ad_id = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :adid
+				    ELSE last_ad_id
+				  END,
+				  last_ad_link = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :alink
+				    ELSE last_ad_link
+				  END,
+				  last_ad_title = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :atitle
+				    ELSE last_ad_title
+				  END,
+				  last_message_at = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) AND :ts_dt IS NOT NULL
+				      THEN COALESCE(:ts_dt, last_message_at)
+				    ELSE last_message_at
+				  END
+				WHERE id = :cid
+				"""
+			).params(
+				cid=int(conversation_pk),
+				mid=int(message_row.id),
+				ts=int(ts_val),
+				ts_dt=ts_dt,
+				txt=(text_val or ""),
+				dir=(direction or "in"),
+				sid=(str(sender_id) if sender_id is not None else None),
+				rid=(str(recipient_id) if recipient_id is not None else None),
+				adid=(str(ad_id) if ad_id is not None else None),
+				alink=ad_link,
+				atitle=ad_title,
+			)
+		)
+	except Exception as e:
+		import logging as _lg
+
+		_lg.getLogger("ingest.upsert").warning(
+			"ingest upsert conversations failed convo_pk=%s mid=%s err=%s",
+			str(conversation_pk),
+			str(getattr(message_row, "id", None)),
+			str(e)[:200],
+		)
 
 
 def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[int]:
@@ -139,49 +298,10 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	except Exception:
 		pass
 	other_party_id = recipient_id if direction == "out" else sender_id
-	# Prefer Graph conversation id when we have a mapping for this page/user pair
-	conversation_id = None
-	try:
-		if other_party_id is not None and igba_id:
-			from sqlalchemy import text as _t
-			row_map = session.exec(
-				_t(
-					"SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1"
-				).params(g=str(igba_id), u=str(other_party_id))
-			).first()
-			if row_map:
-				gcid = getattr(row_map, "graph_conversation_id", None) if hasattr(row_map, "graph_conversation_id") else (row_map[0] if isinstance(row_map, (list, tuple)) else None)
-				if gcid:
-					conversation_id = str(gcid)
-	except Exception:
-		conversation_id = None
-	if conversation_id is None:
-		# On first messages, resolve mapping via lightweight fetch and retry
-		try:
-			if other_party_id is not None and igba_id:
-				import asyncio as _aio
-				loop = _aio.get_event_loop()
-				# This call persists mapping into conversations.graph_conversation_id
-				from .instagram_api import fetch_thread_messages as _ftm
-				try:
-					loop.run_until_complete(_ftm(str(igba_id), str(other_party_id), limit=1))
-				except Exception:
-					pass
-				# retry lookup
-				from sqlalchemy import text as _t
-				row_map2 = session.exec(
-					_t(
-						"SELECT graph_conversation_id FROM conversations WHERE igba_id=:g AND ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1"
-					).params(g=str(igba_id), u=str(other_party_id))
-				).first()
-				if row_map2:
-					gcid2 = getattr(row_map2, "graph_conversation_id", None) if hasattr(row_map2, "graph_conversation_id") else (row_map2[0] if isinstance(row_map2, (list, tuple)) else None)
-					if gcid2:
-						conversation_id = str(gcid2)
-		except Exception:
-			conversation_id = None
-	if conversation_id is None:
-		conversation_id = f"dm:{other_party_id}" if other_party_id is not None else None
+	# Resolve or create canonical Conversation row (internal integer id)
+	conversation_pk = _get_or_create_conversation_id(
+		session, str(igba_id), str(other_party_id) if other_party_id is not None else None
+	)
 	text_val = message_obj.get("text")
 	attachments = message_obj.get("attachments")
 	# Story reply (best-effort)
@@ -230,7 +350,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 		attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
 		timestamp_ms=int(timestamp_ms) if isinstance(timestamp_ms, (int, float, str)) and str(timestamp_ms).isdigit() else None,
 		raw_json=json.dumps(event, ensure_ascii=False),
-		conversation_id=conversation_id,
+		conversation_id=int(conversation_pk) if conversation_pk is not None else None,
 		direction=direction,
 		story_id=story_id,
 		story_url=story_url,
@@ -244,109 +364,20 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	session.add(row)
 	# Flush to get DB id for attachments
 	session.flush()
-	# Upsert ai_conversations last-* fields
-	try:
-		from sqlalchemy import text as _text
-		# Robust timestamp normalization (mirror webhook path)
-		ts_val = None
-		try:
-			if isinstance(timestamp_ms, (int, float)):
-				ts_val = int(timestamp_ms)
-			elif isinstance(timestamp_ms, str):
-				digits = "".join(ch for ch in timestamp_ms if ch.isdigit())
-				if digits:
-					ts_val = int(digits)
-		except Exception:
-			ts_val = None
-		if ts_val is None:
-			try:
-				ts_val = int(row.timestamp_ms) if row.timestamp_ms is not None else None
-			except Exception:
-				ts_val = None
-		if ts_val is None:
-			try:
-				import time as _t
-				ts_val = int(_t.time() * 1000)
-			except Exception:
-				ts_val = None
-		if conversation_id and ts_val is not None:
-			# ensure placeholder exists
-			try:
-				session.exec(_sql_text("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
-			except Exception:
-				try:
-					session.exec(_sql_text("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
-				except Exception:
-					pass
-			# SQLite upsert
-			try:
-				session.exec(
-					_sql_text(
-						"""
-						INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
-						VALUES (:cid, :mid, :ts, :txt, :dir, NULL, :sid, :rid, :adid, :alink, :atitle)
-						ON CONFLICT(convo_id) DO UPDATE SET
-						  last_message_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_id ELSE ai_conversations.last_message_id END,
-						  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), excluded.last_message_timestamp_ms),
-						  last_message_text=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_text ELSE ai_conversations.last_message_text END,
-						  last_message_direction=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_direction ELSE ai_conversations.last_message_direction END,
-						  ig_sender_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_sender_id ELSE ai_conversations.ig_sender_id END,
-						  ig_recipient_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_recipient_id ELSE ai_conversations.ig_recipient_id END,
-						  last_ad_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_id ELSE ai_conversations.last_ad_id END,
-						  last_ad_link=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_link ELSE ai_conversations.last_ad_link END,
-						  last_ad_title=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_title ELSE ai_conversations.last_ad_title END
-						"""
-					).params(
-						cid=str(conversation_id),
-						mid=int(row.id),
-						ts=int(ts_val),
-						txt=(text_val or ""),
-						dir=(direction or "in"),
-						sid=(str(sender_id) if sender_id is not None else None),
-						rid=(str(recipient_id) if recipient_id is not None else None),
-						adid=(str(ad_id) if ad_id is not None else None),
-						alink=ad_link,
-						atitle=ad_title,
-					)
-				)
-			except Exception:
-				# MySQL upsert
-				try:
-					session.exec(
-						_sql_text(
-							"""
-							INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
-							VALUES (:cid, :mid, :ts, :txt, :dir, NULL, :sid, :rid, :adid, :alink, :atitle)
-							ON DUPLICATE KEY UPDATE
-							  last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
-							  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
-							  last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
-							  last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
-							  ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
-							  ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
-							  last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
-							  last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
-							  last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title)
-							"""
-						).params(
-							cid=str(conversation_id),
-							mid=int(row.id),
-							ts=int(ts_val),
-							txt=(text_val or ""),
-							dir=(direction or "in"),
-							sid=(str(sender_id) if sender_id is not None else None),
-							rid=(str(recipient_id) if recipient_id is not None else None),
-							adid=(str(ad_id) if ad_id is not None else None),
-							alink=ad_link,
-							atitle=ad_title,
-						)
-					)
-				except Exception as e:
-					import logging as _lg
-					_lg.getLogger("ingest.upsert").warning("ingest upsert ai_conversations failed cid=%s mid=%s ts=%s err=%s", str(conversation_id), str(row.id), str(ts_val), str(e)[:200])
-	except Exception as e:
-		import logging as _lg
-		_lg.getLogger("ingest.upsert").warning("ingest upsert outer failed cid=%s mid=%s err=%s", str(conversation_id), str(getattr(row, 'id', None)), str(e)[:200])
+	# Upsert conversations last-* fields (summary) keyed by internal id
+	_update_conversation_summary_from_message(
+		session,
+		conversation_pk,
+		timestamp_ms,
+		message_row=row,
+		text_val=text_val,
+		direction=direction,
+		sender_id=str(sender_id) if sender_id is not None else None,
+		recipient_id=str(recipient_id) if recipient_id is not None else None,
+		ad_id=str(ad_id) if ad_id is not None else None,
+		ad_link=ad_link,
+		ad_title=ad_title,
+	)
 	# upsert ads cache
 	try:
 		if ad_id:
@@ -375,10 +406,13 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 		pass
 	# Touch AI shadow state on inbound messages to start debounce timer
 	try:
-		if (direction or "in") == "in" and conversation_id:
+		if (direction or "in") == "in" and conversation_pk:
 			from .ai_shadow import touch_shadow_state
-			ts_val = int(timestamp_ms) if isinstance(timestamp_ms, (int, float)) else (int(str(timestamp_ms)) if isinstance(timestamp_ms, str) and str(timestamp_ms).isdigit() else None)
-			touch_shadow_state(str(conversation_id), ts_val)
+
+			ts_val = int(timestamp_ms) if isinstance(timestamp_ms, (int, float)) else (
+				int(str(timestamp_ms)) if isinstance(timestamp_ms, str) and str(timestamp_ms).isdigit() else None
+			)
+			touch_shadow_state(str(conversation_pk), ts_val)
 	except Exception:
 		pass
 	return row.id  # type: ignore
@@ -533,24 +567,41 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 	except Exception:
 		ts_ms = None
 	direction = "in"
+	owner = None
 	try:
-		token, entity_id, is_page = __import__("app.services.instagram_api", fromlist=["_get_base_token_and_id"]).instagram_api._get_base_token_and_id()
+		token, entity_id, is_page = __import__(
+			"app.services.instagram_api", fromlist=["_get_base_token_and_id"]
+		).instagram_api._get_base_token_and_id()
 		owner = entity_id
 		if sender_id and str(sender_id) == str(owner):
 			direction = "out"
 	except Exception:
 		pass
-	# Prefer Graph conversation id when hydrate provides it; fallback to dm:<ig_user_id>
+	# Prefer Graph conversation id when hydrate provides it (for mapping), but internal
+	# conversation_id is always our own integer PK.
 	graph_cid = None
 	try:
 		graph_cid = event.get("__graph_conversation_id")
 	except Exception:
 		graph_cid = None
-	conversation_id = (
-		str(graph_cid) if graph_cid else (
-			f"dm:{(recipient_id if direction=='out' else sender_id)}" if ((recipient_id if direction=='out' else sender_id) is not None) else None
-		)
+	# Determine other party and resolve/create Conversation row
+	other_party_id = recipient_id if direction == "out" else sender_id
+	effective_igba = str(igba_id or owner or "")
+	conversation_pk = _get_or_create_conversation_id(
+		session, effective_igba, str(other_party_id) if other_party_id is not None else None
 	)
+	# If Graph conversation id is known, persist mapping on the Conversation row
+	if conversation_pk is not None and graph_cid:
+		try:
+			from sqlalchemy import text as _t
+
+			session.exec(
+				_t(
+					"UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)"
+				).params(gc=str(graph_cid), cid=int(conversation_pk))
+			)
+		except Exception:
+			pass
 	# Ad/referral extraction (best-effort)
 	ad_id = None
 	ad_link = None
@@ -578,7 +629,7 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
 		timestamp_ms=int(ts_ms) if ts_ms is not None else None,
 		raw_json=json.dumps(event, ensure_ascii=False),
-		conversation_id=conversation_id,
+		conversation_id=int(conversation_pk) if conversation_pk is not None else None,
 		direction=direction,
 		sender_username=sender_username,
 		story_id=story_id,
@@ -594,87 +645,20 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 	session.flush()
 	if attachments:
 		_create_attachment_stubs(session, int(row.id), str(mid), attachments)  # type: ignore[arg-type]
-	# Upsert ai_conversations last-* fields (safe on out-of-order via timestamp compare)
-	try:
-		if conversation_id and ts_ms is not None:
-			from sqlalchemy import text as _t
-			try:
-				session.exec(_t("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
-			except Exception:
-				try:
-					session.exec(_t("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
-				except Exception:
-					pass
-			try:
-				session.exec(
-					_t(
-						"""
-						INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
-						VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
-						ON CONFLICT(convo_id) DO UPDATE SET
-						  last_message_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_id ELSE ai_conversations.last_message_id END,
-						  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), excluded.last_message_timestamp_ms),
-						  last_message_text=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_text ELSE ai_conversations.last_message_text END,
-						  last_message_direction=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_direction ELSE ai_conversations.last_message_direction END,
-						  last_sender_username=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_sender_username ELSE ai_conversations.last_sender_username END,
-						  ig_sender_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_sender_id ELSE ai_conversations.ig_sender_id END,
-						  ig_recipient_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_recipient_id ELSE ai_conversations.ig_recipient_id END,
-						  last_ad_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_id ELSE ai_conversations.last_ad_id END,
-						  last_ad_link=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_link ELSE ai_conversations.last_ad_link END,
-						  last_ad_title=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_title ELSE ai_conversations.last_ad_title END
-						"""
-					).params(
-						cid=str(conversation_id),
-						mid=int(row.id),
-						ts=int(ts_ms),
-						txt=(text_val or ""),
-						dir=(direction or "in"),
-						sun=(sender_username or None),
-						sid=(str(sender_id) if sender_id is not None else None),
-						rid=(str(recipient_id) if recipient_id is not None else None),
-						adid=(str(ad_id) if ad_id is not None else None),
-						alink=ad_link,
-						atitle=ad_title,
-					)
-				)
-			except Exception as e:
-				try:
-					session.exec(
-						_t(
-							"""
-							INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
-							VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
-							ON DUPLICATE KEY UPDATE
-							  last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
-							  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
-							  last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
-							  last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
-							  last_sender_username=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_sender_username), ai_conversations.last_sender_username),
-							  ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
-							  ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
-							  last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
-							  last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
-							  last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title)
-							"""
-						).params(
-							cid=str(conversation_id),
-							mid=int(row.id),
-							ts=int(ts_ms),
-							txt=(text_val or ""),
-							dir=(direction or "in"),
-							sun=(sender_username or None),
-							sid=(str(sender_id) if sender_id is not None else None),
-							rid=(str(recipient_id) if recipient_id is not None else None),
-							adid=(str(ad_id) if ad_id is not None else None),
-							alink=ad_link,
-							atitle=ad_title,
-						)
-					)
-				except Exception as e2:
-					import logging as _lg
-					_lg.getLogger("ingest.upsert").warning("hydrate upsert ai_conversations failed cid=%s mid=%s ts=%s err=%s first_err=%s", str(conversation_id), str(row.id), str(ts_ms), str(e2)[:200], str(e)[:120])
-	except Exception:
-		pass
+	# Upsert conversations last-* fields (summary) keyed by internal id
+	_update_conversation_summary_from_message(
+		session,
+		conversation_pk,
+		ts_ms,
+		message_row=row,
+		text_val=text_val,
+		direction=direction,
+		sender_id=str(sender_id) if sender_id is not None else None,
+		recipient_id=str(recipient_id) if recipient_id is not None else None,
+		ad_id=str(ad_id) if ad_id is not None else None,
+		ad_link=ad_link,
+		ad_title=ad_title,
+	)
 	# story cache
 	try:
 		if story_id:
@@ -759,20 +743,37 @@ def handle(raw_event_id: int) -> int:
 								referral_json_val = json.dumps(ref, ensure_ascii=False)
 							except Exception:
 								referral_json_val = None
-							# Determine conversation id (other party is the user id)
+							# Determine other party id (user id) and resolve conversation
 							other_party_id = sender_id if sender_id and str(sender_id) != str(igba_id) else recipient_id
-							conversation_id = f"dm:{other_party_id}" if other_party_id else None
-							if conversation_id:
-								# Update the latest message in this conversation with ad metadata if missing
-								rowm = session.exec(text(
-									"SELECT id FROM message WHERE conversation_id=:cid ORDER BY timestamp_ms DESC, id DESC LIMIT 1"
-								)).params(cid=conversation_id).first()
-								if rowm:
-									mid = rowm.id if hasattr(rowm, "id") else (rowm[0] if isinstance(rowm, (list, tuple)) else None)
-									if mid:
-										session.exec(text(
-											"UPDATE message SET ad_id=COALESCE(ad_id, :adid), ad_link=COALESCE(ad_link, :link), ad_title=COALESCE(ad_title, :title), referral_json=COALESCE(referral_json, :ref) WHERE id=:id"
-										)).params(id=int(mid), adid=ad_id, link=ad_link, title=ad_title, ref=referral_json_val)
+							if other_party_id:
+								conv_pk = _get_or_create_conversation_id(
+									session,
+									str(igba_id) if igba_id is not None else "",
+									str(other_party_id),
+								)
+								if conv_pk:
+									# Update the latest message in this conversation with ad metadata if missing
+									rowm = session.exec(
+										text(
+											"SELECT id FROM message WHERE conversation_id=:cid ORDER BY timestamp_ms DESC, id DESC LIMIT 1"
+										)
+									).params(cid=int(conv_pk)).first()
+									if rowm:
+										mid = rowm.id if hasattr(rowm, "id") else (
+											rowm[0] if isinstance(rowm, (list, tuple)) else None
+										)
+										if mid:
+											session.exec(
+												text(
+													"UPDATE message SET ad_id=COALESCE(ad_id, :adid), ad_link=COALESCE(ad_link, :link), ad_title=COALESCE(ad_title, :title), referral_json=COALESCE(referral_json, :ref) WHERE id=:id"
+												)
+											).params(
+												id=int(mid),
+												adid=ad_id,
+												link=ad_link,
+												title=ad_title,
+												ref=referral_json_val,
+											)
 						except Exception:
 							pass
 				except Exception:

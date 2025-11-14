@@ -201,7 +201,10 @@ class Message(SQLModel, table=True):
     attachments_json: Optional[str] = None
     timestamp_ms: Optional[int] = Field(default=None, sa_column=Column(BigInteger))
     raw_json: Optional[str] = Field(default=None, sa_column=Column(Text))
-    conversation_id: Optional[str] = Field(default=None, index=True)
+    # Internal FK to Conversation.id (no longer stores Graph ids or dm:<id> strings)
+    conversation_id: Optional[int] = Field(
+        default=None, foreign_key="conversations.id", index=True
+    )
     direction: Optional[str] = Field(default=None, index=True, description="in|out")
     sender_username: Optional[str] = Field(default=None, index=True)
     # story reply metadata (optional)
@@ -240,18 +243,82 @@ class Attachment(SQLModel, table=True):
 
 
 class Conversation(SQLModel, table=True):
+    """
+    Canonical Instagram DM conversation entity.
+
+    - Internal `id` is the primary key used by the app and FKs.
+    - `igba_id` + `ig_user_id` identify the page/user pair.
+    - `graph_conversation_id` stores the external Graph thread id when known.
+    - Inbox / AI summary fields mirror what used to live in ai_conversations.
+    """
+
     __tablename__ = "conversations"
-    convo_id: str = Field(primary_key=True)
-    igba_id: str = Field(index=True)
-    ig_user_id: str = Field(index=True)
-    last_message_at: dt.datetime = Field(index=True)
-    unread_count: int = 0
-    hydrated_at: Optional[dt.datetime] = None
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # Page / user mapping
+    igba_id: str = Field(index=True, description="Instagram business account (page) id")
+    ig_user_id: str = Field(index=True, description="Other party Instagram user id")
+    graph_conversation_id: Optional[str] = Field(
+        default=None,
+        index=True,
+        description="Facebook/Instagram Graph conversation/thread id",
+    )
+
+    # Conversation lifecycle / inbox summary
+    last_message_id: Optional[int] = Field(
+        default=None,
+        description="Last message.id seen for this conversation (for quick linking)",
+    )
+    last_message_timestamp_ms: Optional[int] = Field(
+        default=None,
+        sa_column=Column(BigInteger),
+        index=True,
+        description="Timestamp in ms since epoch of the last message",
+    )
+    last_message_text: Optional[str] = Field(default=None)
+    last_message_direction: Optional[str] = Field(
+        default=None, description="in|out direction of the last message"
+    )
+    last_sender_username: Optional[str] = Field(default=None)
+    ig_sender_id: Optional[str] = Field(
+        default=None, description="ig_sender_id of the last message"
+    )
+    ig_recipient_id: Optional[str] = Field(
+        default=None, description="ig_recipient_id of the last message"
+    )
+    last_ad_id: Optional[str] = Field(default=None, description="Last ad id seen")
+    last_ad_link: Optional[str] = Field(default=None)
+    last_ad_title: Optional[str] = Field(default=None)
+
+    # Hydration / unread state
+    last_message_at: Optional[dt.datetime] = Field(
+        default=None, index=True, description="Fallback last message time (datetime)"
+    )
+    unread_count: int = Field(default=0, index=True)
+    hydrated_at: Optional[dt.datetime] = Field(
+        default=None,
+        index=True,
+        description="When this conversation was last hydrated from Graph",
+    )
 
 
 class IGUser(SQLModel, table=True):
+    """
+    Canonical Instagram user/contact entity.
+
+    - Internal `id` is used as primary key.
+    - `ig_user_id` is the external Instagram user id (unique).
+    - Contact / CRM and AI-enrichment fields live here to avoid duplication
+      across multiple conversations for the same user.
+    """
+
     __tablename__ = "ig_users"
-    ig_user_id: str = Field(primary_key=True)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ig_user_id: str = Field(index=True, unique=True)
+
+    # Basic profile
     username: Optional[str] = Field(default=None, index=True)
     name: Optional[str] = None
     profile_pic_url: Optional[str] = None
@@ -259,6 +326,38 @@ class IGUser(SQLModel, table=True):
     fetched_at: Optional[dt.datetime] = Field(default=None, index=True)
     fetch_status: Optional[str] = Field(default=None, index=True)
     fetch_error: Optional[str] = None
+
+    # Contact / CRM fields (moved from conversations / ai_conversations)
+    contact_name: Optional[str] = Field(
+        default=None,
+        index=True,
+        description="Extracted contact full name for this user",
+    )
+    contact_phone: Optional[str] = Field(
+        default=None,
+        index=True,
+        description="Extracted phone number for this user",
+    )
+    contact_address: Optional[str] = Field(
+        default=None,
+        description="Extracted shipping/billing address for this user",
+    )
+    linked_order_id: Optional[int] = Field(
+        default=None,
+        foreign_key="order.id",
+        index=True,
+        description="Most relevant linked order for this user (if any)",
+    )
+    ai_status: Optional[str] = Field(
+        default=None,
+        index=True,
+        description="High-level AI enrichment status for this user",
+    )
+    ai_json: Optional[str] = Field(
+        default=None,
+        sa_column=Column(Text),
+        description="Last AI enrichment payload for this user (JSON)",
+    )
 
 
 class IGAiDebugRun(SQLModel, table=True):
@@ -295,7 +394,8 @@ class Job(SQLModel, table=True):
 
 class AiShadowState(SQLModel, table=True):
 	__tablename__ = "ai_shadow_state"
-	convo_id: str = Field(primary_key=True)
+	# Internal conversation id FK (no longer stores string convo ids)
+	conversation_id: int = Field(primary_key=True, foreign_key="conversations.id")
 	last_inbound_ms: Optional[int] = Field(default=None, sa_column=Column(BigInteger))
 	next_attempt_at: Optional[dt.datetime] = Field(default=None, index=True)
 	postpone_count: int = Field(default=0, index=True)
@@ -306,7 +406,8 @@ class AiShadowState(SQLModel, table=True):
 class AiShadowReply(SQLModel, table=True):
 	__tablename__ = "ai_shadow_reply"
 	id: Optional[int] = Field(default=None, primary_key=True)
-	convo_id: str = Field(index=True)
+	# Internal conversation id FK (no longer stores string convo ids)
+	conversation_id: int = Field(index=True, foreign_key="conversations.id")
 	reply_text: Optional[str] = Field(default=None, sa_column=Column(Text))
 	model: Optional[str] = None
 	confidence: Optional[float] = None
