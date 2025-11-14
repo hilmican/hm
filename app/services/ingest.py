@@ -39,7 +39,11 @@ def _ensure_ig_user(conn, ig_user_id: str) -> None:
 def _ensure_ig_user_with_data(session, ig_user_id: str) -> None:
 	"""Ensure IG user exists with data. If not exists, fetch synchronously."""
 	# Check if user exists and has data
-	row = session.exec(text("SELECT ig_user_id, username, fetch_status FROM ig_users WHERE ig_user_id=:id LIMIT 1")).params(id=str(ig_user_id)).first()
+	row = session.exec(
+		text("SELECT ig_user_id, username, fetch_status FROM ig_users WHERE ig_user_id=:id LIMIT 1").params(
+			id=str(ig_user_id)
+		)
+	).first()
 	if row:
 		username = getattr(row, "username", None) or (row[1] if len(row) > 1 else None)
 		fetch_status = getattr(row, "fetch_status", None) or (row[2] if len(row) > 2 else None)
@@ -62,7 +66,10 @@ def _ensure_ig_user_with_data(session, ig_user_id: str) -> None:
 		_log.warning("ingest: failed to enrich user %s synchronously: %s", ig_user_id, e)
 		# Fallback: ensure at least the row exists
 		try:
-			session.exec(text("INSERT OR IGNORE INTO ig_users(ig_user_id) VALUES (:id)")).params(id=str(ig_user_id))
+			# MySQL-safe fallback: INSERT IGNORE to avoid duplicate errors
+			session.exec(
+				text("INSERT IGNORE INTO ig_users(ig_user_id) VALUES (:id)").params(id=str(ig_user_id))
+			)
 		except Exception:
 			pass
 
