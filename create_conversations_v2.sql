@@ -29,8 +29,8 @@ CREATE TABLE conversations (
     unread_count INT NOT NULL DEFAULT 0,
     hydrated_at DATETIME NULL,
 
-    -- Helpful indexes
-    INDEX idx_conversations_ig (igba_id, ig_user_id),
+    -- Helpful indexes & uniqueness: one conversation per (page, user)
+    UNIQUE INDEX idx_conversations_ig (igba_id, ig_user_id),
     INDEX idx_conversations_graph (graph_conversation_id),
     INDEX idx_conversations_last_ts (last_message_timestamp_ms),
     INDEX idx_conversations_last_at (last_message_at)

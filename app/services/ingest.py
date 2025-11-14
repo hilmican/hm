@@ -108,12 +108,18 @@ def _get_or_create_conversation_id(
 	if not igba_id or not ig_user_id:
 		return None
 	from sqlalchemy import text as _t
-
-	# Try fast path: existing row for this (page, user) pair
+	# Try fast path: existing row for this (page, user) pair.
+	# If historical duplicates exist, prefer the one that already has a Graph conversation id.
 	row = session.exec(
-		_t("SELECT id FROM conversations WHERE igba_id=:g AND ig_user_id=:u ORDER BY id ASC LIMIT 1").params(
-			g=str(igba_id), u=str(ig_user_id)
-		)
+		_t(
+			"""
+			SELECT id
+			FROM conversations
+			WHERE igba_id=:g AND ig_user_id=:u
+			ORDER BY CASE WHEN graph_conversation_id IS NULL THEN 1 ELSE 0 END, id ASC
+			LIMIT 1
+			"""
+		).params(g=str(igba_id), u=str(ig_user_id))
 	).first()
 	if row:
 		try:
@@ -136,9 +142,15 @@ def _get_or_create_conversation_id(
 		# Best-effort; fall through to lookup.
 		pass
 	row2 = session.exec(
-		_t("SELECT id FROM conversations WHERE igba_id=:g AND ig_user_id=:u ORDER BY id ASC LIMIT 1").params(
-			g=str(igba_id), u=str(ig_user_id)
-		)
+		_t(
+			"""
+			SELECT id
+			FROM conversations
+			WHERE igba_id=:g AND ig_user_id=:u
+			ORDER BY CASE WHEN graph_conversation_id IS NULL THEN 1 ELSE 0 END, id ASC
+			LIMIT 1
+			"""
+		).params(g=str(igba_id), u=str(ig_user_id))
 	).first()
 	if not row2:
 		return None
