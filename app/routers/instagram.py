@@ -110,21 +110,40 @@ async def receive_events(request: Request):
 
 	with get_session() as session:
 		try:
+			_log.info("IG webhook POST: checking for existing raw event with hash=%s", uniq_hash[:16])
 			row = session.exec(text("SELECT id FROM raw_events WHERE uniq_hash = :h").params(h=uniq_hash)).first()
 			if row:
 				raw_event_id = row.id if hasattr(row, "id") else row[0]
 				saved_raw += 1
+				_log.info("IG webhook POST: found existing raw event id=%s", raw_event_id)
 			else:
-				# Insert raw event, then get ID
-				session.exec(text("INSERT INTO raw_events (uniq_hash, payload) VALUES (:h, :p)").params(h=uniq_hash, p=json.dumps(payload)))
+				_log.info("IG webhook POST: inserting new raw event")
+				# Insert raw event with all required columns
+				session.exec(
+					text("""
+						INSERT INTO raw_events (object, entry_id, payload, sig256, uniq_hash)
+						VALUES (:object, :entry_id, :payload, :sig256, :uniq_hash)
+					""").params(
+						object=str(payload.get("object") or "instagram"),
+						entry_id="",  # Not per-entry since we store whole payload
+						payload=json.dumps(payload),
+						sig256=signature or "",
+						uniq_hash=uniq_hash
+					)
+				)
 				session.commit()
+				_log.info("IG webhook POST: insert committed, querying for id")
 				# Get the ID we just inserted
 				row = session.exec(text("SELECT id FROM raw_events WHERE uniq_hash = :h").params(h=uniq_hash)).first()
 				if row:
 					raw_event_id = row.id if hasattr(row, "id") else row[0]
 					saved_raw += 1
-		except Exception:
-			# ignore duplicates or insert errors to keep webhook fast
+					_log.info("IG webhook POST: got raw_event_id=%s", raw_event_id)
+				else:
+					_log.error("IG webhook POST: failed to get id after insert")
+		except Exception as e:
+			# Log the actual error instead of ignoring
+			_log.error("IG webhook POST: database error saving raw event: %s", str(e))
 			pass
 
 	try:
