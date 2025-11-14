@@ -946,13 +946,13 @@ def init_db() -> None:
                 conn.exec_driver_sql(
                     """
                     CREATE TABLE IF NOT EXISTS raw_events (
-                        id INTEGER PRIMARY KEY,
+                        id INTEGER PRIMARY KEY AUTO_INCREMENT,
                         received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        object TEXT NOT NULL,
-                        entry_id TEXT NOT NULL,
-                        payload TEXT NOT NULL,
-                        sig256 TEXT NOT NULL,
-                        uniq_hash TEXT UNIQUE
+                        object VARCHAR(255) NOT NULL,
+                        entry_id VARCHAR(255) NOT NULL,
+                        payload LONGTEXT NOT NULL,
+                        sig256 VARCHAR(255) NOT NULL,
+                        uniq_hash VARCHAR(255) UNIQUE
                     )
                     """
                 )
