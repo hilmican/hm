@@ -106,39 +106,57 @@ async def receive_events(request: Request):
 	entries: List[Dict[str, Any]] = payload.get("entry", [])
 	saved_raw = 0
 	uniq_hash = hashlib.sha256(body).hexdigest()
+	raw_event_id = None
 
 	with get_session() as session:
 		try:
 			row = session.exec(text("SELECT id FROM raw_events WHERE uniq_hash = :h").params(h=uniq_hash)).first()
 			if row:
+				raw_event_id = row.id if hasattr(row, "id") else row[0]
 				saved_raw += 1
 			else:
-				# Insert raw event
-				session.exec(text("INSERT INTO raw_events (uniq_hash, payload_json) VALUES (:h, :p)").params(h=uniq_hash, p=json.dumps(payload)))
-				session.commit()
-				saved_raw += 1
+				# Insert raw event and get ID
+				try:
+					# Try SQLite/MySQL RETURNING syntax
+					result = session.exec(text("INSERT INTO raw_events (uniq_hash, payload_json) VALUES (:h, :p) RETURNING id").params(h=uniq_hash, p=json.dumps(payload)))
+					raw_event_id = result.first()
+					if raw_event_id:
+						raw_event_id = raw_event_id.id if hasattr(raw_event_id, "id") else raw_event_id[0]
+					session.commit()
+					saved_raw += 1
+				except Exception:
+					# Fallback: insert without RETURNING, then query
+					session.exec(text("INSERT INTO raw_events (uniq_hash, payload_json) VALUES (:h, :p)").params(h=uniq_hash, p=json.dumps(payload)))
+					session.commit()
+					# Get the ID we just inserted
+					row = session.exec(text("SELECT id FROM raw_events WHERE uniq_hash = :h").params(h=uniq_hash)).first()
+					if row:
+						raw_event_id = row.id if hasattr(row, "id") else row[0]
+					saved_raw += 1
 		except Exception:
 			# ignore duplicates or insert errors to keep webhook fast
 			pass
 
 	try:
-		_log.info("IG webhook POST: saved raw events for entries=%d raw_saved=%d", len(entries), saved_raw)
+		_log.info("IG webhook POST: saved raw events for entries=%d raw_saved=%d raw_event_id=%s", len(entries), saved_raw, raw_event_id)
 	except Exception:
 		pass
 
 	# Queue message processing for background handling
-	try:
-		_log.info("IG webhook POST: queuing message processing for %d entries", len(entries))
-		from ..services.queue import enqueue
-		for entry in entries:
-			try:
-				enqueue("ingest", {"entry": entry, "object": "instagram"})
-			except Exception as e:
-				_log.error("IG webhook POST: failed to queue entry: %s", str(e))
-	except Exception as e:
-		# best-effort: ignore failures here; ingestion worker will backfill later
+	if raw_event_id:
 		try:
-			_log.error("IG webhook POST: message processing failed with error: %s", str(e))
+			_log.info("IG webhook POST: queuing message processing for raw_event_id=%s", raw_event_id)
+			from ..services.queue import enqueue
+			enqueue("ingest", {"raw_event_id": int(raw_event_id)})
+		except Exception as e:
+			# best-effort: ignore failures here; ingestion worker will backfill later
+			try:
+				_log.error("IG webhook POST: message processing failed with error: %s", str(e))
+			except Exception:
+				pass
+	else:
+		try:
+			_log.warning("IG webhook POST: no raw_event_id to queue for processing")
 		except Exception:
 			pass
 	return {"status": "ok", "raw_saved": saved_raw}
