@@ -1,5 +1,4 @@
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Iterator
 
 from sqlmodel import SQLModel, create_engine, Session
@@ -7,9 +6,6 @@ from sqlalchemy import text
 import os
 import time
 import sqlite3
-
-DB_PATH = Path("data/app.db")
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # Require explicit database URL; no implicit SQLite fallback
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("MYSQL_URL")
@@ -30,95 +26,6 @@ else:
 
 
 def init_db() -> None:
-    def _auto_reset_on_corruption() -> bool:
-        return os.getenv("SQLITE_AUTO_RESET_ON_CORRUPTION", "0") not in ("0", "false", "False", "")
-
-    def _backup_corrupt_db() -> None:
-        try:
-            ts = int(time.time())
-            backup_path = DB_PATH.with_suffix(f".corrupt-{ts}.db")
-            if DB_PATH.exists():
-                DB_PATH.rename(backup_path)
-                try:
-                    print(f"[DB INIT] Detected corrupted DB; moved to {backup_path}")
-                except Exception:
-                    pass
-        except Exception:
-            # Best-effort only
-            pass
-    def _wait_for_sqlite_available() -> None:
-        """Ensure we can obtain a write lock before proceeding with DDL/migrations.
-
-        This guards against overlapping writers during rolling updates where the
-        previous pod may still be finalizing WAL writes.
-        """
-        retries = int(os.getenv("DB_INIT_RETRIES", "10"))
-        backoff = float(os.getenv("DB_INIT_BACKOFF", "0.5"))
-        busy_timeout_s = float(os.getenv("SQLITE_BUSY_TIMEOUT", "30"))
-        last: Exception | None = None
-        for attempt in range(1, retries + 1):
-            try:
-                conn = sqlite3.connect(str(DB_PATH), timeout=busy_timeout_s)
-                # set helpful pragmas
-                try:
-                    conn.execute("PRAGMA journal_mode=WAL;")
-                except sqlite3.DatabaseError as de:
-                    msg = str(de).lower()
-                    if "malformed" in msg or "database disk image is malformed" in msg:
-                        if _auto_reset_on_corruption():
-                            _backup_corrupt_db()
-                            conn.close()
-                            # recreate empty file to proceed
-                            conn = sqlite3.connect(str(DB_PATH), timeout=busy_timeout_s)
-                        else:
-                            conn.close()
-                            raise
-                    else:
-                        # fallback to default DELETE journaling if WAL not available
-                        try:
-                            conn = sqlite3.connect(str(DB_PATH), timeout=busy_timeout_s)
-                            conn.execute("PRAGMA journal_mode=DELETE;")
-                        except Exception:
-                            # ignore; continue
-                            pass
-                conn.execute(f"PRAGMA busy_timeout={int(busy_timeout_s*1000)};")
-                # optional performance tuning when enabled
-                if os.getenv("SQLITE_TUNE", "1") != "0":
-                    try:
-                        conn.execute("PRAGMA synchronous=NORMAL;")
-                        conn.execute("PRAGMA temp_store=MEMORY;")
-                        conn.execute("PRAGMA mmap_size=268435456;")  # 256MB
-                        conn.execute("PRAGMA cache_size=-262144;")    # ~256MB page cache
-                        conn.execute("PRAGMA journal_size_limit=134217728;")  # 128MB
-                    except Exception:
-                        pass
-                # try to acquire writer lock
-                conn.execute("BEGIN IMMEDIATE;")
-                conn.execute("ROLLBACK;")
-                conn.close()
-                return
-            except Exception as e:
-                last = e
-                msg = str(e).lower()
-                locked = isinstance(e, sqlite3.OperationalError) or ("database is locked" in msg)
-                if ("malformed" in msg or "database disk image is malformed" in msg) and _auto_reset_on_corruption():
-                    _backup_corrupt_db()
-                    # retry immediately with fresh DB on next loop
-                    time.sleep(min(backoff, 0.5))
-                    continue
-                if locked and attempt < retries:
-                    try:
-                        print(f"[DB INIT] waiting for SQLite lock release ({attempt}/{retries})...")
-                    except Exception:
-                        pass
-                    time.sleep(backoff)
-                    backoff = min(backoff * 1.5, 5.0)
-                    continue
-                raise
-
-    # Only for SQLite
-    if getattr(engine, "url", None) and getattr(engine.url, "get_backend_name", lambda: "")() == "sqlite":
-        _wait_for_sqlite_available()
     retries = int(os.getenv("DB_INIT_RETRIES", "10"))
     backoff = float(os.getenv("DB_INIT_BACKOFF", "0.5"))
     last_err: Exception | None = None
@@ -152,6 +59,31 @@ def init_db() -> None:
                                     conn.exec_driver_sql("CREATE INDEX idx_client_merged_into ON client(merged_into_client_id)")
                                 except Exception:
                                     pass
+                        except Exception:
+                            pass
+                        # Ensure raw_events table exists (MySQL)
+                        try:
+                            row = conn.exec_driver_sql(
+                                """
+                                SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'raw_events'
+                                LIMIT 1
+                                """
+                            ).fetchone()
+                            if row is None:
+                                conn.exec_driver_sql(
+                                    """
+                                    CREATE TABLE raw_events (
+                                        id INT PRIMARY KEY AUTO_INCREMENT,
+                                        received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                        object VARCHAR(255) NOT NULL,
+                                        entry_id VARCHAR(255) NOT NULL,
+                                        payload LONGTEXT NOT NULL,
+                                        sig256 VARCHAR(255) NOT NULL,
+                                        uniq_hash VARCHAR(255) UNIQUE
+                                    )
+                                    """
+                                )
                         except Exception:
                             pass
                         # Extend ai_conversations with last-* metadata and hydration (MySQL)
@@ -745,26 +677,7 @@ def init_db() -> None:
             # lightweight migrations for existing SQLite DBs
             with engine.begin() as conn:
                 # Apply SQLite PRAGMAs once at startup if enabled
-                try:
-                    if (getattr(engine, "url", None) and getattr(engine.url, "get_backend_name", lambda: "")() == "sqlite") and os.getenv("SQLITE_TUNE", "1") != "0":
-                        try:
-                            conn.exec_driver_sql("PRAGMA journal_mode=WAL")
-                        except Exception as de:
-                            # If WAL setting fails (e.g., on certain FS or corruption), fall back silently
-                            try:
-                                if "malformed" in str(de).lower() and _auto_reset_on_corruption():
-                                    # Let outer loop handle reset if needed by raising again
-                                    raise
-                                conn.exec_driver_sql("PRAGMA journal_mode=DELETE")
-                            except Exception:
-                                pass
-                        conn.exec_driver_sql("PRAGMA synchronous=NORMAL")
-                        conn.exec_driver_sql("PRAGMA temp_store=MEMORY")
-                        conn.exec_driver_sql("PRAGMA mmap_size=268435456")
-                        conn.exec_driver_sql("PRAGMA cache_size=-262144")
-                        conn.exec_driver_sql("PRAGMA journal_size_limit=134217728")
-                except Exception:
-                    pass
+                # SQLite PRAGMAs are no-ops in MySQL deployments; kept only for legacy compatibility.
                 def column_exists(table: str, column: str) -> bool:
                     try:
                         backend = getattr(engine.url, "get_backend_name", lambda: "")()
@@ -1342,62 +1255,3 @@ def get_session() -> Iterator[Session]:
         raise
     finally:
         session.close()
-
-
-def reset_db() -> None:
-    """Reset DB but preserve users.
-
-    Backs up rows from the `user` table (if it exists), recreates the DB,
-    then restores the users to keep credentials intact.
-    """
-    # Backup existing users before dropping DB
-    existing_users = []
-    try:
-        from .models import User  # local import to avoid circulars at module import time
-        try:
-            from sqlmodel import Session as _Session, select as _select
-            with _Session(engine) as _sess:
-                try:
-                    rows = _sess.exec(_select(User)).all()
-                    for u in rows:
-                        existing_users.append({
-                            "id": u.id,
-                            "username": u.username,
-                            "password_hash": u.password_hash,
-                            "role": u.role,
-                            "failed_attempts": u.failed_attempts,
-                            "locked_until": u.locked_until,
-                            "created_at": u.created_at,
-                            "updated_at": u.updated_at,
-                        })
-                except Exception:
-                    # table may not exist; ignore
-                    pass
-        except Exception:
-            pass
-    except Exception:
-        # models import failed; proceed without backup
-        pass
-
-    engine.dispose()
-    if DB_PATH.exists():
-        DB_PATH.unlink()
-    SQLModel.metadata.create_all(engine)
-
-    # Restore users if any
-    if existing_users:
-        try:
-            from .models import User  # re-import after re-create
-            with Session(engine) as _sess:
-                for data in existing_users:
-                    try:
-                        _sess.add(User(**data))
-                    except Exception:
-                        # If explicit id insertion fails, drop id and retry
-                        data_no_id = dict(data)
-                        data_no_id.pop("id", None)
-                        _sess.add(User(**data_no_id))
-                _sess.commit()
-        except Exception:
-            # If restore fails, continue with empty users rather than aborting reset
-            pass

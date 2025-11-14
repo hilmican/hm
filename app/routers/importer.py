@@ -5,7 +5,7 @@ import re
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from sqlmodel import select
 
-from ..db import get_session, reset_db, DB_PATH, engine
+from ..db import get_session, engine
 from ..models import Client, Item, Order, Payment, ImportRun, ImportRow, StockMovement, Product, OrderItem
 from ..services.importer import read_bizim_file, read_kargo_file, read_returns_file
 from ..services.importer.committers import process_kargo_row, process_bizim_row
@@ -37,42 +37,8 @@ def _is_sqlite_backend() -> bool:
 
 
 def _backup_db_snapshot(tag: str | None = None) -> None:
-	"""Create a timestamped backup of the SQLite database and sidecar files.
-
-	Backups are stored under PROJECT_ROOT/dbbackups with name app-YYYYMMDD-HHMMSS[-tag].db
-	Sidecar files (-wal, -shm) are copied if present.
-	"""
-	# Only perform snapshotting when running on SQLite
-	try:
-		if not _is_sqlite_backend():
-			return
-	except Exception:
-		return
-	try:
-		from datetime import datetime as _dt
-		import shutil as _shutil
-		bdir = PROJECT_ROOT / "dbbackups"
-		bdir.mkdir(parents=True, exist_ok=True)
-		ts = _dt.utcnow().strftime("%Y%m%d-%H%M%S")
-		suffix = f"-{tag}" if tag else ""
-		dst = bdir / f"app-{ts}{suffix}.db"
-		src = DB_PATH
-		if src.exists():
-			_shutil.copy2(src, dst)
-			# sidecars
-			for suf in ("-wal", "-shm"):
-				side = Path(str(src) + suf)
-				if side.exists():
-					_shutil.copy2(side, Path(str(dst) + suf))
-			try:
-				print("[DB BACKUP] snapshot created:", dst)
-			except Exception:
-				pass
-	except Exception as _e:
-		try:
-			print("[DB BACKUP] failed:", _e)
-		except Exception:
-			pass
+	"""No-op DB snapshot placeholder (SQLite backups disabled in MySQL deployment)."""
+	return
 def parse_item_details(text: str | None) -> tuple[str, int | None, int | None, list[str]]:
 	"""Extract base item name, height(cm), weight(kg), and extra notes.
 
@@ -854,91 +820,11 @@ def commit_import(body: dict, request: Request):
 
 @router.post("/reset")
 def reset_database(request: Request, preserve_mappings: bool = False):
-    if not request.session.get("uid"):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    if not preserve_mappings:
-        reset_db()
-        return {"status": "ok"}
-    # preserve mappings: backup products + mapping rules/outputs, reset, then restore
-    from ..models import ItemMappingRule as _Rule, ItemMappingOutput as _Out, Product as _Prod
-    from sqlmodel import select as _select
-    rules_dump: list[dict] = []
-    products_dump: list[dict] = []
-    with get_session() as session:
-        # backup all products (keep ids to satisfy mapping outputs product_id)
-        prods = session.exec(_select(_Prod)).all()
-        for p in prods:
-            products_dump.append({
-                "id": p.id,
-                "name": p.name,
-                "slug": p.slug,
-                "default_unit": p.default_unit,
-                "default_price": p.default_price,
-                "created_at": p.created_at,
-                "updated_at": p.updated_at,
-            })
-        rules = session.exec(_select(_Rule)).all()
-        for r in rules:
-            outs = session.exec(_select(_Out).where(_Out.rule_id == r.id)).all()
-            rules_dump.append({
-                "rule": {
-                    "source_pattern": r.source_pattern,
-                    "match_mode": r.match_mode,
-                    "priority": r.priority,
-                    "notes": r.notes,
-                    "is_active": r.is_active,
-                },
-                "outs": [
-                    {
-                        "item_id": o.item_id,
-                        "product_id": o.product_id,
-                        "size": o.size,
-                        "color": o.color,
-                        "quantity": o.quantity,
-                        "unit_price": o.unit_price,
-                    }
-                    for o in outs
-                ],
-            })
-    # hard reset
-    reset_db()
-    # restore products, then mappings
-    from ..models import ItemMappingRule as _R2, ItemMappingOutput as _O2, Product as _P2
-    with get_session() as session:
-        # restore products first
-        for data in products_dump:
-            try:
-                session.add(_P2(**data))
-            except Exception:
-                # fallback by slug if explicit id insertion fails
-                slug = data.get("slug")
-                existing = session.exec(_select(_P2).where(_P2.slug == slug)).first()
-                if not existing:
-                    nd = dict(data)
-                    nd.pop("id", None)
-                    session.add(_P2(**nd))
-        for entry in rules_dump:
-            rdata = entry.get("rule") or {}
-            r = _R2(
-                source_pattern=rdata.get("source_pattern"),
-                match_mode=rdata.get("match_mode") or "exact",
-                priority=int(rdata.get("priority") or 0),
-                notes=rdata.get("notes"),
-                is_active=bool(rdata.get("is_active")),
-            )
-            session.add(r)
-            session.flush()
-            for o in (entry.get("outs") or []):
-                session.add(_O2(
-                    rule_id=r.id or 0,
-                    item_id=o.get("item_id"),
-                    product_id=o.get("product_id"),
-                    size=o.get("size"),
-                    color=o.get("color"),
-                    quantity=o.get("quantity") or 1,
-                    unit_price=o.get("unit_price"),
-                ))
-    return {"status": "ok", "restored_rules": len(rules_dump)}
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	# Full DB reset is no longer supported now that SQLite-based reset has been removed.
+	# Keep the route to avoid breaking old links, but fail explicitly.
+	raise HTTPException(status_code=501, detail="Database reset is disabled in this deployment")
 
 
 @router.post("/upload")
