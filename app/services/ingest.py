@@ -36,14 +36,19 @@ def _ensure_ig_user(conn, ig_user_id: str) -> None:
 	)
 
 
-def _ensure_ig_user_with_data(session, ig_user_id: str) -> None:
-	"""Ensure IG user exists with data. If not exists, fetch synchronously."""
+def _ensure_ig_user_with_data(session, ig_user_id: str, igba_id: str | None = None) -> None:
+	"""Ensure IG user exists with data and, on first creation, hydrate their thread.
+
+	This prevents the legacy situation where early messages are stored under
+	`dm:<ig_user_id>` and later ones under Graph conversation ids.
+	"""
 	# Check if user exists and has data
 	row = session.exec(
 		text("SELECT ig_user_id, username, fetch_status FROM ig_users WHERE ig_user_id=:id LIMIT 1").params(
 			id=str(ig_user_id)
 		)
 	).first()
+	user_existed = bool(row)
 	if row:
 		username = getattr(row, "username", None) or (row[1] if len(row) > 1 else None)
 		fetch_status = getattr(row, "fetch_status", None) or (row[2] if len(row) > 2 else None)
@@ -51,25 +56,41 @@ def _ensure_ig_user_with_data(session, ig_user_id: str) -> None:
 		if username and str(fetch_status or "").lower() == "ok":
 			return
 
-	# User doesn't exist or incomplete - fetch synchronously
+	# User doesn't exist or is incomplete - fetch synchronously
 	try:
 		import asyncio
+
 		loop = asyncio.get_event_loop()
 		# Use the async enrich_user function
 		from .enrichers import enrich_user
+
 		result = loop.run_until_complete(enrich_user(ig_user_id))
 		if result:
 			_log.info("ingest: user %s enriched synchronously", ig_user_id)
 		else:
 			_log.debug("ingest: user %s already had data or fetch failed", ig_user_id)
+		# If this was a brand-new user and we know the page id, hydrate a small sample
+		# of their thread so that messages are stored under the Graph conversation id
+		# from the very beginning.
+		if (not user_existed) and igba_id:
+			try:
+				from .instagram_api import fetch_thread_messages as _ftm
+
+				_log.info("ingest: hydrating new user thread igba_id=%s ig_user_id=%s", str(igba_id), str(ig_user_id))
+				loop.run_until_complete(_ftm(str(igba_id), str(ig_user_id), limit=20))
+			except Exception as he:
+				_log.warning(
+					"ingest: hydrate for new user failed igba_id=%s ig_user_id=%s err=%s",
+					str(igba_id),
+					str(ig_user_id),
+					str(he)[:200],
+				)
 	except Exception as e:
 		_log.warning("ingest: failed to enrich user %s synchronously: %s", ig_user_id, e)
 		# Fallback: ensure at least the row exists
 		try:
 			# MySQL-safe fallback: INSERT IGNORE to avoid duplicate errors
-			session.exec(
-				text("INSERT IGNORE INTO ig_users(ig_user_id) VALUES (:id)").params(id=str(ig_user_id))
-			)
+			session.exec(text("INSERT IGNORE INTO ig_users(ig_user_id) VALUES (:id)").params(id=str(ig_user_id)))
 		except Exception:
 			pass
 
@@ -708,8 +729,8 @@ def handle(raw_event_id: int) -> int:
 						continue
 					sender_id = (event.get("sender") or {}).get("id")
 					if sender_id:
-						# Synchronous user creation with data fetch
-						_ensure_ig_user_with_data(session, str(sender_id))
+						# Synchronous user creation with data fetch + initial hydrate for new users
+						_ensure_ig_user_with_data(session, str(sender_id), str(igba_id))
 					mid = message_obj.get("mid") or message_obj.get("id")
 					# ensure ai_conversations row exists and possibly enqueue hydration
 					try:
