@@ -213,14 +213,15 @@ def preview_process(body: dict):
             backend = getattr(session.get_bind().engine.url, "get_backend_name", lambda: "")()
         except Exception:
             backend = ""
-        ts_expr = "COALESCE(UNIX_TIMESTAMP(ac.ai_process_time),0)*1000" if backend == "mysql" else "COALESCE(strftime('%s', ac.ai_process_time),0)*1000"
+        # Use conversations.ai_process_time as the watermark instead of ai_conversations
+        ts_expr = "COALESCE(UNIX_TIMESTAMP(c.ai_process_time),0)*1000" if backend == "mysql" else "COALESCE(strftime('%s', c.ai_process_time),0)*1000"
         sql_conv = (
             "SELECT COUNT(1) AS c FROM ("
             " SELECT m.conversation_id, MAX(COALESCE(m.timestamp_ms,0)) AS last_ts"
             " FROM message m WHERE " + " AND ".join(msg_where) +
             " GROUP BY m.conversation_id"
-            ") t LEFT JOIN ai_conversations ac ON ac.convo_id = t.conversation_id "
-            + ("WHERE (ac.ai_process_time IS NULL OR t.last_ts > " + ts_expr + ")" if not reprocess else "")
+            ") t LEFT JOIN conversations c ON c.id = t.conversation_id "
+            + ("WHERE (c.ai_process_time IS NULL OR t.last_ts > " + ts_expr + ")" if not reprocess else "")
         )
         rowc = session.exec(text(sql_conv).params(**msg_params)).first()
         conv_count = int((getattr(rowc, "c", None) if rowc is not None else 0) or (rowc[0] if rowc else 0) or 0)
@@ -244,9 +245,9 @@ def preview_process(body: dict):
             msg_params["ms_to"] = int(ms_to)
         sql_msg = (
             "SELECT COUNT(1) AS mc, SUM(CASE WHEN m.timestamp_ms IS NULL THEN 1 ELSE 0 END) AS mt0 "
-            "FROM message m LEFT JOIN ai_conversations ac ON ac.convo_id = m.conversation_id WHERE "
+            "FROM message m LEFT JOIN conversations c ON c.id = m.conversation_id WHERE "
             + " AND ".join(msg_where)
-            + (f" AND (ac.ai_process_time IS NULL OR COALESCE(m.timestamp_ms,0) > {ts_expr})" if not reprocess else "")
+            + (f" AND (c.ai_process_time IS NULL OR COALESCE(m.timestamp_ms,0) > {ts_expr})" if not reprocess else "")
         )
         rowm = session.exec(text(sql_msg).params(**msg_params)).first()
         msg_count = int((getattr(rowm, "mc", None) if rowm is not None else 0) or (rowm[0] if rowm else 0) or 0)
@@ -312,8 +313,8 @@ def run_results(request: Request, run_id: int, limit: int = 200, status: str | N
         where.append("("
                      "LOWER(COALESCE(r.convo_id,'')) LIKE :qq OR "
                      "LOWER(COALESCE(r.ai_json,'')) LIKE :qq OR "
-                     "LOWER(COALESCE(c.contact_name,'')) LIKE :qq OR "
-                     "COALESCE(c.contact_phone,'') LIKE :qp"
+                     "LOWER(COALESCE(u.contact_name,'')) LIKE :qq OR "
+                     "COALESCE(u.contact_phone,'') LIKE :qp"
                      ")")
         params["qq"] = f"%{qq.lower()}%"
         # for phone, do not lower or strip digits only; a simple contains helps
@@ -337,12 +338,18 @@ def run_results(request: Request, run_id: int, limit: int = 200, status: str | N
         params["ms_to"] = int(ms_to)
     sql = (
         "SELECT r.convo_id, r.status, r.linked_order_id, r.ai_json, r.created_at, "
-        "       MAX(COALESCE(m.timestamp_ms,0)) AS last_ts, c.contact_name, c.contact_phone "
+        "       MAX(COALESCE(m.timestamp_ms,0)) AS last_ts, "
+        "       u.contact_name, u.contact_phone "
         "FROM ig_ai_result r "
-        "LEFT JOIN conversations c ON c.convo_id = r.convo_id "
         "LEFT JOIN message m ON m.conversation_id = r.convo_id "
+        "LEFT JOIN ig_users u "
+        "  ON u.ig_user_id = COALESCE("
+        "       CASE WHEN m.direction = 'in' THEN m.ig_sender_id ELSE m.ig_recipient_id END, "
+        "       m.ig_sender_id, m.ig_recipient_id"
+        "     ) "
         "WHERE " + " AND ".join(where) + " "
-        "GROUP BY r.convo_id, r.status, r.linked_order_id, r.ai_json, r.created_at, c.contact_name, c.contact_phone "
+        "GROUP BY r.convo_id, r.status, r.linked_order_id, r.ai_json, r.created_at, "
+        "         u.contact_name, u.contact_phone "
         + ("HAVING " + " AND ".join(having) + " " if having else "")
         + "ORDER BY last_ts DESC, r.convo_id DESC "
         "LIMIT :lim"
@@ -436,16 +443,38 @@ def run_result_detail(request: Request, run_id: int, convo_id: str, limit: int =
                 })
             except Exception:
                 continue
-        # contact info
+        # contact info (from ig_users via latest message for this conversation)
         contact = {}
         try:
-            rc = session.exec(text("SELECT contact_name, contact_phone, contact_address FROM conversations WHERE convo_id=:cid").params(cid=str(convo_id))).first()
-            if rc:
-                contact = {
-                    "name": getattr(rc, "contact_name", rc[0]) or None,
-                    "phone": getattr(rc, "contact_phone", rc[1]) or None,
-                    "address": getattr(rc, "contact_address", rc[2]) or None,
-                }
+            rowu = session.exec(
+                text(
+                    """
+                    SELECT
+                      CASE
+                        WHEN m.direction = 'in' THEN m.ig_sender_id
+                        ELSE m.ig_recipient_id
+                      END AS ig_user_id
+                    FROM message m
+                    WHERE m.conversation_id=:cid
+                    ORDER BY COALESCE(m.timestamp_ms,0) DESC, m.id DESC
+                    LIMIT 1
+                    """
+                ).params(cid=str(convo_id))
+            ).first()
+            ig_user_id = rowu.ig_user_id if rowu and hasattr(rowu, "ig_user_id") else (rowu[0] if rowu else None)
+            if ig_user_id:
+                rc = session.exec(
+                    text(
+                        "SELECT contact_name, contact_phone, contact_address "
+                        "FROM ig_users WHERE ig_user_id=:uid LIMIT 1"
+                    ).params(uid=str(ig_user_id))
+                ).first()
+                if rc:
+                    contact = {
+                        "name": getattr(rc, "contact_name", rc[0]) or None,
+                        "phone": getattr(rc, "contact_phone", rc[1]) or None,
+                        "address": getattr(rc, "contact_address", rc[2]) or None,
+                    }
         except Exception:
             contact = {}
     templates = request.app.state.templates
@@ -506,23 +535,30 @@ def link_suggest_page(request: Request, start: str | None = None, end: str | Non
             last10 = digits[-10:] if len(digits) >= 10 else digits
             convo_id = None
             msg_preview = None
-            # Try conversations.contact_phone first
-            try:
-                if last10:
+            # Try ig_users.contact_phone first (via messages to identify ig_user_id)
+            if last10:
+                try:
                     rowc = session.exec(
                         text(
                             """
-                            SELECT convo_id, contact_phone
-                            FROM conversations
-                            WHERE contact_phone IS NOT NULL AND REPLACE(REPLACE(REPLACE(contact_phone,' ',''),'-',''),'+','') LIKE :p
-                            ORDER BY last_message_at DESC LIMIT 1
+                            SELECT m.conversation_id, u.contact_phone
+                            FROM message m
+                            JOIN ig_users u
+                              ON u.ig_user_id = COALESCE(
+                                   CASE WHEN m.direction='in' THEN m.ig_sender_id ELSE m.ig_recipient_id END,
+                                   m.ig_sender_id, m.ig_recipient_id
+                                 )
+                            WHERE u.contact_phone IS NOT NULL
+                              AND REPLACE(REPLACE(REPLACE(u.contact_phone,' ',''),'-',''),'+','') LIKE :p
+                            ORDER BY COALESCE(m.timestamp_ms,0) DESC, m.id DESC
+                            LIMIT 1
                             """
-                        ).params(p=f"%{last10}%")
+                        ).params(p=f\"%{last10}%\")
                     ).first()
                     if rowc:
-                        convo_id = rowc.convo_id if hasattr(rowc, "convo_id") else rowc[0]
-            except Exception:
-                pass
+                        convo_id = rowc.conversation_id if hasattr(rowc, \"conversation_id\") else rowc[0]
+                except Exception:
+                    convo_id = None
             # Fallback: search messages.text for digits
             if (convo_id is None) and last10:
                 try:
@@ -599,13 +635,40 @@ async def link_suggest_apply(request: Request):
             o = session.exec(select(Order).where(Order.id == oid)).first()
             if not o:
                 continue
+            # Resolve ig_user_id for this conversation from latest message
+            ig_user_id = None
+            try:
+                rowu = session.exec(
+                    text(
+                        """
+                        SELECT
+                          CASE
+                            WHEN m.direction = 'in' THEN m.ig_sender_id
+                            ELSE m.ig_recipient_id
+                          END AS ig_user_id
+                        FROM message m
+                        WHERE m.conversation_id=:cid
+                        ORDER BY COALESCE(m.timestamp_ms,0) DESC, m.id DESC
+                        LIMIT 1
+                        """
+                    ).params(cid=str(cv))
+                ).first()
+                ig_user_id = rowu.ig_user_id if rowu and hasattr(rowu, "ig_user_id") else (rowu[0] if rowu else None)
+            except Exception:
+                ig_user_id = None
+            if ig_user_id:
+                try:
+                    session.exec(
+                        text(
+                            "UPDATE ig_users SET linked_order_id=:oid "
+                            "WHERE ig_user_id=:uid AND linked_order_id IS NULL"
+                        ).params(oid=int(oid), uid=str(ig_user_id))
+                    )
+                except Exception:
+                    pass
             if not o.ig_conversation_id:
                 o.ig_conversation_id = str(cv)
                 session.add(o)
-            try:
-                session.exec(text("UPDATE conversations SET linked_order_id=:oid WHERE convo_id=:cid").params(oid=int(oid), cid=str(cv)))
-            except Exception:
-                pass
             updated += 1
     return {"status": "ok", "linked": updated}
 
@@ -614,10 +677,10 @@ async def link_suggest_apply(request: Request):
 def unlinked_purchases(request: Request, q: str | None = None, start: str | None = None, end: str | None = None, limit: int = 200):
     """List conversations where a purchase was detected but not linked to an order.
 
-    Uses ai_conversations (vendor-neutral watermark/state) and orders by latest message timestamp.
+    Uses ig_users AI status and orders by latest message timestamp.
     """
     n = int(max(1, min(limit or 200, 1000)))
-    where = ["(ac.linked_order_id IS NULL)", "(ac.ai_status = 'ambiguous' OR ac.ai_status IS NULL)"]
+    where = ["(u.ai_status = 'ambiguous' OR u.ai_status IS NULL)"]
     params: dict[str, object] = {}
     # Parse start/end as dates and convert to ms window over last_ts
     def _parse_date(s: str | None):
@@ -634,21 +697,22 @@ def unlinked_purchases(request: Request, q: str | None = None, start: str | None
     if end_d:
         ms_to = int(dt.datetime.combine(end_d + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
     if q:
-        # Search in contact fields (when present) or AI JSON
-        where.append("(LOWER(COALESCE(c.contact_name,'')) LIKE :qq OR COALESCE(c.contact_phone,'') LIKE :qp OR LOWER(COALESCE(ac.ai_json,'')) LIKE :qa)")
-        qs = f"%{q.lower()}%"
-        params.update({"qq": qs, "qa": qs, "qp": f"%{q}%"} )
+        # Search in contact fields (when present) or AI JSON (on ig_users)
+        where.append("(LOWER(COALESCE(u.contact_name,'')) LIKE :qq OR COALESCE(u.contact_phone,'') LIKE :qp OR LOWER(COALESCE(u.ai_json,'')) LIKE :qa)")
+        qs = f\"%{q.lower()}%\"
+        params.update({\"qq\": qs, \"qa\": qs, \"qp\": f\"%{q}%\"} )
     # Build via subquery to filter on last_ts window
     sql = (
-        "SELECT t.convo_id, c.contact_name, c.contact_phone, c.contact_address, "
-        "       ac.ai_status, ac.ai_json, ac.linked_order_id, t.last_ts "
+        "SELECT t.convo_id, u.contact_name, u.contact_phone, u.contact_address, "
+        "       u.ai_status, u.ai_json, NULL AS linked_order_id, t.last_ts "
         "FROM ("
-        "  SELECT m.conversation_id AS convo_id, MAX(COALESCE(m.timestamp_ms,0)) AS last_ts "
+        "  SELECT m.conversation_id AS convo_id, "
+        "         MAX(COALESCE(m.timestamp_ms,0)) AS last_ts, "
+        "         MAX(CASE WHEN m.direction='in' THEN m.ig_sender_id ELSE m.ig_recipient_id END) AS ig_user_id "
         "  FROM message m "
         "  GROUP BY m.conversation_id"
         ") t "
-        "JOIN ai_conversations ac ON ac.convo_id = t.convo_id "
-        "LEFT JOIN conversations c ON c.convo_id = t.convo_id "
+        "JOIN ig_users u ON u.ig_user_id = t.ig_user_id "
         "WHERE " + " AND ".join(where)
         + (" AND t.last_ts >= :ms_from" if ms_from is not None else "")
         + (" AND t.last_ts < :ms_to" if ms_to is not None else "")
@@ -785,16 +849,36 @@ def mark_unlinked(body: dict):
     if status not in allowed:
         raise HTTPException(status_code=400, detail=f"invalid status; allowed: {', '.join(sorted(allowed))}")
     with get_session() as session:
+        # Resolve ig_user_id for this conversation and update ig_users.ai_status
+        ig_user_id = None
         try:
-            # Update ai_conversations watermark/state
-            session.exec(text("UPDATE ai_conversations SET ai_status=:st, ai_process_time=CURRENT_TIMESTAMP WHERE convo_id=:cid").params(st=status, cid=str(convo_id)))
+            rowu = session.exec(
+                text(
+                    """
+                    SELECT
+                      CASE
+                        WHEN m.direction = 'in' THEN m.ig_sender_id
+                        ELSE m.ig_recipient_id
+                      END AS ig_user_id
+                    FROM message m
+                    WHERE m.conversation_id=:cid
+                    ORDER BY COALESCE(m.timestamp_ms,0) DESC, m.id DESC
+                    LIMIT 1
+                    """
+                ).params(cid=str(convo_id))
+            ).first()
+            ig_user_id = rowu.ig_user_id if rowu and hasattr(rowu, "ig_user_id") else (rowu[0] if rowu else None)
         except Exception:
-            pass
-        try:
-            # Also reflect in conversations when present
-            session.exec(text("UPDATE conversations SET ai_status=:st, ai_processed_at=CURRENT_TIMESTAMP WHERE convo_id=:cid").params(st=status, cid=str(convo_id)))
-        except Exception:
-            pass
+            ig_user_id = None
+        if ig_user_id:
+            try:
+                session.exec(
+                    text(
+                        "UPDATE ig_users SET ai_status=:st WHERE ig_user_id=:uid"
+                    ).params(st=status, uid=str(ig_user_id))
+                )
+            except Exception:
+                pass
     return {"status": "ok"}
 
 

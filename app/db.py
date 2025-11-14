@@ -359,7 +359,8 @@ def init_db() -> None:
                         except Exception:
                             pass
                         # latest_messages deprecated: creation removed
-                        # Ensure conversations AI/contact columns exist for IG AI
+                        # conversations AI/contact columns now live on ig_users; only ensure
+                        # graph_conversation_id and useful indexes exist on conversations.
                         try:
                             rows = conn.exec_driver_sql(
                                 """
@@ -368,24 +369,6 @@ def init_db() -> None:
                                 """
                             ).fetchall()
                             have_cols = {str(r[0]).lower() for r in rows or []}
-                            if 'contact_name' not in have_cols:
-                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN contact_name TEXT NULL")
-                            if 'contact_phone' not in have_cols:
-                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN contact_phone TEXT NULL")
-                            if 'contact_address' not in have_cols:
-                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN contact_address TEXT NULL")
-                            if 'ai_status' not in have_cols:
-                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_status VARCHAR(32) NULL")
-                            if 'ai_json' not in have_cols:
-                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_json LONGTEXT NULL")
-                            if 'ai_processed_at' not in have_cols:
-                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_processed_at DATETIME NULL")
-                            if 'ai_process_time' not in have_cols:
-                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_process_time DATETIME NULL")
-                            if 'linked_order_id' not in have_cols:
-                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN linked_order_id INTEGER NULL")
-                            if 'ai_run_id' not in have_cols:
-                                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN ai_run_id INTEGER NULL")
                             if 'graph_conversation_id' not in have_cols:
                                 conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN graph_conversation_id VARCHAR(128) NULL")
                             else:
@@ -403,34 +386,15 @@ def init_db() -> None:
                                         conn.exec_driver_sql("ALTER TABLE conversations MODIFY COLUMN graph_conversation_id VARCHAR(512) NULL")
                                 except Exception:
                                     pass
-                            # Helpful indexes
-                            try:
-                                conn.exec_driver_sql("CREATE INDEX idx_conversations_ai_processed ON conversations(ai_processed_at)")
-                            except Exception:
-                                pass
-                            try:
-                                conn.exec_driver_sql("CREATE INDEX idx_conversations_linked_order ON conversations(linked_order_id)")
-                            except Exception:
-                                pass
-                            # Additional helpful indexes for faster previews
+                            # helpful indexes for inbox/AI
                             try:
                                 conn.exec_driver_sql("CREATE INDEX idx_conversations_last_message_at ON conversations(last_message_at)")
                             except Exception:
                                 pass
                             try:
-                                conn.exec_driver_sql("CREATE INDEX idx_conversations_ai_last ON conversations(ai_processed_at, last_message_at)")
-                            except Exception:
-                                pass
-                            try:
-                                conn.exec_driver_sql("CREATE INDEX idx_conversations_ai_process_time ON conversations(ai_process_time)")
-                            except Exception:
-                                pass
-                            # Message composite index for inbox (idempotent)
-                            try:
                                 conn.exec_driver_sql("CREATE INDEX idx_message_conv_ts ON message(conversation_id, timestamp_ms)")
                             except Exception:
                                 pass
-                            # Username index for labels
                             try:
                                 conn.exec_driver_sql("CREATE INDEX idx_ig_users_username ON ig_users(username)")
                             except Exception:

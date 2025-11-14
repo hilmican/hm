@@ -10,7 +10,7 @@ import os as _os
 from datetime import datetime as _d
 
 from ..db import get_session
-from ..models import Message, IGAiDebugRun
+from ..models import Message, IGAiDebugRun, Conversation
 from ..services.instagram_api import sync_latest_conversations, _get_base_token_and_id, GRAPH_VERSION
 from ..services.queue import enqueue
 from ..services.ai_ig import _detect_focus_product
@@ -20,14 +20,14 @@ router = APIRouter()
 
 
 @router.get("/inbox/{conversation_id}/debug")
-def debug_conversation(request: Request, conversation_id: str, limit: int = 25):
+def debug_conversation(request: Request, conversation_id: int, limit: int = 25):
     templates = request.app.state.templates
     n = max(1, min(int(limit or 25), 100))
     with get_session() as session:
         from sqlmodel import select
         runs = session.exec(
             select(IGAiDebugRun)
-            .where(IGAiDebugRun.conversation_id == conversation_id)
+            .where(IGAiDebugRun.conversation_id == str(conversation_id))
             .order_by(IGAiDebugRun.id.desc())
             .limit(n)
         ).all()
@@ -83,10 +83,10 @@ def debug_conversation(request: Request, conversation_id: str, limit: int = 25):
 
 
 @router.post("/inbox/{conversation_id}/debug/run")
-def trigger_debug_conversation(conversation_id: str):
+def trigger_debug_conversation(conversation_id: int):
     with get_session() as session:
         # 1) Create a debug run row (UI anchor)
-        run = IGAiDebugRun(conversation_id=conversation_id, status="queued")
+        run = IGAiDebugRun(conversation_id=str(conversation_id), status="queued")
         session.add(run)
         session.flush()
         debug_id = int(run.id or 0)
@@ -133,7 +133,7 @@ def trigger_debug_conversation(conversation_id: str):
                 "min_age_minutes": 0,
                 "limit": 200,
                 "reprocess": False,
-                "conversation_id": conversation_id,
+                "conversation_id": int(conversation_id),
                 "debug_run_id": debug_id,
             }
             job_id = enqueue("ig_ai_process_run", key=str(run_id), payload=payload)
@@ -149,33 +149,16 @@ def trigger_debug_conversation(conversation_id: str):
 
 
 @router.get("/inbox/{conversation_id}")
-def thread(request: Request, conversation_id: str, limit: int = 100):
-    # If this is a legacy dm:<ig_user_id> and we have a known Graph conversation id, redirect
-    if isinstance(conversation_id, str) and conversation_id.startswith("dm:"):
-        try:
-            other_id = conversation_id.split(":", 1)[1]
-        except Exception:
-            other_id = None
-        if other_id:
-            try:
-                from sqlalchemy import text as _text
-                with get_session() as session:
-                    rowc = session.exec(
-                        _text(
-                            "SELECT graph_conversation_id FROM conversations WHERE ig_user_id=:u AND graph_conversation_id IS NOT NULL ORDER BY last_message_at DESC LIMIT 1"
-                        ).params(u=str(other_id))
-                    ).first()
-                    if rowc:
-                        gcid = rowc.graph_conversation_id if hasattr(rowc, "graph_conversation_id") else (rowc[0] if len(rowc) > 0 else None)
-                        if gcid and str(gcid) != conversation_id:
-                            return RedirectResponse(url=f"/ig/inbox/{gcid}", status_code=HTTP_303_SEE_OTHER)
-            except Exception:
-                pass
+def thread(request: Request, conversation_id: int, limit: int = 100):
     with get_session() as session:
         from sqlmodel import select
+        # Load conversation row (for basic metadata) and messages for this internal id
+        convo = session.get(Conversation, int(conversation_id))
+        if convo is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
         msgs = session.exec(
             select(Message)
-            .where(Message.conversation_id == conversation_id)
+            .where(Message.conversation_id == int(conversation_id))
             .order_by(Message.timestamp_ms.desc())
             .limit(min(max(limit, 1), 500))
         ).all()
@@ -191,27 +174,30 @@ def thread(request: Request, conversation_id: str, limit: int = 100):
         linked_order_id = None
         ai_status = None
         ai_json = None
+        # Fetch user-level contact / AI info from ig_users (single source of truth)
+        from sqlalchemy import text as _text
         try:
-            from sqlalchemy import text as _text
-            row_convo = session.exec(
+            row_user = session.exec(
                 _text(
                     """
                     SELECT contact_name, contact_phone, contact_address, linked_order_id, ai_status, ai_json
-                    FROM conversations WHERE convo_id=:cid LIMIT 1
+                    FROM ig_users
+                    WHERE ig_user_id = :u
+                    LIMIT 1
                     """
-                ).params(cid=str(conversation_id))
+                ).params(u=str(convo.ig_user_id))
             ).first()
-            if row_convo:
-                contact_name = (row_convo.contact_name if hasattr(row_convo, "contact_name") else row_convo[0]) or None
-                contact_phone = (row_convo.contact_phone if hasattr(row_convo, "contact_phone") else row_convo[1]) or None
-                contact_address = (row_convo.contact_address if hasattr(row_convo, "contact_address") else row_convo[2]) or None
-                linked_order_id = (row_convo.linked_order_id if hasattr(row_convo, "linked_order_id") else row_convo[3]) or None
-                ai_status = (row_convo.ai_status if hasattr(row_convo, "ai_status") else row_convo[4]) or None
-                ai_json = (row_convo.ai_json if hasattr(row_convo, "ai_json") else row_convo[5]) or None
+            if row_user:
+                contact_name = (row_user.contact_name if hasattr(row_user, "contact_name") else row_user[0]) or None
+                contact_phone = (row_user.contact_phone if hasattr(row_user, "contact_phone") else row_user[1]) or None
+                contact_address = (row_user.contact_address if hasattr(row_user, "contact_address") else row_user[2]) or None
+                linked_order_id = (row_user.linked_order_id if hasattr(row_user, "linked_order_id") else row_user[3]) or None
+                ai_status = (row_user.ai_status if hasattr(row_user, "ai_status") else row_user[4]) or None
+                ai_json = (row_user.ai_json if hasattr(row_user, "ai_json") else row_user[5]) or None
         except Exception:
             pass
 
-        # Fallback: even if conversations row is missing or ai_json empty, try latest historical result
+        # Fallback: even if ig_users row is missing or ai_json empty, try latest historical result
         if not ai_json:
             try:
                 from sqlalchemy import text as _text

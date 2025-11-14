@@ -487,7 +487,7 @@ def process_run(
                     ai_run_log(run_id, "error", "reprocess_clear_error", {"error": str(e)})
                 except Exception:
                     pass
-        # Select eligible conversations by last_message_at and ai_process_time
+        # Select eligible conversations by last_message_at and previously processed watermark
         params: Dict[str, Any] = {"cutoff": cutoff_dt.isoformat(" ")}
         if conversation_id:
             sql = "SELECT convo_id FROM conversations WHERE convo_id = :single LIMIT 1"
@@ -523,17 +523,18 @@ def process_run(
             except Exception:
                 backend = ""
             ts_expr = "COALESCE(UNIX_TIMESTAMP(ac.ai_process_time),0)*1000" if backend == "mysql" else "COALESCE(strftime('%s', ac.ai_process_time),0)*1000"
+            # conversations are now the single source; use conversations.ai_process_time/ai_processed_at
             sql_msg = (
                 "SELECT t.conversation_id FROM ("
                 " SELECT m.conversation_id, MAX(COALESCE(m.timestamp_ms,0)) AS last_ts"
                 " FROM message m WHERE " + " AND ".join(msg_where) +
                 " GROUP BY m.conversation_id"
-                ") t LEFT JOIN ai_conversations ac ON ac.convo_id = t.conversation_id "
-                + ("WHERE (ac.ai_process_time IS NULL OR t.last_ts > " + ts_expr + ") " if not reprocess else " ")
+                ") t LEFT JOIN conversations c ON c.id = t.conversation_id "
+                + ("WHERE (c.ai_process_time IS NULL OR t.last_ts > " + ts_expr + ") " if not reprocess else " ")
                 + f"ORDER BY t.last_ts DESC LIMIT {int(limit)}"
             )
             rows = session.exec(_text(sql_msg).params(**msg_params)).all()
-            convo_ids = [r.conversation_id if hasattr(r, "conversation_id") else r[0] for r in rows]
+            convo_ids = [int(r.conversation_id if hasattr(r, "conversation_id") else r[0]) for r in rows]
             considered = len(convo_ids)
         # Fallback: if conversations table yields 0, select distinct conversation_id
         # from messages by timestamp window so we can still process
