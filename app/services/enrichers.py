@@ -37,15 +37,15 @@ async def enrich_user(ig_user_id: str) -> bool:
 				except Exception:
 					pass
 				return False
-	# Fetch full profile fields instead of only username to enable avatars in UI
+	# Fetch username and name; profile picture URL is not available for all node types (e.g., IGBusinessScopedID)
 	try:
 		from .instagram_api import _get as graph_get, GRAPH_VERSION, _get_base_token_and_id
 		import httpx
 		token, _, _ = _get_base_token_and_id()
 		base = f"https://graph.facebook.com/{GRAPH_VERSION}"
-		# Fetch username, name, and profile picture
+		# Fetch username and name only (avoid profile_picture_url to prevent Graph 400 on some node types)
 		async with httpx.AsyncClient() as client:
-			data_basic = await graph_get(client, base + f"/{ig_user_id}", {"access_token": token, "fields": "username,name,profile_picture_url"})
+			data_basic = await graph_get(client, base + f"/{ig_user_id}", {"access_token": token, "fields": "username,name"})
 		username = data_basic.get("username") or data_basic.get("name")
 		name = data_basic.get("name")
 		profile_pic_url = data_basic.get("profile_picture_url")
