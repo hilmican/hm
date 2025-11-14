@@ -8,6 +8,7 @@ from ..db import get_session
 from ..models import Message
 from .instagram_api import fetch_message_details  # type: ignore
 import logging as _lg
+_log = _lg.getLogger("ingest")
 _log_up = _lg.getLogger("ingest.upsert")
 from .queue import enqueue
 from sqlalchemy import text as _sql_text
@@ -31,6 +32,37 @@ def _ensure_ig_user(conn, ig_user_id: str) -> None:
 		""",
 		(ig_user_id,),
 	)
+
+
+def _ensure_ig_user_with_data(session, ig_user_id: str) -> None:
+	"""Ensure IG user exists with data. If not exists, fetch synchronously."""
+	# Check if user exists and has data
+	row = session.exec(text("SELECT ig_user_id, username, fetch_status FROM ig_users WHERE ig_user_id=:id LIMIT 1")).params(id=str(ig_user_id)).first()
+	if row:
+		username = getattr(row, "username", None) or (row[1] if len(row) > 1 else None)
+		fetch_status = getattr(row, "fetch_status", None) or (row[2] if len(row) > 2 else None)
+		# If we have username and successful fetch, consider it complete
+		if username and str(fetch_status or "").lower() == "ok":
+			return
+
+	# User doesn't exist or incomplete - fetch synchronously
+	try:
+		import asyncio
+		loop = asyncio.get_event_loop()
+		# Use the async enrich_user function
+		from .enrichers import enrich_user
+		result = loop.run_until_complete(enrich_user(ig_user_id))
+		if result:
+			_log.info("ingest: user %s enriched synchronously", ig_user_id)
+		else:
+			_log.debug("ingest: user %s already had data or fetch failed", ig_user_id)
+	except Exception as e:
+		_log.warning("ingest: failed to enrich user %s synchronously: %s", ig_user_id, e)
+		# Fallback: ensure at least the row exists
+		try:
+			session.exec(text("INSERT OR IGNORE INTO ig_users(ig_user_id) VALUES (:id)")).params(id=str(ig_user_id))
+		except Exception:
+			pass
 
 
 def _upsert_conversation(conn, igba_id: str, ig_user_id: str, ts_ms: Optional[int]) -> str:
@@ -667,7 +699,8 @@ def handle(raw_event_id: int) -> int:
 						continue
 					sender_id = (event.get("sender") or {}).get("id")
 					if sender_id:
-						_ensure_ig_user(conn, str(sender_id))
+						# Synchronous user creation with data fetch
+						_ensure_ig_user_with_data(session, str(sender_id))
 					mid = message_obj.get("mid") or message_obj.get("id")
 					# ensure ai_conversations row exists and possibly enqueue hydration
 					try:
@@ -694,18 +727,7 @@ def handle(raw_event_id: int) -> int:
 						if attachments:
 							_create_attachment_stubs(session, msg_id, str(mid), attachments)
 						# enrichers (idempotent via jobs table uniqueness)
-						if sender_id:
-							try:
-								rowu = session.exec(text("SELECT fetch_status FROM ig_users WHERE ig_user_id=:id").params(id=str(sender_id))).first()
-							except Exception:
-								rowu = None
-							fs = None
-							try:
-								fs = (rowu.fetch_status if hasattr(rowu, "fetch_status") else (rowu[0] if isinstance(rowu, (list, tuple)) else None)) if rowu else None
-							except Exception:
-								fs = None
-							if fs is None or str(fs).lower() != "ok":
-								enqueue("enrich_user", key=str(sender_id), payload={"ig_user_id": str(sender_id)})
+						# User enrichment now happens synchronously above, so we skip enqueueing enrich_user
 						enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})
 				# Additionally handle referral-only webhook events (messaging_referrals)
 				try:

@@ -20,17 +20,18 @@ def _ttl_hours(env_key: str, default: int) -> int:
 
 
 async def enrich_user(ig_user_id: str) -> bool:
-	# TTL check
+	# TTL check - only skip if we have successful recent data
 	with get_session() as session:
-		row = session.exec(text("SELECT fetched_at FROM ig_users WHERE ig_user_id = :id").params(id=ig_user_id)).first()
-		if row and (row.fetched_at if hasattr(row, "fetched_at") else row[0]):
-			fa = row.fetched_at if hasattr(row, "fetched_at") else row[0]
+		row = session.exec(text("SELECT fetched_at, fetch_status FROM ig_users WHERE ig_user_id = :id").params(id=ig_user_id)).first()
+		if row:
+			fa = row.fetched_at if hasattr(row, "fetched_at") else (row[0] if isinstance(row, (list, tuple)) else None)
+			fs = row.fetch_status if hasattr(row, "fetch_status") else (row[1] if isinstance(row, (list, tuple)) else None)
 			if isinstance(fa, str):
 				try:
 					fa = dt.datetime.fromisoformat(fa)
 				except Exception:
 					fa = None
-			if fa and (dt.datetime.utcnow() - fa) < dt.timedelta(hours=_ttl_hours("USER_TTL_HOURS", 48)):
+			if fa and str(fs).lower() == 'ok' and (dt.datetime.utcnow() - fa) < dt.timedelta(hours=_ttl_hours("USER_TTL_HOURS", 48)):
 				try:
 					_log.info("enrich_user: skip TTL uid=%s fetched_at=%s", ig_user_id, fa)
 				except Exception:
@@ -42,13 +43,14 @@ async def enrich_user(ig_user_id: str) -> bool:
 		import httpx
 		token, _, _ = _get_base_token_and_id()
 		base = f"https://graph.facebook.com/{GRAPH_VERSION}"
-		# Fetch only username and name (no profile picture)
+		# Fetch username, name, and profile picture
 		async with httpx.AsyncClient() as client:
-			data_basic = await graph_get(client, base + f"/{ig_user_id}", {"access_token": token, "fields": "username,name"})
+			data_basic = await graph_get(client, base + f"/{ig_user_id}", {"access_token": token, "fields": "username,name,profile_picture_url"})
 		username = data_basic.get("username") or data_basic.get("name")
 		name = data_basic.get("name")
+		profile_pic_url = data_basic.get("profile_picture_url")
 		try:
-			_log.info("enrich_user: graph ok uid=%s username=%s name=%s", ig_user_id, username, name)
+			_log.info("enrich_user: graph ok uid=%s username=%s name=%s profile_pic=%s", ig_user_id, username, name, profile_pic_url)
 		except Exception:
 			pass
 	except Exception as e:
@@ -89,10 +91,10 @@ async def enrich_user(ig_user_id: str) -> bool:
 			text(
 				"""
 				UPDATE ig_users
-				SET username=:u, name=:n, fetched_at=CURRENT_TIMESTAMP, fetch_status='ok', fetch_error=NULL
+				SET username=:u, name=:n, profile_pic_url=:p, fetched_at=CURRENT_TIMESTAMP, fetch_status='ok', fetch_error=NULL
 				WHERE ig_user_id=:id
 				"""
-			).params(u=username, n=name, id=ig_user_id)
+			).params(u=username, n=name, p=profile_pic_url, id=ig_user_id)
 		)
 	try:
 		updated = 0
@@ -111,14 +113,14 @@ async def enrich_user(ig_user_id: str) -> bool:
 				try:
 					session.exec(
 						text(
-							"INSERT OR IGNORE INTO ig_users(ig_user_id, username, name, fetched_at, fetch_status) VALUES (:id, :u, :n, CURRENT_TIMESTAMP, 'ok')"
-						).params(id=ig_user_id, u=username, n=name)
+							"INSERT OR IGNORE INTO ig_users(ig_user_id, username, name, profile_pic_url, fetched_at, fetch_status) VALUES (:id, :u, :n, :p, CURRENT_TIMESTAMP, 'ok')"
+						).params(id=ig_user_id, u=username, n=name, p=profile_pic_url)
 					)
 				except Exception:
 					session.exec(
 						text(
-							"INSERT IGNORE INTO ig_users(ig_user_id, username, name, fetched_at, fetch_status) VALUES (:id, :u, :n, CURRENT_TIMESTAMP, 'ok')"
-						).params(id=ig_user_id, u=username, n=name)
+							"INSERT IGNORE INTO ig_users(ig_user_id, username, name, profile_pic_url, fetched_at, fetch_status) VALUES (:id, :u, :n, :p, CURRENT_TIMESTAMP, 'ok')"
+						).params(id=ig_user_id, u=username, n=name, p=profile_pic_url)
 					)
 		except Exception:
 			pass
