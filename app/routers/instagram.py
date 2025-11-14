@@ -156,7 +156,8 @@ async def receive_events(request: Request):
 		try:
 			_log.info("IG webhook POST: queuing message processing for raw_event_id=%s", raw_event_id)
 			from ..services.queue import enqueue
-			enqueue("ingest", {"raw_event_id": int(raw_event_id)})
+			# Use raw_event_id as the job key and pass it in the payload for the worker
+			enqueue("ingest", key=str(raw_event_id), payload={"raw_event_id": int(raw_event_id)})
 		except Exception as e:
 			# best-effort: ignore failures here; ingestion worker will backfill later
 			try:
