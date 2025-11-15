@@ -336,11 +336,27 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	sender_id = (event.get("sender") or {}).get("id")
 	recipient_id = (event.get("recipient") or {}).get("id")
 	timestamp_ms = event.get("timestamp")
-	# derive direction: compare with owner/page id embedded in webhook entry id (igba_id)
+	# derive direction: compare sender with owner/page id (check both igba_id from webhook and configured owner)
 	direction = "in"
 	try:
+		# Check against webhook entry id (igba_id)
 		if sender_id and str(sender_id) == str(igba_id):
 			direction = "out"
+		else:
+			# Also check against configured owner ID (IG_PAGE_ID or IG_USER_ID)
+			token, owner_id, is_page = __import__(
+				"app.services.instagram_api", fromlist=["_get_base_token_and_id"]
+			).instagram_api._get_base_token_and_id()
+			if sender_id and str(sender_id) == str(owner_id):
+				direction = "out"
+			# Also check IG_USER_ID if it's different from owner_id (for business accounts)
+			try:
+				import os
+				ig_user_id = os.getenv("IG_USER_ID")
+				if ig_user_id and sender_id and str(sender_id) == str(ig_user_id):
+					direction = "out"
+			except Exception:
+				pass
 	except Exception:
 		pass
 	# Canonical conversation key is always (page_id, user_id), independent of direction.
@@ -643,8 +659,22 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 			"app.services.instagram_api", fromlist=["_get_base_token_and_id"]
 		).instagram_api._get_base_token_and_id()
 		owner = entity_id
+		# Check against configured owner ID
 		if sender_id and str(sender_id) == str(owner):
 			direction = "out"
+		# Also check IG_USER_ID if it's different from owner_id (for business accounts)
+		if direction == "in":
+			try:
+				import os
+				ig_user_id = os.getenv("IG_USER_ID")
+				if ig_user_id and sender_id and str(sender_id) == str(ig_user_id):
+					direction = "out"
+			except Exception:
+				pass
+		# Also check against igba_id if provided (webhook entry ID)
+		if direction == "in" and igba_id:
+			if sender_id and str(sender_id) == str(igba_id):
+				direction = "out"
 	except Exception:
 		pass
 	# Canonical conversation key is always (page_id, user_id), independent of direction.
