@@ -309,11 +309,18 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 			direction = "out"
 	except Exception:
 		pass
-	other_party_id = recipient_id if direction == "out" else sender_id
+	# Canonical conversation key is always (page_id, user_id), independent of direction.
+	page_id = str(igba_id) if igba_id is not None else ""
+	user_id: Optional[str] = None
+	try:
+		if sender_id and page_id and str(sender_id) != page_id:
+			user_id = str(sender_id)
+		elif recipient_id and page_id and str(recipient_id) != page_id:
+			user_id = str(recipient_id)
+	except Exception:
+		user_id = None
 	# Resolve or create canonical Conversation row (internal integer id)
-	conversation_pk = _get_or_create_conversation_id(
-		session, str(igba_id), str(other_party_id) if other_party_id is not None else None
-	)
+	conversation_pk = _get_or_create_conversation_id(session, page_id, user_id)
 	text_val = message_obj.get("text")
 	attachments = message_obj.get("attachments")
 	# Story reply (best-effort)
@@ -589,6 +596,16 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 			direction = "out"
 	except Exception:
 		pass
+	# Canonical conversation key is always (page_id, user_id), independent of direction.
+	page_id = str(igba_id or owner or "")
+	user_id: Optional[str] = None
+	try:
+		if sender_id and page_id and str(sender_id) != page_id:
+			user_id = str(sender_id)
+		elif recipient_id and page_id and str(recipient_id) != page_id:
+			user_id = str(recipient_id)
+	except Exception:
+		user_id = None
 	# Prefer Graph conversation id when hydrate provides it (for mapping), but internal
 	# conversation_id is always our own integer PK.
 	graph_cid = None
@@ -596,12 +613,8 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		graph_cid = event.get("__graph_conversation_id")
 	except Exception:
 		graph_cid = None
-	# Determine other party and resolve/create Conversation row
-	other_party_id = recipient_id if direction == "out" else sender_id
-	effective_igba = str(igba_id or owner or "")
-	conversation_pk = _get_or_create_conversation_id(
-		session, effective_igba, str(other_party_id) if other_party_id is not None else None
-	)
+	# Resolve or create Conversation row using (page_id, user_id)
+	conversation_pk = _get_or_create_conversation_id(session, page_id, user_id)
 	# If Graph conversation id is known, persist mapping on the Conversation row
 	if conversation_pk is not None and graph_cid:
 		try:
