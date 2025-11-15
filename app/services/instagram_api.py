@@ -124,19 +124,38 @@ async def fetch_message_details(message_id: str) -> Dict[str, Any]:
         return data
 
 
-async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200) -> List[Dict[str, Any]]:
+async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200, graph_conversation_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Fetch latest N messages for a thread defined by page/user pair.
 
     Strategy:
-    - First resolve the conversation id by listing page/user conversations and
-      matching the participant set. Prefer cached mapping when available; otherwise
-      page across conversations until found (best-effort).
-    - Then fetch messages for that conversation id.
+    - If graph_conversation_id is provided, use it directly (1 request).
+    - Otherwise, try cached Graph conversation id from DB (1 request if cached).
+    - If no cached ID, discover by listing conversations (multiple requests - avoid if possible).
+
+    Args:
+        graph_conversation_id: If provided, use this directly instead of discovery (saves API calls).
     """
     try:
-        _log.info("ftm.begin igba=%s ig_user_id=%s limit=%s", str(igba_id), str(ig_user_id), int(limit))
+        _log.info("ftm.begin igba=%s ig_user_id=%s limit=%s graph_cid=%s", str(igba_id), str(ig_user_id), int(limit), "provided" if graph_conversation_id else "none")
     except Exception:
         pass
+    
+    # If graph_conversation_id is provided, use it directly (1 request)
+    if graph_conversation_id:
+        try:
+            msgs = await fetch_messages(str(graph_conversation_id), limit=min(max(limit, 1), 200))
+            try:
+                _log.info("ftm.direct.fetch ok count=%s", len(msgs) if isinstance(msgs, list) else None)
+            except Exception:
+                pass
+            return msgs
+        except Exception as e:
+            try:
+                _log.warning("ftm.direct.fetch failed graph_cid=%s err=%s", str(graph_conversation_id)[:50], str(e)[:200])
+            except Exception:
+                pass
+            # Fall through to cached/discovery if provided ID fails
+    
     # 0) Try cached Graph conversation id from our DB
     cached_id: Optional[str] = None
     try:

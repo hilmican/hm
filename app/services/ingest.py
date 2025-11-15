@@ -37,10 +37,10 @@ def _ensure_ig_user(conn, ig_user_id: str) -> None:
 
 
 def _ensure_ig_user_with_data(session, ig_user_id: str, igba_id: str | None = None) -> None:
-	"""Ensure IG user exists with data and, on first creation, hydrate their thread.
+	"""Ensure IG user exists with data (username, name, etc.).
 
-	This prevents the legacy situation where early messages are stored under
-	`dm:<ig_user_id>` and later ones under Graph conversation ids.
+	This only enriches user info via Graph API. Thread hydration is handled separately
+	when we have graph_conversation_id to avoid unnecessary API calls.
 	"""
 	# Check if user exists and has data
 	row = session.exec(
@@ -48,7 +48,6 @@ def _ensure_ig_user_with_data(session, ig_user_id: str, igba_id: str | None = No
 			id=str(ig_user_id)
 		)
 	).first()
-	user_existed = bool(row)
 	if row:
 		username = getattr(row, "username", None) or (row[1] if len(row) > 1 else None)
 		fetch_status = getattr(row, "fetch_status", None) or (row[2] if len(row) > 2 else None)
@@ -69,23 +68,6 @@ def _ensure_ig_user_with_data(session, ig_user_id: str, igba_id: str | None = No
 			_log.info("ingest: user %s enriched synchronously", ig_user_id)
 		else:
 			_log.debug("ingest: user %s already had data or fetch failed", ig_user_id)
-		# If this was a brand-new user and we know the page id, hydrate their thread once
-		# so that messages populate the canonical Conversation row from the beginning.
-		if (not user_existed) and igba_id:
-			try:
-				from .instagram_api import fetch_thread_messages as _ftm
-
-				_log.info(
-					"ingest: hydrating new user thread igba_id=%s ig_user_id=%s", str(igba_id), str(ig_user_id)
-				)
-				loop.run_until_complete(_ftm(str(igba_id), str(ig_user_id), limit=20))
-			except Exception as he:
-				_log.warning(
-					"ingest: hydrate for new user failed igba_id=%s ig_user_id=%s err=%s",
-					str(igba_id),
-					str(ig_user_id),
-					str(he)[:200],
-				)
 	except Exception as e:
 		_log.warning("ingest: failed to enrich user %s synchronously: %s", ig_user_id, e)
 		# Fallback: ensure at least the row exists
@@ -94,6 +76,58 @@ def _ensure_ig_user_with_data(session, ig_user_id: str, igba_id: str | None = No
 			session.exec(text("INSERT IGNORE INTO ig_users(ig_user_id) VALUES (:id)").params(id=str(ig_user_id)))
 		except Exception:
 			pass
+
+
+def _extract_graph_conversation_id_from_message_id(mid: str, page_id: Optional[str] = None) -> Optional[str]:
+	"""
+	Extract Graph API conversation ID from a message ID.
+	
+	Graph API message IDs are base64-encoded and contain the conversation thread ID.
+	Format: base64("ig_message_item:1:IGMessageThread:<page_id>:<thread_id>:<message_id>")
+	We extract the thread part to construct: base64("ig_message_thread:1:IGMessageThread:<page_id>:<thread_id>")
+	"""
+	if not mid:
+		return None
+	try:
+		import base64
+		import re
+		mid_str = str(mid)
+		# Try decoding with different padding
+		decoded_str = None
+		for pad in ['', '=', '==', '===']:
+			try:
+				decoded = base64.b64decode(mid_str + pad)
+				decoded_str = decoded.decode('utf-8', errors='ignore')
+				if 'IGMessage' in decoded_str or 'Thread' in decoded_str:
+					break
+			except Exception:
+				continue
+		
+		if not decoded_str:
+			return None
+		
+		# Look for the thread pattern: IGMessageThread:<page_id>:<thread_id>
+		match = re.search(r'IGMessageThread[^:]*:(\d+):(\d+)', decoded_str)
+		if match:
+			page_part = match.group(1)
+			thread_part = match.group(2)
+			# Reconstruct the Graph conversation ID
+			conv_str = f"ig_message_thread:1:IGMessageThread:{page_part}:{thread_part}"
+			return base64.b64encode(conv_str.encode('utf-8')).decode('utf-8').rstrip('=')
+		
+		# Fallback: try to find thread ID by looking for page_id in decoded string
+		if page_id and page_id in decoded_str:
+			page_pos = decoded_str.find(page_id)
+			if page_pos >= 0:
+				remaining = decoded_str[page_pos + len(page_id):]
+				thread_match = re.search(r':(\d+)', remaining)
+				if thread_match:
+					thread_part = thread_match.group(1)
+					conv_str = f"ig_message_thread:1:IGMessageThread:{page_id}:{thread_part}"
+					return base64.b64encode(conv_str.encode('utf-8')).decode('utf-8').rstrip('=')
+	except Exception:
+		pass
+	return None
 
 
 def _get_or_create_conversation_id(
@@ -321,6 +355,23 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 		user_id = None
 	# Resolve or create canonical Conversation row (internal integer id)
 	conversation_pk = _get_or_create_conversation_id(session, page_id, user_id)
+	
+	# Extract Graph conversation ID from message ID for hydration
+	graph_conversation_id = None
+	if conversation_pk is not None and mid:
+		graph_conversation_id = _extract_graph_conversation_id_from_message_id(str(mid), page_id)
+		# Store Graph conversation ID on the conversation row if we extracted it
+		if graph_conversation_id:
+			try:
+				from sqlalchemy import text as _t
+				session.exec(
+					_t(
+						"UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)"
+					).params(gc=str(graph_conversation_id), cid=int(conversation_pk))
+				)
+			except Exception:
+				pass
+	
 	text_val = message_obj.get("text")
 	attachments = message_obj.get("attachments")
 	# Story reply (best-effort)
@@ -613,6 +664,11 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		graph_cid = event.get("__graph_conversation_id")
 	except Exception:
 		graph_cid = None
+	
+	# If not provided by hydrate, try to extract from message ID
+	if not graph_cid and mid:
+		graph_cid = _extract_graph_conversation_id_from_message_id(str(mid), page_id)
+	
 	# Resolve or create Conversation row using (page_id, user_id)
 	conversation_pk = _get_or_create_conversation_id(session, page_id, user_id)
 	# If Graph conversation id is known, persist mapping on the Conversation row
@@ -737,9 +793,19 @@ def handle(raw_event_id: int) -> int:
 					if not message_obj or message_obj.get("is_echo") or message_obj.get("is_deleted"):
 						continue
 					sender_id = (event.get("sender") or {}).get("id")
-					if sender_id:
-						# Synchronous user creation with data fetch + initial hydrate for new users
-						_ensure_ig_user_with_data(session, str(sender_id), str(igba_id))
+					recipient_id = (event.get("recipient") or {}).get("id")
+					
+					# Determine which user to enrich (the one that's NOT the page) - max 1 Graph API request
+					user_to_enrich = None
+					if sender_id and str(sender_id) != str(igba_id):
+						user_to_enrich = str(sender_id)
+					elif recipient_id and str(recipient_id) != str(igba_id):
+						user_to_enrich = str(recipient_id)
+					
+					if user_to_enrich:
+						# Only enrich user info (1 Graph API request)
+						_ensure_ig_user_with_data(session, user_to_enrich, str(igba_id))
+					
 					mid = message_obj.get("mid") or message_obj.get("id")
 					# Message-level upsert now owns ai_conversations updates keyed by Graph CID;
 					# skip creating dm:<id> ai_conversations placeholders to avoid duplicate threads.
@@ -749,6 +815,10 @@ def handle(raw_event_id: int) -> int:
 						attachments = message_obj.get("attachments")
 						if attachments:
 							_create_attachment_stubs(session, msg_id, str(mid), attachments)
+						
+						# Hydration is now manual-only (via UI/admin actions) to minimize Graph API requests
+						# We only enrich user info (1 request) and let hydration happen on-demand
+						
 						# enrichers (idempotent via jobs table uniqueness)
 						# User enrichment now happens synchronously above, so we skip enqueueing enrich_user
 						enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})

@@ -73,16 +73,20 @@ def main() -> None:
 			elif kind == "hydrate_conversation":
 				igba_id = str(payload.get("igba_id") or "")
 				ig_user_id = str(payload.get("ig_user_id") or "")
+				graph_conversation_id = str(payload.get("graph_conversation_id") or "") or None
 				limit = int(payload.get("max_messages") or 200)
 				if not (igba_id and ig_user_id):
 					delete_job(jid)
 					continue
 				# fetch thread messages and upsert
+				# Use graph_conversation_id if provided (saves API calls - only 1 request instead of discovery)
 				msgs = []
 				try:
-					msgs = __import__("asyncio").get_event_loop().run_until_complete(fetch_thread_messages(igba_id, ig_user_id, limit))
+					msgs = __import__("asyncio").get_event_loop().run_until_complete(
+						fetch_thread_messages(igba_id, ig_user_id, limit=limit, graph_conversation_id=graph_conversation_id)
+					)
 				except Exception as e:
-					log.warning("hydrate fetch fail jid=%s convo=%s:%s err=%s", jid, igba_id, ig_user_id, e)
+					log.warning("hydrate fetch fail jid=%s convo=%s:%s graph_cid=%s err=%s", jid, igba_id, ig_user_id, graph_conversation_id[:50] if graph_conversation_id else "none", e)
 					increment_attempts(jid)
 					time.sleep(1)
 					continue
@@ -139,32 +143,39 @@ def main() -> None:
 							except Exception:
 								ev_id = None
 							log.warning("hydrate upsert err convo=%s:%s ev=%s ev_type=%s err=%s", igba_id, ig_user_id, ev_id, type(ev).__name__, e)
-					# mark conversation hydrated (ai_conversations)
+					# mark conversation hydrated (update conversations table)
 					try:
-						# Prefer Graph conversation id from fetched messages; fallback to dm:<ig_user_id>
-						cid_ai = None
-						try:
-							if isinstance(msgs, list):
-								for _m in msgs:
-                                    # first dict with annotation wins
-									if isinstance(_m, dict) and _m.get("__graph_conversation_id"):
-										cid_ai = str(_m.get("__graph_conversation_id"))
-										break
-						except Exception:
-							cid_ai = None
-						if not cid_ai:
-							cid_ai = f"dm:{ig_user_id}"
-						# ensure ai_conversations row exists
-						try:
-							session.exec(text("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=cid_ai)
-						except Exception:
-							try:
-								session.exec(text("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=cid_ai)
-							except Exception:
-								pass
-						session.exec(text("UPDATE ai_conversations SET hydrated_at=CURRENT_TIMESTAMP WHERE convo_id=:cid")).params(cid=cid_ai)
-					except Exception:
-						pass
+						from sqlalchemy import text as _t
+						# Use provided graph_conversation_id or extract from messages
+						cid_to_use = graph_conversation_id
+						if not cid_to_use and isinstance(msgs, list):
+							for _m in msgs:
+								if isinstance(_m, dict) and _m.get("__graph_conversation_id"):
+									cid_to_use = str(_m.get("__graph_conversation_id"))
+									break
+						
+						# Update conversations table with hydrated_at timestamp
+						if cid_to_use:
+							# Find conversation by graph_conversation_id or (igba_id, ig_user_id)
+							session.exec(
+								_t(
+									"""
+									UPDATE conversations
+									SET hydrated_at=CURRENT_TIMESTAMP, graph_conversation_id=COALESCE(graph_conversation_id, :gc)
+									WHERE (graph_conversation_id=:gc OR (igba_id=:g AND ig_user_id=:u))
+									LIMIT 1
+									"""
+								).params(gc=str(cid_to_use), g=str(igba_id), u=str(ig_user_id))
+							)
+						else:
+							# Fallback: update by (igba_id, ig_user_id) if no graph_cid available
+							session.exec(
+								_t(
+									"UPDATE conversations SET hydrated_at=CURRENT_TIMESTAMP WHERE igba_id=:g AND ig_user_id=:u LIMIT 1"
+								).params(g=str(igba_id), u=str(ig_user_id))
+							)
+					except Exception as e:
+						log.debug("hydrate: failed to update hydrated_at: %s", str(e)[:200])
 				log.info("hydrate ok jid=%s convo=%s:%s msgs=%s", jid, igba_id, ig_user_id, inserted)
 				try:
 					increment_counter("hydrate_conversation", int(inserted))
