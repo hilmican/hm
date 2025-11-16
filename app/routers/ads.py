@@ -12,12 +12,18 @@ router = APIRouter(prefix="/ads", tags=["ads"])
 
 @router.get("/{ad_id}/edit")
 def edit_ad(request: Request, ad_id: str):
-	# Load ad cache row and existing mapping (if any)
+	# Load ad cache row, existing mapping (if any) and candidate items/products for selection
 	ad_row: dict[str, Any] = {}
 	mapping: dict[str, Any] = {}
+	items: list[dict[str, Any]] = []
 	with get_session() as session:
+		# Ad cache row
 		try:
-			row = session.exec(_text("SELECT ad_id, name, image_url, link, fetch_status, fetch_error, updated_at FROM ads WHERE ad_id=:id")).params(id=str(ad_id)).first()
+			row = session.exec(
+				_text(
+					"SELECT ad_id, name, image_url, link, fetch_status, fetch_error, updated_at FROM ads WHERE ad_id=:id"
+				)
+			).params(id=str(ad_id)).first()
 		except Exception:
 			row = None
 		if row:
@@ -30,8 +36,11 @@ def edit_ad(request: Request, ad_id: str):
 				"fetch_error": getattr(row, "fetch_error", None) if hasattr(row, "fetch_error") else (row[5] if len(row) > 5 else None),
 				"updated_at": getattr(row, "updated_at", None) if hasattr(row, "updated_at") else (row[6] if len(row) > 6 else None),
 			}
+		# Existing mapping for this ad (if any)
 		try:
-			mp = session.exec(_text("SELECT ad_id, product_id, sku FROM ads_products WHERE ad_id=:id LIMIT 1")).params(id=str(ad_id)).first()
+			mp = session.exec(
+				_text("SELECT ad_id, product_id, sku FROM ads_products WHERE ad_id=:id LIMIT 1")
+			).params(id=str(ad_id)).first()
 		except Exception:
 			mp = None
 		if mp:
@@ -40,8 +49,55 @@ def edit_ad(request: Request, ad_id: str):
 				"product_id": getattr(mp, "product_id", None) if hasattr(mp, "product_id") else (mp[1] if len(mp) > 1 else None),
 				"sku": getattr(mp, "sku", None) if hasattr(mp, "sku") else (mp[2] if len(mp) > 2 else None),
 			}
+		# Candidate items/products for combobox-style selection (limit to keep page fast)
+		try:
+			rows_items = session.exec(
+				_text(
+					"""
+					SELECT i.sku, i.name, i.color, i.size, i.product_id, p.name AS product_name
+					FROM item i
+					LEFT JOIN product p ON i.product_id = p.id
+					ORDER BY p.name, i.sku
+					LIMIT 500
+					"""
+				)
+			).all()
+		except Exception:
+			rows_items = []
+		for r in rows_items:
+			try:
+				sku = getattr(r, "sku", None) if hasattr(r, "sku") else (r[0] if len(r) > 0 else None)
+				if not sku:
+					continue
+				name = getattr(r, "name", None) if hasattr(r, "name") else (r[1] if len(r) > 1 else None)
+				color = getattr(r, "color", None) if hasattr(r, "color") else (r[2] if len(r) > 2 else None)
+				size = getattr(r, "size", None) if hasattr(r, "size") else (r[3] if len(r) > 3 else None)
+				pid = getattr(r, "product_id", None) if hasattr(r, "product_id") else (r[4] if len(r) > 4 else None)
+				product_name = getattr(r, "product_name", None) if hasattr(r, "product_name") else (
+					r[5] if len(r) > 5 else None
+				)
+				items.append(
+					{
+						"sku": sku,
+						"name": name,
+						"color": color,
+						"size": size,
+						"product_id": pid,
+						"product_name": product_name,
+					}
+				)
+			except Exception:
+				continue
 	templates = request.app.state.templates
-	return templates.TemplateResponse("ad_edit.html", {"request": request, "ad": ad_row, "mapping": mapping})
+	return templates.TemplateResponse(
+		"ad_edit.html",
+		{
+			"request": request,
+			"ad": ad_row,
+			"mapping": mapping,
+			"items": items,
+		},
+	)
 
 
 @router.post("/{ad_id}/save")
