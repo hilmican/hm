@@ -637,18 +637,24 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	# Auto-link ads to products
 	try:
 		if ad_id:
-			# Try to get ad_title from referral_json if not already extracted
+			# Try to get ad_title from referral_json, preferring ads_context_data.ad_title
+			# This is more reliable than the top-level ad_title which may be generic like "ADS"
 			ad_title_final = ad_title
-			if not ad_title_final and referral_json_val:
+			if referral_json_val:
 				try:
 					ref_data = json.loads(referral_json_val) if isinstance(referral_json_val, str) else referral_json_val
 					if isinstance(ref_data, dict):
-						# Check ads_context_data.ad_title (from Instagram webhook format)
+						# Check ads_context_data.ad_title first (from Instagram webhook format)
+						# This contains the actual post/product title, not just "ADS"
 						ads_ctx = ref_data.get("ads_context_data") or {}
 						if isinstance(ads_ctx, dict):
-							ad_title_final = ads_ctx.get("ad_title") or ad_title_final
-						# Also check direct fields
-						ad_title_final = ref_data.get("ad_title") or ref_data.get("headline") or ref_data.get("source") or ad_title_final
+							ctx_title = ads_ctx.get("ad_title")
+							# Prefer ads_context_data.ad_title if it exists and is more meaningful
+							if ctx_title and ctx_title.strip() and ctx_title.strip().upper() not in ("ADS", "AD", "ADVERTISEMENT"):
+								ad_title_final = ctx_title
+						# Also check direct fields if we don't have a good title yet
+						if not ad_title_final or ad_title_final.strip().upper() in ("ADS", "AD", "ADVERTISEMENT"):
+							ad_title_final = ref_data.get("ad_title") or ref_data.get("headline") or ref_data.get("source") or ad_title_final
 				except Exception:
 					pass
 			# Use ad_title_final or fallback to ad_name
