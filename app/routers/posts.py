@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException, Form
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from starlette.status import HTTP_303_SEE_OTHER
 from typing import Any, Optional, List, Dict
 from sqlalchemy import text as _text
@@ -14,6 +14,68 @@ from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 _log = logging.getLogger("posts")
+
+
+@router.get("/auto-linked")
+def list_auto_linked_posts(request: Request, limit: int = 100):
+	"""List posts that were automatically linked by AI (for review and correction)."""
+	posts: list[dict[str, Any]] = []
+	with get_session() as session:
+		try:
+			rows = session.exec(
+				_text(
+					"""
+					SELECT pp.post_id, pp.product_id, pp.auto_linked, pp.created_at,
+					       pst.title, pst.url, pst.ig_post_media_id, pst.message_id,
+					       pr.name AS product_name
+					FROM posts_products pp
+					LEFT JOIN posts pst ON pst.post_id = pp.post_id
+					LEFT JOIN product pr ON pr.id = pp.product_id
+					WHERE pp.auto_linked = 1
+					ORDER BY pp.created_at DESC
+					LIMIT :lim
+					"""
+				).bindparams(lim=int(limit))
+			).all()
+		except Exception:
+			rows = []
+		
+		for r in rows:
+			try:
+				post_id = getattr(r, "post_id", None) if hasattr(r, "post_id") else (r[0] if len(r) > 0 else None)
+				product_id = getattr(r, "product_id", None) if hasattr(r, "product_id") else (r[1] if len(r) > 1 else None)
+				auto_linked = bool(getattr(r, "auto_linked", None) if hasattr(r, "auto_linked") else (r[2] if len(r) > 2 else False))
+				created_at = getattr(r, "created_at", None) if hasattr(r, "created_at") else (r[3] if len(r) > 3 else None)
+				title = getattr(r, "title", None) if hasattr(r, "title") else (r[4] if len(r) > 4 else None)
+				url = getattr(r, "url", None) if hasattr(r, "url") else (r[5] if len(r) > 5 else None)
+				ig_post_media_id = getattr(r, "ig_post_media_id", None) if hasattr(r, "ig_post_media_id") else (r[6] if len(r) > 6 else None)
+				message_id = getattr(r, "message_id", None) if hasattr(r, "message_id") else (r[7] if len(r) > 7 else None)
+				product_name = getattr(r, "product_name", None) if hasattr(r, "product_name") else (r[8] if len(r) > 8 else None)
+				
+				if post_id:
+					posts.append({
+						"post_id": str(post_id),
+						"product_id": int(product_id) if product_id is not None else None,
+						"product_name": product_name,
+						"title": title,
+						"url": url,
+						"ig_post_media_id": ig_post_media_id,
+						"message_id": message_id,
+						"created_at": created_at,
+						"auto_linked": auto_linked,
+					})
+			except Exception:
+				continue
+	
+	templates = request.app.state.templates
+	return templates.TemplateResponse(
+		"posts_auto_linked.html",
+		{
+			"request": request,
+			"posts": posts,
+			"count": len(posts),
+		},
+	)
 
 
 def _extract_post_info_from_message(msg: Message) -> Optional[Dict[str, Any]]:
@@ -115,6 +177,24 @@ def list_unlinked_posts(request: Request, limit: int = 100):
                 "messages": unlinked_messages,
             },
         )
+
+
+@router.post("/unlink/{post_id}")
+def unlink_post(post_id: str):
+	"""Remove product link from a post (sets auto_linked=0 and clears product_id)."""
+	with get_session() as session:
+		try:
+			stmt_update = _text("""
+				UPDATE posts_products 
+				SET product_id=NULL, auto_linked=0 
+				WHERE post_id=:pid
+			""").bindparams(pid=str(post_id))
+			session.exec(stmt_update)
+			session.commit()
+			return JSONResponse({"status": "ok", "post_id": post_id})
+		except Exception as e:
+			_log.error("Error unlinking post: %s", e)
+			raise HTTPException(status_code=500, detail="Failed to unlink post")
 
 
 @router.post("/link/{message_id}")

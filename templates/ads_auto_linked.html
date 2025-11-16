@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AI ile Otomatik Bağlanan Reklamlar</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .meta { color:#6b7280; font-size:12px; }
+      .card { border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin:12px 0; background:#fff; }
+      .ad-card { border:1px solid #fbbf24; border-radius:8px; padding:16px; margin:12px 0; background:#fffbeb; }
+      .ad-title { font-weight:600; margin-bottom:8px; color:#111827; }
+      .actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+      button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:8px 12px; cursor:pointer; font-size:13px; }
+      button:hover { background:#1d4ed8; }
+      button.secondary { background:#6b7280; }
+      button.secondary:hover { background:#4b5563; }
+      .badge { display:inline-block; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+      .badge-auto { background:#fef3c7; color:#92400e; }
+      .badge-product { background:#d1fae5; color:#065f46; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>🤖 AI ile Otomatik Bağlanan Reklamlar</h1>
+    
+    <div class="meta" style="margin-bottom:12px;">Toplam {{ count }} otomatik bağlanmış reklam bulundu</div>
+    
+    {% if not ads %}
+      <div class="card">
+        <p>Otomatik bağlanmış reklam bulunamadı.</p>
+      </div>
+    {% else %}
+      {% for ad in ads %}
+        <div class="ad-card">
+          <div style="display:flex; gap:12px; align-items:start;">
+            {% if ad.image_url %}
+              <img src="{{ ad.image_url }}" alt="ad" style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb" />
+            {% endif %}
+            <div style="flex:1;">
+              <div class="ad-title">
+                {{ ad.ad_name or ad.ad_id or 'Reklam' }}
+              </div>
+              
+              <div class="meta" style="margin-top:8px;">
+                <span class="badge badge-auto">🤖 Otomatik Bağlandı</span>
+                {% if ad.product_id %}
+                  <span class="badge badge-product">Ürün: {{ ad.product_name or 'ID: ' + ad.product_id|string }}</span>
+                {% endif %}
+                <br>
+                Reklam ID: {{ ad.ad_id }}<br>
+                {% if ad.product_id %}Product ID: {{ ad.product_id }}<br>{% endif %}
+                {% if ad.created_at %}Oluşturulma: {{ ad.created_at }}<br>{% endif %}
+                {% if ad.link %}<a href="{{ ad.link }}" target="_blank" rel="noopener">Reklam Linki ↗</a>{% endif %}
+              </div>
+              
+              <div class="actions">
+                <a href="/ads/{{ ad.ad_id }}/edit" style="text-decoration:none;">
+                  <button>Düzenle / Düzelt</button>
+                </a>
+                <button type="button" onclick="unlinkAd('{{ ad.ad_id }}')" style="background:#ef4444;">Bağlantıyı Kaldır</button>
+                {% if ad.ad_id %}<a style="margin-left:8px" href="/ig/inbox?q={{ ad.ad_id }}">İnboxta ara</a>{% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    {% endif %}
+    
+    <script>
+      async function unlinkAd(adId) {
+        if (!confirm('Bu reklamın ürün bağlantısını kaldırmak istediğinize emin misiniz? Reklam tekrar otomatik bağlanabilir.')) {
+          return;
+        }
+        
+        try {
+          const response = await fetch(`/ads/${adId}/unlink`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          if (response.ok) {
+            alert('Bağlantı kaldırıldı. Sayfa yenilenecek...');
+            location.reload();
+          } else {
+            const error = await response.text();
+            alert('Hata: ' + error);
+          }
+        } catch (error) {
+          alert('Hata: ' + error.message);
+        }
+      }
+    </script>
+  </body>
+</html>
+

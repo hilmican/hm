@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AI ile Otomatik Bağlanan Gönderiler</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .meta { color:#6b7280; font-size:12px; }
+      .card { border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin:12px 0; background:#fff; }
+      .post-card { border:1px solid #fbbf24; border-radius:8px; padding:16px; margin:12px 0; background:#fffbeb; }
+      .post-title { font-weight:600; margin-bottom:8px; color:#111827; }
+      .actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+      button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:8px 12px; cursor:pointer; font-size:13px; }
+      button:hover { background:#1d4ed8; }
+      .badge { display:inline-block; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; }
+      .badge-auto { background:#fef3c7; color:#92400e; }
+      .badge-product { background:#d1fae5; color:#065f46; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>🤖 AI ile Otomatik Bağlanan Gönderiler</h1>
+    
+    <div class="meta" style="margin-bottom:12px;">Toplam {{ count }} otomatik bağlanmış gönderi bulundu</div>
+    
+    {% if not posts %}
+      <div class="card">
+        <p>Otomatik bağlanmış gönderi bulunamadı.</p>
+      </div>
+    {% else %}
+      {% for post in posts %}
+        <div class="post-card">
+          <div class="post-title">
+            {% if post.title %}
+              {{ post.title[:100] }}{% if post.title|length > 100 %}...{% endif %}
+            {% else %}
+              (Başlık yok)
+            {% endif %}
+          </div>
+          
+          <div class="meta" style="margin-top:8px;">
+            <span class="badge badge-auto">🤖 Otomatik Bağlandı</span>
+            {% if post.product_id %}
+              <span class="badge badge-product">Ürün: {{ post.product_name or 'ID: ' + post.product_id|string }}</span>
+            {% endif %}
+            <br>
+            Gönderi ID: {{ post.post_id or post.ig_post_media_id }}<br>
+            {% if post.product_id %}Product ID: {{ post.product_id }}<br>{% endif %}
+            {% if post.message_id %}Mesaj ID: {{ post.message_id }}<br>{% endif %}
+            {% if post.created_at %}Oluşturulma: {{ post.created_at }}<br>{% endif %}
+            {% if post.url %}<a href="{{ post.url }}" target="_blank" rel="noopener">Gönderi ↗</a>{% endif %}
+          </div>
+          
+          <div class="actions">
+            {% if post.message_id %}
+              <form method="post" action="/posts/link/{{ post.message_id }}" style="display:inline;">
+                <button type="button" onclick="if(confirm('Bu gönderiyi düzenlemek için manuel bağlama sayfasına yönlendirileceksiniz. Devam edilsin mi?')) { window.location.href='/posts/unlinked?highlight={{ post.post_id }}'; }">Düzenle / Düzelt</button>
+              </form>
+            {% endif %}
+            <button type="button" onclick="unlinkPost('{{ post.post_id }}')" style="background:#ef4444;">Bağlantıyı Kaldır</button>
+            <a href="/posts/unlinked" style="text-decoration:none;">
+              <button class="secondary">Tüm Gönderiler</button>
+            </a>
+          </div>
+        </div>
+      {% endfor %}
+    {% endif %}
+    
+    <script>
+      async function unlinkPost(postId) {
+        if (!confirm('Bu gönderinin ürün bağlantısını kaldırmak istediğinize emin misiniz? Gönderi tekrar otomatik bağlanabilir.')) {
+          return;
+        }
+        
+        try {
+          const response = await fetch(`/posts/unlink/${postId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          if (response.ok) {
+            alert('Bağlantı kaldırıldı. Sayfa yenilenecek...');
+            location.reload();
+          } else {
+            const error = await response.text();
+            alert('Hata: ' + error);
+          }
+        } catch (error) {
+          alert('Hata: ' + error.message);
+        }
+      }
+    </script>
+  </body>
+</html>
+

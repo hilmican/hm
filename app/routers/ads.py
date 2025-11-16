@@ -13,6 +13,88 @@ from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
 router = APIRouter(prefix="/ads", tags=["ads"])
 
 
+@router.get("/auto-linked")
+def list_auto_linked_ads(request: Request, limit: int = 100):
+	"""List ads that were automatically linked by AI (for review and correction)."""
+	ads: list[dict[str, Any]] = []
+	with get_session() as session:
+		try:
+			rows = session.exec(
+				_text(
+					"""
+					SELECT ap.ad_id, ap.product_id, ap.auto_linked, ap.created_at,
+					       a.name, a.image_url, a.link, a.updated_at,
+					       p.name AS product_name
+					FROM ads_products ap
+					LEFT JOIN ads a ON a.ad_id = ap.ad_id
+					LEFT JOIN product p ON p.id = ap.product_id
+					WHERE ap.auto_linked = 1
+					ORDER BY ap.created_at DESC
+					LIMIT :lim
+					"""
+				).bindparams(lim=int(limit))
+			).all()
+		except Exception:
+			rows = []
+		
+		for r in rows:
+			try:
+				ad_id = getattr(r, "ad_id", None) if hasattr(r, "ad_id") else (r[0] if len(r) > 0 else None)
+				product_id = getattr(r, "product_id", None) if hasattr(r, "product_id") else (r[1] if len(r) > 1 else None)
+				auto_linked = bool(getattr(r, "auto_linked", None) if hasattr(r, "auto_linked") else (r[2] if len(r) > 2 else False))
+				created_at = getattr(r, "created_at", None) if hasattr(r, "created_at") else (r[3] if len(r) > 3 else None)
+				ad_name = getattr(r, "name", None) if hasattr(r, "name") else (r[4] if len(r) > 4 else None)
+				image_url = getattr(r, "image_url", None) if hasattr(r, "image_url") else (r[5] if len(r) > 5 else None)
+				link = getattr(r, "link", None) if hasattr(r, "link") else (r[6] if len(r) > 6 else None)
+				updated_at = getattr(r, "updated_at", None) if hasattr(r, "updated_at") else (r[7] if len(r) > 7 else None)
+				product_name = getattr(r, "product_name", None) if hasattr(r, "product_name") else (r[8] if len(r) > 8 else None)
+				
+				if ad_id:
+					ads.append({
+						"ad_id": str(ad_id),
+						"product_id": int(product_id) if product_id is not None else None,
+						"product_name": product_name,
+						"ad_name": ad_name,
+						"image_url": image_url,
+						"link": link,
+						"created_at": created_at,
+						"updated_at": updated_at,
+						"auto_linked": auto_linked,
+					})
+			except Exception:
+				continue
+	
+	templates = request.app.state.templates
+	return templates.TemplateResponse(
+		"ads_auto_linked.html",
+		{
+			"request": request,
+			"ads": ads,
+			"count": len(ads),
+		},
+	)
+
+
+@router.post("/{ad_id}/unlink")
+def unlink_ad(ad_id: str):
+	"""Remove product link from an ad (sets auto_linked=0 and clears product_id)."""
+	with get_session() as session:
+		try:
+			stmt_update = _text("""
+				UPDATE ads_products 
+				SET product_id=NULL, auto_linked=0 
+				WHERE ad_id=:id
+			""").bindparams(id=str(ad_id))
+			session.exec(stmt_update)
+			session.commit()
+			return JSONResponse({"status": "ok", "ad_id": ad_id})
+		except Exception as e:
+			import logging
+			_log = logging.getLogger("ads")
+			_log.error("Error unlinking ad: %s", e)
+			raise HTTPException(status_code=500, detail="Failed to unlink ad")
+
+
 @router.get("/{ad_id}/edit")
 def edit_ad(request: Request, ad_id: str):
 	"""
