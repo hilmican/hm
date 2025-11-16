@@ -75,94 +75,94 @@ def init_db() -> None:
                 # Up-size potentially long text fields
                 try:
                     row = conn.exec_driver_sql(
-                """
-                SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'importrow' AND COLUMN_NAME = 'mapped_json'
-                """
+                        """
+                        SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                        FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'importrow' AND COLUMN_NAME = 'mapped_json'
+                        """
                     ).fetchone()
                     if row is not None:
-                dtype = str(row[0]).lower()
-                maxlen = row[1]
-                if dtype in ("varchar", "char") or dtype == "text":
-                    conn.exec_driver_sql("ALTER TABLE importrow MODIFY COLUMN mapped_json LONGTEXT")
+                        dtype = str(row[0]).lower()
+                        maxlen = row[1]
+                        if dtype in ("varchar", "char") or dtype == "text":
+                            conn.exec_driver_sql("ALTER TABLE importrow MODIFY COLUMN mapped_json LONGTEXT")
                 except Exception:
                     pass
                 try:
                     row = conn.exec_driver_sql(
-                """
-                SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'importrow' AND COLUMN_NAME = 'message'
-                """
+                        """
+                        SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                        FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'importrow' AND COLUMN_NAME = 'message'
+                        """
                     ).fetchone()
                     if row is not None:
-                dtype = str(row[0]).lower()
-                if dtype in ("varchar", "char"):
-                    conn.exec_driver_sql("ALTER TABLE importrow MODIFY COLUMN message TEXT")
+                        dtype = str(row[0]).lower()
+                        if dtype in ("varchar", "char"):
+                            conn.exec_driver_sql("ALTER TABLE importrow MODIFY COLUMN message TEXT")
                 except Exception:
                     pass
                 # Ensure message.timestamp_ms is BIGINT to hold ms since epoch
                 try:
                     row = conn.exec_driver_sql(
-                """
-                SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'timestamp_ms'
-                """
+                        """
+                        SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'timestamp_ms'
+                        """
                     ).fetchone()
                     if row is not None and str(row[0]).lower() != "bigint":
-                conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN timestamp_ms BIGINT")
+                        conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN timestamp_ms BIGINT")
                 except Exception:
                     pass
                 # Ensure message.raw_json is LONGTEXT to avoid truncation
                 try:
                     row = conn.exec_driver_sql(
-                """
-                SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'raw_json'
-                """
+                        """
+                        SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                        FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'raw_json'
+                        """
                     ).fetchone()
                     if row is not None:
-                dtype = str(row[0]).lower()
-                # if varchar/char or TEXT, upgrade to LONGTEXT
-                if dtype in ("varchar", "char", "text", "tinytext", "mediumtext"):
-                    conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN raw_json LONGTEXT")
+                        dtype = str(row[0]).lower()
+                        # if varchar/char or TEXT, upgrade to LONGTEXT
+                        if dtype in ("varchar", "char", "text", "tinytext", "mediumtext"):
+                            conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN raw_json LONGTEXT")
                 except Exception:
                     pass
                 # Ensure message.referral_json is LONGTEXT as well (ads context blobs can be large)
                 try:
                     row = conn.exec_driver_sql(
-                """
-                SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'referral_json'
-                """
+                        """
+                        SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                        FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'referral_json'
+                        """
                     ).fetchone()
                     if row is not None:
-                dtype = str(row[0]).lower()
-                if dtype in ("varchar", "char", "text", "tinytext", "mediumtext"):
-                    conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN referral_json LONGTEXT")
+                        dtype = str(row[0]).lower()
+                        if dtype in ("varchar", "char", "text", "tinytext", "mediumtext"):
+                            conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN referral_json LONGTEXT")
                 except Exception:
                     pass
                 # Ensure new ad metadata columns exist (MySQL)
                 try:
                     rows = conn.exec_driver_sql(
-                """
-                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message'
-                """
+                        """
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message'
+                        """
                     ).fetchall()
                     have_cols = {str(r[0]).lower() for r in rows or []}
                     if 'ad_image_url' not in have_cols:
-                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_image_url TEXT NULL")
+                        conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_image_url TEXT NULL")
                     if 'ad_name' not in have_cols:
-                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_name TEXT NULL")
+                        conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ad_name TEXT NULL")
                     # Ensure AI lifecycle columns exist
                     if 'ai_status' not in have_cols:
-                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ai_status VARCHAR(16) NULL")
+                        conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ai_status VARCHAR(16) NULL")
                     if 'ai_json' not in have_cols:
-                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ai_json LONGTEXT NULL")
+                        conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ai_json LONGTEXT NULL")
                 except Exception:
                     pass
                 # Ensure order.notes is LONGTEXT to prevent overflow from appended notes
