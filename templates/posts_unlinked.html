@@ -1,0 +1,217 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Bağlantısız Instagram Gönderileri</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .meta { color:#6b7280; font-size:12px; }
+      .card { border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin:12px 0; background:#fff; }
+      .post-card { border:1px solid #e5e7eb; border-radius:8px; padding:16px; margin:12px 0; background:#f9fafb; }
+      .post-title { font-weight:600; margin-bottom:8px; color:#111827; }
+      .post-text { color:#374151; margin:8px 0; max-height:100px; overflow:auto; }
+      .actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+      button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:8px 12px; cursor:pointer; font-size:13px; }
+      button:hover { background:#1d4ed8; }
+      button.secondary { background:#6b7280; }
+      button.secondary:hover { background:#4b5563; }
+      button.success { background:#16a34a; }
+      button.success:hover { background:#15803d; }
+      button:disabled { opacity:0.5; cursor:not-allowed; }
+      a { color:#2563eb; text-decoration:none; }
+      .batch-actions { background:#f3f4f6; padding:16px; border-radius:8px; margin-bottom:20px; }
+      .loading { display:inline-block; width:12px; height:12px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 0.6s linear infinite; margin-right:6px; }
+      @keyframes spin { to { transform:rotate(360deg); } }
+      .suggestion { background:#fef3c7; border:1px solid #fbbf24; border-radius:6px; padding:8px; margin-top:8px; font-size:12px; }
+      .error { background:#fee2e2; border:1px solid #ef4444; border-radius:6px; padding:8px; margin-top:8px; font-size:12px; color:#991b1b; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>Bağlantısız Instagram Gönderileri</h1>
+    
+    <div class="batch-actions">
+      <h3 style="margin:0 0 12px 0;">Toplu İşlemler</h3>
+      <button id="batchLinkBtn" class="success">AI ile Toplu Bağla (50 gönderi)</button>
+      <div id="batchStatus" style="margin-top:8px; font-size:12px; color:#6b7280;"></div>
+    </div>
+
+    {% if not messages %}
+      <div class="card">
+        <p>Tüm gönderiler bağlantılı görünüyor veya gönderi bulunamadı.</p>
+      </div>
+    {% else %}
+      <div class="meta" style="margin-bottom:12px;">Toplam {{ messages|length }} bağlantısız gönderi bulundu</div>
+      
+      {% for msg in messages %}
+        <div class="post-card" data-message-id="{{ msg.message_id }}">
+          <div class="post-title">
+            {% if msg.post_info.title %}
+              {{ msg.post_info.title[:100] }}{% if msg.post_info.title|length > 100 %}...{% endif %}
+            {% else %}
+              (Başlık yok)
+            {% endif %}
+          </div>
+          
+          {% if msg.text %}
+            <div class="post-text">{{ msg.text[:200] }}{% if msg.text|length > 200 %}...{% endif %}</div>
+          {% endif %}
+          
+          <div class="meta">
+            Gönderi ID: {{ msg.post_info.ig_post_media_id }}<br>
+            Mesaj ID: {{ msg.message_id }}<br>
+            {% if msg.timestamp_ms %}
+              <span data-ts="{{ msg.timestamp_ms }}">{{ msg.timestamp_ms }}</span>
+            {% endif %}
+            {% if msg.post_info.url %}
+              · <a href="{{ msg.post_info.url }}" target="_blank" rel="noopener">Gönderi ↗</a>
+            {% endif %}
+          </div>
+          
+          <div class="actions">
+            <button class="aiSuggestBtn" data-message-id="{{ msg.message_id }}">AI Önerisi Al</button>
+            <button class="aiLinkBtn" data-message-id="{{ msg.message_id }}">AI ile Bağla</button>
+            <button class="manualLinkBtn" data-message-id="{{ msg.message_id }}">Manuel Bağla</button>
+          </div>
+          
+          <div id="suggestion-{{ msg.message_id }}" style="display:none;"></div>
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    <script>
+      // Format timestamps
+      document.querySelectorAll('[data-ts]').forEach(el => {
+        const ts = parseInt(el.getAttribute('data-ts'));
+        if (ts) {
+          const date = new Date(ts);
+          el.textContent = date.toLocaleString('tr-TR');
+        }
+      });
+
+      // AI Suggest
+      document.querySelectorAll('.aiSuggestBtn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const messageId = btn.getAttribute('data-message-id');
+          const suggestionDiv = document.getElementById(`suggestion-${messageId}`);
+          const originalText = btn.textContent;
+          
+          btn.disabled = true;
+          btn.innerHTML = '<span class="loading"></span>Öneri alınıyor...';
+          suggestionDiv.style.display = 'none';
+          
+          try {
+            const r = await fetch(`/posts/ai/suggest/${messageId}`, { method: 'POST' });
+            if (!r.ok) throw new Error(await r.text());
+            const data = await r.json();
+            
+            const suggestion = data.suggestion || {};
+            const productId = suggestion.suggested_product_id;
+            const productName = suggestion.suggested_product_name || 'Bilinmiyor';
+            const confidence = suggestion.confidence || 0;
+            const reasoning = suggestion.reasoning || '';
+            
+            suggestionDiv.innerHTML = `
+              <div class="suggestion">
+                <strong>Önerilen Ürün:</strong> ${productName} (ID: ${productId || 'Yok'})<br>
+                <strong>Güven:</strong> ${(confidence * 100).toFixed(0)}%<br>
+                ${reasoning ? `<strong>Açıklama:</strong> ${reasoning}` : ''}
+              </div>
+            `;
+            suggestionDiv.style.display = 'block';
+          } catch (e) {
+            suggestionDiv.innerHTML = `<div class="error">Hata: ${e.message}</div>`;
+            suggestionDiv.style.display = 'block';
+          } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+          }
+        });
+      });
+
+      // AI Link
+      document.querySelectorAll('.aiLinkBtn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const messageId = btn.getAttribute('data-message-id');
+          const originalText = btn.textContent;
+          
+          btn.disabled = true;
+          btn.innerHTML = '<span class="loading"></span>Bağlanıyor...';
+          
+          try {
+            const r = await fetch(`/posts/ai/link/${messageId}`, { method: 'POST' });
+            if (!r.ok) throw new Error(await r.text());
+            const data = await r.json();
+            
+            alert(`Başarılı! Gönderi "${data.product_name}" ürününe bağlandı.`);
+            location.reload();
+          } catch (e) {
+            alert(`Hata: ${e.message}`);
+          } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+          }
+        });
+      });
+
+      // Manual Link
+      document.querySelectorAll('.manualLinkBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const messageId = btn.getAttribute('data-message-id');
+          const productId = prompt('Ürün ID girin:');
+          if (productId && !isNaN(productId)) {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = `/posts/link/${messageId}`;
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'product_id';
+            input.value = productId;
+            form.appendChild(input);
+            document.body.appendChild(form);
+            form.submit();
+          }
+        });
+      });
+
+      // Batch Link
+      const batchLinkBtn = document.getElementById('batchLinkBtn');
+      const batchStatus = document.getElementById('batchStatus');
+      
+      if (batchLinkBtn) {
+        batchLinkBtn.addEventListener('click', async () => {
+          if (!confirm('50 gönderiyi AI ile bağlamak istediğinize emin misiniz?')) {
+            return;
+          }
+          
+          batchLinkBtn.disabled = true;
+          batchLinkBtn.innerHTML = '<span class="loading"></span>İşleniyor...';
+          batchStatus.textContent = 'İşlem başlatıldı, lütfen bekleyin...';
+          
+          try {
+            const r = await fetch('/posts/ai/batch-link?limit=50', { method: 'POST' });
+            if (!r.ok) throw new Error(await r.text());
+            const data = await r.json();
+            
+            batchStatus.innerHTML = `
+              <strong>Tamamlandı!</strong><br>
+              İşlenen: ${data.processed || 0}<br>
+              Başarılı: ${(data.results || []).length}<br>
+              Hatalar: ${(data.errors || []).length}
+            `;
+            
+            if (data.processed > 0) {
+              setTimeout(() => location.reload(), 2000);
+            }
+          } catch (e) {
+            batchStatus.innerHTML = `<span style="color:#ef4444;">Hata: ${e.message}</span>`;
+          } finally {
+            batchLinkBtn.disabled = false;
+            batchLinkBtn.textContent = 'AI ile Toplu Bağla (50 gönderi)';
+          }
+        });
+      }
+    </script>
+  </body>
+</html>
+

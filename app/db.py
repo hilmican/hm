@@ -328,6 +328,40 @@ def init_db() -> None:
                     )
                 except Exception:
                     pass
+                # Posts cache and mapping (MySQL)
+                try:
+                    conn.exec_driver_sql(
+                        """
+                        CREATE TABLE IF NOT EXISTS posts (
+                            post_id VARCHAR(128) PRIMARY KEY,
+                            ig_post_media_id VARCHAR(128) NULL,
+                            title TEXT NULL,
+                            url TEXT NULL,
+                            message_id INTEGER NULL,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            INDEX idx_posts_media_id (ig_post_media_id),
+                            INDEX idx_posts_message (message_id)
+                        )
+                        """
+                    )
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql(
+                        """
+                        CREATE TABLE IF NOT EXISTS posts_products (
+                            post_id VARCHAR(128) PRIMARY KEY,
+                            product_id INTEGER NULL,
+                            sku VARCHAR(128) NULL,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            INDEX idx_posts_products_product (product_id),
+                            INDEX idx_posts_products_sku (sku)
+                        )
+                        """
+                    )
+                except Exception:
+                    pass
                 # Ensure message has story_id/story_url (MySQL)
                 try:
                     rows = conn.exec_driver_sql(

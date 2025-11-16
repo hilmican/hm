@@ -622,7 +622,219 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 			touch_shadow_state(int(conversation_pk), ts_val)
 	except Exception:
 		pass
+	
+	# Auto-link Instagram posts to products
+	try:
+		if attachments:
+			_auto_link_instagram_post(session, row, attachments)
+	except Exception as e:
+		# Never break message ingestion if post linking fails
+		try:
+			_log.warning("ingest: auto-link post failed for mid=%s: %s", str(mid), str(e))
+		except Exception:
+			pass
+	
 	return row.id  # type: ignore
+
+
+def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
+	"""
+	Automatically detect Instagram post attachments and link them to products using AI.
+	This runs asynchronously and doesn't block message ingestion if it fails.
+	"""
+	try:
+		# Extract post info from attachments
+		if not attachments:
+			return
+		
+		post_info = None
+		if isinstance(attachments, list):
+			for att in attachments:
+				if att.get("type") in ("ig_post", "share"):
+					payload = att.get("payload", {})
+					media_id = payload.get("ig_post_media_id")
+					if media_id:
+						post_info = {
+							"ig_post_media_id": str(media_id),
+							"title": payload.get("title"),
+							"url": payload.get("url"),
+						}
+						break
+		
+		if not post_info or not post_info.get("ig_post_media_id"):
+			return
+		
+		post_id = post_info["ig_post_media_id"]
+		
+		# Check if already linked
+		try:
+			existing = session.exec(
+				_sql_text("SELECT post_id FROM posts_products WHERE post_id=:pid").bindparams(pid=post_id)
+			).first()
+			if existing:
+				_log.debug("ingest: post %s already linked, skipping", post_id)
+				return
+		except Exception:
+			pass
+		
+		# Get AI client (non-blocking if not available)
+		try:
+			from .ai import AIClient
+			from ..models import Product
+			from sqlmodel import select
+			from ..utils.slugify import slugify
+			
+			ai = AIClient()
+			if not ai or not getattr(ai, "enabled", False):
+				_log.debug("ingest: AI not available for post linking")
+				return
+		except Exception as e:
+			_log.debug("ingest: failed to initialize AI for post linking: %s", e)
+			return
+		
+		# Get products for context
+		try:
+			products = session.exec(select(Product).limit(500)).all()
+			product_list = [{"id": p.id, "name": p.name, "slug": p.slug} for p in products]
+		except Exception as e:
+			_log.warning("ingest: failed to load products for post linking: %s", e)
+			return
+		
+		# AI suggestion
+		try:
+			system_prompt = """Sen bir Instagram gönderisi analiz uzmanısın. 
+Bir Instagram gönderisinin başlığını ve açıklamasını analiz ederek, bu gönderinin hangi ürünü tanıttığını belirlemen gerekiyor.
+
+Mevcut ürün listesini incele ve gönderinin içeriğine göre en uygun ürünü öner. Eğer hiçbiri uygun değilse, yeni bir ürün adı öner.
+
+Yanıtını JSON formatında döndür:
+{
+  "suggested_product_id": <ürün_id veya null>,
+  "suggested_product_name": "<ürün adı veya null>",
+  "confidence": <0.0-1.0 arası güven skoru>,
+  "reasoning": "<neden bu ürünü seçtiğin açıklaması>"
+}"""
+			
+			user_prompt = f"""Instagram Gönderisi:
+Başlık: {post_info.get('title', 'Yok')}
+Mesaj Metni: {msg.text or 'Yok'}
+
+Mevcut Ürünler:
+{json.dumps(product_list, ensure_ascii=False, indent=2)}
+
+Bu gönderi hangi ürünü tanıtıyor? Lütfen JSON formatında yanıt ver."""
+			
+			suggestion = ai.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
+			
+			product_id = suggestion.get("suggested_product_id")
+			product_name = suggestion.get("suggested_product_name")
+			
+			# Create product if needed
+			if not product_id and product_name:
+				slug = slugify(product_name)
+				existing = session.exec(select(Product).where(Product.slug == slug)).first()
+				if existing:
+					product_id = existing.id
+				else:
+					new_product = Product(
+						name=product_name,
+						slug=slug,
+						default_unit="adet",
+						default_price=None,
+					)
+					session.add(new_product)
+					session.flush()
+					if new_product.id:
+						product_id = new_product.id
+			
+			if not product_id:
+				_log.debug("ingest: could not determine product for post %s", post_id)
+				return
+			
+			# Create post record
+			try:
+				stmt_upsert = _sql_text("""
+					INSERT INTO posts(post_id, ig_post_media_id, title, url, message_id, updated_at)
+					VALUES (:pid, :media_id, :title, :url, :msg_id, CURRENT_TIMESTAMP)
+					ON DUPLICATE KEY UPDATE
+						title=VALUES(title),
+						url=VALUES(url),
+						message_id=VALUES(message_id),
+						updated_at=CURRENT_TIMESTAMP
+				""").bindparams(
+					pid=str(post_id),
+					media_id=str(post_info["ig_post_media_id"]),
+					title=post_info.get("title"),
+					url=post_info.get("url"),
+					msg_id=int(msg.id or 0),
+				)
+				session.exec(stmt_upsert)
+			except Exception:
+				# SQLite fallback
+				stmt_sel = _sql_text("SELECT post_id FROM posts WHERE post_id=:pid").bindparams(pid=str(post_id))
+				existing_post = session.exec(stmt_sel).first()
+				if existing_post:
+					stmt_update = _sql_text("""
+						UPDATE posts SET title=:title, url=:url, message_id=:msg_id, updated_at=CURRENT_TIMESTAMP
+						WHERE post_id=:pid
+					""").bindparams(
+						pid=str(post_id),
+						title=post_info.get("title"),
+						url=post_info.get("url"),
+						msg_id=int(msg.id or 0),
+					)
+					session.exec(stmt_update)
+				else:
+					stmt_insert = _sql_text("""
+						INSERT INTO posts(post_id, ig_post_media_id, title, url, message_id)
+						VALUES (:pid, :media_id, :title, :url, :msg_id)
+					""").bindparams(
+						pid=str(post_id),
+						media_id=str(post_info["ig_post_media_id"]),
+						title=post_info.get("title"),
+						url=post_info.get("url"),
+						msg_id=int(msg.id or 0),
+					)
+					session.exec(stmt_insert)
+			
+			# Link to product
+			try:
+				stmt_link = _sql_text("""
+					INSERT INTO posts_products(post_id, product_id, sku)
+					VALUES (:pid, :prod_id, NULL)
+					ON DUPLICATE KEY UPDATE product_id=VALUES(product_id)
+				""").bindparams(
+					pid=str(post_id),
+					prod_id=int(product_id),
+				)
+				session.exec(stmt_link)
+			except Exception:
+				# SQLite fallback
+				stmt_sel = _sql_text("SELECT post_id FROM posts_products WHERE post_id=:pid").bindparams(pid=str(post_id))
+				existing_link = session.exec(stmt_sel).first()
+				if existing_link:
+					stmt_update = _sql_text("""
+						UPDATE posts_products SET product_id=:prod_id WHERE post_id=:pid
+					""").bindparams(pid=str(post_id), prod_id=int(product_id))
+					session.exec(stmt_update)
+				else:
+					stmt_insert = _sql_text("""
+						INSERT INTO posts_products(post_id, product_id, sku)
+						VALUES (:pid, :prod_id, NULL)
+					""").bindparams(pid=str(post_id), prod_id=int(product_id))
+					session.exec(stmt_insert)
+			
+			_log.info(
+				"ingest: auto-linked post %s to product %s (confidence: %s)",
+				post_id,
+				product_id,
+				suggestion.get("confidence", 0),
+			)
+			
+		except Exception as e:
+			_log.warning("ingest: failed to auto-link post %s: %s", post_id, e)
+			# Don't raise - we don't want to break message ingestion
+			pass
 
 
 def _create_attachment_stubs(session, message_id: int, mid: str, attachments: Any) -> None:
