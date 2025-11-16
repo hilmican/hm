@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Optional
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Form
 from sqlalchemy import text
 from sqlmodel import select
 import datetime as dt
@@ -85,6 +85,74 @@ def start_process(body: dict):
     with get_session() as session:
         session.exec(text("UPDATE ig_ai_run SET job_id=:jid WHERE id=:id").params(jid=int(job_id), id=int(run_id)))
     return {"status": "ok", "run_id": run_id}
+
+
+@router.get("/products")
+def product_ai_page(request: Request, focus: str):
+    """
+    Edit AI instructions for a single product identified by slug or name.
+    Renders ig_ai_products.html with current ai_system_msg / ai_prompt_msg.
+    """
+    from ..models import Product
+
+    focus_s = (focus or "").strip()
+    if not focus_s:
+        raise HTTPException(status_code=400, detail="focus is required")
+    with get_session() as session:
+        try:
+            row = session.exec(
+                select(Product).where((Product.slug == focus_s) | (Product.name == focus_s)).limit(1)
+            ).first()
+        except Exception:
+            row = None
+    if not row:
+        raise HTTPException(status_code=404, detail="Product not found for focus")
+    name = row.name or focus_s
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        "ig_ai_products.html",
+        {
+            "request": request,
+            "focus": row.slug or focus_s,
+            "name": name,
+            "ai_system_msg": row.ai_system_msg or "",
+            "ai_prompt_msg": row.ai_prompt_msg or "",
+        },
+    )
+
+
+@router.post("/products/save")
+def save_product_ai(
+    focus: str = Form(...),
+    ai_system_msg: str = Form(default=""),
+    ai_prompt_msg: str = Form(default=""),
+):
+    """
+    Persist AI instructions for the focused product.
+    """
+    from ..models import Product
+
+    focus_s = (focus or "").strip()
+    if not focus_s:
+        raise HTTPException(status_code=400, detail="focus is required")
+    with get_session() as session:
+        try:
+            prod = session.exec(
+                select(Product).where((Product.slug == focus_s) | (Product.name == focus_s)).limit(1)
+            ).first()
+        except Exception:
+            prod = None
+        if not prod:
+            raise HTTPException(status_code=404, detail="Product not found for focus")
+        # Normalize empty strings to None
+        msg_sys = ai_system_msg.strip() if isinstance(ai_system_msg, str) else ""
+        msg_prompt = ai_prompt_msg.strip() if isinstance(ai_prompt_msg, str) else ""
+        prod.ai_system_msg = msg_sys or None
+        prod.ai_prompt_msg = msg_prompt or None
+        session.add(prod)
+    # Redirect back to the edit page for this product
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=f"/ig/ai/products?focus={prod.slug or focus_s}", status_code=303)
 
 
 @router.get("/process/runs")
