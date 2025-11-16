@@ -711,26 +711,30 @@ async def refresh_thread(conversation_id: str):
 
 @router.post("/inbox/{conversation_id}/shadow/dismiss")
 def dismiss_shadow(conversation_id: int):
-	# Mark the latest suggested shadow draft as dismissed
-	try:
-		from sqlalchemy import text as _text
-		with get_session() as session:
+    # Mark the latest suggested shadow draft as dismissed
+    try:
+        from sqlalchemy import text as _text
+        with get_session() as session:
             row = session.exec(
-                _text("SELECT id FROM ai_shadow_reply WHERE conversation_id=:cid AND (status IS NULL OR status='suggested') ORDER BY id DESC LIMIT 1")
+                _text(
+                    "SELECT id FROM ai_shadow_reply WHERE conversation_id=:cid AND (status IS NULL OR status='suggested') ORDER BY id DESC LIMIT 1"
+                )
             ).params(cid=int(conversation_id)).first()
-			if not row:
-				return {"status": "ok", "changed": 0}
-			rid = getattr(row, "id", None) if hasattr(row, "id") else (row[0] if isinstance(row, (list, tuple)) else None)
-			if not rid:
-				return {"status": "ok", "changed": 0}
-			session.exec(_text("UPDATE ai_shadow_reply SET status='dismissed' WHERE id=:id").params(id=int(rid)))
-			try:
-				increment_counter("ai_draft_dismissed", 1)
-			except Exception:
-				pass
-		return {"status": "ok", "changed": 1}
-	except Exception as e:
-		return {"status": "error", "error": str(e)}
+            if not row:
+                return {"status": "ok", "changed": 0}
+            rid = getattr(row, "id", None) if hasattr(row, "id") else (
+                row[0] if isinstance(row, (list, tuple)) and len(row) > 0 else None
+            )
+            if not rid:
+                return {"status": "ok", "changed": 0}
+            session.exec(_text("UPDATE ai_shadow_reply SET status='dismissed' WHERE id=:id").params(id=int(rid)))
+            try:
+                increment_counter("ai_draft_dismissed", 1)
+            except Exception:
+                pass
+        return {"status": "ok", "changed": 1}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @router.post("/inbox/{conversation_id}/merge-to-graph")
