@@ -31,6 +31,27 @@ def touch_shadow_state(
 		# Avoid corrupting queue with non-integer ids
 		return
 
+	# Only enable AI shadow for conversations that have ad/product context (ads_products mapping)
+	try:
+		with get_session() as session:
+			row = session.exec(
+				_text(
+					"""
+					SELECT 1
+					FROM conversations c
+					JOIN ads_products ap ON ap.ad_id = c.last_ad_id
+					WHERE c.id = :cid
+					LIMIT 1
+					"""
+				).params(cid=cid_int)
+			).first()
+			if not row:
+				# No connected ad/product → do not enqueue in ai_shadow_state
+				return
+	except Exception:
+		# If this check fails, fail closed (no shadow) rather than crashing
+		return
+
 	now = dt.datetime.utcnow()
 	next_at = now + dt.timedelta(seconds=max(1, int(debounce_seconds)))
 

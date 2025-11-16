@@ -65,7 +65,7 @@ def main() -> None:
 						"""
 						SELECT conversation_id, last_inbound_ms, postpone_count, COALESCE(status,'pending') AS status
 						FROM ai_shadow_state
-						WHERE (status IN ('pending','paused') OR status IS NULL)
+						WHERE (status = 'pending' OR status IS NULL)
 						  AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
 						ORDER BY (next_attempt_at IS NULL) DESC, next_attempt_at ASC
 						LIMIT 20
