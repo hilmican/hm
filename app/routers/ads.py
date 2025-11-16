@@ -157,9 +157,10 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 
 
 @router.post("/{ad_id}/ai/suggest")
-def ai_suggest_product_for_ad(request: Request, ad_id: str):
+def ai_suggest_product_for_ad(request: Request, ad_id: str, auto_save: bool = True, min_confidence: float = 0.7):
 	"""
 	Use AI to suggest which product an ad is about based on ad_title and product list.
+	If auto_save is True and confidence >= min_confidence, automatically saves the mapping.
 	Similar to the automatic post linking system.
 	"""
 	ai = getattr(request.app.state, "ai", None)
@@ -281,14 +282,76 @@ def ai_suggest_product_for_ad(request: Request, ad_id: str):
 	
 	product_name = result.get("product_name")
 	confidence = result.get("confidence", 0.0)
+	confidence_float = float(confidence) if confidence is not None else 0.0
 	notes = result.get("notes")
+	
+	# Auto-save if confidence is high enough
+	saved = False
+	if auto_save and product_id and confidence_float >= min_confidence:
+		# Use a new session for saving
+		with get_session() as save_session:
+			try:
+				# Save the mapping (same logic as save_ad_mapping)
+				pid = int(product_id)
+				try:
+					stmt_upsert_sqlite = _text(
+						"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
+					).bindparams(
+						id=str(ad_id),
+						pid=pid,
+						sku=None,
+					)
+					save_session.exec(stmt_upsert_sqlite)
+				except Exception:
+					# Fallback for MySQL
+					try:
+						stmt_upsert_mysql = _text(
+							"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku) "
+							"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku)"
+						).bindparams(
+							id=str(ad_id),
+							pid=pid,
+							sku=None,
+						)
+						save_session.exec(stmt_upsert_mysql)
+					except Exception:
+						# Last resort: try separate update/insert
+						stmt_sel = _text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
+						rowm = save_session.exec(stmt_sel).first()
+						if rowm:
+							stmt_update = _text(
+								"UPDATE ads_products SET product_id=:pid, sku=:sku WHERE ad_id=:id"
+							).bindparams(
+								id=str(ad_id),
+								pid=pid,
+								sku=None,
+							)
+							save_session.exec(stmt_update)
+						else:
+							stmt_insert = _text(
+								"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
+							).bindparams(
+								id=str(ad_id),
+								pid=pid,
+								sku=None,
+							)
+							save_session.exec(stmt_insert)
+				save_session.commit()
+				saved = True
+			except Exception as e:
+				# Log error but don't fail the request
+				import logging
+				_log = logging.getLogger("ads")
+				_log.error("Failed to auto-save ad mapping: %s", str(e))
 	
 	return JSONResponse({
 		"product_id": product_id,
 		"product_name": product_name,
-		"confidence": float(confidence) if confidence is not None else 0.0,
+		"confidence": confidence_float,
 		"notes": notes,
 		"ad_title": ad_text,
+		"saved": saved,
+		"auto_saved": saved,
 	})
 
 

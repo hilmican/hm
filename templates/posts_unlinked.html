@@ -69,9 +69,9 @@
           </div>
           
           <div class="actions">
-            <button class="aiSuggestBtn" data-message-id="{{ msg.message_id }}">AI Önerisi Al</button>
-            <button class="aiLinkBtn" data-message-id="{{ msg.message_id }}">AI ile Bağla</button>
-            <button class="manualLinkBtn" data-message-id="{{ msg.message_id }}">Manuel Bağla</button>
+            <button class="aiLinkBtn success" data-message-id="{{ msg.message_id }}">🤖 AI ile Otomatik Bağla</button>
+            <button class="aiSuggestBtn secondary" data-message-id="{{ msg.message_id }}">AI Önerisi Al</button>
+            <button class="manualLinkBtn secondary" data-message-id="{{ msg.message_id }}">Manuel Bağla</button>
           </div>
           
           <div id="suggestion-{{ msg.message_id }}" style="display:none;"></div>

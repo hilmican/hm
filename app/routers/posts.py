@@ -10,6 +10,7 @@ from ..db import get_session
 from ..models import Message, Product
 from sqlmodel import select
 from ..utils.slugify import slugify
+from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 _log = logging.getLogger("posts")
@@ -288,28 +289,27 @@ def ai_link_post(message_id: int, request: Request):
         products = session.exec(select(Product).limit(500)).all()
         product_list = [{"id": p.id, "name": p.name, "slug": p.slug} for p in products]
         
-        # AI suggestion
-        system_prompt = """Sen bir Instagram gönderisi analiz uzmanısın. 
-Bir Instagram gönderisinin başlığını ve açıklamasını analiz ederek, bu gönderinin hangi ürünü tanıttığını belirlemen gerekiyor.
-
-Mevcut ürün listesini incele ve gönderinin içeriğine göre en uygun ürünü öner. Eğer hiçbiri uygun değilse, yeni bir ürün adı öner.
-
-Yanıtını JSON formatında döndür:
-{
-  "suggested_product_id": <ürün_id veya null>,
-  "suggested_product_name": "<ürün adı veya null>",
-  "confidence": <0.0-1.0 arası güven skoru>,
-  "reasoning": "<neden bu ürünü seçtiğin açıklaması>"
-}"""
+        # Use the same prompt system as ads for consistency
+        system_prompt = AD_PRODUCT_MATCH_SYSTEM_PROMPT
         
-        user_prompt = f"""Instagram Gönderisi:
-Başlık: {post_info.get('title', 'Yok')}
-Mesaj Metni: {msg.text or 'Yok'}
-
-Mevcut Ürünler:
-{json.dumps(product_list, ensure_ascii=False, indent=2)}
-
-Bu gönderi hangi ürünü tanıtıyor? Lütfen JSON formatında yanıt ver."""
+        # Build prompt with post title and message text
+        post_text = f"{post_info.get('title', '')} {msg.text or ''}".strip()
+        
+        body = {
+            "ad_title": post_text,  # Reuse the same structure
+            "known_products": [{"id": p.id, "name": p.name} for p in products],
+            "schema": {
+                "product_id": "int|null",
+                "product_name": "str|null",
+                "confidence": "float",
+                "notes": "str|null",
+            },
+        }
+        
+        user_prompt = (
+            "Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
+            "Tüm alanlar çift tırnaklı olmalı.\nGirdi:\n" + json.dumps(body, ensure_ascii=False)
+        )
         
         try:
             suggestion = ai.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
@@ -317,8 +317,9 @@ Bu gönderi hangi ürünü tanıtıyor? Lütfen JSON formatında yanıt ver."""
             _log.error("AI suggestion failed: %s", e)
             raise HTTPException(status_code=502, detail=f"AI suggestion failed: {e}")
         
-        product_id = suggestion.get("suggested_product_id")
-        product_name = suggestion.get("suggested_product_name")
+        # Map response to expected format (using same schema as ads)
+        product_id = suggestion.get("product_id") or suggestion.get("suggested_product_id")
+        product_name = suggestion.get("product_name") or suggestion.get("suggested_product_name")
         
         # Create product if needed
         if not product_id and product_name:
@@ -487,33 +488,33 @@ def batch_ai_link(request: Request, limit: int = 50):
             seen_media_ids.add(media_id)
             
             try:
-                # AI suggestion
-                system_prompt = """Sen bir Instagram gönderisi analiz uzmanısın. 
-Bir Instagram gönderisinin başlığını ve açıklamasını analiz ederek, bu gönderinin hangi ürünü tanıttığını belirlemen gerekiyor.
-
-Mevcut ürün listesini incele ve gönderinin içeriğine göre en uygun ürünü öner. Eğer hiçbiri uygun değilse, yeni bir ürün adı öner.
-
-Yanıtını JSON formatında döndür:
-{
-  "suggested_product_id": <ürün_id veya null>,
-  "suggested_product_name": "<ürün adı veya null>",
-  "confidence": <0.0-1.0 arası güven skoru>,
-  "reasoning": "<neden bu ürünü seçtiğin açıklaması>"
-}"""
+                # Use the same prompt system as ads for consistency
+                system_prompt = AD_PRODUCT_MATCH_SYSTEM_PROMPT
                 
-                user_prompt = f"""Instagram Gönderisi:
-Başlık: {post_info.get('title', 'Yok')}
-Mesaj Metni: {msg.text or 'Yok'}
-
-Mevcut Ürünler:
-{json.dumps(product_list, ensure_ascii=False, indent=2)}
-
-Bu gönderi hangi ürünü tanıtıyor? Lütfen JSON formatında yanıt ver."""
+                # Build prompt with post title and message text
+                post_text = f"{post_info.get('title', '')} {msg.text or ''}".strip()
+                
+                body = {
+                    "ad_title": post_text,  # Reuse the same structure
+                    "known_products": [{"id": p.id, "name": p.name} for p in products],
+                    "schema": {
+                        "product_id": "int|null",
+                        "product_name": "str|null",
+                        "confidence": "float",
+                        "notes": "str|null",
+                    },
+                }
+                
+                user_prompt = (
+                    "Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
+                    "Tüm alanlar çift tırnaklı olmalı.\nGirdi:\n" + json.dumps(body, ensure_ascii=False)
+                )
                 
                 suggestion = ai.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
                 
-                product_id = suggestion.get("suggested_product_id")
-                product_name = suggestion.get("suggested_product_name")
+                # Map response to expected format (using same schema as ads)
+                product_id = suggestion.get("product_id") or suggestion.get("suggested_product_id")
+                product_name = suggestion.get("product_name") or suggestion.get("suggested_product_name")
                 
                 # Create product if needed
                 if not product_id and product_name:

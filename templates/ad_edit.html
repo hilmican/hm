@@ -95,9 +95,20 @@
               // Set the product in the select
               productSelect.value = data.product_id;
               aiResult.style.display = 'block';
-              aiResult.style.background = '#d1fae5';
-              aiResult.style.color = '#065f46';
-              aiResult.innerHTML = `✅ Önerilen ürün: <strong>${data.product_name || 'ID: ' + data.product_id}</strong> (Güven: ${(data.confidence * 100).toFixed(0)}%)${data.notes ? '<br><small>' + data.notes + '</small>' : ''}`;
+              
+              if (data.saved || data.auto_saved) {
+                // Successfully auto-saved
+                aiResult.style.background = '#d1fae5';
+                aiResult.style.color = '#065f46';
+                aiResult.innerHTML = `✅ <strong>Otomatik kaydedildi!</strong> Ürün: <strong>${data.product_name || 'ID: ' + data.product_id}</strong> (Güven: ${(data.confidence * 100).toFixed(0)}%)${data.notes ? '<br><small>' + data.notes + '</small>' : ''}`;
+                // Reload page after 1.5 seconds to show updated state
+                setTimeout(() => location.reload(), 1500);
+              } else {
+                // Suggested but not saved (low confidence)
+                aiResult.style.background = '#fef3c7';
+                aiResult.style.color = '#92400e';
+                aiResult.innerHTML = `⚠️ Önerilen ürün: <strong>${data.product_name || 'ID: ' + data.product_id}</strong> (Güven: ${(data.confidence * 100).toFixed(0)}% - Düşük güven, manuel kaydetmek için "Kaydet" butonuna tıklayın)${data.notes ? '<br><small>' + data.notes + '</small>' : ''}`;
+              }
             } else {
               aiResult.style.display = 'block';
               aiResult.style.background = '#fef3c7';

@@ -634,6 +634,33 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 		except Exception:
 			pass
 	
+	# Auto-link ads to products
+	try:
+		if ad_id:
+			# Try to get ad_title from referral_json if not already extracted
+			ad_title_final = ad_title
+			if not ad_title_final and referral_json_val:
+				try:
+					ref_data = json.loads(referral_json_val) if isinstance(referral_json_val, str) else referral_json_val
+					if isinstance(ref_data, dict):
+						# Check ads_context_data.ad_title (from Instagram webhook format)
+						ads_ctx = ref_data.get("ads_context_data") or {}
+						if isinstance(ads_ctx, dict):
+							ad_title_final = ads_ctx.get("ad_title") or ad_title_final
+						# Also check direct fields
+						ad_title_final = ref_data.get("ad_title") or ref_data.get("headline") or ref_data.get("source") or ad_title_final
+				except Exception:
+					pass
+			# Use ad_title_final or fallback to ad_name
+			if ad_title_final or ad_name:
+				_auto_link_ad(session, ad_id, ad_title_final, ad_name)
+	except Exception as e:
+		# Never break message ingestion if ad linking fails
+		try:
+			_log.warning("ingest: auto-link ad failed for mid=%s ad_id=%s: %s", str(mid), str(ad_id), str(e))
+		except Exception:
+			pass
+	
 	return row.id  # type: ignore
 
 
@@ -700,34 +727,38 @@ def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
 			_log.warning("ingest: failed to load products for post linking: %s", e)
 			return
 		
-		# AI suggestion
+		# AI suggestion using unified prompt system
 		try:
-			system_prompt = """Sen bir Instagram gönderisi analiz uzmanısın. 
-Bir Instagram gönderisinin başlığını ve açıklamasını analiz ederek, bu gönderinin hangi ürünü tanıttığını belirlemen gerekiyor.
-
-Mevcut ürün listesini incele ve gönderinin içeriğine göre en uygun ürünü öner. Eğer hiçbiri uygun değilse, yeni bir ürün adı öner.
-
-Yanıtını JSON formatında döndür:
-{
-  "suggested_product_id": <ürün_id veya null>,
-  "suggested_product_name": "<ürün adı veya null>",
-  "confidence": <0.0-1.0 arası güven skoru>,
-  "reasoning": "<neden bu ürünü seçtiğin açıklaması>"
-}"""
+			from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
 			
-			user_prompt = f"""Instagram Gönderisi:
-Başlık: {post_info.get('title', 'Yok')}
-Mesaj Metni: {msg.text or 'Yok'}
-
-Mevcut Ürünler:
-{json.dumps(product_list, ensure_ascii=False, indent=2)}
-
-Bu gönderi hangi ürünü tanıtıyor? Lütfen JSON formatında yanıt ver."""
+			system_prompt = AD_PRODUCT_MATCH_SYSTEM_PROMPT
+			
+			# Build prompt with post title and message text
+			post_text = f"{post_info.get('title', '')} {msg.text or ''}".strip()
+			
+			body = {
+				"ad_title": post_text,  # Reuse the same structure
+				"known_products": [{"id": p.id, "name": p.name} for p in products],
+				"schema": {
+					"product_id": "int|null",
+					"product_name": "str|null",
+					"confidence": "float",
+					"notes": "str|null",
+				},
+			}
+			
+			user_prompt = (
+				"Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
+				"Tüm alanlar çift tırnaklı olmalı.\nGirdi:\n" + json.dumps(body, ensure_ascii=False)
+			)
 			
 			suggestion = ai.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
 			
-			product_id = suggestion.get("suggested_product_id")
-			product_name = suggestion.get("suggested_product_name")
+			# Map response to expected format (using same schema as ads)
+			product_id = suggestion.get("product_id") or suggestion.get("suggested_product_id")
+			product_name = suggestion.get("product_name") or suggestion.get("suggested_product_name")
+			confidence = suggestion.get("confidence", 0.0)
+			confidence_float = float(confidence) if confidence is not None else 0.0
 			
 			# Create product if needed
 			if not product_id and product_name:
@@ -747,8 +778,16 @@ Bu gönderi hangi ürünü tanıtıyor? Lütfen JSON formatında yanıt ver."""
 					if new_product.id:
 						product_id = new_product.id
 			
-			if not product_id:
-				_log.debug("ingest: could not determine product for post %s", post_id)
+			# Only auto-link if confidence is high enough (>= 0.7)
+			min_confidence = 0.7
+			if not product_id or confidence_float < min_confidence:
+				_log.debug(
+					"ingest: post %s not auto-linked (product_id=%s, confidence=%.2f < %.2f)",
+					post_id,
+					product_id,
+					confidence_float,
+					min_confidence,
+				)
 				return
 			
 			# Create post record
@@ -825,10 +864,10 @@ Bu gönderi hangi ürünü tanıtıyor? Lütfen JSON formatında yanıt ver."""
 					session.exec(stmt_insert)
 			
 			_log.info(
-				"ingest: auto-linked post %s to product %s (confidence: %s)",
+				"ingest: auto-linked post %s to product %s (confidence: %.2f)",
 				post_id,
 				product_id,
-				suggestion.get("confidence", 0),
+				confidence_float,
 			)
 			
 		except Exception as e:
@@ -837,8 +876,165 @@ Bu gönderi hangi ürünü tanıtıyor? Lütfen JSON formatında yanıt ver."""
 			pass
 	except Exception as e:
 		# Outer exception handler for the entire function
-		_log.warning("ingest: failed to auto-link Instagram post: %s", e)
-		# Don't raise - we don't want to break message ingestion
+		_log.warning("ingest: _auto_link_instagram_post outer error: %s", e)
+		pass
+
+
+def _auto_link_ad(session, ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -> None:
+	"""
+	Automatically link an ad to a product using AI when a message with ad data is ingested.
+	This runs synchronously during message ingestion but doesn't block if it fails.
+	Only saves if AI confidence is >= 0.7.
+	"""
+	try:
+		if not ad_id:
+			return
+		
+		# Use ad_title from message, fallback to ad_name
+		ad_text = ad_title or ad_name
+		if not ad_text:
+			_log.debug("ingest: ad %s has no title/name, skipping auto-link", ad_id)
+			return
+		
+		# Check if already linked
+		try:
+			existing = session.exec(
+				_sql_text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
+			).first()
+			if existing:
+				_log.debug("ingest: ad %s already linked, skipping", ad_id)
+				return
+		except Exception:
+			pass
+		
+		# Get AI client (non-blocking if not available)
+		try:
+			from .ai import AIClient
+			from ..models import Product
+			from sqlmodel import select
+			from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
+			
+			ai = AIClient()
+			if not ai or not getattr(ai, "enabled", False):
+				_log.debug("ingest: AI not available for ad linking")
+				return
+		except Exception as e:
+			_log.debug("ingest: failed to initialize AI for ad linking: %s", e)
+			return
+		
+		# Get products for context
+		try:
+			products = session.exec(select(Product).limit(500)).all()
+			product_list = [{"id": p.id, "name": p.name} for p in products]
+		except Exception as e:
+			_log.warning("ingest: failed to load products for ad linking: %s", e)
+			return
+		
+		# AI suggestion using unified prompt system
+		try:
+			system_prompt = AD_PRODUCT_MATCH_SYSTEM_PROMPT
+			
+			body = {
+				"ad_title": ad_text,
+				"known_products": product_list,
+				"schema": {
+					"product_id": "int|null",
+					"product_name": "str|null",
+					"confidence": "float",
+					"notes": "str|null",
+				},
+			}
+			
+			user_prompt = (
+				"Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
+				"Tüm alanlar çift tırnaklı olmalı.\nGirdi:\n" + json.dumps(body, ensure_ascii=False)
+			)
+			
+			result = ai.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
+			
+			# Extract product_id and confidence
+			product_id = result.get("product_id")
+			if product_id is not None:
+				try:
+					product_id = int(product_id)
+				except (ValueError, TypeError):
+					product_id = None
+			
+			product_name = result.get("product_name")
+			confidence = result.get("confidence", 0.0)
+			confidence_float = float(confidence) if confidence is not None else 0.0
+			
+			# Only auto-link if confidence is high enough (>= 0.7)
+			min_confidence = 0.7
+			if not product_id or confidence_float < min_confidence:
+				_log.debug(
+					"ingest: ad %s not auto-linked (product_id=%s, confidence=%.2f < %.2f)",
+					ad_id,
+					product_id,
+					confidence_float,
+					min_confidence,
+				)
+				return
+			
+			# Save the mapping
+			try:
+				stmt_upsert_sqlite = _sql_text(
+					"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
+				).bindparams(
+					id=str(ad_id),
+					pid=product_id,
+					sku=None,
+				)
+				session.exec(stmt_upsert_sqlite)
+			except Exception:
+				# Fallback for MySQL
+				try:
+					stmt_upsert_mysql = _sql_text(
+						"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku) "
+						"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku)"
+					).bindparams(
+						id=str(ad_id),
+						pid=product_id,
+						sku=None,
+					)
+					session.exec(stmt_upsert_mysql)
+				except Exception:
+					# Last resort: try separate update/insert
+					stmt_sel = _sql_text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
+					rowm = session.exec(stmt_sel).first()
+					if rowm:
+						stmt_update = _sql_text(
+							"UPDATE ads_products SET product_id=:pid, sku=:sku WHERE ad_id=:id"
+						).bindparams(
+							id=str(ad_id),
+							pid=product_id,
+							sku=None,
+						)
+						session.exec(stmt_update)
+					else:
+						stmt_insert = _sql_text(
+							"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
+						).bindparams(
+							id=str(ad_id),
+							pid=product_id,
+							sku=None,
+						)
+						session.exec(stmt_insert)
+			
+			_log.info(
+				"ingest: auto-linked ad %s to product %s (confidence: %.2f)",
+				ad_id,
+				product_id,
+				confidence_float,
+			)
+			
+		except Exception as e:
+			_log.warning("ingest: failed to auto-link ad %s: %s", ad_id, e)
+			# Don't raise - we don't want to break message ingestion
+			pass
+	except Exception as e:
+		# Outer exception handler for the entire function
+		_log.warning("ingest: _auto_link_ad outer error: %s", e)
 		pass
 
 
