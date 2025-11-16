@@ -61,7 +61,19 @@ class AIClient:
 
         messages: list[dict[str, str]] = []
         if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+            # Ensure the system prompt contains the word "json" so OpenAI allows JSON mode
+            sys_txt = str(system_prompt)
+            if "json" not in sys_txt.lower():
+                sys_txt = (sys_txt + "\n\n" + "You MUST respond with a single JSON object.").strip()
+            messages.append({"role": "system", "content": sys_txt})
+        else:
+            # Default system message for JSON mode
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "You are a strict JSON generator. You MUST respond with a single valid JSON object.",
+                }
+            )
         if extra_messages:
             for m in extra_messages:
                 # minimal validation to avoid type errors
