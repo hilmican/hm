@@ -409,6 +409,15 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	referral_json_val = None
 	try:
 		ref = (event.get("referral") or message_obj.get("referral") or {})
+		try:
+			_log_up.info(
+				"insert.webhook: referral raw mid=%s type=%s keys=%s",
+				str(mid),
+				type(ref).__name__,
+				list(ref.keys()) if isinstance(ref, dict) else None,
+			)
+		except Exception:
+			pass
 		if isinstance(ref, dict):
 			ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
 			ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
@@ -416,6 +425,16 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 			ad_img = ref.get("image_url") or ref.get("thumbnail_url") or ref.get("picture") or ref.get("media_url") or None
 			ad_name = ref.get("name") or ref.get("title") or None
 			referral_json_val = json.dumps(ref, ensure_ascii=False)
+			try:
+				_log_up.info(
+					"insert.webhook: referral parsed mid=%s ad_id=%s ad_link=%s ad_title=%s",
+					str(mid),
+					str(ad_id),
+					str(ad_link),
+					str(ad_title),
+				)
+			except Exception:
+				pass
 		# Also parse Ads Library id from ad_link query param when present
 		if not ad_id and ad_link and "facebook.com/ads/library" in str(ad_link):
 			try:
@@ -423,15 +442,38 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 				q = parse_qs(urlparse(str(ad_link)).query)
 				aid = (q.get("id") or [None])[0]
 				ad_id = str(aid) if aid else None
-			except Exception:
-				pass
-	except Exception:
+				try:
+					_log_up.info(
+						"insert.webhook: referral ad_id from ads_library mid=%s ad_id=%s",
+						str(mid),
+						str(ad_id),
+					)
+				except Exception:
+					pass
+			except Exception as e:
+				try:
+					_log_up.warning(
+						"insert.webhook: referral ads_library parse error mid=%s err=%s",
+						str(mid),
+						str(e),
+					)
+				except Exception:
+					pass
+	except Exception as e:
+		try:
+			_log_up.warning(
+				"insert.webhook: referral parse error mid=%s err=%s",
+				str(mid),
+				str(e),
+			)
+		except Exception:
+			pass
 		ad_id = ad_link = ad_title = ad_img = ad_name = None
 		referral_json_val = None
 	# Debug logging: capture mapping decisions for this message to aid troubleshooting
 	try:
 		_log_up.info(
-			"insert.webhook: mid=%s from=%s to=%s igba_id=%s user_id=%s conv_pk=%s graph_cid=%s direction=%s",
+			"insert.webhook: mid=%s from=%s to=%s igba_id=%s user_id=%s conv_pk=%s graph_cid=%s direction=%s ad_id=%s",
 			str(mid),
 			str(sender_id),
 			str(recipient_id),
@@ -440,6 +482,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 			str(conversation_pk),
 			str(graph_conversation_id),
 			str(direction),
+			str(ad_id),
 		)
 	except Exception:
 		# Never break ingestion because of debug logging
@@ -485,12 +528,104 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	try:
 		if ad_id:
 			try:
-				session.exec(_sql_text("INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+				_log_up.info(
+					"insert.webhook: ads upsert start mid=%s ad_id=%s name=%s link=%s",
+					str(mid),
+					str(ad_id),
+					str(ad_name),
+					str(ad_link),
+				)
 			except Exception:
-				session.exec(_sql_text("INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
-			session.exec(_sql_text("UPDATE ads SET name=COALESCE(:n,name), image_url=COALESCE(:img,image_url), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
-	except Exception:
-		pass
+				pass
+			try:
+				session.exec(
+					_sql_text(
+						"INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
+						"VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)"
+					)
+				).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+				try:
+					_log_up.info(
+						"insert.webhook: ads INSERT OR IGNORE ok mid=%s ad_id=%s",
+						str(mid),
+						str(ad_id),
+					)
+				except Exception:
+					pass
+			except Exception as e1:
+				try:
+					_log_up.warning(
+						"insert.webhook: ads INSERT OR IGNORE failed mid=%s ad_id=%s err=%s",
+						str(mid),
+						str(ad_id),
+						str(e1),
+					)
+				except Exception:
+					pass
+				try:
+					session.exec(
+						_sql_text(
+							"INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
+							"VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)"
+						)
+					).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+					try:
+						_log_up.info(
+							"insert.webhook: ads INSERT IGNORE ok mid=%s ad_id=%s",
+							str(mid),
+							str(ad_id),
+						)
+					except Exception:
+						pass
+				except Exception as e2:
+					try:
+						_log_up.error(
+							"insert.webhook: ads INSERT IGNORE failed mid=%s ad_id=%s err=%s",
+							str(mid),
+							str(ad_id),
+							str(e2),
+						)
+					except Exception:
+						pass
+			try:
+				session.exec(
+					_sql_text(
+						"UPDATE ads SET "
+						"name=COALESCE(:n,name), "
+						"image_url=COALESCE(:img,image_url), "
+						"link=COALESCE(:lnk,link), "
+						"updated_at=CURRENT_TIMESTAMP "
+						"WHERE ad_id=:id"
+					)
+				).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+				try:
+					_log_up.info(
+						"insert.webhook: ads UPDATE ok mid=%s ad_id=%s",
+						str(mid),
+						str(ad_id),
+					)
+				except Exception:
+					pass
+			except Exception as e3:
+				try:
+					_log_up.error(
+						"insert.webhook: ads UPDATE failed mid=%s ad_id=%s err=%s",
+						str(mid),
+						str(ad_id),
+						str(e3),
+					)
+				except Exception:
+					pass
+	except Exception as outer:
+		try:
+			_log_up.error(
+				"insert.webhook: ads upsert outer error mid=%s ad_id=%s err=%s",
+				str(mid),
+				str(ad_id),
+				str(outer),
+			)
+		except Exception:
+			pass
 	# upsert stories cache
 	try:
 		if story_id:
@@ -739,6 +874,15 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 	referral_json_val = None
 	try:
 		ref = (event.get("referral") or message_obj.get("referral") or {})
+		try:
+			_log_up.info(
+				"upsert.graph: referral raw mid=%s type=%s keys=%s",
+				str(mid),
+				type(ref).__name__,
+				list(ref.keys()) if isinstance(ref, dict) else None,
+			)
+		except Exception:
+			pass
 		if isinstance(ref, dict):
 			ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
 			ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
@@ -746,13 +890,31 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 			ad_img = ref.get("image_url") or ref.get("thumbnail_url") or ref.get("picture") or ref.get("media_url") or None
 			ad_name = ref.get("name") or ref.get("title") or None
 			referral_json_val = json.dumps(ref, ensure_ascii=False)
-	except Exception:
+			try:
+				_log_up.info(
+					"upsert.graph: referral parsed mid=%s ad_id=%s ad_link=%s ad_title=%s",
+					str(mid),
+					str(ad_id),
+					str(ad_link),
+					str(ad_title),
+				)
+			except Exception:
+				pass
+	except Exception as e:
+		try:
+			_log_up.warning(
+				"upsert.graph: referral parse error mid=%s err=%s",
+				str(mid),
+				str(e),
+			)
+		except Exception:
+			pass
 		ad_id = ad_link = ad_title = ad_img = ad_name = None
 		referral_json_val = None
 	# Debug logging: capture mapping decisions for hydrated/Graph-fetched messages
 	try:
 		_log_up.info(
-			"upsert.graph: mid=%s from=%s to=%s igba_id=%s owner=%s user_id=%s conv_pk=%s graph_cid=%s direction=%s",
+			"upsert.graph: mid=%s from=%s to=%s igba_id=%s owner=%s user_id=%s conv_pk=%s graph_cid=%s direction=%s ad_id=%s",
 			str(mid),
 			str(sender_id),
 			str(recipient_id),
@@ -762,6 +924,7 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 			str(conversation_pk),
 			str(graph_cid),
 			str(direction),
+			str(ad_id),
 		)
 	except Exception:
 		# Never break ingestion because of debug logging
