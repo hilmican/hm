@@ -84,49 +84,8 @@ async def enrich_user_if_missing(session, ig_user_id: str, client: httpx.AsyncCl
                 _log.info("webhook.enrich: user %s enriched successfully", ig_user_id)
                 return user_data
             except Exception as e:
-                # Fallback for SQLite
-                try:
-                    session.exec(text("""
-                        INSERT OR IGNORE INTO ig_users(ig_user_id, username, name, biography, followers_count, follows_count, media_count, profile_picture_url, fetched_at, fetch_status)
-                        VALUES (:id, :uname, :name, :bio, :followers, :following, :media_count, :profile_pic, CURRENT_TIMESTAMP, 'ok')
-                    """).params(
-                        id=str(ig_user_id),
-                        uname=username,
-                        name=name,
-                        bio=bio,
-                        followers=followers,
-                        following=following,
-                        media_count=media_count,
-                        profile_pic=profile_pic
-                    ))
-                    # Update if insert was ignored (user exists)
-                    session.exec(text("""
-                        UPDATE ig_users SET
-                          username=COALESCE(:uname, username),
-                          name=COALESCE(:name, name),
-                          biography=COALESCE(:bio, biography),
-                          followers_count=COALESCE(:followers, followers_count),
-                          follows_count=COALESCE(:following, follows_count),
-                          media_count=COALESCE(:media_count, media_count),
-                          profile_picture_url=COALESCE(:profile_pic, profile_picture_url),
-                          fetched_at=CURRENT_TIMESTAMP,
-                          fetch_status='ok'
-                        WHERE ig_user_id=:id
-                    """).params(
-                        id=str(ig_user_id),
-                        uname=username,
-                        name=name,
-                        bio=bio,
-                        followers=followers,
-                        following=following,
-                        media_count=media_count,
-                        profile_pic=profile_pic
-                    ))
-                    _log.info("webhook.enrich: user %s enriched successfully", ig_user_id)
-                    return user_data
-                except Exception as e2:
-                    _log.warning("webhook.enrich: failed to save user %s: %s", ig_user_id, str(e2))
-                    return None
+                _log.warning("webhook.enrich: failed to save user %s: %s", ig_user_id, str(e))
+                return None
 
     except Exception as e:
         _log.warning("webhook.enrich: failed to enrich user %s: %s", ig_user_id, str(e)[:200])
@@ -192,30 +151,7 @@ async def enrich_conversation_if_missing(session, igba_id: str, ig_user_id: str,
                             _log.info("webhook.enrich: conversation mapping saved %s:%s -> %s", igba_id, ig_user_id, graph_conv_id)
                             return str(graph_conv_id)
                         except Exception as e:
-                            # SQLite fallback
-                            try:
-                                session.exec(text("""
-                                    INSERT OR IGNORE INTO conversations(convo_id, igba_id, ig_user_id, graph_conversation_id, last_message_at)
-                                    VALUES (:cid, :g, :u, :gcid, CURRENT_TIMESTAMP)
-                                """).params(
-                                    cid=f"{igba_id}:{ig_user_id}",
-                                    g=str(igba_id),
-                                    u=str(ig_user_id),
-                                    gcid=str(graph_conv_id)
-                                ))
-                                session.exec(text("""
-                                    UPDATE conversations SET
-                                      graph_conversation_id=:gcid,
-                                      last_message_at=CURRENT_TIMESTAMP
-                                    WHERE convo_id=:cid
-                                """).params(
-                                    cid=f"{igba_id}:{ig_user_id}",
-                                    gcid=str(graph_conv_id)
-                                ))
-                                _log.info("webhook.enrich: conversation mapping saved %s:%s -> %s", igba_id, ig_user_id, graph_conv_id)
-                                return str(graph_conv_id)
-                            except Exception as e2:
-                                _log.warning("webhook.enrich: failed to save conversation mapping: %s", str(e2))
+                            _log.warning("webhook.enrich: failed to save conversation mapping: %s", str(e))
 
     except Exception as e:
         _log.warning("webhook.enrich: failed to enrich conversation %s:%s: %s", igba_id, ig_user_id, str(e)[:200])
@@ -286,34 +222,7 @@ async def enrich_ad_if_missing(session, ad_id: str, client: httpx.AsyncClient) -
                 _log.info("webhook.enrich: ad %s enriched successfully", ad_id)
                 return ad_data
             except Exception as e:
-                # SQLite fallback
-                try:
-                    session.exec(text("""
-                        INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at)
-                        VALUES (:id, :name, :img, :link, CURRENT_TIMESTAMP)
-                    """).params(
-                        id=str(ad_id),
-                        name=title or name or f"Ad {ad_id}",
-                        img=image_url,
-                        link=link_url or f"https://www.facebook.com/ads/library/?id={ad_id}"
-                    ))
-                    session.exec(text("""
-                        UPDATE ads SET
-                          name=COALESCE(:name, name),
-                          image_url=COALESCE(:img, image_url),
-                          link=COALESCE(:link, link),
-                          updated_at=CURRENT_TIMESTAMP
-                        WHERE ad_id=:id
-                    """).params(
-                        id=str(ad_id),
-                        name=title or name or f"Ad {ad_id}",
-                        img=image_url,
-                        link=link_url or f"https://www.facebook.com/ads/library/?id={ad_id}"
-                    ))
-                    _log.info("webhook.enrich: ad %s enriched successfully", ad_id)
-                    return ad_data
-                except Exception as e2:
-                    _log.warning("webhook.enrich: failed to save ad %s: %s", ad_id, str(e2))
+                _log.warning("webhook.enrich: failed to save ad %s: %s", ad_id, str(e))
 
     except Exception as e:
         _log.warning("webhook.enrich: failed to enrich ad %s: %s", ad_id, str(e)[:200])
@@ -366,28 +275,7 @@ async def enrich_story_if_missing(session, story_id: str, client: httpx.AsyncCli
                 _log.info("webhook.enrich: story %s enriched successfully", story_id)
                 return story_data
             except Exception as e:
-                # SQLite fallback
-                try:
-                    session.exec(text("""
-                        INSERT OR IGNORE INTO stories(story_id, url, updated_at)
-                        VALUES (:id, :url, CURRENT_TIMESTAMP)
-                    """).params(
-                        id=str(story_id),
-                        url=media_url or permalink
-                    ))
-                    session.exec(text("""
-                        UPDATE stories SET
-                          url=COALESCE(:url, url),
-                          updated_at=CURRENT_TIMESTAMP
-                        WHERE story_id=:id
-                    """).params(
-                        id=str(story_id),
-                        url=media_url or permalink
-                    ))
-                    _log.info("webhook.enrich: story %s enriched successfully", story_id)
-                    return story_data
-                except Exception as e2:
-                    _log.warning("webhook.enrich: failed to save story %s: %s", story_id, str(e2))
+                _log.warning("webhook.enrich: failed to save story %s: %s", story_id, str(e))
 
     except Exception as e:
         _log.warning("webhook.enrich: failed to enrich story %s: %s", story_id, str(e)[:200])

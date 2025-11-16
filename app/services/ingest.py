@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
-from ..db import get_session
+from ..db import get_session, engine
 from ..models import Message, Conversation, IGUser
 from .instagram_api import fetch_message_details  # type: ignore
 import logging as _lg
@@ -12,6 +12,8 @@ _log = _lg.getLogger("ingest")
 _log_up = _lg.getLogger("ingest.upsert")
 from .queue import enqueue
 from sqlalchemy import text as _sql_text
+
+# MySQL-only backend
 
 
 def _ensure_ig_account(conn, igba_id: str) -> None:
@@ -538,54 +540,31 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 				)
 			except Exception:
 				pass
+			# MySQL-only: use INSERT IGNORE (idempotent on PK ad_id)
 			try:
-				stmt_ins_or_ignore = _sql_text(
-					"INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
+				stmt_ins_ignore = _sql_text(
+					"INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
 					"VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)"
 				).bindparams(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
-				session.exec(stmt_ins_or_ignore)
+				session.exec(stmt_ins_ignore)
 				try:
 					_log_up.info(
-						"insert.webhook: ads INSERT OR IGNORE ok mid=%s ad_id=%s",
+						"insert.webhook: ads INSERT IGNORE ok mid=%s ad_id=%s",
 						str(mid),
 						str(ad_id),
 					)
 				except Exception:
 					pass
-			except Exception as e1:
+			except Exception as e_mysql:
 				try:
-					_log_up.warning(
-						"insert.webhook: ads INSERT OR IGNORE failed mid=%s ad_id=%s err=%s",
+					_log_up.error(
+						"insert.webhook: ads INSERT IGNORE failed mid=%s ad_id=%s err=%s",
 						str(mid),
 						str(ad_id),
-						str(e1),
+						str(e_mysql),
 					)
 				except Exception:
 					pass
-				try:
-					stmt_ins_ignore = _sql_text(
-						"INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
-						"VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)"
-					).bindparams(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
-					session.exec(stmt_ins_ignore)
-					try:
-						_log_up.info(
-							"insert.webhook: ads INSERT IGNORE ok mid=%s ad_id=%s",
-							str(mid),
-							str(ad_id),
-						)
-					except Exception:
-						pass
-				except Exception as e2:
-					try:
-						_log_up.error(
-							"insert.webhook: ads INSERT IGNORE failed mid=%s ad_id=%s err=%s",
-							str(mid),
-							str(ad_id),
-							str(e2),
-						)
-					except Exception:
-						pass
 			try:
 				stmt_upd = _sql_text(
 					"UPDATE ads SET "
@@ -627,17 +606,8 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	# upsert stories cache
 	try:
 		if story_id:
-			try:
-				session.exec(_sql_text("INSERT OR IGNORE INTO stories(story_id, url, updated_at) VALUES (:id, :url, CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
-			except Exception:
-				try:
-					session.exec(_sql_text("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES (:id, :url, CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
-				except Exception:
-					row_s = session.exec(_sql_text("SELECT story_id FROM stories WHERE story_id=:id")).params(id=str(story_id)).first()
-					if row_s:
-						session.exec(_sql_text("UPDATE stories SET url=COALESCE(:url,url), updated_at=CURRENT_TIMESTAMP WHERE story_id=:id")).params(id=str(story_id), url=(str(story_url) if story_url else None))
-					else:
-						session.exec(_sql_text("INSERT INTO stories(story_id, url, updated_at) VALUES (:id, :url, CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
+			session.exec(_sql_text("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES (:id, :url, CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
+			session.exec(_sql_text("UPDATE stories SET url=COALESCE(:url,url), updated_at=CURRENT_TIMESTAMP WHERE story_id=:id")).params(id=str(story_id), url=(str(story_url) if story_url else None))
 	except Exception:
 		pass
 	# Touch AI shadow state on inbound messages to start debounce timer
@@ -971,18 +941,8 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 	try:
 		if story_id:
 			from sqlalchemy import text as _t
-			try:
-				session.exec(_t("INSERT OR IGNORE INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
-			except Exception:
-				try:
-					session.exec(_t("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
-				except Exception:
-					exists = session.exec(_t("SELECT 1 FROM stories WHERE story_id=:id")).params(id=str(story_id)).first()
-					if exists:
-                        # update url if provided
-						session.exec(_t("UPDATE stories SET url=COALESCE(:url,url), updated_at=CURRENT_TIMESTAMP WHERE story_id=:id")).params(id=str(story_id), url=(str(story_url) if story_url else None))
-					else:
-						session.exec(_t("INSERT INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
+			session.exec(_t("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
+			session.exec(_t("UPDATE stories SET url=COALESCE(:url,url), updated_at=CURRENT_TIMESTAMP WHERE story_id=:id")).params(id=str(story_id), url=(str(story_url) if story_url else None))
 	except Exception:
 		pass
 	return int(row.id)

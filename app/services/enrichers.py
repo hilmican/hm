@@ -109,19 +109,11 @@ async def enrich_user(ig_user_id: str) -> bool:
 	if 'updated' in locals() and updated == 0:
 		try:
 			with get_session() as session:
-				# Try SQLite-style first; fall back to MySQL
-				try:
-					session.exec(
-						text(
-							"INSERT OR IGNORE INTO ig_users(ig_user_id, username, name, profile_pic_url, fetched_at, fetch_status) VALUES (:id, :u, :n, :p, CURRENT_TIMESTAMP, 'ok')"
-						).params(id=ig_user_id, u=username, n=name, p=profile_pic_url)
-					)
-				except Exception:
-					session.exec(
-						text(
-							"INSERT IGNORE INTO ig_users(ig_user_id, username, name, profile_pic_url, fetched_at, fetch_status) VALUES (:id, :u, :n, :p, CURRENT_TIMESTAMP, 'ok')"
-						).params(id=ig_user_id, u=username, n=name, p=profile_pic_url)
-					)
+				session.exec(
+					text(
+						"INSERT IGNORE INTO ig_users(ig_user_id, username, name, profile_pic_url, fetched_at, fetch_status) VALUES (:id, :u, :n, :p, CURRENT_TIMESTAMP, 'ok')"
+					).params(id=ig_user_id, u=username, n=name, p=profile_pic_url)
+				)
 		except Exception:
 			pass
 	return True
@@ -163,19 +155,12 @@ async def enrich_page(igba_id: str) -> bool:
 			rc = 0
 		if rc == 0:
 			try:
-				# Dialect-aware insert
+				# MySQL-only insert
 				with session.get_bind().begin() as conn:  # type: ignore
-					try:
-						conn.exec_driver_sql(
-							"INSERT OR IGNORE INTO ig_accounts(igba_id, username, name, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
-							(igba_id, username, name),
-						)
-					except Exception:
-						# MySQL
-						conn.exec_driver_sql(
-							"INSERT IGNORE INTO ig_accounts(igba_id, username, name, updated_at) VALUES (%s, %s, %s, CURRENT_TIMESTAMP)",
-							(igba_id, username, name),
-						)
+					conn.exec_driver_sql(
+						"INSERT IGNORE INTO ig_accounts(igba_id, username, name, updated_at) VALUES (%s, %s, %s, CURRENT_TIMESTAMP)",
+						(igba_id, username, name),
+					)
 			except Exception:
 				pass
 	return True
