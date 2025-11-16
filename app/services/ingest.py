@@ -835,6 +835,11 @@ Bu gönderi hangi ürünü tanıtıyor? Lütfen JSON formatında yanıt ver."""
 			_log.warning("ingest: failed to auto-link post %s: %s", post_id, e)
 			# Don't raise - we don't want to break message ingestion
 			pass
+	except Exception as e:
+		# Outer exception handler for the entire function
+		_log.warning("ingest: failed to auto-link Instagram post: %s", e)
+		# Don't raise - we don't want to break message ingestion
+		pass
 
 
 def _create_attachment_stubs(session, message_id: int, mid: str, attachments: Any) -> None:

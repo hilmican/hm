@@ -31,10 +31,11 @@ def touch_shadow_state(
 		# Avoid corrupting queue with non-integer ids
 		return
 
-	# Only enable AI shadow for conversations that have ad/product context (ads_products mapping)
+	# Only enable AI shadow for conversations that have ad/product or post/product context
 	try:
 		with get_session() as session:
-			row = session.exec(
+			# Check if conversation has ad linked to product
+			row_ad = session.exec(
 				_text(
 					"""
 					SELECT 1
@@ -45,8 +46,23 @@ def touch_shadow_state(
 					"""
 				).params(cid=cid_int)
 			).first()
-			if not row:
-				# No connected ad/product → do not enqueue in ai_shadow_state
+			
+			# Check if conversation has posts linked to products
+			row_post = session.exec(
+				_text(
+					"""
+					SELECT 1
+					FROM message m
+					JOIN posts pst ON pst.message_id = m.id
+					JOIN posts_products pp ON pp.post_id = pst.post_id
+					WHERE m.conversation_id = :cid
+					LIMIT 1
+					"""
+				).params(cid=cid_int)
+			).first()
+			
+			if not row_ad and not row_post:
+				# No connected ad/product or post/product → do not enqueue in ai_shadow_state
 				return
 	except Exception:
 		# If this check fails, fail closed (no shadow) rather than crashing
