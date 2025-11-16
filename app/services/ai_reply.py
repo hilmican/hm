@@ -227,7 +227,25 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 		"last_customer_message": last_customer_message,
 		"transcript": transcript,
 	}
-	user_prompt = json.dumps(user_payload, ensure_ascii=False)
+	# Wrap context JSON in a clear instruction so the model returns our desired schema
+	context_json = json.dumps(user_payload, ensure_ascii=False)
+	user_prompt = (
+		"Sen HiMan için Instagram DM satış asistanısın.\n"
+		"Aşağıda mağaza, ürün ve konuşma geçmişiyle ilgili bir JSON göreceksin.\n"
+		"Sadece aşağıdaki şemaya UYGUN, tek bir JSON obje döndür:\n"
+		"{\n"
+		'  \"should_reply\": bool,           // müşteriye şu anda cevap önerilmeli mi?\n'
+		'  \"reply_text\": string,          // Önerdiğin mesaj; boş BIRAKMA, cevap vermeyeceksen makul bir açıklama yaz\n'
+		'  \"confidence\": number,          // 0.0 – 1.0 arası güven skoru\n'
+		'  \"reason\": string,              // kısa açıklama, örn: \"müşteri beden soruyor\"\n'
+		'  \"notes\": string | null        // operatör için ek notlar (isteğe bağlı)\n'
+		"}\n\n"
+		"Bir metin sohbeti YAZMA, sadece bu JSON objesini üret.\n"
+		"İçerik bağlamı (değiştirmeden kullan):\n"
+		"CONTEXT_JSON_START\n"
+		f"{context_json}\n"
+		"CONTEXT_JSON_END\n"
+	)
 
 	# Optional per-product system tweaks from Product.ai_system_msg
 	product_extra_sys: Optional[str] = None
