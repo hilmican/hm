@@ -6,10 +6,9 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 import logging
-from sqlmodel import select
+from sqlalchemy import text as _text
 
 from ..db import get_session
-from ..models import Message
 
 
 GRAPH_VERSION = os.getenv("IG_GRAPH_API_VERSION", "v21.0")
@@ -335,10 +334,24 @@ async def fetch_user_username(user_id: str) -> Optional[str]:
 
 
 async def sync_latest_conversations(limit: int = 25) -> int:
+    """
+    Best-effort background sync of latest conversations from Graph.
+
+    For MySQL/SQLite backends this uses dialect-specific *idempotent* inserts
+    (`INSERT IGNORE` / `INSERT OR IGNORE`) so that concurrent webhook ingestion
+    or other sync jobs do not raise duplicate-key errors on `ig_message_id`.
+    """
     conversations = await fetch_conversations(limit=limit)
     saved = 0
     with get_session() as session:
         from .ingest import _get_or_create_conversation_id as _get_conv_id
+
+        # Detect backend once per session to choose the appropriate INSERT style
+        try:
+            bind = session.get_bind()
+            backend = getattr(bind.dialect, "name", "") or ""
+        except Exception:
+            backend = ""
 
         for conv in conversations:
             cid = str(conv.get("id"))
@@ -347,24 +360,25 @@ async def sync_latest_conversations(limit: int = 25) -> int:
                 mid = str(m.get("id")) if m.get("id") else None
                 if not mid:
                     continue
-                # dedupe by ig_message_id
-                exists = session.exec(select(Message).where(Message.ig_message_id == mid)).first()
-                if exists:
-                    continue
+
                 frm = (m.get("from") or {}).get("id")
                 frm_username = (m.get("from") or {}).get("username")
                 to = (m.get("to") or {}).get("data") or []
                 recipient_id = to[0]["id"] if to else None
                 direction = "in"
-                token, entity_id, is_page = _get_base_token_and_id()
+                _, entity_id, _ = _get_base_token_and_id()
                 owner_id = entity_id
                 if frm and str(frm) == str(owner_id):
                     direction = "out"
-                text = m.get("message")
+                text_val = m.get("message")
                 created_time = m.get("created_time")
                 ts_ms = None
                 try:
-                    dt_obj = dt.datetime.fromisoformat(created_time.replace("+0000", "+00:00")) if created_time else None
+                    dt_obj = (
+                        dt.datetime.fromisoformat(created_time.replace("+0000", "+00:00"))
+                        if created_time
+                        else None
+                    )
                     ts_ms = int(dt_obj.timestamp() * 1000) if dt_obj else None
                 except Exception:
                     ts_ms = None
@@ -381,20 +395,77 @@ async def sync_latest_conversations(limit: int = 25) -> int:
                 except Exception:
                     convo_pk = None
 
-                row = Message(
-                    ig_sender_id=str(frm) if frm else None,
-                    ig_recipient_id=str(recipient_id) if recipient_id else None,
-                    ig_message_id=mid,
-                    text=text,
-                    attachments_json=None,
-                    timestamp_ms=ts_ms,
-                    raw_json=None,
-                    conversation_id=int(convo_pk) if convo_pk is not None else None,
-                    direction=direction,
-                    sender_username=frm_username,
-                )
-                session.add(row)
-                saved += 1
+                params = {
+                    "ig_sender_id": str(frm) if frm else None,
+                    "ig_recipient_id": str(recipient_id) if recipient_id else None,
+                    "ig_message_id": mid,
+                    "text": text_val,
+                    "timestamp_ms": ts_ms,
+                    "conversation_id": int(convo_pk) if convo_pk is not None else None,
+                    "direction": direction,
+                    "sender_username": frm_username,
+                }
+
+                # Use idempotent insert based on backend to avoid duplicate-key errors
+                if backend == "mysql":
+                    stmt = _text(
+                        """
+                        INSERT IGNORE INTO message (
+                            ig_sender_id,
+                            ig_recipient_id,
+                            ig_message_id,
+                            text,
+                            timestamp_ms,
+                            conversation_id,
+                            direction,
+                            sender_username
+                        ) VALUES (
+                            :ig_sender_id,
+                            :ig_recipient_id,
+                            :ig_message_id,
+                            :text,
+                            :timestamp_ms,
+                            :conversation_id,
+                            :direction,
+                            :sender_username
+                        )
+                        """
+                    )
+                else:
+                    # SQLite / others: best-effort ignore on duplicates
+                    stmt = _text(
+                        """
+                        INSERT OR IGNORE INTO message (
+                            ig_sender_id,
+                            ig_recipient_id,
+                            ig_message_id,
+                            text,
+                            timestamp_ms,
+                            conversation_id,
+                            direction,
+                            sender_username
+                        ) VALUES (
+                            :ig_sender_id,
+                            :ig_recipient_id,
+                            :ig_message_id,
+                            :text,
+                            :timestamp_ms,
+                            :conversation_id,
+                            :direction,
+                            :sender_username
+                        )
+                        """
+                    )
+
+                try:
+                    result = session.exec(stmt.params(**params))
+                    # rowcount > 0 only when a new row was actually inserted
+                    if getattr(result, "rowcount", 0) and result.rowcount > 0:
+                        saved += 1
+                except Exception:
+                    # Best-effort: skip problematic rows rather than failing the whole sync
+                    continue
+
     return saved
 
 
