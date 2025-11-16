@@ -45,21 +45,26 @@
     <pre id="aiBox" style="background:#0b1021;color:#e5e7eb; padding:12px; border-radius:8px; max-height:300px; overflow:auto; white-space:pre-wrap;">{{ ai_json or 'Henüz AI verisi yok.' }}</pre>
     {% if focus_product %}
       <div style="margin-top:12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
-        <h4 style="margin:0 0 8px 0; color:#111827;">Ürün AI Talimatları
-          {% if focus_product.id %}
-            <a href="/ig/ai/products?focus={{ focus_product.slug or focus_product.name or 'default' }}" target="_blank" rel="noopener" class="meta" style="margin-left:6px;">(düzenle)</a>
-          {% endif %}
-        </h4>
-        <div class="meta">
-          Ürün: {{ focus_product.name or '-' }}
-          {% if focus_product.confidence is not none %} · güven: {{ '%.2f' % focus_product.confidence }}{% endif %}
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <h4 style="margin:0; color:#111827;">Ürün AI Talimatları
+            {% if focus_product.id %}
+              <a href="/ig/ai/products?focus={{ focus_product.slug or focus_product.name or 'default' }}" target="_blank" rel="noopener" class="meta" style="margin-left:6px;">(düzenle)</a>
+            {% endif %}
+          </h4>
+          <button id="toggleAiInstructions" type="button" class="action" style="font-size:12px; padding:4px 8px;">Göster</button>
         </div>
-        {% if focus_product.system %}
-          <div style="margin-top:8px; white-space:pre-wrap; font-size:13px;"><strong>System:</strong> {{ focus_product.system }}</div>
-        {% endif %}
-        {% if focus_product.prompt %}
-          <div style="margin-top:8px; white-space:pre-wrap; font-size:13px;"><strong>Prompt:</strong> {{ focus_product.prompt }}</div>
-        {% endif %}
+        <div id="aiInstructionsContent" style="display:none;">
+          <div class="meta">
+            Ürün: {{ focus_product.name or '-' }}
+            {% if focus_product.confidence is not none %} · güven: {{ '%.2f' % focus_product.confidence }}{% endif %}
+          </div>
+          {% if focus_product.system %}
+            <div style="margin-top:8px; white-space:pre-wrap; font-size:13px;"><strong>System:</strong> {{ focus_product.system }}</div>
+          {% endif %}
+          {% if focus_product.prompt %}
+            <div style="margin-top:8px; white-space:pre-wrap; font-size:13px;"><strong>Prompt:</strong> {{ focus_product.prompt }}</div>
+          {% endif %}
+        </div>
       </div>
     {% endif %}
     <div style="margin-top:12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
@@ -209,6 +214,17 @@
         }
       }
       fmtTs();
+
+      // Toggle AI Instructions visibility
+      const toggleAiInstructions = document.getElementById('toggleAiInstructions');
+      const aiInstructionsContent = document.getElementById('aiInstructionsContent');
+      if (toggleAiInstructions && aiInstructionsContent) {
+        toggleAiInstructions.addEventListener('click', () => {
+          const isHidden = aiInstructionsContent.style.display === 'none';
+          aiInstructionsContent.style.display = isHidden ? 'block' : 'none';
+          toggleAiInstructions.textContent = isHidden ? 'Gizle' : 'Göster';
+        });
+      }
 
       const btn = document.getElementById('refresh');
       btn?.addEventListener('click', async () => {
