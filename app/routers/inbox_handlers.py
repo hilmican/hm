@@ -214,16 +214,15 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
 
                 placeholders = ",".join([":a" + str(i) for i in range(len(ad_ids))])
                 params_ads = {("a" + str(i)): ad_ids[i] for i in range(len(ad_ids))}
-                rows_ap = session.exec(
-                    _text(
-                        f"""
-                        SELECT ap.ad_id, ap.product_id, p.name AS product_name
-                        FROM ads_products ap
-                        LEFT JOIN product p ON ap.product_id = p.id
-                        WHERE ap.ad_id IN ({placeholders})
-                        """
-                    ).params(**params_ads)
-                ).all()
+                stmt_ads = _text(
+                    f"""
+                    SELECT ap.ad_id, ap.product_id, p.name AS product_name
+                    FROM ads_products ap
+                    LEFT JOIN product p ON ap.product_id = p.id
+                    WHERE ap.ad_id IN ({placeholders})
+                    """
+                ).bindparams(**params_ads)
+                rows_ap = session.exec(stmt_ads).all()
                 ad_to_product: dict[str, dict[str, object]] = {}
                 for r in rows_ap:
                     try:

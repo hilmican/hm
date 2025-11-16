@@ -76,16 +76,15 @@ def _detect_focus_product(conversation_id: str) -> Tuple[Optional[str], float]:
 	with get_session() as session:
 		# ad_id mapping (optional)
 		try:
-			row = session.exec(
-				_text(
-					"""
-					SELECT m.ad_id
-					FROM message m
-					WHERE m.conversation_id=:cid AND m.ad_id IS NOT NULL
-					ORDER BY m.timestamp_ms DESC, m.id DESC LIMIT 1
-					"""
-				).params(cid=str(conversation_id))
-			).first()
+			stmt_last_ad = _text(
+				"""
+				SELECT m.ad_id
+				FROM message m
+				WHERE m.conversation_id=:cid AND m.ad_id IS NOT NULL
+				ORDER BY m.timestamp_ms DESC, m.id DESC LIMIT 1
+				"""
+			).bindparams(cid=str(conversation_id))
+			row = session.exec(stmt_last_ad).first()
 			ad_id = (row.ad_id if hasattr(row, "ad_id") else (row[0] if row else None)) if row else None
 			if ad_id:
 				# Prefer SKU when present (backwards compatible), else resolve via linked product

@@ -22,11 +22,10 @@ def edit_ad(request: Request, ad_id: str):
 	with get_session() as session:
 		# Ad cache row
 		try:
-			row = session.exec(
-				_text(
-					"SELECT ad_id, name, image_url, link, fetch_status, fetch_error, updated_at FROM ads WHERE ad_id=:id"
-				)
-			).params(id=str(ad_id)).first()
+			stmt_ad = _text(
+				"SELECT ad_id, name, image_url, link, fetch_status, fetch_error, updated_at FROM ads WHERE ad_id=:id"
+			).bindparams(id=str(ad_id))
+			row = session.exec(stmt_ad).first()
 		except Exception:
 			row = None
 		if row:
@@ -41,9 +40,10 @@ def edit_ad(request: Request, ad_id: str):
 			}
 		# Existing mapping for this ad (if any)
 		try:
-			mp = session.exec(
-				_text("SELECT ad_id, product_id, sku FROM ads_products WHERE ad_id=:id LIMIT 1")
-			).params(id=str(ad_id)).first()
+			stmt_mp = _text("SELECT ad_id, product_id, sku FROM ads_products WHERE ad_id=:id LIMIT 1").bindparams(
+				id=str(ad_id)
+			)
+			mp = session.exec(stmt_mp).first()
 		except Exception:
 			mp = None
 		if mp:

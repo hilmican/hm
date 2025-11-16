@@ -174,6 +174,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
         linked_order_id = None
         ai_status = None
         ai_json = None
+        focus_product: dict[str, Any] | None = None
         # Fetch user-level contact / AI info from ig_users (single source of truth)
         from sqlalchemy import text as _text
         try:
@@ -355,6 +356,33 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
         except Exception:
             usernames = {}
 
+        # Detect focus product for this conversation (for UI + AI hints)
+        try:
+            focus_slug, focus_conf = _detect_focus_product(str(conversation_id))
+        except Exception:
+            focus_slug, focus_conf = (None, 0.0)
+        if focus_slug:
+            try:
+                from sqlalchemy import text as _text
+                stmt_fp = _text(
+                    "SELECT id, name, ai_system_msg, ai_prompt_msg FROM product WHERE slug=:s OR name=:s LIMIT 1"
+                ).bindparams(s=str(focus_slug))
+                row_fp = session.exec(stmt_fp).first()
+                if row_fp:
+                    pid = getattr(row_fp, "id", None) if hasattr(row_fp, "id") else (row_fp[0] if len(row_fp) > 0 else None)
+                    pname = getattr(row_fp, "name", None) if hasattr(row_fp, "name") else (row_fp[1] if len(row_fp) > 1 else None)
+                    psys = getattr(row_fp, "ai_system_msg", None) if hasattr(row_fp, "ai_system_msg") else (row_fp[2] if len(row_fp) > 2 else None)
+                    pprompt = getattr(row_fp, "ai_prompt_msg", None) if hasattr(row_fp, "ai_prompt_msg") else (row_fp[3] if len(row_fp) > 3 else None)
+                    focus_product = {
+                        "id": pid,
+                        "name": pname,
+                        "system": psys,
+                        "prompt": pprompt,
+                        "confidence": float(focus_conf or 0.0),
+                    }
+            except Exception:
+                focus_product = None
+
         # Fetch cached ads for messages in this thread
         ads_cache: dict[str, dict[str, Any]] = {}
         ad_products: dict[str, dict[str, Any]] = {}
@@ -363,7 +391,8 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 placeholders = ",".join([":a" + str(i) for i in range(len(ad_ids))])
                 from sqlalchemy import text as _text
                 params = {("a" + str(i)): ad_ids[i] for i in range(len(ad_ids))}
-                rows_ad = session.exec(_text(f"SELECT ad_id, name, image_url, link FROM ads WHERE ad_id IN ({placeholders})")).params(**params).all()
+                stmt_ads = _text(f"SELECT ad_id, name, image_url, link FROM ads WHERE ad_id IN ({placeholders})").bindparams(**params)
+                rows_ad = session.exec(stmt_ads).all()
                 for r in rows_ad:
                     aid = r.ad_id if hasattr(r, "ad_id") else r[0]
                     name = r.name if hasattr(r, "name") else (r[1] if len(r) > 1 else None)
@@ -372,16 +401,15 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     ads_cache[str(aid)] = {"name": name, "image_url": img, "link": lnk}
                 # Enrich with linked product info
                 try:
-                    rows_ap = session.exec(
-                        _text(
-                            f"""
-                            SELECT ap.ad_id, ap.product_id, p.name AS product_name
-                            FROM ads_products ap
-                            LEFT JOIN product p ON ap.product_id = p.id
-                            WHERE ap.ad_id IN ({placeholders})
-                            """
-                        ).params(**params)
-                    ).all()
+                    stmt_ap = _text(
+                        f"""
+                        SELECT ap.ad_id, ap.product_id, p.name AS product_name
+                        FROM ads_products ap
+                        LEFT JOIN product p ON ap.product_id = p.id
+                        WHERE ap.ad_id IN ({placeholders})
+                        """
+                    ).bindparams(**params)
+                    rows_ap = session.exec(stmt_ap).all()
                     for r in rows_ap:
                         try:
                             aid = getattr(r, "ad_id", None) if hasattr(r, "ad_id") else (r[0] if len(r) > 0 else None)
@@ -559,6 +587,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 "usernames": usernames,
                 "ads_cache": ads_cache,
                 "ad_products": ad_products,
+                "focus_product": focus_product,
                 "contact_name": contact_name,
                 "contact_phone": contact_phone,
                 "contact_address": contact_address,
