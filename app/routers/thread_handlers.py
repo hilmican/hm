@@ -96,7 +96,7 @@ def shadow_debug(request: Request, draft_id: int):
         row = session.exec(
             _text(
                 """
-                SELECT id, convo_id, reply_text, model, confidence, reason, json_meta, status, created_at
+                SELECT id, conversation_id, reply_text, model, confidence, reason, json_meta, status, created_at
                 FROM ai_shadow_reply
                 WHERE id = :id
                 LIMIT 1
@@ -107,7 +107,7 @@ def shadow_debug(request: Request, draft_id: int):
             raise HTTPException(status_code=404, detail="Shadow draft not found")
         # Support both row objects and tuples
         did = getattr(row, "id", None) if hasattr(row, "id") else (row[0] if len(row) > 0 else None)
-        convo_id = getattr(row, "convo_id", None) if hasattr(row, "convo_id") else (row[1] if len(row) > 1 else None)
+        convo_id = getattr(row, "conversation_id", None) if hasattr(row, "conversation_id") else (row[1] if len(row) > 1 else None)
         reply_text = getattr(row, "reply_text", None) if hasattr(row, "reply_text") else (row[2] if len(row) > 2 else None)
         model = getattr(row, "model", None) if hasattr(row, "model") else (row[3] if len(row) > 3 else None)
         confidence = getattr(row, "confidence", None) if hasattr(row, "confidence") else (row[4] if len(row) > 4 else None)
@@ -580,8 +580,8 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
             from sqlalchemy import text as _text
             rows_shadow = session.exec(
                 _text(
-                    "SELECT id, reply_text, model, confidence, reason, created_at, status FROM ai_shadow_reply WHERE convo_id=:cid ORDER BY id ASC LIMIT 200"
-                ).params(cid=str(conversation_id))
+                    "SELECT id, reply_text, model, confidence, reason, created_at, status FROM ai_shadow_reply WHERE conversation_id=:cid ORDER BY id ASC LIMIT 200"
+                ).params(cid=int(conversation_id))
             ).all()
             # Represent the last one (if any) in 'shadow' for legacy panel rendering
             if rows_shadow:
@@ -710,14 +710,14 @@ async def refresh_thread(conversation_id: str):
 
 
 @router.post("/inbox/{conversation_id}/shadow/dismiss")
-def dismiss_shadow(conversation_id: str):
+def dismiss_shadow(conversation_id: int):
 	# Mark the latest suggested shadow draft as dismissed
 	try:
 		from sqlalchemy import text as _text
 		with get_session() as session:
-			row = session.exec(
-				_text("SELECT id FROM ai_shadow_reply WHERE convo_id=:cid AND (status IS NULL OR status='suggested') ORDER BY id DESC LIMIT 1")
-			).params(cid=str(conversation_id)).first()
+            row = session.exec(
+                _text("SELECT id FROM ai_shadow_reply WHERE conversation_id=:cid AND (status IS NULL OR status='suggested') ORDER BY id DESC LIMIT 1")
+            ).params(cid=int(conversation_id)).first()
 			if not row:
 				return {"status": "ok", "changed": 0}
 			rid = getattr(row, "id", None) if hasattr(row, "id") else (row[0] if isinstance(row, (list, tuple)) else None)

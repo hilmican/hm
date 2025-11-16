@@ -394,7 +394,7 @@ class Job(SQLModel, table=True):
 
 class AiShadowState(SQLModel, table=True):
 	__tablename__ = "ai_shadow_state"
-	# Internal conversation id FK (no longer stores string convo ids)
+	# Canonical FK to conversations.id
 	conversation_id: int = Field(primary_key=True, foreign_key="conversations.id")
 	last_inbound_ms: Optional[int] = Field(default=None, sa_column=Column(BigInteger))
 	next_attempt_at: Optional[dt.datetime] = Field(default=None, index=True)
@@ -406,7 +406,7 @@ class AiShadowState(SQLModel, table=True):
 class AiShadowReply(SQLModel, table=True):
 	__tablename__ = "ai_shadow_reply"
 	id: Optional[int] = Field(default=None, primary_key=True)
-	# Internal conversation id FK (no longer stores string convo ids)
+	# Canonical FK to conversations.id
 	conversation_id: int = Field(index=True, foreign_key="conversations.id")
 	reply_text: Optional[str] = Field(default=None, sa_column=Column(Text))
 	model: Optional[str] = None

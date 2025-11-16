@@ -545,12 +545,12 @@ def init_db() -> None:
                                     pass
                         except Exception:
                             pass
-                        # AI Shadow tables (MySQL)
+                        # AI Shadow tables (MySQL) - canonical key is conversations.id (INT)
                         try:
                             conn.exec_driver_sql(
                                 """
                                 CREATE TABLE IF NOT EXISTS ai_shadow_state (
-                                    convo_id VARCHAR(128) PRIMARY KEY,
+                                    conversation_id INT PRIMARY KEY,
                                     last_inbound_ms BIGINT NULL,
                                     next_attempt_at DATETIME NULL,
                                     postpone_count INT NOT NULL DEFAULT 0,
@@ -569,7 +569,7 @@ def init_db() -> None:
                                 """
                                 CREATE TABLE IF NOT EXISTS ai_shadow_reply (
                                     id INTEGER PRIMARY KEY AUTO_INCREMENT,
-                                    convo_id VARCHAR(128) NOT NULL,
+                                    conversation_id INT NOT NULL,
                                     reply_text LONGTEXT NULL,
                                     model VARCHAR(128) NULL,
                                     confidence DOUBLE NULL,
@@ -578,7 +578,7 @@ def init_db() -> None:
                                     attempt_no INT NULL DEFAULT 0,
                                     status VARCHAR(32) NULL,
                                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                                    INDEX idx_ai_shadow_reply_convo (convo_id),
+                                    INDEX idx_ai_shadow_reply_conversation (conversation_id),
                                     INDEX idx_ai_shadow_reply_created (created_at),
                                     INDEX idx_ai_shadow_reply_status (status)
                                 )
@@ -1040,11 +1040,11 @@ def init_db() -> None:
                     conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ig_users_fetched_at ON ig_users(fetched_at)")
                 except Exception:
                     pass
-                # AI Shadow tables (SQLite)
+                # AI Shadow tables (SQLite) - canonical key is conversations.id (INT)
                 conn.exec_driver_sql(
                     """
                     CREATE TABLE IF NOT EXISTS ai_shadow_state (
-                        convo_id TEXT PRIMARY KEY,
+                        conversation_id INTEGER PRIMARY KEY,
                         last_inbound_ms BIGINT,
                         next_attempt_at DATETIME,
                         postpone_count INTEGER DEFAULT 0,
@@ -1054,7 +1054,9 @@ def init_db() -> None:
                     """
                 )
                 try:
-                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_shadow_next_attempt ON ai_shadow_state(next_attempt_at)")
+                    conn.exec_driver_sql(
+                        "CREATE INDEX IF NOT EXISTS idx_ai_shadow_next_attempt ON ai_shadow_state(next_attempt_at)"
+                    )
                 except Exception:
                     pass
                 try:
@@ -1065,7 +1067,7 @@ def init_db() -> None:
                     """
                     CREATE TABLE IF NOT EXISTS ai_shadow_reply (
                         id INTEGER PRIMARY KEY,
-                        convo_id TEXT NOT NULL,
+                        conversation_id INTEGER NOT NULL,
                         reply_text TEXT,
                         model TEXT,
                         confidence REAL,
@@ -1078,11 +1080,15 @@ def init_db() -> None:
                     """
                 )
                 try:
-                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_shadow_reply_convo ON ai_shadow_reply(convo_id)")
+                    conn.exec_driver_sql(
+                        "CREATE INDEX IF NOT EXISTS idx_ai_shadow_reply_conversation ON ai_shadow_reply(conversation_id)"
+                    )
                 except Exception:
                     pass
                 try:
-                    conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_ai_shadow_reply_created ON ai_shadow_reply(created_at)")
+                    conn.exec_driver_sql(
+                        "CREATE INDEX IF NOT EXISTS idx_ai_shadow_reply_created ON ai_shadow_reply(created_at)"
+                    )
                 except Exception:
                     pass
                 try:

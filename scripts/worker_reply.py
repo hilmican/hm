@@ -63,7 +63,7 @@ def main() -> None:
 				rows = session.exec(
 					_text(
 						"""
-						SELECT convo_id, last_inbound_ms, postpone_count, COALESCE(status,'pending') AS status
+						SELECT conversation_id, last_inbound_ms, postpone_count, COALESCE(status,'pending') AS status
 						FROM ai_shadow_state
 						WHERE (status IN ('pending','paused') OR status IS NULL)
 						  AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
@@ -74,7 +74,7 @@ def main() -> None:
 				).all()
 				for r in rows:
 					item = {
-						"convo_id": r.convo_id if hasattr(r, "convo_id") else r[0],
+						"conversation_id": r.conversation_id if hasattr(r, "conversation_id") else r[0],
 						"last_inbound_ms": int((r.last_inbound_ms if hasattr(r, "last_inbound_ms") else r[1]) or 0),
 						"postpone_count": int((r.postpone_count if hasattr(r, "postpone_count") else r[2]) or 0),
 						"status": (r.status if hasattr(r, "status") else r[3]) or "pending",
@@ -93,7 +93,7 @@ def main() -> None:
 			continue
 
 		for st in due:
-			cid = st.get("convo_id") or st.get("conversation_id") or st.get("id") or st.get("cid")
+			cid = st.get("conversation_id")
 			try:
 				cid = int(cid) if cid is not None else None
 			except Exception:
@@ -148,7 +148,11 @@ def main() -> None:
 								att=int(postpones or 0),
 							)
 						)
-						session.exec(_text("UPDATE ai_shadow_state SET status='suggested', updated_at=CURRENT_TIMESTAMP WHERE convo_id=:cid").params(cid=cid))
+						session.exec(
+							_text(
+								"UPDATE ai_shadow_state SET status='suggested', updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+							).params(cid=int(cid))
+						)
 				except Exception as pe:
 					try:
 						log.warning("persist draft error cid=%s err=%s", cid, pe)

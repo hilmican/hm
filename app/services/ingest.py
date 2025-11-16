@@ -647,7 +647,8 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 			ts_val = int(timestamp_ms) if isinstance(timestamp_ms, (int, float)) else (
 				int(str(timestamp_ms)) if isinstance(timestamp_ms, str) and str(timestamp_ms).isdigit() else None
 			)
-			touch_shadow_state(str(conversation_pk), ts_val)
+			# Use canonical internal conversation id (int)
+			touch_shadow_state(int(conversation_pk), ts_val)
 	except Exception:
 		pass
 	return row.id  # type: ignore

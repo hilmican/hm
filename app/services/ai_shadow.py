@@ -9,17 +9,31 @@ from ..db import get_session
 from ..services.monitoring import increment_counter
 
 
-def touch_shadow_state(conversation_id: str | int, last_inbound_ms: Optional[int], *, debounce_seconds: int = 30) -> None:
+def touch_shadow_state(
+	conversation_id: str | int,
+	last_inbound_ms: Optional[int],
+	*,
+	debounce_seconds: int = 30,
+) -> None:
 	"""Upsert or update the shadow state for a conversation when a new inbound message arrives.
 
+	- Uses canonical ``conversation_id`` (conversations.id INT)
 	- Sets next_attempt_at to now + debounce_seconds
 	- Resets status to 'pending' unless it's currently 'running'
 	- Keeps existing postpone_count for ongoing conversations
 	"""
 	if not conversation_id:
 		return
+
+	try:
+		cid_int = int(conversation_id)
+	except Exception:
+		# Avoid corrupting queue with non-integer ids
+		return
+
 	now = dt.datetime.utcnow()
 	next_at = now + dt.timedelta(seconds=max(1, int(debounce_seconds)))
+
 	with get_session() as session:
 		try:
 			# Try update path first
@@ -33,7 +47,7 @@ def touch_shadow_state(conversation_id: str | int, last_inbound_ms: Optional[int
 					    updated_at=CURRENT_TIMESTAMP
 					WHERE conversation_id=:cid
 					"""
-				).params(ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "), cid=int(conversation_id))
+				).params(ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "), cid=cid_int)
 			)
 			# Insert if not exists
 			session.exec(
@@ -43,7 +57,7 @@ def touch_shadow_state(conversation_id: str | int, last_inbound_ms: Optional[int
 					SELECT :cid, :ms, :na, 0, 'pending', CURRENT_TIMESTAMP
 					WHERE NOT EXISTS (SELECT 1 FROM ai_shadow_state WHERE conversation_id=:cid)
 					"""
-				).params(cid=int(conversation_id), ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "))
+				).params(cid=cid_int, ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "))
 			)
 		except Exception:
 			# best-effort; do not propagate
@@ -52,6 +66,10 @@ def touch_shadow_state(conversation_id: str | int, last_inbound_ms: Optional[int
 
 def insert_draft(conversation_id: int, *, reply_text: str, model: Optional[str], confidence: Optional[float], reason: Optional[str], json_meta: Optional[str], attempt_no: int = 0, status: str = "suggested") -> int:
 	if not conversation_id or not reply_text:
+		return 0
+	try:
+		cid_int = int(conversation_id)
+	except Exception:
 		return 0
 	with get_session() as session:
 		row_id = 0
@@ -62,7 +80,16 @@ def insert_draft(conversation_id: int, *, reply_text: str, model: Optional[str],
 					INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, attempt_no, status, created_at)
 					VALUES(:cid, :txt, :m, :c, :r, :j, :a, :s, CURRENT_TIMESTAMP)
 					"""
-				).params(cid=int(conversation_id), txt=str(reply_text), m=(model or None), c=(confidence if confidence is not None else None), r=(reason or None), j=(json_meta or None), a=int(attempt_no or 0), s=(status or "suggested"))
+				).params(
+					cid=cid_int,
+					txt=str(reply_text),
+					m=(model or None),
+					c=(confidence if confidence is not None else None),
+					r=(reason or None),
+					j=(json_meta or None),
+					a=int(attempt_no or 0),
+					s=(status or "suggested"),
+				)
 			)
 			# Try to obtain last insert id backend-agnostic
 			try:
