@@ -98,7 +98,8 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 		sku_clean: Optional[str] = (sku.strip() if isinstance(sku, str) else None)
 		if pid is None and sku_clean:
 			try:
-				rowi = session.exec(_text("SELECT product_id FROM item WHERE sku=:s LIMIT 1")).params(s=str(sku_clean)).first()
+				stmt_item = _text("SELECT product_id FROM item WHERE sku=:s LIMIT 1").bindparams(s=str(sku_clean))
+				rowi = session.exec(stmt_item).first()
 				if rowi:
 					val = getattr(rowi, "product_id", None) if hasattr(rowi, "product_id") else (rowi[0] if len(rowi) > 0 else None)
 					pid = int(val) if val is not None else None
@@ -106,22 +107,48 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 				pid = None
 		# Upsert mapping
 		try:
-			session.exec(_text(
+			stmt_upsert_sqlite = _text(
 				"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
-			)).params(id=str(ad_id), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
+			).bindparams(
+				id=str(ad_id),
+				pid=(int(pid) if pid is not None else None),
+				sku=(sku_clean or None),
+			)
+			session.exec(stmt_upsert_sqlite)
 		except Exception:
 			# Fallback for MySQL: emulate replace with insert/update
 			try:
-				session.exec(_text(
-					"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku) ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku)"
-				)).params(id=str(ad_id), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
+				stmt_upsert_mysql = _text(
+					"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku) "
+					"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku)"
+				).bindparams(
+					id=str(ad_id),
+					pid=(int(pid) if pid is not None else None),
+					sku=(sku_clean or None),
+				)
+				session.exec(stmt_upsert_mysql)
 			except Exception:
 				# Last resort: try separate update/insert
-				rowm = session.exec(_text("SELECT ad_id FROM ads_products WHERE ad_id=:id")).params(id=str(ad_id)).first()
+				stmt_sel = _text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
+				rowm = session.exec(stmt_sel).first()
 				if rowm:
-					session.exec(_text("UPDATE ads_products SET product_id=:pid, sku=:sku WHERE ad_id=:id")).params(id=str(ad_id), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
+					stmt_update = _text(
+						"UPDATE ads_products SET product_id=:pid, sku=:sku WHERE ad_id=:id"
+					).bindparams(
+						id=str(ad_id),
+						pid=(int(pid) if pid is not None else None),
+						sku=(sku_clean or None),
+					)
+					session.exec(stmt_update)
 				else:
-					session.exec(_text("INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)")).params(id=str(ad_id), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
+					stmt_insert = _text(
+						"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
+					).bindparams(
+						id=str(ad_id),
+						pid=(int(pid) if pid is not None else None),
+						sku=(sku_clean or None),
+					)
+					session.exec(stmt_insert)
 	# Redirect back to edit page
 	return RedirectResponse(url=f"/ads/{ad_id}/edit", status_code=HTTP_303_SEE_OTHER)
 
