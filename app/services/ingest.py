@@ -987,120 +987,155 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 
 
 def handle(raw_event_id: int) -> int:
-	"""Ingest one raw_event id. Return number of messages inserted."""
+	"""Ingest one raw_event id. Return number of messages inserted.
+
+	This implementation keeps database transactions as small as possible:
+	- One short read to fetch the raw_events payload.
+	- Then, for each entry/message, a separate short-lived session/transaction
+	  is used for DB writes. Graph API calls are done outside those
+	  transactions via _ensure_ig_user_with_data, which manages its own
+	  persistence if needed.
+
+	This reduces lock hold times in MySQL and makes lock wait timeouts less likely.
+	"""
 	inserted = 0
+
+	# Step 1: load raw_events payload in its own short transaction
 	with get_session() as session:
-		# Load raw payload
-		row = session.exec(text("SELECT id, payload FROM raw_events WHERE id = :id").params(id=raw_event_id)).first()
+		row = session.exec(
+			text("SELECT id, payload FROM raw_events WHERE id = :id").params(id=raw_event_id)
+		).first()
 		if not row:
 			return 0
 		payload_text = row.payload if hasattr(row, "payload") else row[1]
-		try:
-			payload: Dict[str, Any] = json.loads(payload_text)
-		except Exception:
-			return 0
-		entries: List[Dict[str, Any]] = payload.get("entry", [])
-		with session.get_bind().begin() as conn:  # type: ignore
-			for entry in entries:
-				igba_id = str(entry.get("id")) if entry.get("id") is not None else ""
-				if not igba_id:
-					continue
-				_ensure_ig_account(conn, igba_id)
-				# Collect messaging events possibly nested
-				messaging_events: List[Dict[str, Any]] = entry.get("messaging") or []
-				if not messaging_events and entry.get("changes"):
-					for change in entry.get("changes", []):
-						val = change.get("value") or {}
-						if isinstance(val, dict) and val.get("messaging"):
-							messaging_events.extend(val.get("messaging", []))
-				for event in messaging_events:
-					message_obj = event.get("message") or {}
-					# For Instagram, we WANT to store echo messages (our own replies) so they appear
-					# in the conversation. We only skip when there is no message object at all
-					# or when the message is explicitly deleted.
-					if not message_obj or message_obj.get("is_deleted"):
-						continue
-					sender_id = (event.get("sender") or {}).get("id")
-					recipient_id = (event.get("recipient") or {}).get("id")
-					
-					# Determine which user to enrich (the one that's NOT the page) - max 1 Graph API request
-					user_to_enrich = None
-					if sender_id and str(sender_id) != str(igba_id):
-						user_to_enrich = str(sender_id)
-					elif recipient_id and str(recipient_id) != str(igba_id):
-						user_to_enrich = str(recipient_id)
-					
-					if user_to_enrich:
-						# Only enrich user info (1 Graph API request)
-						_ensure_ig_user_with_data(session, user_to_enrich, str(igba_id))
-					
-					mid = message_obj.get("mid") or message_obj.get("id")
-					# Message-level upsert now owns ai_conversations updates keyed by Graph CID;
-					# skip creating dm:<id> ai_conversations placeholders to avoid duplicate threads.
-					msg_id = _insert_message(session, event, igba_id)
-					if msg_id:
-						inserted += 1
-						attachments = message_obj.get("attachments")
-						if attachments:
-							_create_attachment_stubs(session, msg_id, str(mid), attachments)
-						
-						# Hydration is now manual-only (via UI/admin actions) to minimize Graph API requests
-						# We only enrich user info (1 request) and let hydration happen on-demand
-						
-						# enrichers (idempotent via jobs table uniqueness)
-						# User enrichment now happens synchronously above, so we skip enqueueing enrich_user
-						enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})
-				# Additionally handle referral-only webhook events (messaging_referrals)
+
+	try:
+		payload: Dict[str, Any] = json.loads(payload_text)
+	except Exception:
+		return 0
+
+	entries: List[Dict[str, Any]] = payload.get("entry", [])
+
+	# Step 2: process each entry with small, per-entry/per-message transactions
+	for entry in entries:
+		igba_id = str(entry.get("id")) if entry.get("id") is not None else ""
+		if not igba_id:
+			continue
+
+		# Collect messaging events possibly nested
+		messaging_events: List[Dict[str, Any]] = entry.get("messaging") or []
+		if not messaging_events and entry.get("changes"):
+			for change in entry.get("changes", []):
+				val = change.get("value") or {}
+				if isinstance(val, dict) and val.get("messaging"):
+					messaging_events.extend(val.get("messaging", []))
+
+		for event in messaging_events:
+			message_obj = event.get("message") or {}
+			# For Instagram, we WANT to store echo messages (our own replies) so they appear
+			# in the conversation. We only skip when there is no message object at all
+			# or when the message is explicitly deleted.
+			if not message_obj or message_obj.get("is_deleted"):
+				continue
+
+			sender_id = (event.get("sender") or {}).get("id")
+			recipient_id = (event.get("recipient") or {}).get("id")
+
+			# Determine which user to enrich (the one that's NOT the page) - max 1 Graph API request.
+			# This function manages its own DB usage; we avoid holding our own long transaction here.
+			user_to_enrich = None
+			if sender_id and str(sender_id) != str(igba_id):
+				user_to_enrich = str(sender_id)
+			elif recipient_id and str(recipient_id) != str(igba_id):
+				user_to_enrich = str(recipient_id)
+
+			if user_to_enrich:
+				_ensure_ig_user_with_data(None, user_to_enrich, str(igba_id))  # type: ignore[arg-type]
+
+			mid = message_obj.get("mid") or message_obj.get("id")
+
+			# Insert message + attachments in a short-lived transaction
+			with get_session() as session_msg:
+				# Ensure page/account row exists (MySQL dialect)
 				try:
-					ref_events = entry.get("messaging_referrals") or []
-					for rev in ref_events:
-						try:
-							sender_id = (rev.get("sender") or {}).get("id")
-							recipient_id = (rev.get("recipient") or {}).get("id")
-							ref = rev.get("referral") or {}
-							ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
-							ad_link = ref.get("ad_link") or ref.get("url") or ref.get("referer_uri") or None
-							ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
-							referral_json_val = None
-							try:
-								referral_json_val = json.dumps(ref, ensure_ascii=False)
-							except Exception:
-								referral_json_val = None
-							# Determine other party id (user id) and resolve conversation
-							other_party_id = sender_id if sender_id and str(sender_id) != str(igba_id) else recipient_id
-							if other_party_id:
-								conv_pk = _get_or_create_conversation_id(
-									session,
-									str(igba_id) if igba_id is not None else "",
-									str(other_party_id),
-								)
-								if conv_pk:
-									# Update the latest message in this conversation with ad metadata if missing
-									rowm = session.exec(
-										text(
-											"SELECT id FROM message WHERE conversation_id=:cid ORDER BY timestamp_ms DESC, id DESC LIMIT 1"
-										)
-									).params(cid=int(conv_pk)).first()
-									if rowm:
-										mid = rowm.id if hasattr(rowm, "id") else (
-											rowm[0] if isinstance(rowm, (list, tuple)) else None
-										)
-										if mid:
-											session.exec(
-												text(
-													"UPDATE message SET ad_id=COALESCE(ad_id, :adid), ad_link=COALESCE(ad_link, :link), ad_title=COALESCE(ad_title, :title), referral_json=COALESCE(referral_json, :ref) WHERE id=:id"
-												)
-											).params(
-												id=int(mid),
-												adid=ad_id,
-												link=ad_link,
-												title=ad_title,
-												ref=referral_json_val,
+					_ensure_ig_account(session_msg.get_bind(), igba_id)  # type: ignore[arg-type]
+				except Exception:
+					# Best-effort; do not fail ingestion because of ig_accounts
+					pass
+
+				msg_id = _insert_message(session_msg, event, igba_id)
+				if msg_id:
+					inserted += 1
+					attachments = message_obj.get("attachments")
+					if attachments:
+						_create_attachment_stubs(session_msg, msg_id, str(mid), attachments)
+
+					# Hydration is now manual-only (via UI/admin actions) to minimize Graph API requests.
+					# We only enrich user info (1 request) and let hydration happen on-demand.
+
+					# Enqueue enrich_page (idempotent via jobs table uniqueness)
+					try:
+						enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})
+					except Exception:
+						pass
+
+		# Additionally handle referral-only webhook events (messaging_referrals)
+		try:
+			ref_events = entry.get("messaging_referrals") or []
+			for rev in ref_events:
+				try:
+					sender_id = (rev.get("sender") or {}).get("id")
+					recipient_id = (rev.get("recipient") or {}).get("id")
+					ref = rev.get("referral") or {}
+					ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
+					ad_link = ref.get("ad_link") or ref.get("url") or ref.get("referer_uri") or None
+					ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
+					referral_json_val = None
+					try:
+						referral_json_val = json.dumps(ref, ensure_ascii=False)
+					except Exception:
+						referral_json_val = None
+					# Determine other party id (user id) and resolve conversation
+					other_party_id = (
+						sender_id if sender_id and str(sender_id) != str(igba_id) else recipient_id
+					)
+					if other_party_id:
+						with get_session() as session_ref:
+							conv_pk = _get_or_create_conversation_id(
+								session_ref,
+								str(igba_id) if igba_id is not None else "",
+								str(other_party_id),
+							)
+							if conv_pk:
+								# Update the latest message in this conversation with ad metadata if missing
+								rowm = session_ref.exec(
+									text(
+										"SELECT id FROM message WHERE conversation_id=:cid ORDER BY timestamp_ms DESC, id DESC LIMIT 1"
+									)
+								).params(cid=int(conv_pk)).first()
+								if rowm:
+									mid_last = (
+										rowm.id
+										if hasattr(rowm, "id")
+										else (rowm[0] if isinstance(rowm, (list, tuple)) else None)
+									)
+									if mid_last:
+										session_ref.exec(
+											text(
+												"UPDATE message SET ad_id=COALESCE(ad_id, :adid), ad_link=COALESCE(ad_link, :link), ad_title=COALESCE(ad_title, :title), referral_json=COALESCE(referral_json, :ref) WHERE id=:id"
 											)
-						except Exception:
-							pass
+										).params(
+											id=int(mid_last),
+											adid=ad_id,
+											link=ad_link,
+											title=ad_title,
+											ref=referral_json_val,
+										)
 				except Exception:
 					pass
-		return inserted
+		except Exception:
+			pass
+
+	return inserted
 
 

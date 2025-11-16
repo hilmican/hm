@@ -13,6 +13,7 @@ from sqlalchemy import text
 from app.services.monitoring import record_heartbeat, increment_counter
 import os
 import socket
+from pymysql.err import OperationalError
 
 
 log = logging.getLogger("worker.ingest")
@@ -255,6 +256,22 @@ def main() -> None:
 			else:
 				delete_job(jid)
 		except Exception as e:
+			# Special-case MySQL lock wait timeout (1205) as a transient error and retry the job.
+			code = None
+			try:
+				if isinstance(e, OperationalError) and len(e.args) > 0:
+					# e.args[0] is the MySQL error code for pymysql OperationalError
+					code = e.args[0]
+			except Exception:
+				code = None
+
+			if code == 1205:
+				log.warning("ingest lock wait timeout jid=%s raw=%s err=%s (will retry)", jid, raw_id, e)
+				increment_attempts(jid)
+				# Small backoff to reduce contention; keep job in queue for retry
+				time.sleep(1.5)
+				continue
+
 			log.warning("ingest fail jid=%s raw=%s err=%s", jid, raw_id, e)
 			increment_attempts(jid)
 			time.sleep(1)
