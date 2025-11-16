@@ -155,14 +155,15 @@ def main() -> None:
 				# Persist draft
 				try:
 					with get_session() as session:
+						# First insert reply row (without conversation_id, to avoid column-mismatch issues),
+						# then immediately update conversation_id using LAST_INSERT_ID() within the same session/connection.
 						session.exec(
 							_text(
 								"""
-								INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, attempt_no, status, created_at)
-								VALUES(:cid, :txt, :model, :conf, :reason, :meta, :att, 'suggested', CURRENT_TIMESTAMP)
+								INSERT INTO ai_shadow_reply(reply_text, model, confidence, reason, json_meta, attempt_no, status, created_at)
+								VALUES(:txt, :model, :conf, :reason, :meta, :att, 'suggested', CURRENT_TIMESTAMP)
 								"""
 							).params(
-								cid=int(cid),
 								txt=reply_text,
 								model=str(data.get("model") or ""),
 								conf=(float(data.get("confidence") or 0.6)),
@@ -171,6 +172,13 @@ def main() -> None:
 								att=int(postpones or 0),
 							)
 						)
+						# Attach conversation_id to the last inserted row
+						session.exec(
+							_text(
+								"UPDATE ai_shadow_reply SET conversation_id=:cid WHERE id = LAST_INSERT_ID()"
+							).params(cid=int(cid))
+						)
+						# Mark state as suggested so UI can pick it up
 						session.exec(
 							_text(
 								"UPDATE ai_shadow_state SET status='suggested', updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
