@@ -292,12 +292,28 @@ def init_db() -> None:
                             ad_id VARCHAR(128) PRIMARY KEY,
                             product_id INTEGER NULL,
                             sku VARCHAR(128) NULL,
+                            auto_linked TINYINT(1) NOT NULL DEFAULT 0,
                             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             INDEX idx_ads_products_product (product_id),
-                            INDEX idx_ads_products_sku (sku)
+                            INDEX idx_ads_products_sku (sku),
+                            INDEX idx_ads_products_auto_linked (auto_linked)
                         )
                         """
                     )
+                except Exception:
+                    pass
+                # Add auto_linked column to ads_products if it doesn't exist
+                try:
+                    rows = conn.exec_driver_sql(
+                        """
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ads_products'
+                        """
+                    ).fetchall()
+                    have_cols = {str(r[0]).lower() for r in rows or []}
+                    if 'auto_linked' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE ads_products ADD COLUMN auto_linked TINYINT(1) NOT NULL DEFAULT 0")
+                        conn.exec_driver_sql("CREATE INDEX idx_ads_products_auto_linked ON ads_products(auto_linked)")
                 except Exception:
                     pass
                 # Stories cache and mapping (MySQL)
@@ -354,12 +370,28 @@ def init_db() -> None:
                             post_id VARCHAR(128) PRIMARY KEY,
                             product_id INTEGER NULL,
                             sku VARCHAR(128) NULL,
+                            auto_linked TINYINT(1) NOT NULL DEFAULT 0,
                             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             INDEX idx_posts_products_product (product_id),
-                            INDEX idx_posts_products_sku (sku)
+                            INDEX idx_posts_products_sku (sku),
+                            INDEX idx_posts_products_auto_linked (auto_linked)
                         )
                         """
                     )
+                except Exception:
+                    pass
+                # Add auto_linked column to posts_products if it doesn't exist
+                try:
+                    rows = conn.exec_driver_sql(
+                        """
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'posts_products'
+                        """
+                    ).fetchall()
+                    have_cols = {str(r[0]).lower() for r in rows or []}
+                    if 'auto_linked' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE posts_products ADD COLUMN auto_linked TINYINT(1) NOT NULL DEFAULT 0")
+                        conn.exec_driver_sql("CREATE INDEX idx_posts_products_auto_linked ON posts_products(auto_linked)")
                 except Exception:
                     pass
                 # Ensure message has story_id/story_url (MySQL)

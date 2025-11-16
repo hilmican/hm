@@ -836,12 +836,12 @@ def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
 					)
 					session.exec(stmt_insert)
 			
-			# Link to product
+			# Link to product (mark as auto_linked)
 			try:
 				stmt_link = _sql_text("""
-					INSERT INTO posts_products(post_id, product_id, sku)
-					VALUES (:pid, :prod_id, NULL)
-					ON DUPLICATE KEY UPDATE product_id=VALUES(product_id)
+					INSERT INTO posts_products(post_id, product_id, sku, auto_linked)
+					VALUES (:pid, :prod_id, NULL, 1)
+					ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), auto_linked=1
 				""").bindparams(
 					pid=str(post_id),
 					prod_id=int(product_id),
@@ -853,13 +853,13 @@ def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
 				existing_link = session.exec(stmt_sel).first()
 				if existing_link:
 					stmt_update = _sql_text("""
-						UPDATE posts_products SET product_id=:prod_id WHERE post_id=:pid
+						UPDATE posts_products SET product_id=:prod_id, auto_linked=1 WHERE post_id=:pid
 					""").bindparams(pid=str(post_id), prod_id=int(product_id))
 					session.exec(stmt_update)
 				else:
 					stmt_insert = _sql_text("""
-						INSERT INTO posts_products(post_id, product_id, sku)
-						VALUES (:pid, :prod_id, NULL)
+						INSERT INTO posts_products(post_id, product_id, sku, auto_linked)
+						VALUES (:pid, :prod_id, NULL, 1)
 					""").bindparams(pid=str(post_id), prod_id=int(product_id))
 					session.exec(stmt_insert)
 			
@@ -976,10 +976,10 @@ def _auto_link_ad(session, ad_id: str, ad_title: Optional[str], ad_name: Optiona
 				)
 				return
 			
-			# Save the mapping
+			# Save the mapping (mark as auto_linked)
 			try:
 				stmt_upsert_sqlite = _sql_text(
-					"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
+					"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 1)"
 				).bindparams(
 					id=str(ad_id),
 					pid=product_id,
@@ -990,8 +990,8 @@ def _auto_link_ad(session, ad_id: str, ad_title: Optional[str], ad_name: Optiona
 				# Fallback for MySQL
 				try:
 					stmt_upsert_mysql = _sql_text(
-						"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku) "
-						"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku)"
+						"INSERT INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 1) "
+						"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku), auto_linked=1"
 					).bindparams(
 						id=str(ad_id),
 						pid=product_id,
@@ -1004,7 +1004,7 @@ def _auto_link_ad(session, ad_id: str, ad_title: Optional[str], ad_name: Optiona
 					rowm = session.exec(stmt_sel).first()
 					if rowm:
 						stmt_update = _sql_text(
-							"UPDATE ads_products SET product_id=:pid, sku=:sku WHERE ad_id=:id"
+							"UPDATE ads_products SET product_id=:pid, sku=:sku, auto_linked=1 WHERE ad_id=:id"
 						).bindparams(
 							id=str(ad_id),
 							pid=product_id,
@@ -1013,7 +1013,7 @@ def _auto_link_ad(session, ad_id: str, ad_title: Optional[str], ad_name: Optiona
 						session.exec(stmt_update)
 					else:
 						stmt_insert = _sql_text(
-							"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
+							"INSERT INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 1)"
 						).bindparams(
 							id=str(ad_id),
 							pid=product_id,

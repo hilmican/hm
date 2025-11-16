@@ -36,6 +36,9 @@
       <div class="meta">
         Product ID: {{ mapping.product_id or '-' }}
         {% if mapping.sku %} · SKU (eski): {{ mapping.sku }}{% endif %}
+        {% if mapping.auto_linked %}
+          · <span style="color:#f59e0b; font-weight:600;">🤖 AI ile otomatik bağlandı</span>
+        {% endif %}
         {% if not mapping.product_id %}
           · <span style="color:#b91c1c;">Bu reklam henüz bir ürüne bağlı değil.</span>
         {% else %}

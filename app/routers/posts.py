@@ -79,12 +79,20 @@ def list_unlinked_posts(request: Request, limit: int = 100):
             
             seen_media_ids.add(media_id)
             
-            # Check if linked to product
+            # Check if linked to product and get auto_linked status
+            auto_linked = False
             try:
-                linked = session.exec(
-                    _text("SELECT post_id FROM posts_products WHERE post_id=:pid").bindparams(pid=media_id)
+                linked_row = session.exec(
+                    _text("SELECT post_id, auto_linked FROM posts_products WHERE post_id=:pid").bindparams(pid=media_id)
                 ).first()
-                if linked:
+                if linked_row:
+                    # Extract auto_linked value
+                    auto_linked = bool(
+                        getattr(linked_row, "auto_linked", None) if hasattr(linked_row, "auto_linked") 
+                        else (linked_row[1] if len(linked_row) > 1 else False)
+                    )
+                    # Only show in unlinked list if we want to show all (including linked for review)
+                    # For now, skip if already linked
                     continue
             except Exception:
                 pass
@@ -96,6 +104,7 @@ def list_unlinked_posts(request: Request, limit: int = 100):
                 "post_info": post_info,
                 "timestamp_ms": msg.timestamp_ms,
                 "conversation_id": msg.conversation_id,
+                "auto_linked": auto_linked,
             })
         
         templates = request.app.state.templates
@@ -176,12 +185,12 @@ def link_post_to_product(message_id: int, product_id: Optional[int] = Form(defau
                 _log.error("Error upserting post: %s", e)
                 raise HTTPException(status_code=500, detail="Failed to create post record")
         
-        # Link post to product
+        # Link post to product (manual save clears auto_linked flag)
         try:
             stmt_link = _text("""
-                INSERT INTO posts_products(post_id, product_id, sku)
-                VALUES (:pid, :prod_id, NULL)
-                ON DUPLICATE KEY UPDATE product_id=VALUES(product_id)
+                INSERT INTO posts_products(post_id, product_id, sku, auto_linked)
+                VALUES (:pid, :prod_id, NULL, 0)
+                ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), auto_linked=0
             """).bindparams(
                 pid=str(post_id),
                 prod_id=int(product_id),
@@ -194,13 +203,13 @@ def link_post_to_product(message_id: int, product_id: Optional[int] = Form(defau
                 existing = session.exec(stmt_sel).first()
                 if existing:
                     stmt_update = _text("""
-                        UPDATE posts_products SET product_id=:prod_id WHERE post_id=:pid
+                        UPDATE posts_products SET product_id=:prod_id, auto_linked=0 WHERE post_id=:pid
                     """).bindparams(pid=str(post_id), prod_id=int(product_id))
                     session.exec(stmt_update)
                 else:
                     stmt_insert = _text("""
-                        INSERT INTO posts_products(post_id, product_id, sku)
-                        VALUES (:pid, :prod_id, NULL)
+                        INSERT INTO posts_products(post_id, product_id, sku, auto_linked)
+                        VALUES (:pid, :prod_id, NULL, 0)
                     """).bindparams(pid=str(post_id), prod_id=int(product_id))
                     session.exec(stmt_insert)
             except Exception as e:
@@ -391,12 +400,12 @@ def ai_link_post(message_id: int, request: Request):
                 )
                 session.exec(stmt_insert)
         
-        # Link to product
+        # Link to product (AI link keeps auto_linked=1)
         try:
             stmt_link = _text("""
-                INSERT INTO posts_products(post_id, product_id, sku)
-                VALUES (:pid, :prod_id, NULL)
-                ON DUPLICATE KEY UPDATE product_id=VALUES(product_id)
+                INSERT INTO posts_products(post_id, product_id, sku, auto_linked)
+                VALUES (:pid, :prod_id, NULL, 1)
+                ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), auto_linked=1
             """).bindparams(
                 pid=str(post_id),
                 prod_id=int(product_id),
@@ -408,13 +417,13 @@ def ai_link_post(message_id: int, request: Request):
             existing = session.exec(stmt_sel).first()
             if existing:
                 stmt_update = _text("""
-                    UPDATE posts_products SET product_id=:prod_id WHERE post_id=:pid
+                    UPDATE posts_products SET product_id=:prod_id, auto_linked=1 WHERE post_id=:pid
                 """).bindparams(pid=str(post_id), prod_id=int(product_id))
                 session.exec(stmt_update)
             else:
                 stmt_insert = _text("""
-                    INSERT INTO posts_products(post_id, product_id, sku)
-                    VALUES (:pid, :prod_id, NULL)
+                    INSERT INTO posts_products(post_id, product_id, sku, auto_linked)
+                    VALUES (:pid, :prod_id, NULL, 1)
                 """).bindparams(pid=str(post_id), prod_id=int(product_id))
                 session.exec(stmt_insert)
         
@@ -591,12 +600,12 @@ def batch_ai_link(request: Request, limit: int = 50):
                         )
                         session.exec(stmt_insert)
                 
-                # Link to product
+                # Link to product (batch AI link - mark as auto_linked)
                 try:
                     stmt_link = _text("""
-                        INSERT INTO posts_products(post_id, product_id, sku)
-                        VALUES (:pid, :prod_id, NULL)
-                        ON DUPLICATE KEY UPDATE product_id=VALUES(product_id)
+                        INSERT INTO posts_products(post_id, product_id, sku, auto_linked)
+                        VALUES (:pid, :prod_id, NULL, 1)
+                        ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), auto_linked=1
                     """).bindparams(
                         pid=str(post_id),
                         prod_id=int(product_id),
@@ -608,13 +617,13 @@ def batch_ai_link(request: Request, limit: int = 50):
                     existing_link = session.exec(stmt_sel).first()
                     if existing_link:
                         stmt_update = _text("""
-                            UPDATE posts_products SET product_id=:prod_id WHERE post_id=:pid
+                            UPDATE posts_products SET product_id=:prod_id, auto_linked=1 WHERE post_id=:pid
                         """).bindparams(pid=str(post_id), prod_id=int(product_id))
                         session.exec(stmt_update)
                     else:
                         stmt_insert = _text("""
-                            INSERT INTO posts_products(post_id, product_id, sku)
-                            VALUES (:pid, :prod_id, NULL)
+                            INSERT INTO posts_products(post_id, product_id, sku, auto_linked)
+                            VALUES (:pid, :prod_id, NULL, 1)
                         """).bindparams(pid=str(post_id), prod_id=int(product_id))
                         session.exec(stmt_insert)
                 

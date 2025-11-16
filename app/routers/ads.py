@@ -43,7 +43,7 @@ def edit_ad(request: Request, ad_id: str):
 			}
 		# Existing mapping for this ad (if any)
 		try:
-			stmt_mp = _text("SELECT ad_id, product_id, sku FROM ads_products WHERE ad_id=:id LIMIT 1").bindparams(
+			stmt_mp = _text("SELECT ad_id, product_id, sku, auto_linked FROM ads_products WHERE ad_id=:id LIMIT 1").bindparams(
 				id=str(ad_id)
 			)
 			mp = session.exec(stmt_mp).first()
@@ -54,6 +54,7 @@ def edit_ad(request: Request, ad_id: str):
 				"ad_id": getattr(mp, "ad_id", None) if hasattr(mp, "ad_id") else (mp[0] if len(mp) > 0 else None),
 				"product_id": getattr(mp, "product_id", None) if hasattr(mp, "product_id") else (mp[1] if len(mp) > 1 else None),
 				"sku": getattr(mp, "sku", None) if hasattr(mp, "sku") else (mp[2] if len(mp) > 2 else None),
+				"auto_linked": bool(getattr(mp, "auto_linked", None) if hasattr(mp, "auto_linked") else (mp[3] if len(mp) > 3 else False)),
 			}
 		# Candidate products for combobox-style selection (limit to keep page fast)
 		try:
@@ -96,6 +97,7 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 	if not ((sku and sku.strip()) or product_id):
 		raise HTTPException(status_code=400, detail="SKU veya Product ID giriniz")
 	with get_session() as session:
+		# Manual save should clear auto_linked flag (user is correcting/confirming)
 		# Resolve product_id from sku if needed (best-effort)
 		pid: Optional[int] = int(product_id) if product_id is not None else None
 		sku_clean: Optional[str] = (sku.strip() if isinstance(sku, str) else None)
@@ -108,10 +110,10 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 					pid = int(val) if val is not None else None
 			except Exception:
 				pid = None
-		# Upsert mapping
+		# Upsert mapping (manual save clears auto_linked flag)
 		try:
 			stmt_upsert_sqlite = _text(
-				"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
+				"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 0)"
 			).bindparams(
 				id=str(ad_id),
 				pid=(int(pid) if pid is not None else None),
@@ -122,8 +124,8 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 			# Fallback for MySQL: emulate replace with insert/update
 			try:
 				stmt_upsert_mysql = _text(
-					"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku) "
-					"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku)"
+					"INSERT INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 0) "
+					"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku), auto_linked=0"
 				).bindparams(
 					id=str(ad_id),
 					pid=(int(pid) if pid is not None else None),
@@ -136,7 +138,7 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 				rowm = session.exec(stmt_sel).first()
 				if rowm:
 					stmt_update = _text(
-						"UPDATE ads_products SET product_id=:pid, sku=:sku WHERE ad_id=:id"
+						"UPDATE ads_products SET product_id=:pid, sku=:sku, auto_linked=0 WHERE ad_id=:id"
 					).bindparams(
 						id=str(ad_id),
 						pid=(int(pid) if pid is not None else None),
@@ -145,7 +147,7 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 					session.exec(stmt_update)
 				else:
 					stmt_insert = _text(
-						"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
+						"INSERT INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 0)"
 					).bindparams(
 						id=str(ad_id),
 						pid=(int(pid) if pid is not None else None),

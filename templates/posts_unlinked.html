@@ -60,6 +60,9 @@
           <div class="meta">
             Gönderi ID: {{ msg.post_info.ig_post_media_id }}<br>
             Mesaj ID: {{ msg.message_id }}<br>
+            {% if msg.auto_linked %}
+              <span style="color:#f59e0b; font-weight:600;">🤖 AI ile otomatik bağlandı</span><br>
+            {% endif %}
             {% if msg.timestamp_ms %}
               <span data-ts="{{ msg.timestamp_ms }}">{{ msg.timestamp_ms }}</span>
             {% endif %}
