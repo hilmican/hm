@@ -180,6 +180,7 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
         # Last-resort: conversations still missing a display name – leave as numeric id
         # Best-effort ad metadata using ai_conversations last_* fields
         ad_map = {}
+        ad_ids: list[str] = []
         try:
             for m in rows:
                 cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
@@ -188,11 +189,16 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                 ad_link = (m.get("ad_link") if isinstance(m, dict) else getattr(m, "ad_link", None))
                 ad_title = (m.get("ad_title") if isinstance(m, dict) else getattr(m, "ad_title", None))
                 ad_id_val = (m.get("last_ad_id") if isinstance(m, dict) else getattr(m, "last_ad_id", None))
+                if ad_id_val:
+                    sid = str(ad_id_val)
+                    if sid not in ad_ids:
+                        ad_ids.append(sid)
                 if (ad_link or ad_title or ad_id_val) and cid not in ad_map:
                     ad_map[cid] = {"link": ad_link, "title": ad_title, "id": ad_id_val}
         except Exception:
             # fallback to link/title only
             ad_map = {}
+            ad_ids = []
             for m in rows:
                 cid = m.get("conversation_id") if isinstance(m, dict) else m.conversation_id
                 if not cid:
@@ -201,6 +207,51 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                 ad_title = (m.get("ad_title") if isinstance(m, dict) else getattr(m, "ad_title", None))
                 if (ad_link or ad_title) and cid not in ad_map:
                     ad_map[cid] = {"link": ad_link, "title": ad_title}
+        # Enrich ad_map with linked product information from ads_products/product
+        if ad_ids:
+            try:
+                from sqlalchemy import text as _text
+
+                placeholders = ",".join([":a" + str(i) for i in range(len(ad_ids))])
+                params_ads = {("a" + str(i)): ad_ids[i] for i in range(len(ad_ids))}
+                rows_ap = session.exec(
+                    _text(
+                        f"""
+                        SELECT ap.ad_id, ap.product_id, p.name AS product_name
+                        FROM ads_products ap
+                        LEFT JOIN product p ON ap.product_id = p.id
+                        WHERE ap.ad_id IN ({placeholders})
+                        """
+                    ).params(**params_ads)
+                ).all()
+                ad_to_product: dict[str, dict[str, object]] = {}
+                for r in rows_ap:
+                    try:
+                        aid = getattr(r, "ad_id", None) if hasattr(r, "ad_id") else (r[0] if len(r) > 0 else None)
+                        pid = getattr(r, "product_id", None) if hasattr(r, "product_id") else (r[1] if len(r) > 1 else None)
+                        pname = getattr(r, "product_name", None) if hasattr(r, "product_name") else (r[2] if len(r) > 2 else None)
+                        if not aid:
+                            continue
+                        ad_to_product[str(aid)] = {"product_id": pid, "product_name": pname}
+                    except Exception:
+                        continue
+                if ad_to_product:
+                    for cid, meta in ad_map.items():
+                        try:
+                            ad_id_val = meta.get("id") if isinstance(meta, dict) else None
+                            if not ad_id_val:
+                                continue
+                            ap = ad_to_product.get(str(ad_id_val))
+                            if not ap:
+                                continue
+                            if isinstance(meta, dict):
+                                meta["product_id"] = ap.get("product_id")
+                                meta["product_name"] = ap.get("product_name")
+                        except Exception:
+                            continue
+            except Exception:
+                # best-effort; ignore product enrichment errors
+                pass
         # For backward compatibility, set labels to display_names
         labels = display_names
         templates = request.app.state.templates

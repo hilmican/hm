@@ -62,7 +62,12 @@
               {% if ad.title %}
                 <span class="meta"> — {{ (ad.title or '')[:60] }}</span>
               {% endif %}
-              {% if ad.id %}
+              {% if ad.product_name %}
+                <span class="meta"> · Ürün: {{ ad.product_name }}</span>
+                {% if ad.id %}
+                  <a class="meta-link" href="/ads/{{ ad.id }}/edit" title="Ürün bağlantısını düzenle">Düzenle</a>
+                {% endif %}
+              {% elif ad.id %}
                 <a class="meta-link" href="/ads/{{ ad.id }}/edit" title="Reklamı ürüne bağla">Reklamı Bağla</a>
               {% endif %}
             {% endif %}

@@ -88,11 +88,29 @@ def _detect_focus_product(conversation_id: str) -> Tuple[Optional[str], float]:
 			).first()
 			ad_id = (row.ad_id if hasattr(row, "ad_id") else (row[0] if row else None)) if row else None
 			if ad_id:
-				rp = session.exec(_text("SELECT sku FROM ads_products WHERE ad_id=:id LIMIT 1").params(id=str(ad_id))).first()
+				# Prefer SKU when present (backwards compatible), else resolve via linked product
+				rp = session.exec(
+					_text(
+						"""
+						SELECT ap.sku, ap.product_id, p.slug, p.name
+						FROM ads_products ap
+						LEFT JOIN product p ON ap.product_id = p.id
+						WHERE ap.ad_id = :id
+						LIMIT 1
+						"""
+					).params(id=str(ad_id))
+				).first()
 				if rp:
-					sku = rp.sku if hasattr(rp, "sku") else (rp[0] if isinstance(rp, (list, tuple)) else None)
+					sku = getattr(rp, "sku", None) if hasattr(rp, "sku") else (rp[0] if len(rp) > 0 else None)
+					pid = getattr(rp, "product_id", None) if hasattr(rp, "product_id") else (rp[1] if len(rp) > 1 else None)
+					slug = getattr(rp, "slug", None) if hasattr(rp, "slug") else (rp[2] if len(rp) > 2 else None)
+					pname = getattr(rp, "name", None) if hasattr(rp, "name") else (rp[3] if len(rp) > 3 else None)
 					if sku:
 						return str(sku), 0.9
+					if slug:
+						return str(slug), 0.9
+					if pname:
+						return str(pname), 0.85
 		except Exception:
 			pass
 		# keyword match

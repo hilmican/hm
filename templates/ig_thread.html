@@ -127,8 +127,14 @@
                 · Replied to an ad{% if m.ad_title or m.ad_id %}: {{ m.ad_title or m.ad_id }}{% endif %}
                 {% set ad_url = m.ad_link or (('https://www.facebook.com/ads/library/?id=' ~ m.ad_id) if m.ad_id else None) %}
                 {% if ad_url %} (<a target="_blank" rel="noopener" href="{{ ad_url }}">link</a>){% endif %}
-                {% set ad = (ads_cache.get(m.ad_id) if (ads_cache is defined and m.ad_id) else None) %}
-                {% if m.ad_id %}
+                {% set ad = (ads_cache.get(m.ad_id|string) if (ads_cache is defined and m.ad_id) else None) %}
+                {% set ap = (ad_products.get(m.ad_id|string) if (ad_products is defined and m.ad_id) else None) %}
+                {% if ap and ap.product_name %}
+                  · Ürün: {{ ap.product_name }}
+                  {% if m.ad_id %}
+                    <a class="meta" href="/ads/{{ m.ad_id }}/edit" title="Ürün bağlantısını düzenle">(düzenle)</a>
+                  {% endif %}
+                {% elif m.ad_id %}
                   · <a class="meta" href="/ads/{{ m.ad_id }}/edit" title="Reklamı ürüne bağla">Reklamı Bağla</a>
                 {% endif %}
                 {% if ad and ad.image_url %}

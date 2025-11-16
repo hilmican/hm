@@ -357,6 +357,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
 
         # Fetch cached ads for messages in this thread
         ads_cache: dict[str, dict[str, Any]] = {}
+        ad_products: dict[str, dict[str, Any]] = {}
         try:
             if ad_ids:
                 placeholders = ",".join([":a" + str(i) for i in range(len(ad_ids))])
@@ -369,8 +370,33 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     img = r.image_url if hasattr(r, "image_url") else (r[2] if len(r) > 2 else None)
                     lnk = r.link if hasattr(r, "link") else (r[3] if len(r) > 3 else None)
                     ads_cache[str(aid)] = {"name": name, "image_url": img, "link": lnk}
+                # Enrich with linked product info
+                try:
+                    rows_ap = session.exec(
+                        _text(
+                            f"""
+                            SELECT ap.ad_id, ap.product_id, p.name AS product_name
+                            FROM ads_products ap
+                            LEFT JOIN product p ON ap.product_id = p.id
+                            WHERE ap.ad_id IN ({placeholders})
+                            """
+                        ).params(**params)
+                    ).all()
+                    for r in rows_ap:
+                        try:
+                            aid = getattr(r, "ad_id", None) if hasattr(r, "ad_id") else (r[0] if len(r) > 0 else None)
+                            pid = getattr(r, "product_id", None) if hasattr(r, "product_id") else (r[1] if len(r) > 1 else None)
+                            pname = getattr(r, "product_name", None) if hasattr(r, "product_name") else (r[2] if len(r) > 2 else None)
+                            if not aid:
+                                continue
+                            ad_products[str(aid)] = {"product_id": pid, "product_name": pname}
+                        except Exception:
+                            continue
+                except Exception:
+                    ad_products = {}
         except Exception:
             ads_cache = {}
+            ad_products = {}
 
         # Build attachment indices so template can render images (fallback: legacy attachments_json)
         att_map = {}
@@ -532,6 +558,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 "att_ids_map": att_ids_map,
                 "usernames": usernames,
                 "ads_cache": ads_cache,
+                "ad_products": ad_products,
                 "contact_name": contact_name,
                 "contact_phone": contact_phone,
                 "contact_address": contact_address,
