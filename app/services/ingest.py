@@ -542,8 +542,9 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 					_sql_text(
 						"INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
 						"VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)"
-					)
-				).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+					),
+					{"id": ad_id, "n": ad_name, "img": ad_img, "lnk": ad_link},
+				)
 				try:
 					_log_up.info(
 						"insert.webhook: ads INSERT OR IGNORE ok mid=%s ad_id=%s",
@@ -567,8 +568,9 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 						_sql_text(
 							"INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
 							"VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)"
-						)
-					).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+						),
+						{"id": ad_id, "n": ad_name, "img": ad_img, "lnk": ad_link},
+					)
 					try:
 						_log_up.info(
 							"insert.webhook: ads INSERT IGNORE ok mid=%s ad_id=%s",
@@ -596,8 +598,9 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 						"link=COALESCE(:lnk,link), "
 						"updated_at=CURRENT_TIMESTAMP "
 						"WHERE ad_id=:id"
-					)
-				).params(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+					),
+					{"id": ad_id, "n": ad_name, "img": ad_img, "lnk": ad_link},
+				)
 				try:
 					_log_up.info(
 						"insert.webhook: ads UPDATE ok mid=%s ad_id=%s",
