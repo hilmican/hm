@@ -40,7 +40,15 @@
       </div>
     {% endif %}
   <div style="margin-top:18px">
-    <h3>AI Çıktısı</h3>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <h3 style="margin:0;">AI Çıktısı</h3>
+      <div style="display:flex; gap:8px;">
+        <a href="/ig/inbox/{{ conversation_id }}/debug" class="action" style="background:#6366f1; text-decoration:none; padding:6px 12px; border-radius:6px; font-size:13px;">AI Timeline Logları</a>
+        <form method="post" action="/ig/inbox/{{ conversation_id }}/debug/run" style="margin:0; display:inline;">
+          <button type="submit" class="action" style="background:#10b981; font-size:13px; padding:6px 12px;">AI Çalıştır</button>
+        </form>
+      </div>
+    </div>
     {% if ai_status %}<div class="meta">Durum: {{ ai_status }}</div>{% endif %}
     <pre id="aiBox" style="background:#0b1021;color:#e5e7eb; padding:12px; border-radius:8px; max-height:300px; overflow:auto; white-space:pre-wrap;">{{ ai_json or 'Henüz AI verisi yok.' }}</pre>
     {% if focus_product %}
