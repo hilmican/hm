@@ -121,10 +121,23 @@ def main() -> None:
 				continue
 			# Generate draft
 			try:
+				try:
+					log.info("ai_shadow: generating draft for conversation_id=%s", cid)
+				except Exception:
+					pass
 				data = draft_reply(int(cid), limit=40, include_meta=True)
 				# Decide whether we should actually propose a reply
 				should_reply = bool(data.get("should_reply", True))
 				reply_text = (data.get("reply_text") or "").strip()
+				try:
+					log.info(
+						"ai_shadow: generated draft for conversation_id=%s should_reply=%s reply_len=%s",
+						cid,
+						should_reply,
+						len(reply_text),
+					)
+				except Exception:
+					pass
 				if (not should_reply) or (not reply_text):
 					# Model indicates no need to reply yet or produced empty text -> pause suggestions
 					_set_status(cid, "paused")
