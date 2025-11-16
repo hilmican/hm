@@ -538,13 +538,11 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 			except Exception:
 				pass
 			try:
-				session.exec(
-					_sql_text(
-						"INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
-						"VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)"
-					),
-					{"id": ad_id, "n": ad_name, "img": ad_img, "lnk": ad_link},
-				)
+				stmt_ins_or_ignore = _sql_text(
+					"INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
+					"VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)"
+				).bindparams(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+				session.exec(stmt_ins_or_ignore)
 				try:
 					_log_up.info(
 						"insert.webhook: ads INSERT OR IGNORE ok mid=%s ad_id=%s",
@@ -564,13 +562,11 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 				except Exception:
 					pass
 				try:
-					session.exec(
-						_sql_text(
-							"INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
-							"VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)"
-						),
-						{"id": ad_id, "n": ad_name, "img": ad_img, "lnk": ad_link},
-					)
+					stmt_ins_ignore = _sql_text(
+						"INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
+						"VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)"
+					).bindparams(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+					session.exec(stmt_ins_ignore)
 					try:
 						_log_up.info(
 							"insert.webhook: ads INSERT IGNORE ok mid=%s ad_id=%s",
@@ -590,17 +586,15 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 					except Exception:
 						pass
 			try:
-				session.exec(
-					_sql_text(
-						"UPDATE ads SET "
-						"name=COALESCE(:n,name), "
-						"image_url=COALESCE(:img,image_url), "
-						"link=COALESCE(:lnk,link), "
-						"updated_at=CURRENT_TIMESTAMP "
-						"WHERE ad_id=:id"
-					),
-					{"id": ad_id, "n": ad_name, "img": ad_img, "lnk": ad_link},
-				)
+				stmt_upd = _sql_text(
+					"UPDATE ads SET "
+					"name=COALESCE(:n,name), "
+					"image_url=COALESCE(:img,image_url), "
+					"link=COALESCE(:lnk,link), "
+					"updated_at=CURRENT_TIMESTAMP "
+					"WHERE ad_id=:id"
+				).bindparams(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
+				session.exec(stmt_upd)
 				try:
 					_log_up.info(
 						"insert.webhook: ads UPDATE ok mid=%s ad_id=%s",
