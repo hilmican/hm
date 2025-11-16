@@ -121,7 +121,12 @@
               {% endif %}
               {{ m.text or '' }}
               {% if m.is_ai_draft %}
-                <div class="meta" style="margin-top:4px">AI Öneri · model: {{ m.ai_model or '-' }}{% if m.ai_reason %} · {{ m.ai_reason }}{% endif %}</div>
+                <div class="meta" style="margin-top:4px">
+                  AI Öneri · model: {{ m.ai_model or '-' }}{% if m.ai_reason %} · {{ m.ai_reason }}{% endif %}
+                  {% if m.draft_id %}
+                    · <a href="/ig/inbox/shadow/{{ m.draft_id }}" target="_blank" rel="noopener">Detayları gör</a>
+                  {% endif %}
+                </div>
                 <div style="margin-top:6px">
                   <a class="action" href="/ig/ai/products?focus={{ m.product_slug or 'default' }}" target="_blank" rel="noopener">Ürün AI mesajlarını düzenle ↗</a>
                 </div>

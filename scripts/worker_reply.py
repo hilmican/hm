@@ -3,6 +3,7 @@ import time
 import logging
 import datetime as dt
 from typing import Any, Optional
+import json
 
 from app.db import get_session
 from sqlalchemy import text as _text
@@ -120,10 +121,13 @@ def main() -> None:
 				continue
 			# Generate draft
 			try:
-				data = draft_reply(int(cid), limit=40, include_meta=False)
+				data = draft_reply(int(cid), limit=40, include_meta=True)
+				# Decide whether we should actually propose a reply
+				should_reply = bool(data.get("should_reply", True))
 				reply_text = (data.get("reply_text") or "").strip()
-				if not reply_text:
-					_set_status(cid, "error")
+				if (not should_reply) or (not reply_text):
+					# Model indicates no need to reply yet or produced empty text -> pause suggestions
+					_set_status(cid, "paused")
 					continue
 				# Persist draft
 				try:
@@ -132,7 +136,7 @@ def main() -> None:
 							_text(
 								"""
 								INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, attempt_no, status, created_at)
-								VALUES(:cid, :txt, :model, :conf, :reason, NULL, :att, 'suggested', CURRENT_TIMESTAMP)
+								VALUES(:cid, :txt, :model, :conf, :reason, :meta, :att, 'suggested', CURRENT_TIMESTAMP)
 								"""
 							).params(
 								cid=int(cid),
@@ -140,6 +144,7 @@ def main() -> None:
 								model=str(data.get("model") or ""),
 								conf=(float(data.get("confidence") or 0.6)),
 								reason=(data.get("reason") or "auto"),
+								meta=json.dumps(data.get("debug_meta"), ensure_ascii=False) if data.get("debug_meta") else None,
 								att=int(postpones or 0),
 							)
 						)

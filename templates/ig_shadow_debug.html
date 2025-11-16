@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Shadow Draft #{{ draft.id }}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      h1, h2, h3 { margin: 0 0 8px 0; }
+      .meta { color:#6b7280; font-size:13px; margin:4px 0; }
+      pre { background:#0b1021; color:#e5e7eb; padding:12px; border-radius:8px; white-space:pre-wrap; max-height:320px; overflow:auto; }
+      a { color:#2563eb; text-decoration:none; }
+      .section { margin-top:16px; padding:12px; border-radius:10px; border:1px solid #e5e7eb; background:#f9fafb; }
+      .pill { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid #d1d5db; font-size:12px; margin-left:4px; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <a href="/ig/inbox/{{ conversation_id }}">← Konuşmaya geri dön</a>
+    <h1>Shadow Draft #{{ draft.id }}</h1>
+    <div class="meta">
+      Konuşma: <a href="/ig/inbox/{{ conversation_id }}">{{ conversation_id }}</a>
+      {% if draft.status %}<span class="pill">{{ draft.status }}</span>{% endif %}
+    </div>
+    <div class="meta">
+      Model: {{ draft.model or '-' }}
+      {% if draft.confidence is not none %} · Güven: {{ '%.2f' % draft.confidence }}{% endif %}
+      {% if draft.reason %} · Sebep: {{ draft.reason }}{% endif %}
+      {% if draft.created_at %} · Oluşturulma: {{ draft.created_at }}{% endif %}
+    </div>
+
+    <div class="section">
+      <h3>AI Cevabı (reply_text)</h3>
+      <pre>{{ (draft.reply_text or '') }}</pre>
+    </div>
+
+    <div class="section">
+      <h3>System Prompt</h3>
+      {% if debug_meta and debug_meta.system_prompt %}
+        <pre>{{ debug_meta.system_prompt }}</pre>
+      {% else %}
+        <div class="meta">System prompt kaydı yok.</div>
+      {% endif %}
+    </div>
+
+    <div class="section">
+      <h3>User Payload (Prompt JSON)</h3>
+      {% if debug_meta and debug_meta.user_payload %}
+        <pre>{{ debug_meta.user_payload_pretty }}</pre>
+      {% else %}
+        <div class="meta">user_payload kaydı yok.</div>
+      {% endif %}
+    </div>
+
+    <div class="section">
+      <h3>Ham Model Cevabı (raw_response)</h3>
+      {% if debug_meta and debug_meta.raw_response %}
+        <pre>{{ debug_meta.raw_response_pretty }}</pre>
+      {% else %}
+        <div class="meta">raw_response kaydı yok.</div>
+      {% endif %}
+    </div>
+  </body>
+</html>
+
+

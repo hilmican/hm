@@ -82,6 +82,81 @@ def debug_conversation(request: Request, conversation_id: int, limit: int = 25):
     )
 
 
+@router.get("/inbox/shadow/{draft_id}")
+def shadow_debug(request: Request, draft_id: int):
+    """
+    Show details of a single shadow draft:
+    - System prompt used
+    - Prompt/user payload JSON
+    - Raw model response (if available)
+    """
+    from sqlalchemy import text as _text
+    templates = request.app.state.templates
+    with get_session() as session:
+        row = session.exec(
+            _text(
+                """
+                SELECT id, convo_id, reply_text, model, confidence, reason, json_meta, status, created_at
+                FROM ai_shadow_reply
+                WHERE id = :id
+                LIMIT 1
+                """
+            ).params(id=int(draft_id))
+        ).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Shadow draft not found")
+        # Support both row objects and tuples
+        did = getattr(row, "id", None) if hasattr(row, "id") else (row[0] if len(row) > 0 else None)
+        convo_id = getattr(row, "convo_id", None) if hasattr(row, "convo_id") else (row[1] if len(row) > 1 else None)
+        reply_text = getattr(row, "reply_text", None) if hasattr(row, "reply_text") else (row[2] if len(row) > 2 else None)
+        model = getattr(row, "model", None) if hasattr(row, "model") else (row[3] if len(row) > 3 else None)
+        confidence = getattr(row, "confidence", None) if hasattr(row, "confidence") else (row[4] if len(row) > 4 else None)
+        reason = getattr(row, "reason", None) if hasattr(row, "reason") else (row[5] if len(row) > 5 else None)
+        json_meta = getattr(row, "json_meta", None) if hasattr(row, "json_meta") else (row[6] if len(row) > 6 else None)
+        status = getattr(row, "status", None) if hasattr(row, "status") else (row[7] if len(row) > 7 else None)
+        created_at = getattr(row, "created_at", None) if hasattr(row, "created_at") else (row[8] if len(row) > 8 else None)
+    debug_meta = None
+    if json_meta:
+        try:
+            import json as _json
+
+            debug_meta = _json.loads(json_meta)
+            if isinstance(debug_meta, dict):
+                # pretty-print nested fields for template
+                try:
+                    user_payload = debug_meta.get("user_payload")
+                    if user_payload is not None:
+                        debug_meta["user_payload_pretty"] = _json.dumps(user_payload, ensure_ascii=False, indent=2)
+                except Exception:
+                    debug_meta["user_payload_pretty"] = None
+                try:
+                    raw_resp = debug_meta.get("raw_response")
+                    if raw_resp is not None:
+                        debug_meta["raw_response_pretty"] = _json.dumps(raw_resp, ensure_ascii=False, indent=2) if not isinstance(raw_resp, str) else raw_resp
+                except Exception:
+                    debug_meta["raw_response_pretty"] = None
+        except Exception:
+            debug_meta = None
+    draft = {
+        "id": did,
+        "reply_text": reply_text,
+        "model": model,
+        "confidence": confidence,
+        "reason": reason,
+        "status": status,
+        "created_at": created_at,
+    }
+    return templates.TemplateResponse(
+        "ig_shadow_debug.html",
+        {
+            "request": request,
+            "conversation_id": convo_id,
+            "draft": draft,
+            "debug_meta": debug_meta,
+        },
+    )
+
+
 @router.post("/inbox/{conversation_id}/debug/run")
 def trigger_debug_conversation(conversation_id: int):
     with get_session() as session:
@@ -546,6 +621,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     txt = getattr(rr, "reply_text", None) if hasattr(rr, "reply_text") else (rr[1] if len(rr) > 1 else None)
                     if not (txt and str(txt).strip()):
                         continue
+                    did = getattr(rr, "id", None) if hasattr(rr, "id") else (rr[0] if len(rr) > 0 else None)
                     ca = getattr(rr, "created_at", None) if hasattr(rr, "created_at") else (rr[5] if len(rr) > 5 else None)
                     ts = None
                     if ca:
@@ -563,6 +639,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                         "ig_sender_id": None,
                         "ig_recipient_id": None,
                         "is_ai_draft": True,
+                        "draft_id": int(did) if did is not None else None,
                         "ai_model": getattr(rr, "model", None) if hasattr(rr, "model") else (rr[2] if len(rr) > 2 else None),
                         "ai_reason": getattr(rr, "reason", None) if hasattr(rr, "reason") else (rr[4] if len(rr) > 4 else None),
                         "product_slug": focus_slug or "default",
