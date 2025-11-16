@@ -43,12 +43,27 @@ async def _get(client: httpx.AsyncClient, url: str, params: Dict[str, Any]) -> D
             return r.json()
         except httpx.HTTPStatusError as e:
             last_err = e
+            status_code = getattr(e.response, 'status_code', None)
             try:
                 last_body = e.response.text
             except Exception:
                 last_body = None
+            
+            # Don't retry 403 errors - they're permission issues, not transient
+            if status_code == 403:
+                try:
+                    _log.warning("graph http %s attempt=%s code=%s url=%s body_snip=%s (skipping retries)", 
+                                type(e).__name__, attempt+1, status_code, safe_url, 
+                                (last_body[:160] if last_body else None))
+                except Exception:
+                    pass
+                # Break immediately - don't retry 403s
+                break
+            
             try:
-                _log.warning("graph http %s attempt=%s code=%s url=%s body_snip=%s", type(e).__name__, attempt+1, getattr(e.response, 'status_code', None), safe_url, (last_body[:160] if last_body else None))
+                _log.warning("graph http %s attempt=%s code=%s url=%s body_snip=%s", 
+                            type(e).__name__, attempt+1, status_code, safe_url, 
+                            (last_body[:160] if last_body else None))
             except Exception:
                 pass
             await asyncio.sleep(0.5 * (attempt + 1))

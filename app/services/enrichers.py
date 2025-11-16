@@ -22,10 +22,20 @@ def _ttl_hours(env_key: str, default: int) -> int:
 async def enrich_user(ig_user_id: str) -> bool:
 	# TTL check - only skip if we have successful recent data
 	with get_session() as session:
-		row = session.exec(text("SELECT fetched_at, fetch_status FROM ig_users WHERE ig_user_id = :id").params(id=ig_user_id)).first()
+		row = session.exec(text("SELECT fetched_at, fetch_status, fetch_error FROM ig_users WHERE ig_user_id = :id").params(id=ig_user_id)).first()
 		if row:
 			fa = row.fetched_at if hasattr(row, "fetched_at") else (row[0] if isinstance(row, (list, tuple)) else None)
 			fs = row.fetch_status if hasattr(row, "fetch_status") else (row[1] if isinstance(row, (list, tuple)) else None)
+			fe = row.fetch_error if hasattr(row, "fetch_error") else (row[2] if isinstance(row, (list, tuple)) and len(row) > 2 else None)
+			
+			# Skip if we have a recent 403/permission error - don't retry
+			if fs == 'error' and fe and ('403' in str(fe) or '230' in str(fe) or 'consent' in str(fe).lower()):
+				try:
+					_log.info("enrich_user: skip permission error uid=%s error=%s", ig_user_id, str(fe)[:100])
+				except Exception:
+					pass
+				return False
+			
 			if isinstance(fa, str):
 				try:
 					fa = dt.datetime.fromisoformat(fa)
