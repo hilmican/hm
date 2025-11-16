@@ -376,6 +376,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     focus_product = {
                         "id": pid,
                         "name": pname,
+                        "slug": focus_slug,
                         "system": psys,
                         "prompt": pprompt,
                         "confidence": float(focus_conf or 0.0),

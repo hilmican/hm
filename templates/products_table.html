@@ -32,7 +32,7 @@
     <h2>Urunler</h2>
     <table id="prodTbl">
         <thead>
-            <tr><th>ID</th><th>Ad</th><th>Slug</th><th>Birim</th><th>Varsayilan Fiyat</th><th>Islemler</th></tr>
+            <tr><th>ID</th><th>Ad</th><th>Slug</th><th>Birim</th><th>Varsayilan Fiyat</th><th>AI</th><th>Islemler</th></tr>
         </thead>
         <tbody>
             {% for p in rows %}
@@ -42,6 +42,13 @@
                 <td>{{ p.slug }}</td>
                 <td><input data-field="default_unit" value="{{ p.default_unit }}" /></td>
                 <td><input data-field="default_price" type="number" step="0.01" value="{{ p.default_price }}" /></td>
+                <td>
+                    {% if p.slug or p.name %}
+                        <a href="/ig/ai/products?focus={{ p.slug or p.name }}" target="_blank" rel="noopener">AI Talimatları</a>
+                    {% else %}
+                        <span class="meta">-</span>
+                    {% endif %}
+                </td>
                 <td>
                     <button class="saveBtn" style="background:#10b981;color:#fff;border:none;">Kaydet</button>
                     <button class="delBtn" style="background:#ef4444;color:#fff;border:none;">Sil</button>

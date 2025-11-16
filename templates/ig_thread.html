@@ -45,7 +45,11 @@
     <pre id="aiBox" style="background:#0b1021;color:#e5e7eb; padding:12px; border-radius:8px; max-height:300px; overflow:auto; white-space:pre-wrap;">{{ ai_json or 'Henüz AI verisi yok.' }}</pre>
     {% if focus_product %}
       <div style="margin-top:12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
-        <h4 style="margin:0 0 8px 0; color:#111827;">Ürün AI Talimatları</h4>
+        <h4 style="margin:0 0 8px 0; color:#111827;">Ürün AI Talimatları
+          {% if focus_product.id %}
+            <a href="/ig/ai/products?focus={{ focus_product.slug or focus_product.name or 'default' }}" target="_blank" rel="noopener" class="meta" style="margin-left:6px;">(düzenle)</a>
+          {% endif %}
+        </h4>
         <div class="meta">
           Ürün: {{ focus_product.name or '-' }}
           {% if focus_product.confidence is not none %} · güven: {{ '%.2f' % focus_product.confidence }}{% endif %}
