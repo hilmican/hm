@@ -1051,7 +1051,10 @@ def handle(raw_event_id: int) -> int:
 				user_to_enrich = str(recipient_id)
 
 			if user_to_enrich:
-				_ensure_ig_user_with_data(None, user_to_enrich, str(igba_id))  # type: ignore[arg-type]
+				# Enrich IG user info in a short-lived session to avoid long-held transactions
+				from .ingest import _ensure_ig_user_with_data as _ensure_user  # type: ignore
+				with get_session() as session_user:
+					_ensure_user(session_user, user_to_enrich, str(igba_id))
 
 			mid = message_obj.get("mid") or message_obj.get("id")
 
