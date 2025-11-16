@@ -116,3 +116,20 @@ IG_PURCHASE_SYSTEM_PROMPT = (
 # }
 
 
+# Ad to product matching prompt
+AD_PRODUCT_MATCH_SYSTEM_PROMPT = (
+    "Sen bir reklam-ürün eşleştirme yardımcısısın. "
+    "Girdi: Bir reklam başlığı/açıklaması ve mevcut ürün listesi. "
+    "Görev: Reklamın hangi ürünü tanıttığını belirle. "
+    "Kurallar: "
+    "1) SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
+    "2) Reklam başlığındaki ürün adını, renk/beden/birim gibi varyant bilgilerini ayırt et. "
+    "3) Ürün listesindeki ürünlerle karşılaştır ve en uygun eşleşmeyi bul. "
+    "4) Eğer reklam başlığında ürün adı açıkça belirtilmişse, o ürünü öner. "
+    "5) Eğer tam eşleşme yoksa, en yakın ürünü öner (örneğin 'Pantolon' → 'Jogger Pantolon' gibi). "
+    "6) Eğer hiçbir ürünle eşleşme yoksa, product_id null döndür ve notes alanında açıkla. "
+    "7) Tüm alanlar çift tırnaklı olmalı. "
+    "8) JSON dışına çıkma. "
+)
+
+

@@ -43,11 +43,11 @@
         {% endif %}
       </div>
     </div>
-    <form method="post" action="/ads/{{ ad_id }}/save" style="margin-top:12px;">
+    <form method="post" action="/ads/{{ ad_id }}/save" style="margin-top:12px;" id="adForm">
       <div style="display:grid; gap:12px; max-width:420px;">
         <div>
           <label>Ürün Seçimi</label>
-          <select name="product_id" style="width:100%; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px;">
+          <select name="product_id" id="productSelect" style="width:100%; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px;">
             <option value="">Ürün seçiniz</option>
             {% for p in products or [] %}
               <option value="{{ p.id }}" {% if mapping.product_id and p.id == mapping.product_id %}selected{% endif %}>
@@ -58,11 +58,64 @@
           <div class="meta" style="margin-top:4px;">Bu reklamı bağlamak istediğiniz ürünü seçin. Beden / renk gibi varyantlar bu sayfada ayrıştırılmaz.</div>
         </div>
         <div>
+          <button type="button" id="aiSuggestBtn" style="background:#10b981; margin-right:8px;">🤖 AI ile Öner</button>
           <button type="submit">Kaydet</button>
           {% if ad and ad.ad_id %}<a style="margin-left:8px" href="/ig/inbox?q={{ ad.ad_id }}">İnboxta ara</a>{% endif %}
         </div>
+        <div id="aiResult" style="display:none; padding:8px; border-radius:8px; margin-top:8px; font-size:13px;"></div>
       </div>
     </form>
+    <script>
+      const aiBtn = document.getElementById('aiSuggestBtn');
+      const productSelect = document.getElementById('productSelect');
+      const aiResult = document.getElementById('aiResult');
+      
+      if (aiBtn) {
+        aiBtn.addEventListener('click', async () => {
+          if (!aiBtn) return;
+          const adId = '{{ ad_id }}';
+          aiBtn.disabled = true;
+          aiBtn.textContent = '⏳ İşleniyor...';
+          aiResult.style.display = 'none';
+          
+          try {
+            const response = await fetch(`/ads/${adId}/ai/suggest`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' }
+            });
+            
+            if (!response.ok) {
+              const errorText = await response.text();
+              throw new Error(errorText || `HTTP ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.product_id) {
+              // Set the product in the select
+              productSelect.value = data.product_id;
+              aiResult.style.display = 'block';
+              aiResult.style.background = '#d1fae5';
+              aiResult.style.color = '#065f46';
+              aiResult.innerHTML = `✅ Önerilen ürün: <strong>${data.product_name || 'ID: ' + data.product_id}</strong> (Güven: ${(data.confidence * 100).toFixed(0)}%)${data.notes ? '<br><small>' + data.notes + '</small>' : ''}`;
+            } else {
+              aiResult.style.display = 'block';
+              aiResult.style.background = '#fef3c7';
+              aiResult.style.color = '#92400e';
+              aiResult.innerHTML = `⚠️ Uygun ürün bulunamadı.${data.notes ? '<br><small>' + data.notes + '</small>' : ''}`;
+            }
+          } catch (error) {
+            aiResult.style.display = 'block';
+            aiResult.style.background = '#fee2e2';
+            aiResult.style.color = '#991b1b';
+            aiResult.innerHTML = `❌ Hata: ${error.message}`;
+          } finally {
+            aiBtn.disabled = false;
+            aiBtn.textContent = '🤖 AI ile Öner';
+          }
+        });
+      }
+    </script>
   </body>
   </html>
 

@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Request, HTTPException, Form
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from starlette.status import HTTP_303_SEE_OTHER
 from typing import Any, Optional
 from sqlalchemy import text as _text
+import json
 
 from ..db import get_session
+from ..services.ai import AIClient
+from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
 
 
 router = APIRouter(prefix="/ads", tags=["ads"])
@@ -151,5 +154,141 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 					session.exec(stmt_insert)
 	# Redirect back to edit page
 	return RedirectResponse(url=f"/ads/{ad_id}/edit", status_code=HTTP_303_SEE_OTHER)
+
+
+@router.post("/{ad_id}/ai/suggest")
+def ai_suggest_product_for_ad(request: Request, ad_id: str):
+	"""
+	Use AI to suggest which product an ad is about based on ad_title and product list.
+	Similar to the automatic post linking system.
+	"""
+	ai = getattr(request.app.state, "ai", None)
+	if not ai or not getattr(ai, "enabled", False):
+		raise HTTPException(status_code=503, detail="AI not configured")
+	
+	ad_title: Optional[str] = None
+	ad_name: Optional[str] = None
+	products: list[dict[str, Any]] = []
+	
+	with get_session() as session:
+		# Get ad title from ads table or messages
+		try:
+			# First try ads table
+			stmt_ad = _text(
+				"SELECT name FROM ads WHERE ad_id=:id LIMIT 1"
+			).bindparams(id=str(ad_id))
+			row = session.exec(stmt_ad).first()
+			if row:
+				ad_name = getattr(row, "name", None) if hasattr(row, "name") else (row[0] if len(row) > 0 else None)
+		except Exception:
+			pass
+		
+		# Also try to get ad_title from messages (more reliable, includes ads_context_data)
+		try:
+			stmt_msg = _text(
+				"SELECT ad_title, referral_json FROM message WHERE ad_id=:id ORDER BY timestamp_ms DESC LIMIT 1"
+			).bindparams(id=str(ad_id))
+			row_msg = session.exec(stmt_msg).first()
+			if row_msg:
+				# Try ad_title column first
+				ad_title = getattr(row_msg, "ad_title", None) if hasattr(row_msg, "ad_title") else (row_msg[0] if len(row_msg) > 0 else None)
+				# If not found, try extracting from referral_json (ads_context_data)
+				if not ad_title:
+					try:
+						referral_json = getattr(row_msg, "referral_json", None) if hasattr(row_msg, "referral_json") else (row_msg[1] if len(row_msg) > 1 else None)
+						if referral_json:
+							ref_data = json.loads(referral_json) if isinstance(referral_json, str) else referral_json
+							if isinstance(ref_data, dict):
+								# Check ads_context_data.ad_title (from Instagram webhook format)
+								ads_ctx = ref_data.get("ads_context_data") or {}
+								if isinstance(ads_ctx, dict):
+									ad_title = ads_ctx.get("ad_title") or ad_title
+								# Also check direct fields
+								ad_title = ref_data.get("ad_title") or ref_data.get("headline") or ref_data.get("source") or ad_title
+					except Exception:
+						pass
+		except Exception:
+			pass
+		
+		# Use ad_title from messages if available, otherwise use ad_name from ads table
+		ad_text = ad_title or ad_name
+		
+		if not ad_text:
+			raise HTTPException(status_code=404, detail="Ad title not found. Please ensure the ad has a title or name.")
+		
+		# Get product list
+		try:
+			rows_products = session.exec(
+				_text(
+					"""
+					SELECT id, name
+					FROM product
+					ORDER BY name
+					LIMIT 500
+					"""
+				)
+			).all()
+		except Exception:
+			rows_products = []
+		
+		for r in rows_products:
+			try:
+				pid = getattr(r, "id", None) if hasattr(r, "id") else (r[0] if len(r) > 0 else None)
+				name = getattr(r, "name", None) if hasattr(r, "name") else (r[1] if len(r) > 1 else None)
+				if pid is None or not name:
+					continue
+				products.append({"id": int(pid), "name": str(name)})
+			except Exception:
+				continue
+	
+	if not products:
+		raise HTTPException(status_code=400, detail="No products found in database")
+	
+	# Build AI request
+	system_prompt = AD_PRODUCT_MATCH_SYSTEM_PROMPT
+	
+	body = {
+		"ad_title": ad_text,
+		"known_products": products,
+		"schema": {
+			"product_id": "int|null",
+			"product_name": "str|null",
+			"confidence": "float",
+			"notes": "str|null",
+		},
+	}
+	
+	user_prompt = (
+		"Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
+		"Tüm alanlar çift tırnaklı olmalı.\nGirdi:\n" + json.dumps(body, ensure_ascii=False)
+	)
+	
+	try:
+		result = ai.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=f"AI request failed: {str(e)}")
+	
+	# Validate and return result
+	if not isinstance(result, dict):
+		raise HTTPException(status_code=500, detail="AI returned invalid response")
+	
+	product_id = result.get("product_id")
+	if product_id is not None:
+		try:
+			product_id = int(product_id)
+		except (ValueError, TypeError):
+			product_id = None
+	
+	product_name = result.get("product_name")
+	confidence = result.get("confidence", 0.0)
+	notes = result.get("notes")
+	
+	return JSONResponse({
+		"product_id": product_id,
+		"product_name": product_name,
+		"confidence": float(confidence) if confidence is not None else 0.0,
+		"notes": notes,
+		"ad_title": ad_text,
+	})
 
 
