@@ -34,8 +34,9 @@
     <div class="card">
       <h3 style="margin:0 0 8px 0;">Mevcut Bağlantı</h3>
       <div class="meta">
-        SKU: {{ mapping.sku or '-' }} · Product ID: {{ mapping.product_id or '-' }}
-        {% if not mapping.sku and not mapping.product_id %}
+        Product ID: {{ mapping.product_id or '-' }}
+        {% if mapping.sku %} · SKU (eski): {{ mapping.sku }}{% endif %}
+        {% if not mapping.product_id %}
           · <span style="color:#b91c1c;">Bu reklam henüz bir ürüne bağlı değil.</span>
         {% else %}
           · <span style="color:#16a34a;">Bu reklam bir ürüne bağlı.</span>
@@ -45,37 +46,16 @@
     <form method="post" action="/ads/{{ ad.ad_id or '' }}/save" style="margin-top:12px;">
       <div style="display:grid; gap:12px; max-width:420px;">
         <div>
-          <label>SKU / Ürün Seçimi (önerilir)</label>
-          <input
-            type="text"
-            name="sku"
-            list="skuOptions"
-            placeholder="SKU ara veya seç"
-            value="{{ mapping.sku or '' }}"
-            style="width:100%;"
-          />
-          <datalist id="skuOptions">
-            {% for it in items or [] %}
-              {% set label_parts = [] %}
-              {% if it.product_name %}{% set _ = label_parts.append(it.product_name) %}{% endif %}
-              {% if it.name %}{% set _ = label_parts.append(it.name) %}{% endif %}
-              {% if it.color %}{% set _ = label_parts.append(it.color) %}{% endif %}
-              {% if it.size %}{% set _ = label_parts.append(it.size) %}{% endif %}
-              <option value="{{ it.sku }}">
-                {{ it.sku }}{% if label_parts %} — {{ label_parts|join(' / ') }}{% endif %}
+          <label>Ürün Seçimi</label>
+          <select name="product_id" style="width:100%; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px;">
+            <option value="">Ürün seçiniz</option>
+            {% for p in products or [] %}
+              <option value="{{ p.id }}" {% if mapping.product_id and p.id == mapping.product_id %}selected{% endif %}>
+                {{ p.name }}
               </option>
             {% endfor %}
-          </datalist>
-          <div class="meta" style="margin-top:4px;">
-            Liste en fazla 500 varyant gösterir. Dilerseniz SKU'yu el ile de yazabilirsiniz.
-          </div>
-        </div>
-        <div>
-          <label>Product ID (isteğe bağlı, genelde gerekmez)</label>
-          <input type="number" name="product_id" placeholder="örn. 42" value="{{ mapping.product_id or '' }}" style="width:100%;" />
-          <div class="meta" style="margin-top:4px;">
-            Eğer SKU seçerseniz, Product ID otomatik bulunur.
-          </div>
+          </select>
+          <div class="meta" style="margin-top:4px;">Bu reklamı bağlamak istediğiniz ürünü seçin. Beden / renk gibi varyantlar bu sayfada ayrıştırılmaz.</div>
         </div>
         <div>
           <button type="submit">Kaydet</button>

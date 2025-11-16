@@ -12,10 +12,13 @@ router = APIRouter(prefix="/ads", tags=["ads"])
 
 @router.get("/{ad_id}/edit")
 def edit_ad(request: Request, ad_id: str):
-	# Load ad cache row, existing mapping (if any) and candidate items/products for selection
+	"""
+	Load ad cache row, existing mapping (if any) and candidate *products* for selection.
+	We no longer need per-SKU selection here; ads are linked to a single product.
+	"""
 	ad_row: dict[str, Any] = {}
 	mapping: dict[str, Any] = {}
-	items: list[dict[str, Any]] = []
+	products: list[dict[str, Any]] = []
 	with get_session() as session:
 		# Ad cache row
 		try:
@@ -49,43 +52,27 @@ def edit_ad(request: Request, ad_id: str):
 				"product_id": getattr(mp, "product_id", None) if hasattr(mp, "product_id") else (mp[1] if len(mp) > 1 else None),
 				"sku": getattr(mp, "sku", None) if hasattr(mp, "sku") else (mp[2] if len(mp) > 2 else None),
 			}
-		# Candidate items/products for combobox-style selection (limit to keep page fast)
+		# Candidate products for combobox-style selection (limit to keep page fast)
 		try:
-			rows_items = session.exec(
+			rows_products = session.exec(
 				_text(
 					"""
-					SELECT i.sku, i.name, i.color, i.size, i.product_id, p.name AS product_name
-					FROM item i
-					LEFT JOIN product p ON i.product_id = p.id
-					ORDER BY p.name, i.sku
+					SELECT id, name
+					FROM product
+					ORDER BY name
 					LIMIT 500
 					"""
 				)
 			).all()
 		except Exception:
-			rows_items = []
-		for r in rows_items:
+			rows_products = []
+		for r in rows_products:
 			try:
-				sku = getattr(r, "sku", None) if hasattr(r, "sku") else (r[0] if len(r) > 0 else None)
-				if not sku:
-					continue
+				pid = getattr(r, "id", None) if hasattr(r, "id") else (r[0] if len(r) > 0 else None)
 				name = getattr(r, "name", None) if hasattr(r, "name") else (r[1] if len(r) > 1 else None)
-				color = getattr(r, "color", None) if hasattr(r, "color") else (r[2] if len(r) > 2 else None)
-				size = getattr(r, "size", None) if hasattr(r, "size") else (r[3] if len(r) > 3 else None)
-				pid = getattr(r, "product_id", None) if hasattr(r, "product_id") else (r[4] if len(r) > 4 else None)
-				product_name = getattr(r, "product_name", None) if hasattr(r, "product_name") else (
-					r[5] if len(r) > 5 else None
-				)
-				items.append(
-					{
-						"sku": sku,
-						"name": name,
-						"color": color,
-						"size": size,
-						"product_id": pid,
-						"product_name": product_name,
-					}
-				)
+				if pid is None or not name:
+					continue
+				products.append({"id": pid, "name": name})
 			except Exception:
 				continue
 	templates = request.app.state.templates
@@ -95,7 +82,7 @@ def edit_ad(request: Request, ad_id: str):
 			"request": request,
 			"ad": ad_row,
 			"mapping": mapping,
-			"items": items,
+			"products": products,
 		},
 	)
 
