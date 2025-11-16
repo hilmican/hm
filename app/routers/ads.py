@@ -80,6 +80,7 @@ def edit_ad(request: Request, ad_id: str):
 		"ad_edit.html",
 		{
 			"request": request,
+			"ad_id": ad_id,
 			"ad": ad_row,
 			"mapping": mapping,
 			"products": products,
