@@ -7,7 +7,12 @@ router = APIRouter()
 
 
 @router.get("/inbox")
-async def inbox(request: Request, limit: int = 25, q: str | None = None):
+async def inbox(
+    request: Request,
+    limit: int = 25,
+    q: str | None = None,
+    has_ad: str | None = None,
+):
     with get_session() as session:
         # Use unified conversations table as single source for inbox list
         from sqlalchemy import text as _text
@@ -28,6 +33,8 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
             FROM conversations c
             LEFT JOIN ig_users u
               ON u.ig_user_id = CASE WHEN c.last_message_direction='out' THEN c.ig_recipient_id ELSE c.ig_sender_id END
+            LEFT JOIN ads_products ap
+              ON ap.ad_id = c.last_ad_id
         """
         where_parts: list[str] = []
         params: dict[str, object] = {}
@@ -48,6 +55,13 @@ async def inbox(request: Request, limit: int = 25, q: str | None = None):
                 )
             """)
             params["qq"] = qq
+        # Optional filter: restrict to conversations with ads / unlinked ads
+        has_ad_s = (has_ad or "").strip().lower()
+        if has_ad_s in ("yes", "true", "1", "any"):
+            where_parts.append("c.last_ad_id IS NOT NULL")
+        elif has_ad_s in ("unlinked", "missing_product", "no_product"):
+            # Conversations whose latest ad has no product mapping yet
+            where_parts.append("c.last_ad_id IS NOT NULL AND ap.product_id IS NULL")
         sample_n = max(50, min(int(limit or 25) * 4, 200))
         bind = session.get_bind()
         dialect_name = ""

@@ -278,16 +278,17 @@ def _update_conversation_summary_from_message(
 				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :rid
 				    ELSE ig_recipient_id
 				  END,
+				  -- Only advance ad metadata when the new message actually carries ad info
 				  last_ad_id = CASE
-				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :adid
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) AND :adid IS NOT NULL THEN :adid
 				    ELSE last_ad_id
 				  END,
 				  last_ad_link = CASE
-				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :alink
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) AND :alink IS NOT NULL THEN :alink
 				    ELSE last_ad_link
 				  END,
 				  last_ad_title = CASE
-				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :atitle
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) AND :atitle IS NOT NULL THEN :atitle
 				    ELSE last_ad_title
 				  END,
 				  last_message_at = CASE

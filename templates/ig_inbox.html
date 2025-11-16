@@ -19,6 +19,11 @@
     <div class="toolbar">
       <form method="get" action="/ig/inbox" style="display:flex;gap:8px;align-items:center;">
         <input type="text" name="q" placeholder="Mesajlarda ara..." value="{{ q or '' }}" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;min-width:280px" />
+        <select name="has_ad" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;">
+          <option value="" {% if not has_ad %}selected{% endif %}>Tüm konuşmalar</option>
+          <option value="yes" {% if has_ad == 'yes' %}selected{% endif %}>Reklamlı konuşmalar</option>
+          <option value="unlinked" {% if has_ad == 'unlinked' %}selected{% endif %}>Ürüne bağlanmamış reklamlar</option>
+        </select>
         <button type="submit">Ara</button>
         <a href="/ig/inbox" class="meta" style="margin-left:6px">Temizle</a>
       </form>
