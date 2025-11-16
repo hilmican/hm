@@ -512,6 +512,77 @@ def init_db() -> None:
                                         pass
                         except Exception:
                             pass
+
+                        # Ensure attachments table exists and attachments.id is AUTO_INCREMENT (MySQL)
+                        # This fixes "Field 'id' doesn't have a default value" errors when inserting attachments.
+                        try:
+                            conn.exec_driver_sql(
+                                """
+                                CREATE TABLE IF NOT EXISTS attachments (
+                                    id INT PRIMARY KEY AUTO_INCREMENT,
+                                    message_id INT NOT NULL,
+                                    kind VARCHAR(32) NOT NULL,
+                                    graph_id VARCHAR(255) NULL,
+                                    position INT NULL,
+                                    mime VARCHAR(255) NULL,
+                                    size_bytes BIGINT NULL,
+                                    checksum_sha256 VARCHAR(255) NULL,
+                                    storage_path TEXT NULL,
+                                    thumb_path TEXT NULL,
+                                    fetched_at DATETIME NULL,
+                                    fetch_status VARCHAR(32) NULL,
+                                    fetch_error TEXT NULL,
+                                    INDEX idx_attachments_message_id (message_id),
+                                    INDEX idx_attachments_graph_id (graph_id)
+                                )
+                                """
+                            )
+                        except Exception:
+                            # Table may already exist with different definition; ignore and fix id below.
+                            pass
+                        try:
+                            row = conn.exec_driver_sql(
+                                """
+                                SELECT COLUMN_KEY, EXTRA
+                                FROM INFORMATION_SCHEMA.COLUMNS
+                                WHERE TABLE_SCHEMA = DATABASE()
+                                  AND TABLE_NAME = 'attachments'
+                                  AND COLUMN_NAME = 'id'
+                                """
+                            ).fetchone()
+                            if row is not None:
+                                colkey = str(row[0] or "").lower()
+                                extra = str(row[1] or "").lower()
+                                if "auto_increment" not in extra:
+                                    # Align with SQLModel model: make id an AUTO_INCREMENT primary key.
+                                    try:
+                                        conn.exec_driver_sql("ALTER TABLE `attachments` MODIFY COLUMN `id` INT NOT NULL")
+                                    except Exception:
+                                        pass
+                                    try:
+                                        # Drop existing PK if it's on a different column; safe to ignore failures.
+                                        if colkey != "pri":
+                                            conn.exec_driver_sql("ALTER TABLE `attachments` DROP PRIMARY KEY")
+                                    except Exception:
+                                        pass
+                                    try:
+                                        conn.exec_driver_sql(
+                                            "ALTER TABLE `attachments` CHANGE `id` `id` INT NOT NULL AUTO_INCREMENT"
+                                        )
+                                    except Exception:
+                                        # Fallback single-step for some MySQL variants
+                                        try:
+                                            conn.exec_driver_sql(
+                                                "ALTER TABLE `attachments` MODIFY COLUMN `id` INT NOT NULL AUTO_INCREMENT"
+                                            )
+                                        except Exception:
+                                            pass
+                                    try:
+                                        conn.exec_driver_sql("ALTER TABLE `attachments` ADD PRIMARY KEY (`id`)")
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
                         try:
                             # Add UNIQUE(kind,key) if missing
                             idx = conn.exec_driver_sql(
