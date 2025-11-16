@@ -855,7 +855,10 @@ def handle(raw_event_id: int) -> int:
 							messaging_events.extend(val.get("messaging", []))
 				for event in messaging_events:
 					message_obj = event.get("message") or {}
-					if not message_obj or message_obj.get("is_echo") or message_obj.get("is_deleted"):
+					# For Instagram, we WANT to store echo messages (our own replies) so they appear
+					# in the conversation. We only skip when there is no message object at all
+					# or when the message is explicitly deleted.
+					if not message_obj or message_obj.get("is_deleted"):
 						continue
 					sender_id = (event.get("sender") or {}).get("id")
 					recipient_id = (event.get("recipient") or {}).get("id")
