@@ -115,7 +115,7 @@
     <div id="thread">
       {% for m in messages %}
         <div class="msg {{ m.direction or 'in' }}">
-          <div class="bubble" {% if m.is_ai_draft %}style="border:1px dashed #93c5fd; background:#eff6ff;"{% endif %}>
+          <div class="bubble" {% if m.is_ai_draft %}{% if m.ai_decision_status == 'no_reply' %}style="border:1px dashed #f59e0b; background:#fef3c7;"{% else %}style="border:1px dashed #93c5fd; background:#eff6ff;"{% endif %}{% endif %}>
             <div>
               {% set u_map = usernames if usernames is defined else {} %}
               {% set uname = m.sender_username or (u_map.get(m.ig_sender_id or '')) %}
@@ -127,14 +127,26 @@
               {{ m.text or '' }}
               {% if m.is_ai_draft %}
                 <div class="meta" style="margin-top:4px">
-                  AI Öneri · model: {{ m.ai_model or '-' }}{% if m.ai_reason %} · {{ m.ai_reason }}{% endif %}
+                  {% if m.ai_decision_status == 'no_reply' %}
+                    <span style="color:#f59e0b; font-weight:600;">⚠️ AI Kararı: Cevap verilmeyecek</span>
+                  {% elif m.ai_decision_status == 'suggested' %}
+                    <span style="color:#3b82f6; font-weight:600;">💬 AI Önerisi</span>
+                  {% elif m.ai_decision_status == 'dismissed' %}
+                    <span style="color:#6b7280; font-weight:600;">❌ AI Önerisi (Reddedildi)</span>
+                  {% else %}
+                    <span style="color:#6366f1; font-weight:600;">🤖 AI Aksiyonu</span>
+                  {% endif %}
+                  {% if m.ai_model %} · model: {{ m.ai_model }}{% endif %}
+                  {% if m.ai_reason %} · {{ m.ai_reason }}{% endif %}
                   {% if m.draft_id %}
                     · <a href="/ig/inbox/shadow/{{ m.draft_id }}" target="_blank" rel="noopener">Detayları gör</a>
                   {% endif %}
                 </div>
+                {% if m.ai_decision_status != 'no_reply' %}
                 <div style="margin-top:6px">
                   <a class="action" href="/ig/ai/products?focus={{ m.product_slug or 'default' }}" target="_blank" rel="noopener">Ürün AI mesajlarını düzenle ↗</a>
                 </div>
+                {% endif %}
               {% endif %}
             </div>
             {% set local_ids = att_ids_map.get(m.ig_message_id or '') %}

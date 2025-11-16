@@ -580,7 +580,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
             from sqlalchemy import text as _text
             rows_shadow = session.exec(
                 _text(
-                    "SELECT id, reply_text, model, confidence, reason, created_at, status FROM ai_shadow_reply WHERE conversation_id=:cid ORDER BY id ASC LIMIT 200"
+                    "SELECT id, reply_text, model, confidence, reason, created_at, status FROM ai_shadow_reply WHERE conversation_id=:cid ORDER BY created_at ASC LIMIT 200"
                 ).params(cid=int(conversation_id))
             ).all()
             # Represent the last one (if any) in 'shadow' for legacy panel rendering
@@ -619,8 +619,10 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
             for rr in rows_shadow:
                 try:
                     txt = getattr(rr, "reply_text", None) if hasattr(rr, "reply_text") else (rr[1] if len(rr) > 1 else None)
-                    if not (txt and str(txt).strip()):
-                        continue
+                    status = getattr(rr, "status", None) if hasattr(rr, "status") else (rr[6] if len(rr) > 6 else None)
+                    # Include all records, even if empty text (for no_reply decisions)
+                    if not txt:
+                        txt = ""  # Will be handled in template
                     did = getattr(rr, "id", None) if hasattr(rr, "id") else (rr[0] if len(rr) > 0 else None)
                     ca = getattr(rr, "created_at", None) if hasattr(rr, "created_at") else (rr[5] if len(rr) > 5 else None)
                     ts = None
@@ -632,13 +634,14 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                             ts = None
                     vm = {
                         "direction": "out",
-                        "text": str(txt),
+                        "text": str(txt) if txt else "",
                         "timestamp_ms": ts or 0,
                         "sender_username": "AI",
                         "ig_message_id": None,
                         "ig_sender_id": None,
                         "ig_recipient_id": None,
                         "is_ai_draft": True,
+                        "ai_decision_status": status,  # Pass status to template
                         "draft_id": int(did) if did is not None else None,
                         "ai_model": getattr(rr, "model", None) if hasattr(rr, "model") else (rr[2] if len(rr) > 2 else None),
                         "ai_reason": getattr(rr, "reason", None) if hasattr(rr, "reason") else (rr[4] if len(rr) > 4 else None),

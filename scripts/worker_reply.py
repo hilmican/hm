@@ -150,6 +150,43 @@ def main() -> None:
 					pass
 				if (not should_reply) or (not reply_text):
 					# Model indicates no need to reply yet or produced empty text -> pause suggestions
+					# BUT: still log the decision for timeline visibility
+					try:
+						reason_text = data.get("reason") or "no_reply_decision"
+						notes_text = data.get("notes") or ""
+						decision_text = f"🤖 AI Decision: No reply needed"
+						if reason_text and reason_text != "no_reply_decision":
+							decision_text += f"\n\nSebep: {reason_text}"
+						if notes_text:
+							decision_text += f"\n\nNot: {notes_text}"
+						with get_session() as session:
+							session.exec(
+								_text(
+									"""
+									INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, attempt_no, status, created_at)
+									VALUES(:cid, :txt, :model, :conf, :reason, :meta, :att, 'no_reply', CURRENT_TIMESTAMP)
+									"""
+								).params(
+									cid=int(cid),
+									txt=decision_text,
+									model=str(data.get("model") or ""),
+									conf=(float(data.get("confidence") or 0.6)),
+									reason=reason_text,
+									meta=json.dumps(data.get("debug_meta"), ensure_ascii=False) if data.get("debug_meta") else None,
+									att=int(postpones or 0),
+								)
+							)
+							# Mark state as paused
+							session.exec(
+								_text(
+									"UPDATE ai_shadow_state SET status='paused', updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+								).params(cid=int(cid))
+							)
+					except Exception as pe:
+						try:
+							log.warning("persist no-reply decision error cid=%s err=%s", cid, pe)
+						except Exception:
+							pass
 					_set_status(cid, "paused")
 					continue
 				# Persist draft
