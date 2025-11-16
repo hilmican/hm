@@ -428,6 +428,23 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	except Exception:
 		ad_id = ad_link = ad_title = ad_img = ad_name = None
 		referral_json_val = None
+	# Debug logging: capture mapping decisions for this message to aid troubleshooting
+	try:
+		_log_up.info(
+			"insert.webhook: mid=%s from=%s to=%s igba_id=%s user_id=%s conv_pk=%s graph_cid=%s direction=%s",
+			str(mid),
+			str(sender_id),
+			str(recipient_id),
+			str(igba_id),
+			str(user_id),
+			str(conversation_pk),
+			str(graph_conversation_id),
+			str(direction),
+		)
+	except Exception:
+		# Never break ingestion because of debug logging
+		pass
+
 	row = Message(
 		ig_sender_id=str(sender_id) if sender_id is not None else None,
 		ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
@@ -732,6 +749,24 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 	except Exception:
 		ad_id = ad_link = ad_title = ad_img = ad_name = None
 		referral_json_val = None
+	# Debug logging: capture mapping decisions for hydrated/Graph-fetched messages
+	try:
+		_log_up.info(
+			"upsert.graph: mid=%s from=%s to=%s igba_id=%s owner=%s user_id=%s conv_pk=%s graph_cid=%s direction=%s",
+			str(mid),
+			str(sender_id),
+			str(recipient_id),
+			str(igba_id),
+			str(owner),
+			str(user_id),
+			str(conversation_pk),
+			str(graph_cid),
+			str(direction),
+		)
+	except Exception:
+		# Never break ingestion because of debug logging
+		pass
+
 	row = Message(
 		ig_sender_id=str(sender_id) if sender_id is not None else None,
 		ig_recipient_id=str(recipient_id) if recipient_id is not None else None,

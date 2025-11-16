@@ -87,7 +87,17 @@ async def receive_events(request: Request):
 
 	try:
 		payload: Dict[str, Any] = json.loads(body.decode("utf-8"))
-		_log.info("IG webhook POST: parsed payload with object=%s, entries=%d", payload.get("object"), len(payload.get("entry", [])))
+		_log.info(
+			"IG webhook POST: parsed payload with object=%s, entries=%d",
+			payload.get("object"),
+			len(payload.get("entry", [])),
+		)
+		# Debug: log full payload JSON to help trace mapping issues (from/to/conversation IDs, etc.)
+		try:
+			_log.info("IG webhook POST: full payload JSON=%s", json.dumps(payload, ensure_ascii=False))
+		except Exception:
+			# Best-effort; never let debug logging break webhook handling
+			pass
 	except Exception:
 		try:
 			_log.warning("IG webhook POST: invalid JSON, body_len=%d", len(body or b""))
