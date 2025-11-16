@@ -130,6 +130,16 @@ def main() -> None:
 				should_reply = bool(data.get("should_reply", True))
 				reply_text = (data.get("reply_text") or "").strip()
 				try:
+					# Log raw data (truncated) for debugging model behavior
+					try:
+						data_str = json.dumps(data, ensure_ascii=False)
+					except Exception:
+						data_str = str(data)
+					log.info(
+						"ai_shadow: debug conversation_id=%s raw_data=%s",
+						cid,
+						(data_str[:2000] + "...") if len(data_str) > 2000 else data_str,
+					)
 					log.info(
 						"ai_shadow: generated draft for conversation_id=%s should_reply=%s reply_len=%s",
 						cid,
