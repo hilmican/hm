@@ -1,5 +1,6 @@
 import json
 import datetime as dt
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -12,6 +13,18 @@ _log = _lg.getLogger("ingest")
 _log_up = _lg.getLogger("ingest.upsert")
 from .queue import enqueue
 from sqlalchemy import text as _sql_text
+
+
+@dataclass
+class _InsertResult:
+	message_id: int
+	message_text: Optional[str]
+	attachments: Any
+	ad_id: Optional[str]
+	ad_link: Optional[str]
+	ad_title: Optional[str]
+	ad_name: Optional[str]
+	referral_json: Optional[str]
 
 # MySQL-only backend
 
@@ -38,31 +51,31 @@ def _ensure_ig_user(conn, ig_user_id: str) -> None:
 	)
 
 
-def _ensure_ig_user_with_data(session, ig_user_id: str, igba_id: str | None = None) -> None:
-	"""Ensure IG user exists with data (username, name, etc.).
+def _ensure_ig_user_with_data(ig_user_id: str, igba_id: str | None = None) -> None:
+	"""Ensure IG user exists with data (username, name, etc.) without holding long DB transactions."""
+	if not ig_user_id:
+		return
 
-	This only enriches user info via Graph API. Thread hydration is handled separately
-	when we have graph_conversation_id to avoid unnecessary API calls.
-	"""
-	# Check if user exists and has data
-	row = session.exec(
-		text("SELECT ig_user_id, username, fetch_status FROM ig_users WHERE ig_user_id=:id LIMIT 1").params(
-			id=str(ig_user_id)
-		)
-	).first()
-	if row:
-		username = getattr(row, "username", None) or (row[1] if len(row) > 1 else None)
-		fetch_status = getattr(row, "fetch_status", None) or (row[2] if len(row) > 2 else None)
-		# If we have username and successful fetch, consider it complete
-		if username and str(fetch_status or "").lower() == "ok":
-			return
+	def _needs_enrichment() -> bool:
+		with get_session() as session:
+			row = session.exec(
+				text("SELECT ig_user_id, username, fetch_status FROM ig_users WHERE ig_user_id=:id LIMIT 1").params(
+					id=str(ig_user_id)
+				)
+			).first()
+			if not row:
+				return True
+			username = getattr(row, "username", None) or (row[1] if len(row) > 1 else None)
+			fetch_status = getattr(row, "fetch_status", None) or (row[2] if len(row) > 2 else None)
+			return not (username and str(fetch_status or "").lower() == "ok")
 
-	# User doesn't exist or is incomplete - fetch synchronously
+	if not _needs_enrichment():
+		return
+
 	try:
 		import asyncio
 
 		loop = asyncio.get_event_loop()
-		# Use the async enrich_user function (idempotent: checks fetch_status='ok' internally)
 		from .enrichers import enrich_user
 
 		result = loop.run_until_complete(enrich_user(ig_user_id))
@@ -70,14 +83,16 @@ def _ensure_ig_user_with_data(session, ig_user_id: str, igba_id: str | None = No
 			_log.info("ingest: user %s enriched synchronously", ig_user_id)
 		else:
 			_log.debug("ingest: user %s already had data or fetch failed", ig_user_id)
+		return
 	except Exception as e:
 		_log.warning("ingest: failed to enrich user %s synchronously: %s", ig_user_id, e)
-		# Fallback: ensure at least the row exists
-		try:
-			# MySQL-safe fallback: INSERT IGNORE to avoid duplicate errors
+
+	# Fallback: ensure at least the row exists
+	try:
+		with get_session() as session:
 			session.exec(text("INSERT IGNORE INTO ig_users(ig_user_id) VALUES (:id)").params(id=str(ig_user_id)))
-		except Exception:
-			pass
+	except Exception:
+		pass
 
 
 def _extract_graph_conversation_id_from_message_id(mid: str, page_id: Optional[str] = None) -> Optional[str]:
@@ -325,7 +340,7 @@ def _update_conversation_summary_from_message(
 		)
 
 
-def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[int]:
+def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_InsertResult]:
 	message_obj = event.get("message") or {}
 	if not message_obj:
 		return None
@@ -623,63 +638,51 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[in
 	except Exception:
 		pass
 	
-	# Auto-link Instagram posts to products
-	try:
-		if attachments:
-			_auto_link_instagram_post(session, row, attachments)
-	except Exception as e:
-		# Never break message ingestion if post linking fails
-		try:
-			_log.warning("ingest: auto-link post failed for mid=%s: %s", str(mid), str(e))
-		except Exception:
-			pass
-	
-	# Auto-link ads to products
-	try:
-		if ad_id:
-			# Try to get ad_title from referral_json, preferring ads_context_data.ad_title
-			# This is more reliable than the top-level ad_title which may be generic like "ADS"
-			ad_title_final = ad_title
-			if referral_json_val:
-				try:
-					ref_data = json.loads(referral_json_val) if isinstance(referral_json_val, str) else referral_json_val
-					if isinstance(ref_data, dict):
-						# Check ads_context_data.ad_title first (from Instagram webhook format)
-						# This contains the actual post/product title, not just "ADS"
-						ads_ctx = ref_data.get("ads_context_data") or {}
-						if isinstance(ads_ctx, dict):
-							ctx_title = ads_ctx.get("ad_title")
-							# Prefer ads_context_data.ad_title if it exists and is more meaningful
-							if ctx_title and ctx_title.strip() and ctx_title.strip().upper() not in ("ADS", "AD", "ADVERTISEMENT"):
-								ad_title_final = ctx_title
-						# Also check direct fields if we don't have a good title yet
-						if not ad_title_final or ad_title_final.strip().upper() in ("ADS", "AD", "ADVERTISEMENT"):
-							ad_title_final = ref_data.get("ad_title") or ref_data.get("headline") or ref_data.get("source") or ad_title_final
-				except Exception:
-					pass
-			# Use ad_title_final or fallback to ad_name
-			if ad_title_final or ad_name:
-				_auto_link_ad(session, ad_id, ad_title_final, ad_name)
-	except Exception as e:
-		# Never break message ingestion if ad linking fails
-		try:
-			_log.warning("ingest: auto-link ad failed for mid=%s ad_id=%s: %s", str(mid), str(ad_id), str(e))
-		except Exception:
-			pass
-	
-	return row.id  # type: ignore
+	return _InsertResult(
+		message_id=int(row.id),  # type: ignore[arg-type]
+		message_text=text_val,
+		attachments=attachments,
+		ad_id=str(ad_id) if ad_id is not None else None,
+		ad_link=ad_link,
+		ad_title=ad_title,
+		ad_name=ad_name,
+		referral_json=referral_json_val if isinstance(referral_json_val, str) else json.dumps(referral_json_val)
+		if referral_json_val is not None
+		else None,
+	)
 
 
-def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
+def _derive_ad_title_for_linking(
+	ad_title: Optional[str],
+	ad_name: Optional[str],
+	referral_json_val: Optional[str],
+) -> Optional[str]:
+	ad_title_final = ad_title
+	if referral_json_val:
+		try:
+			ref_data = json.loads(referral_json_val) if isinstance(referral_json_val, str) else referral_json_val
+			if isinstance(ref_data, dict):
+				ads_ctx = ref_data.get("ads_context_data") or {}
+				if isinstance(ads_ctx, dict):
+					ctx_title = ads_ctx.get("ad_title")
+					if ctx_title and ctx_title.strip() and ctx_title.strip().upper() not in ("ADS", "AD", "ADVERTISEMENT"):
+						ad_title_final = ctx_title
+				if not ad_title_final or ad_title_final.strip().upper() in ("ADS", "AD", "ADVERTISEMENT"):
+					ad_title_final = ref_data.get("ad_title") or ref_data.get("headline") or ref_data.get("source") or ad_title_final
+		except Exception:
+			pass
+	return ad_title_final or ad_name
+
+
+def _auto_link_instagram_post(message_id: int, message_text: Optional[str], attachments: Any) -> None:
 	"""
-	Automatically detect Instagram post attachments and link them to products using AI.
-	This runs asynchronously and doesn't block message ingestion if it fails.
+	Automatically detect Instagram post attachments and link them to products using AI,
+	running any remote/API work outside of active DB transactions.
 	"""
 	try:
-		# Extract post info from attachments
 		if not attachments:
 			return
-		
+
 		post_info = None
 		if isinstance(attachments, list):
 			for att in attachments:
@@ -693,30 +696,29 @@ def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
 							"url": payload.get("url"),
 						}
 						break
-		
+
 		if not post_info or not post_info.get("ig_post_media_id"):
 			return
-		
-		post_id = post_info["ig_post_media_id"]
-		
-		# Check if already linked
-		try:
+
+		post_id = str(post_info["ig_post_media_id"])
+
+		from ..models import Product
+		from sqlmodel import select
+
+		with get_session() as session:
 			existing = session.exec(
 				_sql_text("SELECT post_id FROM posts_products WHERE post_id=:pid").bindparams(pid=post_id)
 			).first()
 			if existing:
 				_log.debug("ingest: post %s already linked, skipping", post_id)
 				return
-		except Exception:
-			pass
-		
-		# Get AI client (non-blocking if not available)
+			products = session.exec(select(Product).limit(500)).all()
+			product_list = [{"id": p.id, "name": p.name, "slug": p.slug} for p in products]
+
 		try:
 			from .ai import AIClient
-			from ..models import Product
-			from sqlmodel import select
-			from ..utils.slugify import slugify
-			
+			from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
+
 			ai = AIClient()
 			if not ai or not getattr(ai, "enabled", False):
 				_log.debug("ingest: AI not available for post linking")
@@ -724,51 +726,43 @@ def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
 		except Exception as e:
 			_log.debug("ingest: failed to initialize AI for post linking: %s", e)
 			return
-		
-		# Get products for context
-		try:
-			products = session.exec(select(Product).limit(500)).all()
-			product_list = [{"id": p.id, "name": p.name, "slug": p.slug} for p in products]
-		except Exception as e:
-			_log.warning("ingest: failed to load products for post linking: %s", e)
-			return
-		
-		# AI suggestion using unified prompt system
-		try:
-			from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
-			
-			system_prompt = AD_PRODUCT_MATCH_SYSTEM_PROMPT
-			
-			# Build prompt with post title and message text
-			post_text = f"{post_info.get('title', '')} {msg.text or ''}".strip()
-			
-			body = {
-				"ad_title": post_text,  # Reuse the same structure
-				"known_products": [{"id": p.id, "name": p.name} for p in products],
-				"schema": {
-					"product_id": "int|null",
-					"product_name": "str|null",
-					"confidence": "float",
-					"notes": "str|null",
-				},
-			}
-			
-			user_prompt = (
-				"Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
-				"Tüm alanlar çift tırnaklı olmalı.\nGirdi:\n" + json.dumps(body, ensure_ascii=False)
-			)
-			
-			suggestion = ai.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
-			
-			# Map response to expected format (using same schema as ads)
-			product_id = suggestion.get("product_id") or suggestion.get("suggested_product_id")
-			product_name = suggestion.get("product_name") or suggestion.get("suggested_product_name")
-			confidence = suggestion.get("confidence", 0.0)
-			confidence_float = float(confidence) if confidence is not None else 0.0
-			
-			# Create product if needed
-			if not product_id and product_name:
-				slug = slugify(product_name)
+
+		post_text = f"{post_info.get('title', '')} {message_text or ''}".strip()
+
+		body = {
+			"ad_title": post_text,
+			"known_products": [{"id": p["id"], "name": p["name"]} for p in product_list],
+			"schema": {
+				"product_id": "int|null",
+				"product_name": "str|null",
+				"confidence": "float",
+				"notes": "str|null",
+			},
+		}
+
+		user_prompt = (
+			"Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
+			"Tüm alanlar çift tırnaklı olmalı.\nGirdi:\n" + json.dumps(body, ensure_ascii=False)
+		)
+
+		suggestion = ai.generate_json(system_prompt=AD_PRODUCT_MATCH_SYSTEM_PROMPT, user_prompt=user_prompt)
+
+		product_id = suggestion.get("product_id") or suggestion.get("suggested_product_id")
+		product_name = suggestion.get("product_name") or suggestion.get("suggested_product_name")
+		confidence = suggestion.get("confidence", 0.0)
+		confidence_float = float(confidence) if confidence is not None else 0.0
+
+		if product_id is not None:
+			try:
+				product_id = int(product_id)
+			except (ValueError, TypeError):
+				product_id = None
+
+		if not product_id and product_name:
+			from ..utils.slugify import slugify
+
+			slug = slugify(product_name)
+			with get_session() as session:
 				existing = session.exec(select(Product).where(Product.slug == slug)).first()
 				if existing:
 					product_id = existing.id
@@ -783,20 +777,19 @@ def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
 					session.flush()
 					if new_product.id:
 						product_id = new_product.id
-			
-			# Only auto-link if confidence is high enough (>= 0.7)
-			min_confidence = 0.7
-			if not product_id or confidence_float < min_confidence:
-				_log.debug(
-					"ingest: post %s not auto-linked (product_id=%s, confidence=%.2f < %.2f)",
-					post_id,
-					product_id,
-					confidence_float,
-					min_confidence,
-				)
-				return
-			
-			# Create post record
+
+		min_confidence = 0.7
+		if not product_id or confidence_float < min_confidence:
+			_log.debug(
+				"ingest: post %s not auto-linked (product_id=%s, confidence=%.2f < %.2f)",
+				post_id,
+				product_id,
+				confidence_float,
+				min_confidence,
+			)
+			return
+
+		with get_session() as session:
 			try:
 				stmt_upsert = _sql_text("""
 					INSERT INTO posts(post_id, ig_post_media_id, title, url, message_id, updated_at)
@@ -811,11 +804,10 @@ def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
 					media_id=str(post_info["ig_post_media_id"]),
 					title=post_info.get("title"),
 					url=post_info.get("url"),
-					msg_id=int(msg.id or 0),
+					msg_id=int(message_id),
 				)
 				session.exec(stmt_upsert)
 			except Exception:
-				# SQLite fallback
 				stmt_sel = _sql_text("SELECT post_id FROM posts WHERE post_id=:pid").bindparams(pid=str(post_id))
 				existing_post = session.exec(stmt_sel).first()
 				if existing_post:
@@ -826,7 +818,7 @@ def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
 						pid=str(post_id),
 						title=post_info.get("title"),
 						url=post_info.get("url"),
-						msg_id=int(msg.id or 0),
+						msg_id=int(message_id),
 					)
 					session.exec(stmt_update)
 				else:
@@ -838,11 +830,10 @@ def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
 						media_id=str(post_info["ig_post_media_id"]),
 						title=post_info.get("title"),
 						url=post_info.get("url"),
-						msg_id=int(msg.id or 0),
+						msg_id=int(message_id),
 					)
 					session.exec(stmt_insert)
-			
-			# Link to product (mark as auto_linked)
+
 			try:
 				stmt_link = _sql_text("""
 					INSERT INTO posts_products(post_id, product_id, sku, auto_linked)
@@ -854,7 +845,6 @@ def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
 				)
 				session.exec(stmt_link)
 			except Exception:
-				# SQLite fallback
 				stmt_sel = _sql_text("SELECT post_id FROM posts_products WHERE post_id=:pid").bindparams(pid=str(post_id))
 				existing_link = session.exec(stmt_sel).first()
 				if existing_link:
@@ -868,58 +858,48 @@ def _auto_link_instagram_post(session, msg: Message, attachments: Any) -> None:
 						VALUES (:pid, :prod_id, NULL, 1)
 					""").bindparams(pid=str(post_id), prod_id=int(product_id))
 					session.exec(stmt_insert)
-			
-			_log.info(
-				"ingest: auto-linked post %s to product %s (confidence: %.2f)",
-				post_id,
-				product_id,
-				confidence_float,
-			)
-			
-		except Exception as e:
-			_log.warning("ingest: failed to auto-link post %s: %s", post_id, e)
-			# Don't raise - we don't want to break message ingestion
-			pass
+
+		_log.info(
+			"ingest: auto-linked post %s to product %s (confidence: %.2f)",
+			post_id,
+			product_id,
+			confidence_float,
+		)
 	except Exception as e:
-		# Outer exception handler for the entire function
 		_log.warning("ingest: _auto_link_instagram_post outer error: %s", e)
-		pass
 
 
-def _auto_link_ad(session, ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -> None:
+def _auto_link_ad(ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -> None:
 	"""
-	Automatically link an ad to a product using AI when a message with ad data is ingested.
-	This runs synchronously during message ingestion but doesn't block if it fails.
-	Only saves if AI confidence is >= 0.7.
+	Automatically link an ad to a product using AI without holding open DB transactions
+	while waiting on remote APIs. Only saves if AI confidence is >= 0.7.
 	"""
 	try:
 		if not ad_id:
 			return
-		
-		# Use ad_title from message, fallback to ad_name
+
 		ad_text = ad_title or ad_name
 		if not ad_text:
 			_log.debug("ingest: ad %s has no title/name, skipping auto-link", ad_id)
 			return
-		
-		# Check if already linked
-		try:
+
+		from ..models import Product
+		from sqlmodel import select
+
+		with get_session() as session:
 			existing = session.exec(
 				_sql_text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
 			).first()
 			if existing:
 				_log.debug("ingest: ad %s already linked, skipping", ad_id)
 				return
-		except Exception:
-			pass
-		
-		# Get AI client (non-blocking if not available)
+			products = session.exec(select(Product).limit(500)).all()
+			product_list = [{"id": p.id, "name": p.name} for p in products]
+
 		try:
 			from .ai import AIClient
-			from ..models import Product
-			from sqlmodel import select
 			from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
-			
+
 			ai = AIClient()
 			if not ai or not getattr(ai, "enabled", False):
 				_log.debug("ingest: AI not available for ad linking")
@@ -927,85 +907,89 @@ def _auto_link_ad(session, ad_id: str, ad_title: Optional[str], ad_name: Optiona
 		except Exception as e:
 			_log.debug("ingest: failed to initialize AI for ad linking: %s", e)
 			return
-		
-		# Get products for context
-		try:
-			products = session.exec(select(Product).limit(500)).all()
-			product_list = [{"id": p.id, "name": p.name} for p in products]
-		except Exception as e:
-			_log.warning("ingest: failed to load products for ad linking: %s", e)
-			return
-		
-		# AI suggestion using unified prompt system
-		try:
-			system_prompt = AD_PRODUCT_MATCH_SYSTEM_PROMPT
-			
-			body = {
-				"ad_title": ad_text,
-				"known_products": product_list,
-				"schema": {
-					"product_id": "int|null",
-					"product_name": "str|null",
-					"confidence": "float",
-					"notes": "str|null",
-				},
-			}
-			
-			user_prompt = (
-				"Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
-				"Tüm alanlar çift tırnaklı olmalı.\nGirdi:\n" + json.dumps(body, ensure_ascii=False)
-			)
-			
-			result = ai.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
-			
-			# Extract product_id and confidence
-			product_id = result.get("product_id")
-			if product_id is not None:
-				try:
-					product_id = int(product_id)
-				except (ValueError, TypeError):
-					product_id = None
-			
-			product_name = result.get("product_name")
-			confidence = result.get("confidence", 0.0)
-			confidence_float = float(confidence) if confidence is not None else 0.0
-			
-			# Only auto-link if confidence is high enough (>= 0.7)
-			min_confidence = 0.7
-			if not product_id or confidence_float < min_confidence:
-				_log.debug(
-					"ingest: ad %s not auto-linked (product_id=%s, confidence=%.2f < %.2f)",
-					ad_id,
-					product_id,
-					confidence_float,
-					min_confidence,
-				)
-				return
-			
-			# Save the mapping (mark as auto_linked)
+
+		body = {
+			"ad_title": ad_text,
+			"known_products": product_list,
+			"schema": {
+				"product_id": "int|null",
+				"product_name": "str|null",
+				"confidence": "float",
+				"notes": "str|null",
+			},
+		}
+
+		user_prompt = (
+			"Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
+			"Tüm alanlar çift tırnaklı olmalı.\nGirdi:\n" + json.dumps(body, ensure_ascii=False)
+		)
+
+		result = ai.generate_json(system_prompt=AD_PRODUCT_MATCH_SYSTEM_PROMPT, user_prompt=user_prompt)
+
+		product_id = result.get("product_id")
+		product_name = result.get("product_name")
+		confidence = result.get("confidence", 0.0)
+		confidence_float = float(confidence) if confidence is not None else 0.0
+
+		if product_id is not None:
 			try:
-				stmt_upsert_sqlite = _sql_text(
-					"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 1)"
+				product_id = int(product_id)
+			except (ValueError, TypeError):
+				product_id = None
+
+		if not product_id and product_name:
+			from ..utils.slugify import slugify
+
+			slug = slugify(product_name)
+			with get_session() as session:
+				existing = session.exec(select(Product).where(Product.slug == slug)).first()
+				if existing:
+					product_id = existing.id
+				else:
+					new_product = Product(
+						name=product_name,
+						slug=slug,
+						default_unit="adet",
+						default_price=None,
+					)
+					session.add(new_product)
+					session.flush()
+					if new_product.id:
+						product_id = new_product.id
+
+		min_confidence = 0.7
+		if not product_id or confidence_float < min_confidence:
+			_log.debug(
+				"ingest: ad %s not auto-linked (product_id=%s, confidence=%.2f < %.2f)",
+				ad_id,
+				product_id,
+				confidence_float,
+				min_confidence,
+			)
+			return
+
+		with get_session() as session:
+			try:
+				stmt_upsert_mysql = _sql_text(
+					"INSERT INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 1) "
+					"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku), auto_linked=1"
 				).bindparams(
 					id=str(ad_id),
-					pid=product_id,
+					pid=int(product_id),
 					sku=None,
 				)
-				session.exec(stmt_upsert_sqlite)
+				session.exec(stmt_upsert_mysql)
 			except Exception:
-				# Fallback for MySQL
 				try:
-					stmt_upsert_mysql = _sql_text(
-						"INSERT INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 1) "
-						"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku), auto_linked=1"
+					stmt_upsert_sqlite = _sql_text(
+						"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 1)"
 					).bindparams(
 						id=str(ad_id),
-						pid=product_id,
+						pid=int(product_id),
 						sku=None,
 					)
-					session.exec(stmt_upsert_mysql)
+					session.exec(stmt_upsert_sqlite)
 				except Exception:
-					# Last resort: try separate update/insert
 					stmt_sel = _sql_text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
 					rowm = session.exec(stmt_sel).first()
 					if rowm:
@@ -1013,7 +997,7 @@ def _auto_link_ad(session, ad_id: str, ad_title: Optional[str], ad_name: Optiona
 							"UPDATE ads_products SET product_id=:pid, sku=:sku, auto_linked=1 WHERE ad_id=:id"
 						).bindparams(
 							id=str(ad_id),
-							pid=product_id,
+							pid=int(product_id),
 							sku=None,
 						)
 						session.exec(stmt_update)
@@ -1022,26 +1006,19 @@ def _auto_link_ad(session, ad_id: str, ad_title: Optional[str], ad_name: Optiona
 							"INSERT INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 1)"
 						).bindparams(
 							id=str(ad_id),
-							pid=product_id,
+							pid=int(product_id),
 							sku=None,
 						)
 						session.exec(stmt_insert)
-			
-			_log.info(
-				"ingest: auto-linked ad %s to product %s (confidence: %.2f)",
-				ad_id,
-				product_id,
-				confidence_float,
-			)
-			
-		except Exception as e:
-			_log.warning("ingest: failed to auto-link ad %s: %s", ad_id, e)
-			# Don't raise - we don't want to break message ingestion
-			pass
+
+		_log.info(
+			"ingest: auto-linked ad %s to product %s (confidence: %.2f)",
+			ad_id,
+			product_id,
+			confidence_float,
+		)
 	except Exception as e:
-		# Outer exception handler for the entire function
 		_log.warning("ingest: _auto_link_ad outer error: %s", e)
-		pass
 
 
 def _create_attachment_stubs(session, message_id: int, mid: str, attachments: Any) -> None:
@@ -1431,13 +1408,12 @@ def handle(raw_event_id: int) -> int:
 				user_to_enrich = str(recipient_id)
 
 			if user_to_enrich:
-				# Enrich IG user info in a short-lived session to avoid long-held transactions
-				from .ingest import _ensure_ig_user_with_data as _ensure_user  # type: ignore
-				with get_session() as session_user:
-					_ensure_user(session_user, user_to_enrich, str(igba_id))
+				# Enrich IG user info without keeping the current transaction open
+				_ensure_ig_user_with_data(user_to_enrich, str(igba_id))
 
 			mid = message_obj.get("mid") or message_obj.get("id")
 
+			insert_result: Optional[_InsertResult] = None
 			# Insert message + attachments in a short-lived transaction
 			with get_session() as session_msg:
 				# Ensure page/account row exists (MySQL dialect)
@@ -1447,12 +1423,12 @@ def handle(raw_event_id: int) -> int:
 					# Best-effort; do not fail ingestion because of ig_accounts
 					pass
 
-				msg_id = _insert_message(session_msg, event, igba_id)
-				if msg_id:
+				insert_result = _insert_message(session_msg, event, igba_id)
+				if insert_result:
 					inserted += 1
-					attachments = message_obj.get("attachments")
+					attachments = insert_result.attachments
 					if attachments:
-						_create_attachment_stubs(session_msg, msg_id, str(mid), attachments)
+						_create_attachment_stubs(session_msg, insert_result.message_id, str(mid), attachments)
 
 					# Hydration is now manual-only (via UI/admin actions) to minimize Graph API requests.
 					# We only enrich user info (1 request) and let hydration happen on-demand.
@@ -1460,6 +1436,32 @@ def handle(raw_event_id: int) -> int:
 					# Enqueue enrich_page (idempotent via jobs table uniqueness)
 					try:
 						enqueue("enrich_page", key=str(igba_id), payload={"igba_id": str(igba_id)})
+					except Exception:
+						pass
+
+			# Run slow/remote follow-ups outside the DB transaction
+			if insert_result:
+				try:
+					if insert_result.attachments:
+						_auto_link_instagram_post(insert_result.message_id, insert_result.message_text, insert_result.attachments)
+				except Exception as e:
+					try:
+						_log.warning("ingest: auto-link post deferred error mid=%s msg=%s", str(mid), str(e))
+					except Exception:
+						pass
+
+				try:
+					if insert_result.ad_id:
+						ad_title_final = _derive_ad_title_for_linking(
+							insert_result.ad_title,
+							insert_result.ad_name,
+							insert_result.referral_json,
+						)
+						if ad_title_final or insert_result.ad_name:
+							_auto_link_ad(insert_result.ad_id, ad_title_final, insert_result.ad_name)
+				except Exception as e:
+					try:
+						_log.warning("ingest: auto-link ad deferred error mid=%s ad_id=%s err=%s", str(mid), str(insert_result.ad_id), str(e))
 					except Exception:
 						pass
 
