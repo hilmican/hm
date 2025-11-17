@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Optional
+from typing import Optional, Any, Dict, List
 
 from fastapi import APIRouter, Request, HTTPException, Form
 from sqlalchemy import text
@@ -14,6 +14,187 @@ from ..services.monitoring import get_ai_run_logs
 
 
 router = APIRouter(prefix="/ig/ai", tags=["instagram-ai"])
+
+
+def _row_get(row: Any, key: str) -> Any:
+    try:
+        mapping = getattr(row, "_mapping", None)
+        if mapping and key in mapping:
+            return mapping[key]
+    except Exception:
+        pass
+    if hasattr(row, key):
+        return getattr(row, key)
+    try:
+        return row[key]
+    except Exception:
+        return None
+
+
+def _ms_to_datetime(value: Any) -> Optional[dt.datetime]:
+    try:
+        if value is None:
+            return None
+        ms = int(value)
+        if ms <= 0:
+            return None
+        return dt.datetime.utcfromtimestamp(ms / 1000.0)
+    except Exception:
+        return None
+
+
+def _collect_shadow_metrics(limit: int = 100) -> Dict[str, Any]:
+    n = max(1, min(int(limit or 100), 200))
+    now = dt.datetime.utcnow()
+    status_counts: Dict[str, int] = {}
+    entries: List[Dict[str, Any]] = []
+    ready_count = 0
+
+    with get_session() as session:
+        try:
+            rows = session.exec(
+                text(
+                    """
+                    SELECT COALESCE(status, 'pending') AS st, COUNT(*) AS cnt
+                    FROM ai_shadow_state
+                    GROUP BY COALESCE(status, 'pending')
+                    """
+                )
+            ).all()
+            for row in rows:
+                status = str(_row_get(row, "st") or "pending")
+                cnt = int(_row_get(row, "cnt") or 0)
+                status_counts[status] = cnt
+        except Exception:
+            status_counts = {}
+
+        try:
+            row_ready = session.exec(
+                text(
+                    """
+                    SELECT COUNT(*) AS c
+                    FROM ai_shadow_state
+                    WHERE (status = 'pending' OR status IS NULL)
+                      AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
+                    """
+                )
+            ).first()
+            ready_count = int(_row_get(row_ready, "c") or 0) if row_ready else 0
+        except Exception:
+            ready_count = 0
+
+        try:
+            rows = session.exec(
+                text(
+                    f"""
+                    SELECT
+                        s.conversation_id,
+                        COALESCE(s.status, 'pending') AS status,
+                        s.last_inbound_ms,
+                        s.next_attempt_at,
+                        s.updated_at,
+                        c.graph_conversation_id,
+                        c.last_message_at,
+                        u.username,
+                        u.name AS contact_name,
+                        (SELECT MIN(m.timestamp_ms) FROM message m WHERE m.conversation_id = s.conversation_id) AS first_msg_ms,
+                        (SELECT MAX(m.timestamp_ms) FROM message m WHERE m.conversation_id = s.conversation_id) AS last_msg_ms,
+                        (SELECT COUNT(*) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id) AS reply_count,
+                        (SELECT MIN(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id) AS first_reply_at,
+                        (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id) AS last_reply_at
+                    FROM ai_shadow_state s
+                    LEFT JOIN conversations c ON c.id = s.conversation_id
+                    LEFT JOIN ig_users u ON u.id = c.ig_user_id
+                    ORDER BY COALESCE(s.next_attempt_at, CURRENT_TIMESTAMP) ASC, s.updated_at DESC
+                    LIMIT {n}
+                    """
+                )
+            ).all()
+        except Exception:
+            rows = []
+
+    total_replies = 0
+    total_first_reply_latency = 0.0
+    first_reply_samples = 0
+
+    for row in rows:
+        convo_id = _row_get(row, "conversation_id")
+        status = _row_get(row, "status") or "pending"
+        last_inbound_at = _ms_to_datetime(_row_get(row, "last_inbound_ms"))
+        first_message_at = _ms_to_datetime(_row_get(row, "first_msg_ms"))
+        last_message_at = _ms_to_datetime(_row_get(row, "last_msg_ms"))
+        first_reply_at = _row_get(row, "first_reply_at")
+        last_reply_at = _row_get(row, "last_reply_at")
+        if isinstance(first_reply_at, str):
+            try:
+                first_reply_at = dt.datetime.fromisoformat(first_reply_at)
+            except Exception:
+                first_reply_at = None
+        if isinstance(last_reply_at, str):
+            try:
+                last_reply_at = dt.datetime.fromisoformat(last_reply_at)
+            except Exception:
+                last_reply_at = None
+
+        reply_count = int(_row_get(row, "reply_count") or 0)
+        total_replies += reply_count
+
+        wait_seconds = None
+        if last_inbound_at:
+            wait_seconds = max(0.0, (now - last_inbound_at).total_seconds())
+
+        time_to_first_reply = None
+        if first_reply_at and last_message_at:
+            time_to_first_reply = (first_reply_at - last_message_at).total_seconds()
+            if time_to_first_reply is not None and time_to_first_reply >= 0:
+                total_first_reply_latency += time_to_first_reply
+                first_reply_samples += 1
+
+        time_since_last_reply = None
+        if last_reply_at:
+            time_since_last_reply = max(0.0, (now - last_reply_at).total_seconds())
+
+        entries.append(
+            {
+                "conversation_id": int(convo_id) if convo_id is not None else None,
+                "status": str(status),
+                "last_inbound_at": last_inbound_at,
+                "first_message_at": first_message_at,
+                "last_message_at": last_message_at,
+                "next_attempt_at": _row_get(row, "next_attempt_at"),
+                "updated_at": _row_get(row, "updated_at"),
+                "graph_conversation_id": _row_get(row, "graph_conversation_id"),
+                "username": _row_get(row, "username"),
+                "contact_name": _row_get(row, "contact_name"),
+                "reply_count": reply_count,
+                "first_reply_at": first_reply_at,
+                "last_reply_at": last_reply_at,
+                "wait_seconds": wait_seconds,
+                "time_to_first_reply_seconds": time_to_first_reply,
+                "time_since_last_reply_seconds": time_since_last_reply,
+            }
+        )
+
+    oldest_pending = max(
+        [e["wait_seconds"] or 0 for e in entries if e["status"] == "pending" and e.get("wait_seconds") is not None],
+        default=0,
+    )
+    summary = {
+        "total_queue": sum(status_counts.values()),
+        "ready_to_run": ready_count,
+        "reply_total": total_replies,
+        "with_replies": sum(1 for e in entries if (e.get("reply_count") or 0) > 0),
+        "avg_first_reply_seconds": (total_first_reply_latency / first_reply_samples) if first_reply_samples else None,
+        "avg_reply_count": (total_replies / len(entries)) if entries else 0,
+        "oldest_pending_seconds": oldest_pending,
+    }
+    return {
+        "generated_at": now,
+        "status_counts": status_counts,
+        "entries": entries,
+        "summary": summary,
+        "limit": n,
+    }
 
 
 @router.get("/process")
@@ -351,6 +532,51 @@ def preview_process(body: dict):
         "messages_without_timestamp": msg_ts_missing,
         "cutoff": cutoff_dt.isoformat(),
     }
+
+
+@router.get("/shadow/monitor")
+def shadow_monitor(request: Request, limit: int = 50):
+    data = _collect_shadow_metrics(limit)
+    templates = request.app.state.templates
+    ctx = {"request": request, **data}
+    return templates.TemplateResponse("ig_ai_shadow.html", ctx)
+
+
+@router.get("/shadow/monitor/data")
+def shadow_monitor_data(limit: int = 50):
+    data = _collect_shadow_metrics(limit)
+
+    def _serialize_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+        out = dict(entry)
+        for key in [
+            "last_inbound_at",
+            "first_message_at",
+            "last_message_at",
+            "next_attempt_at",
+            "updated_at",
+            "first_reply_at",
+            "last_reply_at",
+        ]:
+            val = out.get(key)
+            if isinstance(val, dt.datetime):
+                out[key] = val.isoformat()
+            elif val is None:
+                out[key] = None
+            else:
+                try:
+                    out[key] = str(val)
+                except Exception:
+                    out[key] = None
+        return out
+
+    payload = {
+        "generated_at": data["generated_at"].isoformat(),
+        "status_counts": data["status_counts"],
+        "summary": data["summary"],
+        "limit": data["limit"],
+        "entries": [_serialize_entry(e) for e in data["entries"]],
+    }
+    return payload
 
 
 @router.get("/run/{run_id}/logs")

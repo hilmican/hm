@@ -1,0 +1,246 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AI Shadow Kuyruk Takibi</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; margin:24px; background:#f9fafb; color:#111827; }
+    h2 { margin-top:8px; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:18px; margin:16px 0; box-shadow:0 1px 2px rgba(15,23,42,0.08); }
+    .metrics { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap:12px; }
+    .metric-card { background:#0f172a; color:#f8fafc; border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:6px; }
+    .metric-card .label { font-size:12px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.8; }
+    .metric-card .value { font-size:28px; font-weight:600; }
+    .metric-card .sub { font-size:13px; opacity:0.8; }
+    .status-grid { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+    .status-chip { padding:8px 12px; border-radius:10px; background:#eef2ff; color:#312e81; font-weight:500; min-width:120px; display:flex; justify-content:space-between; border:1px solid rgba(99,102,241,0.25); }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { padding:10px 8px; border-bottom:1px solid #f1f5f9; text-align:left; vertical-align:top; }
+    th { font-size:13px; text-transform:uppercase; letter-spacing:0.05em; color:#475569; background:#f8fafc; position:sticky; top:0; z-index:1; }
+    tr:hover { background:#f8fafc; }
+    .muted { color:#6b7280; font-size:12px; }
+    .status-pill { display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; text-transform:capitalize; }
+    .status-pending { background:#fef3c7; color:#92400e; }
+    .status-running { background:#dbeafe; color:#1e3a8a; }
+    .status-suggested { background:#dcfce7; color:#065f46; }
+    .status-paused { background:#ede9fe; color:#5b21b6; }
+    .status-error { background:#fee2e2; color:#991b1b; }
+    .status-exhausted { background:#e5e7eb; color:#1f2937; }
+    .card-header { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    button.refresh { border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:8px; padding:8px 14px; cursor:pointer; font-weight:500; }
+    button.refresh:disabled { opacity:0.5; cursor:not-allowed; }
+    @media (max-width:1024px){
+      table { font-size:13px; }
+      th, td { padding:8px 6px; }
+    }
+  </style>
+</head>
+<body>
+  {% include "_nav.html" %}
+  <h2>AI Shadow Kuyruk Takibi</h2>
+  <div class="muted">Kuyruktaki konuşmaları, bekleme sürelerini ve AI yanıt performansını izleyin.</div>
+
+  {% macro fmt_dt(value) -%}
+    {% if value %}{{ value.strftime("%Y-%m-%d %H:%M:%S") }}{% else %}-{% endif %}
+  {%- endmacro %}
+  {% macro fmt_secs(value) -%}
+    {% if value is none %}-{% elif value < 60 %}{{ "%.1f"|format(value) }} sn{% elif value < 3600 %}{{ "%.1f"|format(value/60) }} dk{% else %}{{ "%.1f"|format(value/3600) }} sa{% endif %}
+  {%- endmacro %}
+
+  <div class="metrics">
+    <div class="metric-card">
+      <div class="label">Toplam Kuyruk</div>
+      <div class="value" id="metricTotalQueue">{{ summary.total_queue or 0 }}</div>
+      <div class="sub">{{ summary.with_replies or 0 }} konuşma yanıt aldı</div>
+    </div>
+    <div class="metric-card">
+      <div class="label">Hazır / Bekleyen</div>
+      <div class="value" id="metricReady">{{ summary.ready_to_run or 0 }}</div>
+      <div class="sub">Bekleyen en eski: {{ fmt_secs(summary.oldest_pending_seconds) }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="label">İlk Yanıt Süresi (Ø)</div>
+      <div class="value" id="metricAvgFirst">
+        {% if summary.avg_first_reply_seconds is not none %}
+          {{ fmt_secs(summary.avg_first_reply_seconds) }}
+        {% else %}-{% endif %}
+      </div>
+      <div class="sub">Yanıt veren konuşmalar için</div>
+    </div>
+    <div class="metric-card">
+      <div class="label">Yanıt Sayısı (Ø)</div>
+      <div class="value" id="metricAvgReplies">{{ "%.1f"|format(summary.avg_reply_count or 0) }}</div>
+      <div class="sub">Toplam {{ summary.reply_total or 0 }} taslak</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3>Durum Dağılımı</h3>
+      <div class="muted">Son güncelleme: <span id="generatedAt">{{ fmt_dt(generated_at) }}</span></div>
+    </div>
+    <div class="status-grid" id="statusChips">
+      {% if status_counts %}
+        {% for st, count in status_counts.items() %}
+          <div class="status-chip">
+            <span>{{ st }}</span>
+            <span>{{ count }}</span>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="muted">Kuyrukta kayıt yok.</div>
+      {% endif %}
+    </div>
+    <div class="muted" style="margin-top:8px;">Gösterilen konuşma limiti: {{ limit }}</div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3>Aktif Konuşmalar</h3>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <span class="muted">Otomatik 10 sn'de bir yenilenir</span>
+        <button class="refresh" id="refreshBtn">Yenile</button>
+      </div>
+    </div>
+    <div style="overflow:auto; max-height:600px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Konuşma</th>
+            <th>Durum</th>
+            <th>Son Mesaj</th>
+            <th>Bekleme</th>
+            <th>İlk Yanıt</th>
+            <th>Son Yanıt</th>
+            <th>Yanıt Sayısı</th>
+            <th>Planlanan</th>
+            <th>Güncellendi</th>
+          </tr>
+        </thead>
+        <tbody id="shadowTableBody">
+          {% for entry in entries %}
+          <tr>
+            <td>
+              {% if entry.conversation_id %}
+                <a href="/ig/inbox/{{ entry.conversation_id }}" target="_blank">#{{ entry.conversation_id }}</a>
+              {% else %}-{% endif %}
+              <div class="muted">
+                {% if entry.username %}@{{ entry.username }}{% endif %}
+                {% if entry.contact_name %} · {{ entry.contact_name }}{% endif %}
+              </div>
+            </td>
+            <td>
+              <span class="status-pill status-{{ entry.status }}">{{ entry.status }}</span>
+            </td>
+            <td>
+              {{ fmt_dt(entry.last_message_at or entry.last_inbound_at) }}
+              <div class="muted">{% if entry.first_message_at %}İlk: {{ fmt_dt(entry.first_message_at) }}{% endif %}</div>
+            </td>
+            <td>{{ fmt_secs(entry.wait_seconds) }}</td>
+            <td>
+              {{ fmt_dt(entry.first_reply_at) }}
+              <div class="muted">{{ fmt_secs(entry.time_to_first_reply_seconds) }}</div>
+            </td>
+            <td>
+              {{ fmt_dt(entry.last_reply_at) }}
+              <div class="muted">{{ fmt_secs(entry.time_since_last_reply_seconds) }}</div>
+            </td>
+            <td>{{ entry.reply_count }}</td>
+            <td>{{ fmt_dt(entry.next_attempt_at) }}</td>
+            <td>{{ fmt_dt(entry.updated_at) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const LIMIT = {{ limit }};
+    const refreshBtn = document.getElementById('refreshBtn');
+
+    function fmtDuration(seconds){
+      if (seconds === null || seconds === undefined) return '-';
+      if (seconds < 60) return seconds.toFixed(1) + ' sn';
+      if (seconds < 3600) return (seconds/60).toFixed(1) + ' dk';
+      return (seconds/3600).toFixed(1) + ' sa';
+    }
+
+    function fmtDate(iso){
+      if (!iso) return '-';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '-';
+      return d.toLocaleString();
+    }
+
+    function renderStatusChips(data){
+      const container = document.getElementById('statusChips');
+      if (!container) return;
+      container.innerHTML = '';
+      const entries = Object.entries(data || {});
+      if (!entries.length){
+        container.innerHTML = '<div class="muted">Kuyrukta kayıt yok.</div>';
+        return;
+      }
+      for (const [status, count] of entries){
+        const div = document.createElement('div');
+        div.className = 'status-chip';
+        div.innerHTML = `<span>${status}</span><span>${count}</span>`;
+        container.appendChild(div);
+      }
+    }
+
+    function renderTable(entries){
+      const tbody = document.getElementById('shadowTableBody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      for (const entry of (entries || [])){
+        const tr = document.createElement('tr');
+        const username = entry.username ? '@' + entry.username : '';
+        const contact = entry.contact_name ? entry.contact_name : '';
+        tr.innerHTML = `
+          <td>
+            ${entry.conversation_id ? `<a href="/ig/inbox/${entry.conversation_id}" target="_blank">#${entry.conversation_id}</a>` : '-'}
+            <div class="muted">${[username, contact].filter(Boolean).join(' · ')}</div>
+          </td>
+          <td><span class="status-pill status-${entry.status || 'pending'}">${entry.status || '-'}</span></td>
+          <td>${fmtDate(entry.last_message_at || entry.last_inbound_at)}</td>
+          <td>${fmtDuration(entry.wait_seconds)}</td>
+          <td>${fmtDate(entry.first_reply_at)}<div class="muted">${fmtDuration(entry.time_to_first_reply_seconds)}</div></td>
+          <td>${fmtDate(entry.last_reply_at)}<div class="muted">${fmtDuration(entry.time_since_last_reply_seconds)}</div></td>
+          <td>${entry.reply_count ?? 0}</td>
+          <td>${fmtDate(entry.next_attempt_at)}</td>
+          <td>${fmtDate(entry.updated_at)}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function refreshData(){
+      if (refreshBtn) refreshBtn.disabled = true;
+      try{
+        const res = await fetch(`/ig/ai/shadow/monitor/data?limit=${LIMIT}`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (data.summary){
+          document.getElementById('metricTotalQueue').textContent = data.summary.total_queue ?? 0;
+          document.getElementById('metricReady').textContent = data.summary.ready_to_run ?? 0;
+          document.getElementById('metricAvgFirst').textContent = data.summary.avg_first_reply_seconds != null ? fmtDuration(data.summary.avg_first_reply_seconds) : '-';
+          document.getElementById('metricAvgReplies').textContent = (data.summary.avg_reply_count ?? 0).toFixed(1);
+        }
+        document.getElementById('generatedAt').textContent = fmtDate(data.generated_at);
+        renderStatusChips(data.status_counts || {});
+        renderTable(data.entries || []);
+      } catch (err){
+        console.error('refresh error', err);
+      } finally {
+        if (refreshBtn) refreshBtn.disabled = false;
+      }
+    }
+
+    refreshBtn?.addEventListener('click', refreshData);
+    setInterval(refreshData, 10000);
+  </script>
+</body>
+</html>
+
