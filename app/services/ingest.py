@@ -20,6 +20,9 @@ class _InsertResult:
 	message_id: int
 	message_text: Optional[str]
 	attachments: Any
+	conversation_id: Optional[int]
+	timestamp_ms: Optional[int]
+	direction: Optional[str]
 	ad_id: Optional[str]
 	ad_link: Optional[str]
 	ad_title: Optional[str]
@@ -625,23 +628,21 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 			session.exec(_sql_text("UPDATE stories SET url=COALESCE(:url,url), updated_at=CURRENT_TIMESTAMP WHERE story_id=:id")).params(id=str(story_id), url=(str(story_url) if story_url else None))
 	except Exception:
 		pass
-	# Touch AI shadow state on inbound messages to start debounce timer
+	shadow_ts = None
 	try:
-		if (direction or "in") == "in" and conversation_pk:
-			from .ai_shadow import touch_shadow_state
-
-			ts_val = int(timestamp_ms) if isinstance(timestamp_ms, (int, float)) else (
-				int(str(timestamp_ms)) if isinstance(timestamp_ms, str) and str(timestamp_ms).isdigit() else None
-			)
-			# Use canonical internal conversation id (int)
-			touch_shadow_state(int(conversation_pk), ts_val)
+		if isinstance(timestamp_ms, (int, float)):
+			shadow_ts = int(timestamp_ms)
+		elif isinstance(timestamp_ms, str) and timestamp_ms.isdigit():
+			shadow_ts = int(timestamp_ms)
 	except Exception:
-		pass
-	
+		shadow_ts = None
 	return _InsertResult(
 		message_id=int(row.id),  # type: ignore[arg-type]
 		message_text=text_val,
 		attachments=attachments,
+		conversation_id=int(conversation_pk) if conversation_pk is not None else None,
+		timestamp_ms=shadow_ts,
+		direction=direction,
 		ad_id=str(ad_id) if ad_id is not None else None,
 		ad_link=ad_link,
 		ad_title=ad_title,
@@ -1441,6 +1442,16 @@ def handle(raw_event_id: int) -> int:
 
 			# Run slow/remote follow-ups outside the DB transaction
 			if insert_result:
+				try:
+					if (insert_result.direction or "in") == "in" and insert_result.conversation_id:
+						from .ai_shadow import touch_shadow_state
+
+						touch_shadow_state(
+							int(insert_result.conversation_id),
+							int(insert_result.timestamp_ms) if insert_result.timestamp_ms is not None else None,
+						)
+				except Exception:
+					pass
 				try:
 					if insert_result.attachments:
 						_auto_link_instagram_post(insert_result.message_id, insert_result.message_text, insert_result.attachments)
