@@ -192,11 +192,12 @@ def _load_focus_product_and_stock(conversation_id: int) -> Tuple[Optional[Dict[s
 def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[str, Any]], str]:
 	"""
 	Load recent messages for this conversation and return (history_list, last_customer_message).
-
+	
 	history_list: [{"dir": "in|out", "text": "str", "timestamp_ms": int}, ...]
 	"""
-	history: List[Dict[str, Any]] = []
+	history_all: List[Dict[str, Any]] = []
 	last_customer_message = ""
+	last_customer_idx: Optional[int] = None
 	with get_session() as session:
 		msgs = (
 			session.exec(
@@ -213,12 +214,19 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 				"text": (m.text or ""),
 				"timestamp_ms": int(m.timestamp_ms or 0),
 			}
-			history.append(entry)
-			if (m.direction or "in") == "in" and (m.text or "").strip():
-				last_customer_message = m.text or ""
+			history_all.append(entry)
+			if (entry["dir"] or "in").lower() == "in" and (entry["text"] or "").strip():
+				last_customer_message = entry["text"] or ""
+				last_customer_idx = len(history_all) - 1
 		except Exception:
 			continue
-	return history, last_customer_message
+	if last_customer_idx is not None:
+		history_trimmed = history_all[: last_customer_idx + 1]
+	else:
+		history_trimmed = history_all
+		if not last_customer_message:
+			last_customer_message = ""
+	return history_trimmed, last_customer_message
 
 
 def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = False) -> Dict[str, Any]:
