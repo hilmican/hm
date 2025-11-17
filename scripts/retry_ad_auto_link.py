@@ -101,7 +101,7 @@ def retry_ad_linking(ad_id: str = None, conversation_id: int = None, dry_run: bo
                 print(f"  [DRY RUN] Would call _auto_link_ad with ad_title='{ad_title_final}', ad_name='{ad_name}'")
             else:
                 try:
-                    _auto_link_ad(session, str(ad_id_val), ad_title_final, ad_name)
+                    _auto_link_ad(str(ad_id_val), ad_title_final, ad_name)
                     # Check if it was linked
                     linked = session.exec(
                         text("SELECT product_id FROM ads_products WHERE ad_id=:id").params(id=str(ad_id_val))
