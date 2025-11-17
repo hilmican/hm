@@ -9,6 +9,7 @@ from sqlmodel import select
 from ..db import get_session
 from ..models import Message, Product, Item
 from .ai import AIClient
+from .ai_context import VariantExclusions, parse_variant_exclusions, variant_is_excluded
 from .ai_ig import _detect_focus_product
 
 
@@ -51,6 +52,8 @@ def _load_focus_product_and_stock(conversation_id: int) -> Tuple[Optional[Dict[s
 	focus_slug, focus_conf = _detect_focus_product(str(conversation_id))
 	product_info: Optional[Dict[str, Any]] = None
 	stock: List[Dict[str, Any]] = []
+	product_default_price: Optional[float] = None
+	variant_exclusions: VariantExclusions = VariantExclusions()
 	if not focus_slug:
 		return None, stock
 	with get_session() as session:
@@ -145,6 +148,14 @@ def _load_focus_product_and_stock(conversation_id: int) -> Tuple[Optional[Dict[s
 				p_slug = rowp2.slug
 			except Exception:
 				pass
+			try:
+				product_default_price = float(rowp2.default_price) if rowp2.default_price is not None else None
+			except Exception:
+				product_default_price = None
+			try:
+				variant_exclusions = parse_variant_exclusions(getattr(rowp2, "ai_variant_exclusions", None))
+			except Exception:
+				variant_exclusions = VariantExclusions()
 		product_info = {
 			"id": p_id_val,
 			"name": p_name,
@@ -152,6 +163,29 @@ def _load_focus_product_and_stock(conversation_id: int) -> Tuple[Optional[Dict[s
 			"slug": p_slug,
 			"confidence": float(focus_conf or 0.0),
 		}
+		if product_default_price is not None:
+			for entry in stock:
+				try:
+					entry["price"] = product_default_price
+				except Exception:
+					continue
+		if not variant_exclusions.is_empty():
+			filtered: List[Dict[str, Any]] = []
+			for entry in stock:
+				if variant_is_excluded(variant_exclusions, entry.get("color"), entry.get("size")):
+					continue
+				filtered.append(entry)
+			stock = filtered
+		if not stock:
+			stock.append(
+				{
+					"sku": (product_info.get("slug_or_sku") if product_info else focus_slug) or f"product:{p_id_val or ''}",
+					"name": product_info.get("name") if product_info else None,
+					"color": None,
+					"size": None,
+					"price": product_default_price,
+				}
+			)
 	return product_info, stock
 
 

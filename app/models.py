@@ -116,6 +116,11 @@ class Product(SQLModel, table=True):
     ai_system_msg: Optional[str] = Field(default=None, sa_column=Column(Text))
     ai_prompt_msg: Optional[str] = Field(default=None, sa_column=Column(Text))
     ai_tags: Optional[str] = Field(default=None, description="JSON array of keywords for focus detection")
+    ai_variant_exclusions: Optional[str] = Field(
+        default=None,
+        sa_column=Column(Text),
+        description="JSON or comma separated variant (color/size) exclusions for AI replies",
+    )
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 

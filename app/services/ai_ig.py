@@ -9,6 +9,7 @@ from sqlmodel import select
 from ..db import get_session
 from ..models import Message, Product
 from .ai import AIClient
+from .ai_context import VariantExclusions, parse_variant_exclusions, variant_is_excluded
 
 
 class AIAdapter:
@@ -30,23 +31,38 @@ def sys_prompt(text: str) -> str:
 	return text or ""
 
 def lookup_price(sku_or_slug: str) -> Optional[float]:
-	"""Return default/unit price if available."""
+	"""Return default/unit price if available (prioritizing product defaults)."""
 	from ..models import Item
 	with get_session() as session:
 		try:
-			# try SKU
-			row = session.exec(select(Item).where(Item.sku == sku_or_slug).limit(1)).first()
-			if row and row.price is not None:
-				return float(row.price)
-		except Exception:
-			pass
-		try:
-			# fallback by product slug/name
-			prow = session.exec(select(Product).where((Product.slug == sku_or_slug) | (Product.name == sku_or_slug)).limit(1)).first()
+			# Prefer product lookup by slug/name first
+			prow = session.exec(
+				select(Product).where((Product.slug == sku_or_slug) | (Product.name == sku_or_slug)).limit(1)
+			).first()
 			if prow and prow.default_price is not None:
 				return float(prow.default_price)
 		except Exception:
-			pass
+			prow = None
+		try:
+			row = session.exec(select(Item).where(Item.sku == sku_or_slug).limit(1)).first()
+		except Exception:
+			row = None
+		if row:
+			# Attempt to use the parent product default price if available
+			try:
+				if getattr(row, "product_id", None) is not None:
+					prow2 = session.exec(select(Product).where(Product.id == int(row.product_id)).limit(1)).first()
+				else:
+					prow2 = None
+			except Exception:
+				prow2 = None
+			if prow2 and prow2.default_price is not None:
+				return float(prow2.default_price)
+			try:
+				if row.price is not None:
+					return float(row.price)
+			except Exception:
+				pass
 	return None
 
 
@@ -154,80 +170,153 @@ def build_prompt(conversation_id: str, customer_text: str) -> Tuple[str, str]:
 		"payment_options": ["cod_cash", "cod_card"],
 	}
 	stock: List[Dict[str, Any]] = []
+	product_default_price: Optional[float] = None
+	variant_exclusions: VariantExclusions = VariantExclusions()
+	history: List[Dict[str, Any]] = []
+
+	def _hydrate_product_context(prod: Optional[Product]) -> None:
+		nonlocal sys_msg, prompt_msg, product_default_price, variant_exclusions
+		if not prod:
+			return
+		try:
+			val = getattr(prod, "ai_system_msg", None)
+			if val is not None:
+				sys_msg = val
+		except Exception:
+			pass
+		try:
+			val = getattr(prod, "ai_prompt_msg", None)
+			if val is not None:
+				prompt_msg = val
+		except Exception:
+			pass
+		try:
+			if prod.default_price is not None:
+				product_default_price = float(prod.default_price)
+		except Exception:
+			pass
+		try:
+			variant_exclusions = parse_variant_exclusions(getattr(prod, "ai_variant_exclusions", None))
+		except Exception:
+			variant_exclusions = VariantExclusions()
+
 	with get_session() as session:
-		# product prompts
+		product_row: Optional[Product] = None
 		try:
 			if focus:
-				pr = session.exec(_text("SELECT ai_system_msg, ai_prompt_msg FROM product WHERE slug=:s OR name=:s LIMIT 1").params(s=str(focus))).first()
+				product_row = session.exec(
+					select(Product).where((Product.slug == str(focus)) | (Product.name == str(focus))).limit(1)
+				).first()
+		except Exception:
+			product_row = None
+		_hydrate_product_context(product_row)
+
+		pid: Optional[int] = None
+		try:
+			if focus:
+				rowi = session.exec(
+					_text(
+						"SELECT sku, name, color, size, price, product_id FROM item WHERE sku=:s LIMIT 1"
+					).params(s=str(focus))
+				).first()
 			else:
-				pr = None
-			if pr:
-				sys_msg = (pr.ai_system_msg if hasattr(pr, "ai_system_msg") else pr[0]) or ""
-				prompt_msg = (pr.ai_prompt_msg if hasattr(pr, "ai_prompt_msg") else pr[1]) or ""
+				rowi = None
 		except Exception:
-			sys_msg = prompt_msg = ""
-		# inventory snapshot for AI: include price/colors/sizes for focused product
-		try:
-			if focus:
-				# Try to resolve by SKU
-				rowi = session.exec(_text("SELECT sku, name, color, size, price, product_id FROM item WHERE sku=:s LIMIT 1").params(s=str(focus))).first()
-				if rowi:
-					sku = getattr(rowi, "sku", None) if hasattr(rowi, "sku") else (rowi[0] if len(rowi) > 0 else None)
-					name = getattr(rowi, "name", None) if hasattr(rowi, "name") else (rowi[1] if len(rowi) > 1 else None)
-					color = getattr(rowi, "color", None) if hasattr(rowi, "color") else (rowi[2] if len(rowi) > 2 else None)
-					size = getattr(rowi, "size", None) if hasattr(rowi, "size") else (rowi[3] if len(rowi) > 3 else None)
-					price = getattr(rowi, "price", None) if hasattr(rowi, "price") else (rowi[4] if len(rowi) > 4 else None)
-					pid = getattr(rowi, "product_id", None) if hasattr(rowi, "product_id") else (rowi[5] if len(rowi) > 5 else None)
-					if sku:
-						stock.append({"sku": sku, "name": name, "color": color, "size": size, "price": price})
-					# include siblings to expose available variants
-					if pid is not None:
-						try:
-							rows_sib = session.exec(_text("SELECT sku, name, color, size, price FROM item WHERE product_id=:pid LIMIT 200").params(pid=int(pid))).all()
-						except Exception:
-							rows_sib = []
-						for r in rows_sib:
-							try:
-                                # support both SQLModel rows and tuples
-								sku2 = r.sku if hasattr(r, "sku") else r[0]
-								name2 = r.name if hasattr(r, "name") else (r[1] if len(r) > 1 else None)
-								color2 = r.color if hasattr(r, "color") else (r[2] if len(r) > 2 else None)
-								size2 = r.size if hasattr(r, "size") else (r[3] if len(r) > 3 else None)
-								price2 = r.price if hasattr(r, "price") else (r[4] if len(r) > 4 else None)
-								if isinstance(sku2, str) and not any(it.get("sku") == sku2 for it in stock):
-									stock.append({"sku": sku2, "name": name2, "color": color2, "size": size2, "price": price2})
-							except Exception:
-								continue
-				else:
-					# Fallback: resolve product by slug/name
-					rowp = session.exec(_text("SELECT id FROM product WHERE slug=:s OR name=:s LIMIT 1").params(s=str(focus))).first()
-					pid2 = (rowp.id if hasattr(rowp, "id") else (rowp[0] if rowp else None)) if rowp else None
-					if pid2 is not None:
-						try:
-							rows_it = session.exec(_text("SELECT sku, name, color, size, price FROM item WHERE product_id=:pid LIMIT 200").params(pid=int(pid2))).all()
-						except Exception:
-							rows_it = []
-						for r in rows_it:
-							try:
-								sku2 = r.sku if hasattr(r, "sku") else r[0]
-								name2 = r.name if hasattr(r, "name") else (r[1] if len(r) > 1 else None)
-								color2 = r.color if hasattr(r, "color") else (r[2] if len(r) > 2 else None)
-								size2 = r.size if hasattr(r, "size") else (r[3] if len(r) > 3 else None)
-								price2 = r.price if hasattr(r, "price") else (r[4] if len(r) > 4 else None)
-								stock.append({"sku": sku2, "name": name2, "color": color2, "size": size2, "price": price2})
-							except Exception:
-								continue
-		except Exception:
-			# keep empty stock on any failure
-			stock = []
-		# recent messages
+			rowi = None
+		if rowi:
+			sku = getattr(rowi, "sku", None) if hasattr(rowi, "sku") else (rowi[0] if len(rowi) > 0 else None)
+			name = getattr(rowi, "name", None) if hasattr(rowi, "name") else (rowi[1] if len(rowi) > 1 else None)
+			color = getattr(rowi, "color", None) if hasattr(rowi, "color") else (rowi[2] if len(rowi) > 2 else None)
+			size = getattr(rowi, "size", None) if hasattr(rowi, "size") else (rowi[3] if len(rowi) > 3 else None)
+			price = getattr(rowi, "price", None) if hasattr(rowi, "price") else (rowi[4] if len(rowi) > 4 else None)
+			pid_raw = getattr(rowi, "product_id", None) if hasattr(rowi, "product_id") else (rowi[5] if len(rowi) > 5 else None)
+			try:
+				pid = int(pid_raw) if pid_raw is not None else None
+			except Exception:
+				pid = None
+			if sku:
+				stock.append({"sku": sku, "name": name, "color": color, "size": size, "price": price})
+		if pid is None and focus:
+			try:
+				rowp = session.exec(
+					select(Product).where((Product.slug == str(focus)) | (Product.name == str(focus))).limit(1)
+				).first()
+			except Exception:
+				rowp = None
+			if rowp:
+				try:
+					pid = int(rowp.id) if rowp.id is not None else None
+				except Exception:
+					pid = None
+				_hydrate_product_context(rowp)
+		if pid is not None:
+			try:
+				rows_sib = session.exec(
+					_text("SELECT sku, name, color, size, price FROM item WHERE product_id=:pid LIMIT 200").params(
+						pid=int(pid)
+					)
+				).all()
+			except Exception:
+				rows_sib = []
+			for r in rows_sib:
+				try:
+					sku2 = r.sku if hasattr(r, "sku") else (r[0] if len(r) > 0 else None)
+					if not isinstance(sku2, str) or any(it.get("sku") == sku2 for it in stock):
+						continue
+					name2 = r.name if hasattr(r, "name") else (r[1] if len(r) > 1 else None)
+					color2 = r.color if hasattr(r, "color") else (r[2] if len(r) > 2 else None)
+					size2 = r.size if hasattr(r, "size") else (r[3] if len(r) > 3 else None)
+					price2 = r.price if hasattr(r, "price") else (r[4] if len(r) > 4 else None)
+					stock.append({"sku": sku2, "name": name2, "color": color2, "size": size2, "price": price2})
+				except Exception:
+					continue
+			if product_row is None:
+				try:
+					product_row = session.exec(select(Product).where(Product.id == int(pid)).limit(1)).first()
+				except Exception:
+					product_row = None
+				_hydrate_product_context(product_row)
 		try:
 			msgs = session.exec(
-				select(Message).where(Message.conversation_id == conversation_id).order_by(Message.timestamp_ms.asc()).limit(25)
+				select(Message)
+				.where(Message.conversation_id == conversation_id)
+				.order_by(Message.timestamp_ms.asc())
+				.limit(25)
 			).all()
 			history = [{"dir": (m.direction or "in"), "text": (m.text or "")} for m in msgs]
 		except Exception:
 			history = []
+
+	if product_default_price is not None:
+		for entry in stock:
+			try:
+				entry["price"] = product_default_price
+			except Exception:
+				continue
+	if not variant_exclusions.is_empty():
+		filtered_stock: List[Dict[str, Any]] = []
+		for entry in stock:
+			if variant_is_excluded(variant_exclusions, entry.get("color"), entry.get("size")):
+				continue
+			filtered_stock.append(entry)
+		stock = filtered_stock
+	if not stock and focus:
+		fallback_name = None
+		try:
+			if product_row:
+				fallback_name = getattr(product_row, "name", None)
+		except Exception:
+			fallback_name = None
+		stock.append(
+			{
+				"sku": str(focus),
+				"name": fallback_name or str(focus),
+				"color": None,
+				"size": None,
+				"price": product_default_price,
+			}
+		)
+
 	# fallback system if missing
 	if not sys_msg:
 		sys_msg = "Sen HiMan için Instagram DM satış asistanısın. Kısa ve net yanıtla; satış akışını ilerlet."
