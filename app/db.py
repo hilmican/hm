@@ -563,6 +563,27 @@ def init_db() -> None:
                         conn.exec_driver_sql("ALTER TABLE product ADD COLUMN ai_prompt_msg LONGTEXT NULL")
                     if 'ai_tags' not in have_cols:
                         conn.exec_driver_sql("ALTER TABLE product ADD COLUMN ai_tags JSON NULL")
+                    if 'pretext_id' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN pretext_id INT NULL")
+                        conn.exec_driver_sql("CREATE INDEX idx_product_pretext_id ON product(pretext_id)")
+                except Exception:
+                    pass
+                # Ensure ai_pretext table exists
+                try:
+                    conn.exec_driver_sql(
+                        """
+                        CREATE TABLE IF NOT EXISTS ai_pretext (
+                            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                            name VARCHAR(255) NOT NULL,
+                            content LONGTEXT NOT NULL,
+                            is_default TINYINT(1) NOT NULL DEFAULT 0,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            INDEX idx_ai_pretext_name (name),
+                            INDEX idx_ai_pretext_default (is_default)
+                        )
+                        """
+                    )
                 except Exception:
                     pass
                 # Message timestamp and composite index to accelerate counts and latest-per-conversation lookups

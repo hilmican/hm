@@ -121,6 +121,12 @@ class Product(SQLModel, table=True):
         sa_column=Column(Text),
         description="JSON or comma separated variant (color/size) exclusions for AI replies",
     )
+    pretext_id: Optional[int] = Field(
+        default=None,
+        foreign_key="ai_pretext.id",
+        index=True,
+        description="Which pretext to use for this product (prepended to system message)",
+    )
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
@@ -438,3 +444,18 @@ class Cost(SQLModel, table=True):
 	date: Optional[dt.date] = Field(default=None, index=True)
 	details: Optional[str] = Field(default=None, sa_column=Column(Text))
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class AIPretext(SQLModel, table=True):
+	"""
+	Pretext templates that can be prepended to AI system messages.
+	Allows per-product customization of the system prompt prefix.
+	"""
+	__tablename__ = "ai_pretext"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	name: str = Field(index=True, description="Pretext name/identifier")
+	content: str = Field(sa_column=Column(Text), description="Pretext content to prepend to system message")
+	is_default: bool = Field(default=False, index=True, description="Default pretext (used when product has no pretext_id)")
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)

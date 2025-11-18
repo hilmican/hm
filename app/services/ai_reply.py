@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Message, Product, Item
+from ..models import Message, Product, Item, Conversation, IGUser, AIPretext
 from .ai import AIClient
 from .ai_context import VariantExclusions, parse_variant_exclusions, variant_is_excluded
 from .ai_ig import _detect_focus_product
@@ -189,6 +189,33 @@ def _load_focus_product_and_stock(conversation_id: int) -> Tuple[Optional[Dict[s
 	return product_info, stock
 
 
+def _load_customer_info(conversation_id: int) -> Dict[str, Any]:
+	"""Load customer information (username, name, contact_name) from IGUser."""
+	customer_info = {
+		"username": None,
+		"name": None,
+		"contact_name": None,
+	}
+	try:
+		with get_session() as session:
+			# Get conversation to find ig_user_id
+			conv = session.exec(
+				select(Conversation).where(Conversation.id == int(conversation_id)).limit(1)
+			).first()
+			if conv and conv.ig_user_id:
+				# Get IGUser info
+				ig_user = session.exec(
+					select(IGUser).where(IGUser.ig_user_id == str(conv.ig_user_id)).limit(1)
+				).first()
+				if ig_user:
+					customer_info["username"] = ig_user.username
+					customer_info["name"] = ig_user.name
+					customer_info["contact_name"] = ig_user.contact_name
+	except Exception:
+		pass
+	return customer_info
+
+
 def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[str, Any]], str]:
 	"""
 	Load recent messages for this conversation and return (history_list, last_customer_message).
@@ -289,7 +316,11 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 		"CONTEXT_JSON_END\n"
 	)
 
-	# Optional per-product system tweaks from Product.ai_system_msg
+	# Load customer info for gender detection
+	customer_info = _load_customer_info(int(conversation_id))
+
+	# Load pretext and product system message
+	pretext_content: Optional[str] = None
 	product_extra_sys: Optional[str] = None
 	if product_info and product_info.get("id") is not None:
 		try:
@@ -297,12 +328,82 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 				p = session.exec(
 					select(Product).where(Product.id == int(product_info["id"])).limit(1)
 				).first()
-			if p and getattr(p, "ai_system_msg", None):
-				product_extra_sys = p.ai_system_msg  # type: ignore[assignment]
+				if p:
+					# Get product's ai_system_msg (existing)
+					if getattr(p, "ai_system_msg", None):
+						product_extra_sys = p.ai_system_msg  # type: ignore[assignment]
+					
+					# Get pretext
+					pretext_id = getattr(p, "pretext_id", None)
+					if pretext_id:
+						# Use product's selected pretext
+						pretext = session.exec(
+							select(AIPretext).where(AIPretext.id == int(pretext_id)).limit(1)
+						).first()
+						if pretext:
+							pretext_content = pretext.content
+					else:
+						# Use default pretext (first one marked as default, or first one)
+						pretext = session.exec(
+							select(AIPretext).where(AIPretext.is_default == True).limit(1)
+						).first()
+						if not pretext:
+							# Fallback to first pretext if no default
+							pretext = session.exec(
+								select(AIPretext).order_by(AIPretext.id.asc()).limit(1)
+							).first()
+						if pretext:
+							pretext_content = pretext.content
 		except Exception:
-			product_extra_sys = None
+			pass
+	else:
+		# No product focus - use default pretext
+		try:
+			with get_session() as session:
+				pretext = session.exec(
+					select(AIPretext).where(AIPretext.is_default == True).limit(1)
+				).first()
+				if not pretext:
+					pretext = session.exec(
+						select(AIPretext).order_by(AIPretext.id.asc()).limit(1)
+					).first()
+				if pretext:
+					pretext_content = pretext.content
+		except Exception:
+			pass
 
-	sys_prompt = _shadow_system_prompt(base_extra=product_extra_sys)
+	# Build gender detection instructions
+	gender_instructions = f"""
+## Müşteri Hitap Kuralları
+
+Müşteri bilgileri:
+- Kullanıcı adı: {customer_info.get("username") or "bilinmiyor"}
+- İsim: {customer_info.get("name") or customer_info.get("contact_name") or "bilinmiyor"}
+- İletişim adı: {customer_info.get("contact_name") or "bilinmiyor"}
+
+HITAP KURALLARI:
+1. Müşterinin cinsiyetini belirlemek için yukarıdaki bilgileri (kullanıcı adı, isim, iletişim adı) kullan.
+2. Eğer müşteri ERKEK ise: "abim" kullan (örnek: "Merhabalar abim")
+3. Eğer müşteri KADIN ise: "ablam" kullan (örnek: "Merhabalar ablam")
+4. Eğer cinsiyeti belirleyemiyorsan: "efendim" kullan (örnek: "Merhabalar efendim")
+5. Cinsiyet belirleme kriterleri:
+   - İsimdeki son ekler: "-a", "-e" gibi ekler genelde kadın isimlerinde görülür
+   - Türkçe kadın isimleri: Ayşe, Fatma, Zeynep, Elif, Emine, Hatice, Merve, Seda, vb.
+   - Türkçe erkek isimleri: Mehmet, Ali, Ahmet, Mustafa, Hasan, Hüseyin, İbrahim, vb.
+   - Belirsizse veya emin değilsen "efendim" kullan
+
+ÖNEMLİ: Asla yanlış cinsiyete hitap etme. Emin değilsen "efendim" kullan.
+"""
+
+	# Combine: pretext + gender instructions + product system message
+	sys_prompt_parts: List[str] = []
+	if pretext_content:
+		sys_prompt_parts.append(pretext_content)
+	sys_prompt_parts.append(gender_instructions)
+	if product_extra_sys:
+		sys_prompt_parts.append(product_extra_sys)
+
+	sys_prompt = "\n\n".join(sys_prompt_parts) if sys_prompt_parts else gender_instructions
 
 	raw_response: Any = None
 	if include_meta:
