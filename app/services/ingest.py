@@ -227,6 +227,7 @@ def _update_conversation_summary_from_message(
 	ad_id: Optional[str],
 	ad_link: Optional[str],
 	ad_title: Optional[str],
+	post_id: Optional[str] = None,
 ) -> None:
 	"""
 	Update conversations last-* summary fields from a newly inserted Message.
@@ -269,6 +270,17 @@ def _update_conversation_summary_from_message(
 			ts_dt = dt.datetime.utcfromtimestamp(ts_val / 1000.0)
 		except Exception:
 			ts_dt = None
+		
+		# Determine link_type and link_id (prioritize post over ad)
+		link_type = None
+		link_id = None
+		if post_id:
+			link_type = 'post'
+			link_id = str(post_id)
+		elif ad_id:
+			link_type = 'ad'
+			link_id = str(ad_id)
+		
 		session.exec(
 			_text(
 				"""
@@ -298,7 +310,7 @@ def _update_conversation_summary_from_message(
 				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) THEN :rid
 				    ELSE ig_recipient_id
 				  END,
-				  -- Only advance ad metadata when the new message actually carries ad info
+				  -- Only advance ad metadata when the new message actually carries ad info (deprecated)
 				  last_ad_id = CASE
 				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) AND :adid IS NOT NULL THEN :adid
 				    ELSE last_ad_id
@@ -310,6 +322,15 @@ def _update_conversation_summary_from_message(
 				  last_ad_title = CASE
 				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) AND :atitle IS NOT NULL THEN :atitle
 				    ELSE last_ad_title
+				  END,
+				  -- New unified link tracking
+				  last_link_type = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) AND :link_type IS NOT NULL THEN :link_type
+				    ELSE last_link_type
+				  END,
+				  last_link_id = CASE
+				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) AND :link_id IS NOT NULL THEN :link_id
+				    ELSE last_link_id
 				  END,
 				  last_message_at = CASE
 				    WHEN :ts >= COALESCE(last_message_timestamp_ms, 0) AND :ts_dt IS NOT NULL
@@ -330,6 +351,8 @@ def _update_conversation_summary_from_message(
 				adid=(str(ad_id) if ad_id is not None else None),
 				alink=ad_link,
 				atitle=ad_title,
+				link_type=link_type,
+				link_id=link_id,
 			)
 		)
 	except Exception as e:
@@ -421,6 +444,25 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 	except Exception:
 		story_id = None
 		story_url = None
+	# Post extraction from attachments (best-effort)
+	post_id = None
+	post_title = None
+	post_url = None
+	try:
+		if attachments and isinstance(attachments, list):
+			for att in attachments:
+				if att.get("type") in ("ig_post", "share"):
+					payload = att.get("payload", {})
+					media_id = payload.get("ig_post_media_id")
+					if media_id:
+						post_id = str(media_id)
+						post_title = payload.get("title")
+						post_url = payload.get("url")
+						break
+	except Exception:
+		post_id = None
+		post_title = None
+		post_url = None
 	# Ad/referral extraction (best-effort)
 	ad_id = None
 	ad_link = None
@@ -544,6 +586,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		ad_id=str(ad_id) if ad_id is not None else None,
 		ad_link=ad_link,
 		ad_title=ad_title,
+		post_id=post_id,
 	)
 	# upsert ads cache
 	try:
@@ -561,8 +604,8 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 			# MySQL-only: use INSERT IGNORE (idempotent on PK ad_id)
 			try:
 				stmt_ins_ignore = _sql_text(
-					"INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) "
-					"VALUES (:id, :n, :img, :lnk, CURRENT_TIMESTAMP)"
+					"INSERT IGNORE INTO ads(ad_id, link_type, name, image_url, link, updated_at) "
+					"VALUES (:id, 'ad', :n, :img, :lnk, CURRENT_TIMESTAMP)"
 				).bindparams(id=ad_id, n=ad_name, img=ad_img, lnk=ad_link)
 				session.exec(stmt_ins_ignore)
 				try:
@@ -586,6 +629,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 			try:
 				stmt_upd = _sql_text(
 					"UPDATE ads SET "
+					"link_type='ad', "
 					"name=COALESCE(:n,name), "
 					"image_url=COALESCE(:img,image_url), "
 					"link=COALESCE(:lnk,link), "
@@ -617,6 +661,82 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 				"insert.webhook: ads upsert outer error mid=%s ad_id=%s err=%s",
 				str(mid),
 				str(ad_id),
+				str(outer),
+			)
+		except Exception:
+			pass
+	# upsert posts cache (stored in ads table with link_type='post')
+	try:
+		if post_id:
+			try:
+				_log_up.info(
+					"insert.webhook: posts upsert start mid=%s post_id=%s title=%s url=%s",
+					str(mid),
+					str(post_id),
+					str(post_title),
+					str(post_url),
+				)
+			except Exception:
+				pass
+			# MySQL-only: use INSERT IGNORE (idempotent on PK ad_id)
+			try:
+				stmt_ins_ignore = _sql_text(
+					"INSERT IGNORE INTO ads(ad_id, link_type, name, link, updated_at) "
+					"VALUES (:id, 'post', :n, :lnk, CURRENT_TIMESTAMP)"
+				).bindparams(id=post_id, n=post_title, lnk=post_url)
+				session.exec(stmt_ins_ignore)
+				try:
+					_log_up.info(
+						"insert.webhook: posts INSERT IGNORE ok mid=%s post_id=%s",
+						str(mid),
+						str(post_id),
+					)
+				except Exception:
+					pass
+			except Exception as e_mysql:
+				try:
+					_log_up.error(
+						"insert.webhook: posts INSERT IGNORE failed mid=%s post_id=%s err=%s",
+						str(mid),
+						str(post_id),
+						str(e_mysql),
+					)
+				except Exception:
+					pass
+			try:
+				stmt_upd = _sql_text(
+					"UPDATE ads SET "
+					"link_type='post', "
+					"name=COALESCE(:n,name), "
+					"link=COALESCE(:lnk,link), "
+					"updated_at=CURRENT_TIMESTAMP "
+					"WHERE ad_id=:id"
+				).bindparams(id=post_id, n=post_title, lnk=post_url)
+				session.exec(stmt_upd)
+				try:
+					_log_up.info(
+						"insert.webhook: posts UPDATE ok mid=%s post_id=%s",
+						str(mid),
+						str(post_id),
+					)
+				except Exception:
+					pass
+			except Exception as e3:
+				try:
+					_log_up.error(
+						"insert.webhook: posts UPDATE failed mid=%s post_id=%s err=%s",
+						str(mid),
+						str(post_id),
+						str(e3),
+					)
+				except Exception:
+					pass
+	except Exception as outer:
+		try:
+			_log_up.error(
+				"insert.webhook: posts upsert outer error mid=%s post_id=%s err=%s",
+				str(mid),
+				str(post_id),
 				str(outer),
 			)
 		except Exception:
@@ -708,7 +828,7 @@ def _auto_link_instagram_post(message_id: int, message_text: Optional[str], atta
 
 		with get_session() as session:
 			existing = session.exec(
-				_sql_text("SELECT post_id FROM posts_products WHERE post_id=:pid").bindparams(pid=post_id)
+				_sql_text("SELECT ad_id FROM ads_products WHERE ad_id=:pid AND link_type='post'").bindparams(pid=post_id)
 			).first()
 			if existing:
 				_log.debug("ingest: post %s already linked, skipping", post_id)
@@ -791,72 +911,69 @@ def _auto_link_instagram_post(message_id: int, message_text: Optional[str], atta
 			return
 
 		with get_session() as session:
+			# Store post in ads table with link_type='post'
 			try:
 				stmt_upsert = _sql_text("""
-					INSERT INTO posts(post_id, ig_post_media_id, title, url, message_id, updated_at)
-					VALUES (:pid, :media_id, :title, :url, :msg_id, CURRENT_TIMESTAMP)
+					INSERT INTO ads(ad_id, link_type, name, link, updated_at)
+					VALUES (:pid, 'post', :title, :url, CURRENT_TIMESTAMP)
 					ON DUPLICATE KEY UPDATE
-						title=VALUES(title),
-						url=VALUES(url),
-						message_id=VALUES(message_id),
+						link_type='post',
+						name=VALUES(name),
+						link=VALUES(link),
 						updated_at=CURRENT_TIMESTAMP
 				""").bindparams(
 					pid=str(post_id),
-					media_id=str(post_info["ig_post_media_id"]),
 					title=post_info.get("title"),
 					url=post_info.get("url"),
-					msg_id=int(message_id),
 				)
 				session.exec(stmt_upsert)
 			except Exception:
-				stmt_sel = _sql_text("SELECT post_id FROM posts WHERE post_id=:pid").bindparams(pid=str(post_id))
+				stmt_sel = _sql_text("SELECT ad_id FROM ads WHERE ad_id=:pid").bindparams(pid=str(post_id))
 				existing_post = session.exec(stmt_sel).first()
 				if existing_post:
 					stmt_update = _sql_text("""
-						UPDATE posts SET title=:title, url=:url, message_id=:msg_id, updated_at=CURRENT_TIMESTAMP
-						WHERE post_id=:pid
+						UPDATE ads SET link_type='post', name=:title, link=:url, updated_at=CURRENT_TIMESTAMP
+						WHERE ad_id=:pid
 					""").bindparams(
 						pid=str(post_id),
 						title=post_info.get("title"),
 						url=post_info.get("url"),
-						msg_id=int(message_id),
 					)
 					session.exec(stmt_update)
 				else:
 					stmt_insert = _sql_text("""
-						INSERT INTO posts(post_id, ig_post_media_id, title, url, message_id)
-						VALUES (:pid, :media_id, :title, :url, :msg_id)
+						INSERT INTO ads(ad_id, link_type, name, link)
+						VALUES (:pid, 'post', :title, :url)
 					""").bindparams(
 						pid=str(post_id),
-						media_id=str(post_info["ig_post_media_id"]),
 						title=post_info.get("title"),
 						url=post_info.get("url"),
-						msg_id=int(message_id),
 					)
 					session.exec(stmt_insert)
 
+			# Link post to product in ads_products with link_type='post'
 			try:
 				stmt_link = _sql_text("""
-					INSERT INTO posts_products(post_id, product_id, sku, auto_linked)
-					VALUES (:pid, :prod_id, NULL, 1)
-					ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), auto_linked=1
+					INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked)
+					VALUES (:pid, 'post', :prod_id, NULL, 1)
+					ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), auto_linked=1, link_type='post'
 				""").bindparams(
 					pid=str(post_id),
 					prod_id=int(product_id),
 				)
 				session.exec(stmt_link)
 			except Exception:
-				stmt_sel = _sql_text("SELECT post_id FROM posts_products WHERE post_id=:pid").bindparams(pid=str(post_id))
+				stmt_sel = _sql_text("SELECT ad_id FROM ads_products WHERE ad_id=:pid").bindparams(pid=str(post_id))
 				existing_link = session.exec(stmt_sel).first()
 				if existing_link:
 					stmt_update = _sql_text("""
-						UPDATE posts_products SET product_id=:prod_id, auto_linked=1 WHERE post_id=:pid
+						UPDATE ads_products SET link_type='post', product_id=:prod_id, auto_linked=1 WHERE ad_id=:pid
 					""").bindparams(pid=str(post_id), prod_id=int(product_id))
 					session.exec(stmt_update)
 				else:
 					stmt_insert = _sql_text("""
-						INSERT INTO posts_products(post_id, product_id, sku, auto_linked)
-						VALUES (:pid, :prod_id, NULL, 1)
+						INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked)
+						VALUES (:pid, 'post', :prod_id, NULL, 1)
 					""").bindparams(pid=str(post_id), prod_id=int(product_id))
 					session.exec(stmt_insert)
 
@@ -889,7 +1006,7 @@ def _auto_link_ad(ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -
 
 		with get_session() as session:
 			existing = session.exec(
-				_sql_text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
+				_sql_text("SELECT ad_id FROM ads_products WHERE ad_id=:id AND link_type='ad'").bindparams(id=str(ad_id))
 			).first()
 			if existing:
 				_log.debug("ingest: ad %s already linked, skipping", ad_id)
@@ -972,8 +1089,8 @@ def _auto_link_ad(ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -
 		with get_session() as session:
 			try:
 				stmt_upsert_mysql = _sql_text(
-					"INSERT INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 1) "
-					"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku), auto_linked=1"
+					"INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, 'ad', :pid, :sku, 1) "
+					"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku), auto_linked=1, link_type='ad'"
 				).bindparams(
 					id=str(ad_id),
 					pid=int(product_id),
@@ -983,7 +1100,7 @@ def _auto_link_ad(ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -
 			except Exception:
 				try:
 					stmt_upsert_sqlite = _sql_text(
-						"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 1)"
+						"INSERT OR REPLACE INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, 'ad', :pid, :sku, 1)"
 					).bindparams(
 						id=str(ad_id),
 						pid=int(product_id),
@@ -995,7 +1112,7 @@ def _auto_link_ad(ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -
 					rowm = session.exec(stmt_sel).first()
 					if rowm:
 						stmt_update = _sql_text(
-							"UPDATE ads_products SET product_id=:pid, sku=:sku, auto_linked=1 WHERE ad_id=:id"
+							"UPDATE ads_products SET link_type='ad', product_id=:pid, sku=:sku, auto_linked=1 WHERE ad_id=:id"
 						).bindparams(
 							id=str(ad_id),
 							pid=int(product_id),
@@ -1004,7 +1121,7 @@ def _auto_link_ad(ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -
 						session.exec(stmt_update)
 					else:
 						stmt_insert = _sql_text(
-							"INSERT INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 1)"
+							"INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, 'ad', :pid, :sku, 1)"
 						).bindparams(
 							id=str(ad_id),
 							pid=int(product_id),

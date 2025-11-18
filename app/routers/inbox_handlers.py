@@ -28,13 +28,15 @@ async def inbox(
                    c.last_ad_title AS ad_title,
                    c.last_message_id AS message_id,
                    c.last_ad_id AS last_ad_id,
+                   c.last_link_type AS last_link_type,
+                   c.last_link_id AS last_link_id,
                    u.username AS other_username,
                    u.name AS other_name
             FROM conversations c
             LEFT JOIN ig_users u
               ON u.ig_user_id = CASE WHEN c.last_message_direction='out' THEN c.ig_recipient_id ELSE c.ig_sender_id END
             LEFT JOIN ads_products ap
-              ON ap.ad_id = c.last_ad_id
+              ON ap.ad_id = COALESCE(c.last_link_id, c.last_ad_id) AND ap.link_type = COALESCE(c.last_link_type, 'ad')
         """
         where_parts: list[str] = []
         params: dict[str, object] = {}
@@ -55,13 +57,13 @@ async def inbox(
                 )
             """)
             params["qq"] = qq
-        # Optional filter: restrict to conversations with ads / unlinked ads
+        # Optional filter: restrict to conversations with ads/posts / unlinked ads/posts
         has_ad_s = (has_ad or "").strip().lower()
         if has_ad_s in ("yes", "true", "1", "any"):
-            where_parts.append("c.last_ad_id IS NOT NULL")
+            where_parts.append("(c.last_link_id IS NOT NULL OR c.last_ad_id IS NOT NULL)")
         elif has_ad_s in ("unlinked", "missing_product", "no_product"):
-            # Conversations whose latest ad has no product mapping yet
-            where_parts.append("c.last_ad_id IS NOT NULL AND ap.product_id IS NULL")
+            # Conversations whose latest link (ad or post) has no product mapping yet
+            where_parts.append("(c.last_link_id IS NOT NULL OR c.last_ad_id IS NOT NULL) AND ap.product_id IS NULL")
         sample_n = max(50, min(int(limit or 25) * 4, 200))
         bind = session.get_bind()
         dialect_name = ""
@@ -92,8 +94,10 @@ async def inbox(
                     "ad_title": (getattr(r, "ad_title", None) if hasattr(r, "ad_title") else (r[8] if len(r) > 8 else None)),
                     "message_id": (getattr(r, "message_id", None) if hasattr(r, "message_id") else (r[9] if len(r) > 9 else None)),
                     "last_ad_id": (getattr(r, "last_ad_id", None) if hasattr(r, "last_ad_id") else (r[10] if len(r) > 10 else None)),
-                    "other_username": (getattr(r, "other_username", None) if hasattr(r, "other_username") else (r[11] if len(r) > 11 else None)),
-                    "other_name": (getattr(r, "other_name", None) if hasattr(r, "other_name") else (r[12] if len(r) > 12 else None)),
+                    "last_link_type": (getattr(r, "last_link_type", None) if hasattr(r, "last_link_type") else (r[11] if len(r) > 11 else None)),
+                    "last_link_id": (getattr(r, "last_link_id", None) if hasattr(r, "last_link_id") else (r[12] if len(r) > 12 else None)),
+                    "other_username": (getattr(r, "other_username", None) if hasattr(r, "other_username") else (r[13] if len(r) > 13 else None)),
+                    "other_name": (getattr(r, "other_name", None) if hasattr(r, "other_name") else (r[14] if len(r) > 14 else None)),
                 })
             except Exception:
                 continue
@@ -202,13 +206,16 @@ async def inbox(
                     continue
                 ad_link = (m.get("ad_link") if isinstance(m, dict) else getattr(m, "ad_link", None))
                 ad_title = (m.get("ad_title") if isinstance(m, dict) else getattr(m, "ad_title", None))
-                ad_id_val = (m.get("last_ad_id") if isinstance(m, dict) else getattr(m, "last_ad_id", None))
+                # Use new unified link_id, fallback to last_ad_id for backward compatibility
+                link_id = (m.get("last_link_id") if isinstance(m, dict) else getattr(m, "last_link_id", None))
+                link_type = (m.get("last_link_type") if isinstance(m, dict) else getattr(m, "last_link_type", None))
+                ad_id_val = link_id or (m.get("last_ad_id") if isinstance(m, dict) else getattr(m, "last_ad_id", None))
                 if ad_id_val:
                     sid = str(ad_id_val)
                     if sid not in ad_ids:
                         ad_ids.append(sid)
                 if (ad_link or ad_title or ad_id_val) and cid not in ad_map:
-                    ad_map[cid] = {"link": ad_link, "title": ad_title, "id": ad_id_val}
+                    ad_map[cid] = {"link": ad_link, "title": ad_title, "id": ad_id_val, "link_type": link_type}
         except Exception:
             # fallback to link/title only
             ad_map = {}
@@ -230,7 +237,7 @@ async def inbox(
                 params_ads = {("a" + str(i)): ad_ids[i] for i in range(len(ad_ids))}
                 stmt_ads = _text(
                     f"""
-                    SELECT ap.ad_id, ap.product_id, p.name AS product_name
+                    SELECT ap.ad_id, ap.product_id, p.name AS product_name, ap.link_type
                     FROM ads_products ap
                     LEFT JOIN product p ON ap.product_id = p.id
                     WHERE ap.ad_id IN ({placeholders})

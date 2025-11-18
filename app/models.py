@@ -291,9 +291,11 @@ class Conversation(SQLModel, table=True):
     ig_recipient_id: Optional[str] = Field(
         default=None, description="ig_recipient_id of the last message"
     )
-    last_ad_id: Optional[str] = Field(default=None, description="Last ad id seen")
-    last_ad_link: Optional[str] = Field(default=None)
-    last_ad_title: Optional[str] = Field(default=None)
+    last_ad_id: Optional[str] = Field(default=None, description="Last ad id seen (deprecated, use last_link_id)")
+    last_ad_link: Optional[str] = Field(default=None, description="Deprecated, use last_link_id")
+    last_ad_title: Optional[str] = Field(default=None, description="Deprecated")
+    last_link_type: Optional[str] = Field(default=None, description="Type of last link: 'ad' or 'post'")
+    last_link_id: Optional[str] = Field(default=None, description="Last link id (ad_id or post_id)")
 
     # Hydration / unread state
     last_message_at: Optional[dt.datetime] = Field(

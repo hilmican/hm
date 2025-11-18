@@ -267,39 +267,69 @@ def init_db() -> None:
                     )
                 except Exception:
                     pass
-                # ads cache table (MySQL)
+                # ads cache table (MySQL) - unified for ads and posts
                 try:
                     conn.exec_driver_sql(
                         """
                         CREATE TABLE IF NOT EXISTS ads (
                             ad_id VARCHAR(128) PRIMARY KEY,
+                            link_type VARCHAR(16) NOT NULL DEFAULT 'ad',
                             name TEXT NULL,
                             image_url TEXT NULL,
                             link TEXT NULL,
                             fetch_status TEXT NULL,
                             fetch_error TEXT NULL,
-                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            INDEX idx_ads_link_type (link_type)
                         )
                         """
                     )
                 except Exception:
                     pass
-                # ads to product mapping table (MySQL)
+                # Add link_type column if it doesn't exist (migration support)
+                try:
+                    rows = conn.exec_driver_sql(
+                        """
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ads' AND COLUMN_NAME = 'link_type'
+                        """
+                    ).fetchall()
+                    if not rows:
+                        conn.exec_driver_sql("ALTER TABLE ads ADD COLUMN link_type VARCHAR(16) NOT NULL DEFAULT 'ad'")
+                        conn.exec_driver_sql("CREATE INDEX idx_ads_link_type ON ads(link_type)")
+                except Exception:
+                    pass
+                # ads to product mapping table (MySQL) - unified for ads and posts
                 try:
                     conn.exec_driver_sql(
                         """
                         CREATE TABLE IF NOT EXISTS ads_products (
                             ad_id VARCHAR(128) PRIMARY KEY,
+                            link_type VARCHAR(16) NOT NULL DEFAULT 'ad',
                             product_id INTEGER NULL,
                             sku VARCHAR(128) NULL,
                             auto_linked TINYINT(1) NOT NULL DEFAULT 0,
                             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             INDEX idx_ads_products_product (product_id),
                             INDEX idx_ads_products_sku (sku),
-                            INDEX idx_ads_products_auto_linked (auto_linked)
+                            INDEX idx_ads_products_auto_linked (auto_linked),
+                            INDEX idx_ads_products_link_type (link_type)
                         )
                         """
                     )
+                except Exception:
+                    pass
+                # Add link_type column if it doesn't exist (migration support)
+                try:
+                    rows = conn.exec_driver_sql(
+                        """
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ads_products' AND COLUMN_NAME = 'link_type'
+                        """
+                    ).fetchall()
+                    if not rows:
+                        conn.exec_driver_sql("ALTER TABLE ads_products ADD COLUMN link_type VARCHAR(16) NOT NULL DEFAULT 'ad'")
+                        conn.exec_driver_sql("CREATE INDEX idx_ads_products_link_type ON ads_products(link_type)")
                 except Exception:
                     pass
                 # Add auto_linked column to ads_products if it doesn't exist
