@@ -36,6 +36,7 @@ async def inbox(
                        c.last_message_direction AS direction,
                        c.ig_sender_id,
                        c.ig_recipient_id,
+                       c.ig_user_id,
                        c.last_ad_link AS ad_link,
                        c.last_ad_title AS ad_title,
                        c.last_message_id AS message_id,
@@ -46,7 +47,7 @@ async def inbox(
                        u.name AS other_name
                 FROM conversations c
                 LEFT JOIN ig_users u
-                  ON u.ig_user_id = CASE WHEN c.last_message_direction='out' THEN c.ig_recipient_id ELSE c.ig_sender_id END
+                  ON u.ig_user_id = c.ig_user_id
                 LEFT JOIN ads_products ap
                   ON ap.ad_id = COALESCE(c.last_link_id, c.last_ad_id) AND ap.link_type = COALESCE(c.last_link_type, 'ad')
             """
@@ -60,6 +61,7 @@ async def inbox(
                        c.last_message_direction AS direction,
                        c.ig_sender_id,
                        c.ig_recipient_id,
+                       c.ig_user_id,
                        c.last_ad_link AS ad_link,
                        c.last_ad_title AS ad_title,
                        c.last_message_id AS message_id,
@@ -70,7 +72,7 @@ async def inbox(
                        u.name AS other_name
                 FROM conversations c
                 LEFT JOIN ig_users u
-                  ON u.ig_user_id = CASE WHEN c.last_message_direction='out' THEN c.ig_recipient_id ELSE c.ig_sender_id END
+                  ON u.ig_user_id = c.ig_user_id
                 LEFT JOIN ads_products ap
                   ON ap.ad_id = c.last_ad_id AND (ap.link_type = 'ad' OR ap.link_type IS NULL)
             """
@@ -132,14 +134,15 @@ async def inbox(
                     "direction": (getattr(r, "direction", None) if hasattr(r, "direction") else (r[4] if len(r) > 4 else None)),
                     "ig_sender_id": (getattr(r, "ig_sender_id", None) if hasattr(r, "ig_sender_id") else (r[5] if len(r) > 5 else None)),
                     "ig_recipient_id": (getattr(r, "ig_recipient_id", None) if hasattr(r, "ig_recipient_id") else (r[6] if len(r) > 6 else None)),
-                    "ad_link": (getattr(r, "ad_link", None) if hasattr(r, "ad_link") else (r[7] if len(r) > 7 else None)),
-                    "ad_title": (getattr(r, "ad_title", None) if hasattr(r, "ad_title") else (r[8] if len(r) > 8 else None)),
-                    "message_id": (getattr(r, "message_id", None) if hasattr(r, "message_id") else (r[9] if len(r) > 9 else None)),
-                    "last_ad_id": (getattr(r, "last_ad_id", None) if hasattr(r, "last_ad_id") else (r[10] if len(r) > 10 else None)),
-                    "last_link_type": (getattr(r, "last_link_type", None) if hasattr(r, "last_link_type") else (r[11] if len(r) > 11 else None)),
-                    "last_link_id": (getattr(r, "last_link_id", None) if hasattr(r, "last_link_id") else (r[12] if len(r) > 12 else None)),
-                    "other_username": (getattr(r, "other_username", None) if hasattr(r, "other_username") else (r[13] if len(r) > 13 else None)),
-                    "other_name": (getattr(r, "other_name", None) if hasattr(r, "other_name") else (r[14] if len(r) > 14 else None)),
+                    "ig_user_id": (getattr(r, "ig_user_id", None) if hasattr(r, "ig_user_id") else (r[7] if len(r) > 7 else None)),
+                    "ad_link": (getattr(r, "ad_link", None) if hasattr(r, "ad_link") else (r[8] if len(r) > 8 else None)),
+                    "ad_title": (getattr(r, "ad_title", None) if hasattr(r, "ad_title") else (r[9] if len(r) > 9 else None)),
+                    "message_id": (getattr(r, "message_id", None) if hasattr(r, "message_id") else (r[10] if len(r) > 10 else None)),
+                    "last_ad_id": (getattr(r, "last_ad_id", None) if hasattr(r, "last_ad_id") else (r[11] if len(r) > 11 else None)),
+                    "last_link_type": (getattr(r, "last_link_type", None) if hasattr(r, "last_link_type") else (r[12] if len(r) > 12 else None)),
+                    "last_link_id": (getattr(r, "last_link_id", None) if hasattr(r, "last_link_id") else (r[13] if len(r) > 13 else None)),
+                    "other_username": (getattr(r, "other_username", None) if hasattr(r, "other_username") else (r[14] if len(r) > 14 else None)),
+                    "other_name": (getattr(r, "other_name", None) if hasattr(r, "other_name") else (r[15] if len(r) > 15 else None)),
                 })
             except Exception:
                 continue
@@ -151,14 +154,18 @@ async def inbox(
                 continue
             if cid not in conv_map:
                 conv_map[cid] = m
-            # Determine the other party id for this message
+            # Determine the other party id for this conversation (use ig_user_id directly)
             other = None
             try:
-                direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
-                if direction == "out":
-                    other = m.get("ig_recipient_id") if isinstance(m, dict) else m.ig_recipient_id
-                else:
-                    other = m.get("ig_sender_id") if isinstance(m, dict) else m.ig_sender_id
+                # Use ig_user_id from conversation (the canonical other party ID)
+                other = m.get("ig_user_id") if isinstance(m, dict) else getattr(m, "ig_user_id", None)
+                # Fallback to direction-based logic if ig_user_id is missing
+                if not other:
+                    direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
+                    if direction == "out":
+                        other = m.get("ig_recipient_id") if isinstance(m, dict) else m.ig_recipient_id
+                    else:
+                        other = m.get("ig_sender_id") if isinstance(m, dict) else m.ig_sender_id
             except Exception:
                 other = None
             if other:
@@ -220,11 +227,15 @@ async def inbox(
                             continue
                         other = None
                         try:
-                            direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
-                            if direction == "out":
-                                other = m.get("ig_recipient_id") if isinstance(m, dict) else m.ig_recipient_id
-                            else:
-                                other = m.get("ig_sender_id") if isinstance(m, dict) else m.ig_sender_id
+                            # Use ig_user_id from conversation (the canonical other party ID)
+                            other = m.get("ig_user_id") if isinstance(m, dict) else getattr(m, "ig_user_id", None)
+                            # Fallback to direction-based logic if ig_user_id is missing
+                            if not other:
+                                direction = (m.get("direction") if isinstance(m, dict) else m.direction) or "in"
+                                if direction == "out":
+                                    other = m.get("ig_recipient_id") if isinstance(m, dict) else m.ig_recipient_id
+                                else:
+                                    other = m.get("ig_sender_id") if isinstance(m, dict) else m.ig_sender_id
                         except Exception:
                             other = None
                         if other:
