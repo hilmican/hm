@@ -373,8 +373,9 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 	mid = message_obj.get("mid") or message_obj.get("id")
 	if not mid:
 		return None
-	# idempotency by ig_message_id
-	exists = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid").params(mid=str(mid))).first()
+	# idempotency by ig_message_id - use INSERT IGNORE to avoid race conditions
+	# First check if exists (fast path for already-processed messages)
+	exists = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid LIMIT 1").params(mid=str(mid))).first()
 	if exists:
 		return None
 	sender_id = (event.get("sender") or {}).get("id")
@@ -551,28 +552,88 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		# Never break ingestion because of debug logging
 		pass
 
-	row = Message(
-		ig_sender_id=str(sender_id) if sender_id is not None else None,
-		ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
-		ig_message_id=str(mid),
-		text=text_val,
-		attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
-		timestamp_ms=int(timestamp_ms) if isinstance(timestamp_ms, (int, float, str)) and str(timestamp_ms).isdigit() else None,
-		raw_json=json.dumps(event, ensure_ascii=False),
-		conversation_id=int(conversation_pk) if conversation_pk is not None else None,
-		direction=direction,
-		story_id=story_id,
-		story_url=story_url,
-		ad_id=ad_id,
-		ad_link=ad_link,
-		ad_title=ad_title,
-		ad_image_url=ad_img,
-		ad_name=ad_name,
-		referral_json=referral_json_val,
-	)
-	session.add(row)
-	# Flush to get DB id for attachments
-	session.flush()
+	# Use INSERT IGNORE to avoid race conditions and lock contention
+	# This prevents duplicate key errors when multiple workers process the same message
+	try:
+		from sqlalchemy import text as _t
+		# Try INSERT IGNORE first - this is atomic and avoids lock contention
+		stmt = _t("""
+			INSERT IGNORE INTO message (
+				ig_sender_id, ig_recipient_id, ig_message_id, text, attachments_json,
+				timestamp_ms, raw_json, conversation_id, direction, sender_username,
+				story_id, story_url, ad_id, ad_link, ad_title, ad_image_url, ad_name, referral_json, created_at
+			) VALUES (
+				:sender_id, :recipient_id, :mid, :text, :attachments_json,
+				:timestamp_ms, :raw_json, :conversation_id, :direction, :sender_username,
+				:story_id, :story_url, :ad_id, :ad_link, :ad_title, :ad_image_url, :ad_name, :referral_json, NOW()
+			)
+		""").bindparams(
+			sender_id=str(sender_id) if sender_id is not None else None,
+			recipient_id=str(recipient_id) if recipient_id is not None else None,
+			mid=str(mid),
+			text=text_val,
+			attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
+			timestamp_ms=int(timestamp_ms) if isinstance(timestamp_ms, (int, float, str)) and str(timestamp_ms).isdigit() else None,
+			raw_json=json.dumps(event, ensure_ascii=False),
+			conversation_id=int(conversation_pk) if conversation_pk is not None else None,
+			direction=direction,
+			sender_username=None,  # Will be set by enricher if needed
+			story_id=story_id,
+			story_url=story_url,
+			ad_id=ad_id,
+			ad_link=ad_link,
+			ad_title=ad_title,
+			ad_image_url=ad_img,
+			ad_name=ad_name,
+			referral_json=referral_json_val,
+		)
+		result = session.exec(stmt)
+		session.flush()
+		
+		# Check if insert actually happened (INSERT IGNORE returns 0 rows if duplicate)
+		# Fetch the message ID
+		msg_row = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid").params(mid=str(mid))).first()
+		if not msg_row:
+			# Another process inserted it between our check and insert, or insert failed silently
+			return None
+		message_id = int(msg_row.id if hasattr(msg_row, "id") else msg_row[0])
+		
+		# Create Message object for return value
+		row = Message(
+			id=message_id,
+			ig_sender_id=str(sender_id) if sender_id is not None else None,
+			ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
+			ig_message_id=str(mid),
+			text=text_val,
+			attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
+			timestamp_ms=int(timestamp_ms) if isinstance(timestamp_ms, (int, float, str)) and str(timestamp_ms).isdigit() else None,
+			raw_json=json.dumps(event, ensure_ascii=False),
+			conversation_id=int(conversation_pk) if conversation_pk is not None else None,
+			direction=direction,
+			story_id=story_id,
+			story_url=story_url,
+			ad_id=ad_id,
+			ad_link=ad_link,
+			ad_title=ad_title,
+			ad_image_url=ad_img,
+			ad_name=ad_name,
+			referral_json=referral_json_val,
+		)
+	except Exception as e:
+		# If INSERT IGNORE fails for any reason, check if message exists (race condition handled)
+		try:
+			_log_up.warning("insert.webhook: INSERT IGNORE failed mid=%s err=%s, checking if exists", str(mid), str(e)[:200])
+		except Exception:
+			pass
+		msg_row = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid").params(mid=str(mid))).first()
+		if not msg_row:
+			# Insert failed and message doesn't exist - return None
+			return None
+		message_id = int(msg_row.id if hasattr(msg_row, "id") else msg_row[0])
+		# Fetch full row for return value
+		row = session.get(Message, message_id)
+		if not row:
+			return None
 	# Upsert conversations last-* fields (summary) keyed by internal id
 	_update_conversation_summary_from_message(
 		session,

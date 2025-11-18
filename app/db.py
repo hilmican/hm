@@ -2,7 +2,8 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from sqlmodel import SQLModel, create_engine, Session
-from sqlalchemy import text
+from sqlalchemy import text, event
+from sqlalchemy.engine import Engine
 import os
 import time
 
@@ -14,7 +15,44 @@ if not DATABASE_URL:
 if not (DATABASE_URL.startswith("mysql+") or DATABASE_URL.startswith("mysql://")):
     raise RuntimeError("Only MySQL databases are supported. DATABASE_URL must start with mysql+ or mysql://")
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+# Connection pool settings to prevent too many connections
+pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
+max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "5"))
+pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "3600"))  # Recycle connections after 1 hour
+
+# Query timeout in seconds (default 30 seconds)
+query_timeout = int(os.getenv("DB_QUERY_TIMEOUT", "30"))
+
+# Transaction isolation level (READ COMMITTED reduces lock contention)
+isolation_level = os.getenv("DB_ISOLATION_LEVEL", "READ COMMITTED")
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=pool_size,
+    max_overflow=max_overflow,
+    pool_timeout=pool_timeout,
+    pool_recycle=pool_recycle,
+    connect_args={
+        "connect_timeout": 10,
+        "read_timeout": query_timeout,
+        "write_timeout": query_timeout,
+        "init_command": f"SET SESSION TRANSACTION ISOLATION LEVEL {isolation_level}",
+    },
+)
+
+# Set isolation level on each connection
+@event.listens_for(Engine, "connect")
+def set_isolation_level(dbapi_conn, connection_record):
+    """Set transaction isolation level on each new connection."""
+    try:
+        cursor = dbapi_conn.cursor()
+        cursor.execute(f"SET SESSION TRANSACTION ISOLATION LEVEL {isolation_level}")
+        cursor.close()
+    except Exception:
+        # Best-effort; don't fail if isolation level can't be set
+        pass
 
 
 def init_db() -> None:
