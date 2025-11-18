@@ -16,28 +16,64 @@ async def inbox(
     with get_session() as session:
         # Use unified conversations table as single source for inbox list
         from sqlalchemy import text as _text
-        base_sql = """
-            SELECT c.id AS convo_id,
-                   c.last_message_timestamp_ms AS timestamp_ms,
-                   c.last_message_text AS text,
-                   c.last_sender_username AS sender_username,
-                   c.last_message_direction AS direction,
-                   c.ig_sender_id,
-                   c.ig_recipient_id,
-                   c.last_ad_link AS ad_link,
-                   c.last_ad_title AS ad_title,
-                   c.last_message_id AS message_id,
-                   c.last_ad_id AS last_ad_id,
-                   c.last_link_type AS last_link_type,
-                   c.last_link_id AS last_link_id,
-                   u.username AS other_username,
-                   u.name AS other_name
-            FROM conversations c
-            LEFT JOIN ig_users u
-              ON u.ig_user_id = CASE WHEN c.last_message_direction='out' THEN c.ig_recipient_id ELSE c.ig_sender_id END
-            LEFT JOIN ads_products ap
-              ON ap.ad_id = COALESCE(c.last_link_id, c.last_ad_id) AND ap.link_type = COALESCE(c.last_link_type, 'ad')
-        """
+        # Check if new columns exist (for backward compatibility before migration)
+        try:
+            check_cols = session.exec(_text("""
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversations' 
+                AND COLUMN_NAME IN ('last_link_type', 'last_link_id')
+            """)).all()
+            has_new_cols = len(check_cols) >= 2
+        except Exception:
+            has_new_cols = False
+        
+        if has_new_cols:
+            base_sql = """
+                SELECT c.id AS convo_id,
+                       c.last_message_timestamp_ms AS timestamp_ms,
+                       c.last_message_text AS text,
+                       c.last_sender_username AS sender_username,
+                       c.last_message_direction AS direction,
+                       c.ig_sender_id,
+                       c.ig_recipient_id,
+                       c.last_ad_link AS ad_link,
+                       c.last_ad_title AS ad_title,
+                       c.last_message_id AS message_id,
+                       c.last_ad_id AS last_ad_id,
+                       c.last_link_type AS last_link_type,
+                       c.last_link_id AS last_link_id,
+                       u.username AS other_username,
+                       u.name AS other_name
+                FROM conversations c
+                LEFT JOIN ig_users u
+                  ON u.ig_user_id = CASE WHEN c.last_message_direction='out' THEN c.ig_recipient_id ELSE c.ig_sender_id END
+                LEFT JOIN ads_products ap
+                  ON ap.ad_id = COALESCE(c.last_link_id, c.last_ad_id) AND ap.link_type = COALESCE(c.last_link_type, 'ad')
+            """
+        else:
+            # Fallback for databases that haven't run migration yet
+            base_sql = """
+                SELECT c.id AS convo_id,
+                       c.last_message_timestamp_ms AS timestamp_ms,
+                       c.last_message_text AS text,
+                       c.last_sender_username AS sender_username,
+                       c.last_message_direction AS direction,
+                       c.ig_sender_id,
+                       c.ig_recipient_id,
+                       c.last_ad_link AS ad_link,
+                       c.last_ad_title AS ad_title,
+                       c.last_message_id AS message_id,
+                       c.last_ad_id AS last_ad_id,
+                       NULL AS last_link_type,
+                       NULL AS last_link_id,
+                       u.username AS other_username,
+                       u.name AS other_name
+                FROM conversations c
+                LEFT JOIN ig_users u
+                  ON u.ig_user_id = CASE WHEN c.last_message_direction='out' THEN c.ig_recipient_id ELSE c.ig_sender_id END
+                LEFT JOIN ads_products ap
+                  ON ap.ad_id = c.last_ad_id AND (ap.link_type = 'ad' OR ap.link_type IS NULL)
+            """
         where_parts: list[str] = []
         params: dict[str, object] = {}
         if q and isinstance(q, str) and q.strip():
@@ -60,10 +96,16 @@ async def inbox(
         # Optional filter: restrict to conversations with ads/posts / unlinked ads/posts
         has_ad_s = (has_ad or "").strip().lower()
         if has_ad_s in ("yes", "true", "1", "any"):
-            where_parts.append("(c.last_link_id IS NOT NULL OR c.last_ad_id IS NOT NULL)")
+            if has_new_cols:
+                where_parts.append("(c.last_link_id IS NOT NULL OR c.last_ad_id IS NOT NULL)")
+            else:
+                where_parts.append("c.last_ad_id IS NOT NULL")
         elif has_ad_s in ("unlinked", "missing_product", "no_product"):
             # Conversations whose latest link (ad or post) has no product mapping yet
-            where_parts.append("(c.last_link_id IS NOT NULL OR c.last_ad_id IS NOT NULL) AND ap.product_id IS NULL")
+            if has_new_cols:
+                where_parts.append("(c.last_link_id IS NOT NULL OR c.last_ad_id IS NOT NULL) AND ap.product_id IS NULL")
+            else:
+                where_parts.append("c.last_ad_id IS NOT NULL AND ap.product_id IS NULL")
         sample_n = max(50, min(int(limit or 25) * 4, 200))
         bind = session.get_bind()
         dialect_name = ""
