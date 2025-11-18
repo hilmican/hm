@@ -29,6 +29,21 @@
         <label>Prompt Mesajı (ai_prompt_msg)</label>
         <textarea name="ai_prompt_msg" placeholder="Ürün/paket/ifadeler...">{{ ai_prompt_msg }}</textarea>
       </div>
+      <div class="field">
+        <label>Pretext Seçimi</label>
+        <select name="pretext_id" style="width:100%; padding:10px 12px; border:1px solid #e5e7eb; border-radius:8px;">
+          <option value="">Varsayılan pretext kullan</option>
+          {% for p in pretexts %}
+          <option value="{{ p.id }}" {% if pretext_id == p.id %}selected{% endif %}>
+            {{ p.name }}{% if p.is_default %} (Varsayılan){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        <div class="meta" style="margin-top:6px;">
+          Pretext, sistem mesajının başına eklenen özel metindir. 
+          <a href="/ig/ai/pretexts" target="_blank">Pretext'leri yönet</a>
+        </div>
+      </div>
       <button type="submit">Kaydet</button>
     </form>
 

@@ -272,9 +272,9 @@ def start_process(body: dict):
 def product_ai_page(request: Request, focus: str):
     """
     Edit AI instructions for a single product identified by slug or name.
-    Renders ig_ai_products.html with current ai_system_msg / ai_prompt_msg.
+    Renders ig_ai_products.html with current ai_system_msg / ai_prompt_msg / pretext_id.
     """
-    from ..models import Product
+    from ..models import Product, AIPretext
 
     focus_s = (focus or "").strip()
     if not focus_s:
@@ -286,8 +286,13 @@ def product_ai_page(request: Request, focus: str):
             ).first()
         except Exception:
             row = None
-    if not row:
-        raise HTTPException(status_code=404, detail="Product not found for focus")
+        if not row:
+            raise HTTPException(status_code=404, detail="Product not found for focus")
+        
+        # Load all pretexts for dropdown
+        pretexts = session.exec(select(AIPretext).order_by(AIPretext.is_default.desc(), AIPretext.id.asc())).all()
+        pretext_list = [{"id": p.id, "name": p.name, "is_default": p.is_default} for p in pretexts]
+        
     name = row.name or focus_s
     templates = request.app.state.templates
     return templates.TemplateResponse(
@@ -298,6 +303,8 @@ def product_ai_page(request: Request, focus: str):
             "name": name,
             "ai_system_msg": row.ai_system_msg or "",
             "ai_prompt_msg": row.ai_prompt_msg or "",
+            "pretext_id": row.pretext_id,
+            "pretexts": pretext_list,
         },
     )
 
@@ -307,6 +314,7 @@ def save_product_ai(
     focus: str = Form(...),
     ai_system_msg: str = Form(default=""),
     ai_prompt_msg: str = Form(default=""),
+    pretext_id: str = Form(default=""),
 ):
     """
     Persist AI instructions for the focused product.
@@ -330,6 +338,16 @@ def save_product_ai(
         msg_prompt = ai_prompt_msg.strip() if isinstance(ai_prompt_msg, str) else ""
         prod.ai_system_msg = msg_sys or None
         prod.ai_prompt_msg = msg_prompt or None
+        # Handle pretext_id
+        pretext_id_val = None
+        if pretext_id and isinstance(pretext_id, str) and pretext_id.strip():
+            try:
+                pretext_id_val = int(pretext_id.strip())
+                if pretext_id_val <= 0:
+                    pretext_id_val = None
+            except Exception:
+                pretext_id_val = None
+        prod.pretext_id = pretext_id_val
         session.add(prod)
     # Redirect back to the edit page for this product
     from fastapi.responses import RedirectResponse
@@ -783,6 +801,116 @@ def run_result_detail(request: Request, run_id: int, convo_id: str, limit: int =
             "contact": contact,
         },
     )
+
+
+@router.get("/pretexts")
+def pretexts_page(request: Request):
+    """List and manage AI pretexts."""
+    from ..models import AIPretext
+    
+    with get_session() as session:
+        pretexts = session.exec(select(AIPretext).order_by(AIPretext.is_default.desc(), AIPretext.id.asc())).all()
+        pretext_list = []
+        for p in pretexts:
+            pretext_list.append({
+                "id": p.id,
+                "name": p.name,
+                "content": p.content or "",
+                "is_default": p.is_default,
+                "created_at": p.created_at,
+                "updated_at": p.updated_at,
+            })
+    
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        "ig_ai_pretexts.html",
+        {"request": request, "pretexts": pretext_list},
+    )
+
+
+@router.post("/pretexts/create")
+def create_pretext(
+    name: str = Form(...),
+    content: str = Form(...),
+    is_default: str = Form(default=""),
+):
+    """Create a new pretext."""
+    from ..models import AIPretext
+    
+    with get_session() as session:
+        # If this is set as default, unset other defaults
+        set_as_default = is_default.lower() in ("true", "1", "yes", "on")
+        if set_as_default:
+            session.exec(text("UPDATE ai_pretext SET is_default = 0"))
+        
+        pretext = AIPretext(
+            name=name.strip(),
+            content=content.strip(),
+            is_default=set_as_default,
+        )
+        session.add(pretext)
+        session.flush()
+        pretext_id = pretext.id
+    
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/ig/ai/pretexts", status_code=303)
+
+
+@router.post("/pretexts/{pretext_id}/update")
+def update_pretext(
+    pretext_id: int,
+    name: str = Form(...),
+    content: str = Form(...),
+    is_default: str = Form(default=""),
+):
+    """Update an existing pretext."""
+    from ..models import AIPretext
+    
+    with get_session() as session:
+        pretext = session.exec(select(AIPretext).where(AIPretext.id == pretext_id)).first()
+        if not pretext:
+            raise HTTPException(status_code=404, detail="Pretext not found")
+        
+        # If this is set as default, unset other defaults
+        set_as_default = is_default.lower() in ("true", "1", "yes", "on")
+        if set_as_default:
+            session.exec(text("UPDATE ai_pretext SET is_default = 0 WHERE id != :id").params(id=pretext_id))
+        
+        pretext.name = name.strip()
+        pretext.content = content.strip()
+        pretext.is_default = set_as_default
+        session.add(pretext)
+    
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/ig/ai/pretexts", status_code=303)
+
+
+@router.post("/pretexts/{pretext_id}/delete")
+def delete_pretext(pretext_id: int):
+    """Delete a pretext."""
+    from ..models import AIPretext
+    
+    with get_session() as session:
+        pretext = session.exec(select(AIPretext).where(AIPretext.id == pretext_id)).first()
+        if not pretext:
+            raise HTTPException(status_code=404, detail="Pretext not found")
+        
+        # Check if any products are using this pretext
+        products_using = session.exec(
+            text("SELECT COUNT(*) FROM product WHERE pretext_id = :id").params(id=pretext_id)
+        ).first()
+        count = int(products_using[0] if isinstance(products_using, (list, tuple)) else (getattr(products_using, "count", 0) if hasattr(products_using, "count") else 0))
+        
+        if count > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete pretext: {count} product(s) are using it. Please update products first."
+            )
+        
+        session.delete(pretext)
+    
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/ig/ai/pretexts", status_code=303)
 
 
 @router.get("/link-suggest")

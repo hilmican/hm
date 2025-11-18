@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AI Pretext Yönetimi</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .field { margin-bottom: 12px; }
+      label { display:block; font-weight:600; margin-bottom:6px; color:#111827; }
+      textarea { width:100%; min-height:160px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:8px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      input[type="text"] { width:100%; padding:10px 12px; border:1px solid #e5e7eb; border-radius:8px; }
+      button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:10px 14px; cursor:pointer; margin-right:8px; }
+      button.danger { background:#ef4444; }
+      .meta { color:#6b7280; font-size:12px; }
+      .card { border:1px solid #e5e7eb; border-radius:10px; padding:16px; margin-bottom:16px; }
+      .card h3 { margin:0 0 12px 0; }
+      .badge { display:inline-block; background:#10b981; color:#fff; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-left:8px; }
+      .pretext-list { margin-top:24px; }
+      .pretext-item { border:1px solid #e5e7eb; border-radius:8px; padding:16px; margin-bottom:12px; }
+      .pretext-item h4 { margin:0 0 8px 0; display:flex; align-items:center; }
+      .pretext-content { background:#f9fafb; padding:12px; border-radius:6px; margin:8px 0; white-space:pre-wrap; font-size:13px; }
+      .actions { margin-top:12px; }
+      .edit-form { display:none; margin-top:12px; }
+      .edit-form.active { display:block; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>AI Pretext Yönetimi</h1>
+    <p class="meta">Pretext'ler, AI sistem mesajlarının başına eklenen özel metinlerdir. Ürün bazında seçilebilir veya varsayılan olarak kullanılabilir.</p>
+
+    <div class="card">
+      <h3>Yeni Pretext Oluştur</h3>
+      <form method="post" action="/ig/ai/pretexts/create">
+        <div class="field">
+          <label>İsim</label>
+          <input type="text" name="name" placeholder="örn: Default, Premium Line, vb." required />
+        </div>
+        <div class="field">
+          <label>İçerik</label>
+          <textarea name="content" placeholder="Pretext içeriği (AI sistem mesajının başına eklenecek)" required></textarea>
+        </div>
+        <div class="field">
+          <label>
+            <input type="checkbox" name="is_default" value="1" />
+            Varsayılan pretext olarak işaretle
+          </label>
+        </div>
+        <button type="submit">Oluştur</button>
+      </form>
+    </div>
+
+    <div class="pretext-list">
+      <h2>Mevcut Pretext'ler</h2>
+      {% if pretexts %}
+        {% for p in pretexts %}
+        <div class="pretext-item" id="pretext-{{ p.id }}">
+          <h4>
+            {{ p.name }}
+            {% if p.is_default %}<span class="badge">Varsayılan</span>{% endif %}
+          </h4>
+          <div class="pretext-content">{{ p.content }}</div>
+          <div class="meta">Oluşturulma: {{ p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else 'N/A' }} | Güncelleme: {{ p.updated_at.strftime('%Y-%m-%d %H:%M') if p.updated_at else 'N/A' }}</div>
+          <div class="actions">
+            <button onclick="toggleEdit({{ p.id }})">Düzenle</button>
+            <button class="danger" onclick="deletePretext({{ p.id }}, '{{ p.name }}')">Sil</button>
+          </div>
+          <div class="edit-form" id="edit-form-{{ p.id }}">
+            <form method="post" action="/ig/ai/pretexts/{{ p.id }}/update">
+              <div class="field">
+                <label>İsim</label>
+                <input type="text" name="name" value="{{ p.name }}" required />
+              </div>
+              <div class="field">
+                <label>İçerik</label>
+                <textarea name="content" required>{{ p.content }}</textarea>
+              </div>
+              <div class="field">
+                <label>
+                  <input type="checkbox" name="is_default" value="1" {% if p.is_default %}checked{% endif %} />
+                  Varsayılan pretext olarak işaretle
+                </label>
+              </div>
+              <button type="submit">Kaydet</button>
+              <button type="button" onclick="toggleEdit({{ p.id }})">İptal</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="meta">Henüz pretext oluşturulmamış.</p>
+      {% endif %}
+    </div>
+
+    <script>
+      function toggleEdit(id) {
+        const form = document.getElementById('edit-form-' + id);
+        form.classList.toggle('active');
+      }
+
+      function deletePretext(id, name) {
+        if (!confirm(`"${name}" pretext'ini silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`)) {
+          return;
+        }
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = `/ig/ai/pretexts/${id}/delete`;
+        document.body.appendChild(form);
+        form.submit();
+      }
+    </script>
+  </body>
+</html>
+
