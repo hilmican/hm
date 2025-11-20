@@ -86,7 +86,16 @@ def main() -> None:
 				# Log scan results every 20 loops (10 seconds)
 				if loop_count % 20 == 0:
 					total_in_queue = session.exec(_text("SELECT COUNT(*) FROM ai_shadow_state")).first()
-					total_count = int(total_in_queue[0] if isinstance(total_in_queue, (tuple, list)) else (getattr(total_in_queue, "count", 0) if hasattr(total_in_queue, "count") else 0))
+					# Extract count value from Row object (COUNT(*) returns a scalar in first column)
+					if total_in_queue:
+						if isinstance(total_in_queue, (tuple, list)):
+							total_count = int(total_in_queue[0] or 0)
+						elif hasattr(total_in_queue, "__getitem__"):
+							total_count = int(total_in_queue[0] or 0)
+						else:
+							total_count = 0
+					else:
+						total_count = 0
 					log.info("worker_reply: scan loop=%d found=%d due items total_in_queue=%d", loop_count, len(due), total_count)
 		except Exception as e:
 			try:
