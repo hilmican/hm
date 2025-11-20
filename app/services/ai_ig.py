@@ -86,11 +86,69 @@ def get_stock_snapshot(sku: str) -> Optional[dict]:
 def _detect_focus_product(conversation_id: str) -> Tuple[Optional[str], float]:
 	"""Best-effort focus product detection.
 	Returns (sku_or_slug, confidence). Currently a lightweight heuristic:
+	- check conversation's last_link_id/last_link_type (supports posts via ads_products)
 	- use ad_id→sku mapping if present (ads_products table optional)
 	- keyword match against Product.ai_tags on last N inbound messages
 	"""
 	with get_session() as session:
-		# ad_id mapping (optional)
+		# Check conversation's last_link_id/last_link_type first (includes posts)
+		try:
+			stmt_conv = _text(
+				"""
+				SELECT c.last_link_id, c.last_link_type, c.last_ad_id
+				FROM conversations c
+				WHERE c.id = :cid
+				LIMIT 1
+				"""
+			).bindparams(cid=str(conversation_id))
+			row_conv = session.exec(stmt_conv).first()
+			if row_conv:
+				last_link_id = getattr(row_conv, "last_link_id", None) if hasattr(row_conv, "last_link_id") else (row_conv[0] if len(row_conv) > 0 else None)
+				last_link_type = getattr(row_conv, "last_link_type", None) if hasattr(row_conv, "last_link_type") else (row_conv[1] if len(row_conv) > 1 else None)
+				last_ad_id = getattr(row_conv, "last_ad_id", None) if hasattr(row_conv, "last_ad_id") else (row_conv[2] if len(row_conv) > 2 else None)
+				# Use last_link_id if present (handles both ads and posts)
+				link_id_to_check = last_link_id or last_ad_id
+				link_type_to_check = last_link_type or ("ad" if last_ad_id else None)
+				if link_id_to_check:
+					# Resolve product via ads_products (works for both ad and post link_type)
+					rp = session.exec(
+						_text(
+							"""
+							SELECT ap.sku, ap.product_id, p.slug, p.name
+							FROM ads_products ap
+							LEFT JOIN product p ON ap.product_id = p.id
+							WHERE ap.ad_id = :id AND (ap.link_type = :link_type OR :link_type IS NULL)
+							LIMIT 1
+							"""
+						).params(id=str(link_id_to_check), link_type=link_type_to_check)
+					).first()
+					if not rp and link_type_to_check:
+						# Fallback: try without link_type filter (for backward compatibility)
+						rp = session.exec(
+							_text(
+								"""
+								SELECT ap.sku, ap.product_id, p.slug, p.name
+								FROM ads_products ap
+								LEFT JOIN product p ON ap.product_id = p.id
+								WHERE ap.ad_id = :id
+								LIMIT 1
+								"""
+							).params(id=str(link_id_to_check))
+						).first()
+					if rp:
+						sku = getattr(rp, "sku", None) if hasattr(rp, "sku") else (rp[0] if len(rp) > 0 else None)
+						pid = getattr(rp, "product_id", None) if hasattr(rp, "product_id") else (rp[1] if len(rp) > 1 else None)
+						slug = getattr(rp, "slug", None) if hasattr(rp, "slug") else (rp[2] if len(rp) > 2 else None)
+						pname = getattr(rp, "name", None) if hasattr(rp, "name") else (rp[3] if len(rp) > 3 else None)
+						if sku:
+							return str(sku), 0.9
+						if slug:
+							return str(slug), 0.9
+						if pname:
+							return str(pname), 0.85
+		except Exception:
+			pass
+		# Fallback: ad_id mapping from messages (backward compatibility)
 		try:
 			stmt_last_ad = _text(
 				"""
