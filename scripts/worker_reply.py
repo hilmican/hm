@@ -156,6 +156,37 @@ def main() -> None:
 				except Exception:
 					pass
 				data = draft_reply(int(cid), limit=40, include_meta=True)
+				# Block when conversation isn't linked to a product/ad
+				if data.get("missing_product_context"):
+					warning_text = data.get("notes") or "Konuşma ürüne/posta bağlanmadan AI çalışmaz."
+					reason_text = data.get("reason") or "missing_product_context"
+					meta = {"error": "missing_product_context", "product_info": data.get("product_info") or {}}
+					try:
+						with get_session() as session:
+							session.exec(
+								_text(
+									"""
+									INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, attempt_no, status, created_at)
+									VALUES(:cid, :txt, :model, :conf, :reason, :meta, NULL, :att, 'info', CURRENT_TIMESTAMP)
+									"""
+								).params(
+									cid=int(cid),
+									txt=f"⚠️ AI beklemede: {warning_text}",
+									model="system",
+									conf=0.0,
+									reason=reason_text,
+									meta=json.dumps(meta, ensure_ascii=False),
+									att=int(postpones or 0),
+								)
+							)
+							session.exec(
+								_text(
+									"UPDATE ai_shadow_state SET status='needs_link', updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+								).params(cid=int(cid))
+							)
+					except Exception:
+						pass
+					continue
 				# Decide whether we should actually propose a reply
 				should_reply = bool(data.get("should_reply", True))
 				reply_text = (data.get("reply_text") or "").strip()

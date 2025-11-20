@@ -18,10 +18,62 @@
   </head>
   <body>
     {% include "_nav.html" %}
+    {% set lc = link_context or {} %}
+    {% set uc = user_context or {} %}
+    {% set ai_state = ai_state or {} %}
     <div class="toolbar">
       <a href="/ig/inbox">← Back to Inbox</a>
       <a class="action" href="/ig/inbox/{{ conversation_id }}/debug" title="AI Debug">AI Debug</a>
       <button id="refresh">Refresh</button>
+    </div>
+    <div style="display:grid; gap:12px; margin-bottom:16px;">
+      <div style="border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
+        <h3 style="margin:0 0 8px 0; color:#111827;">Konuşma Özeti</h3>
+        <div class="meta">IG Kullanıcısı:
+          {% if uc.username %}@{{ uc.username }}
+          {% elif other_label %}{{ other_label }}
+          {% else %}-{% endif %}
+          {% if uc.ig_user_id %} · id: {{ uc.ig_user_id }}{% endif %}
+        </div>
+        {% if uc.contact_name or uc.contact_phone or uc.contact_address %}
+          <div class="meta">
+            {% if uc.contact_name %}Ad: {{ uc.contact_name }}{% endif %}
+            {% if uc.contact_name and uc.contact_phone %} · {% endif %}
+            {% if uc.contact_phone %}Tel: {{ uc.contact_phone }}{% endif %}
+            {% if (uc.contact_name or uc.contact_phone) and uc.contact_address %} · {% endif %}
+            {% if uc.contact_address %}Adres: {{ uc.contact_address }}{% endif %}
+          </div>
+        {% endif %}
+        {% if uc.linked_order_id %}
+          <div class="meta">Bağlı Sipariş: <a href="/orders/{{ uc.linked_order_id }}/edit" style="color:#2563eb;">#{{ uc.linked_order_id }}</a></div>
+        {% endif %}
+        {% if lc.product_name %}
+          <div class="meta">Bağlı Ürün: {{ lc.product_name }}
+            {% if lc.product_slug %}
+              <a class="meta" href="/ig/ai/products?focus={{ lc.product_slug }}" target="_blank" rel="noopener">(AI talimatlarını düzenle)</a>
+            {% endif %}
+          </div>
+        {% elif lc.has_link %}
+          <div class="meta">
+            Bağlı {{ lc.link_type or 'ad' }}: {{ lc.link_id or lc.ad_id }}
+            {% if lc.ad_edit_url %}
+              <a class="meta" href="{{ lc.ad_edit_url }}" target="_blank" rel="noopener">düzenle ↗</a>
+            {% endif %}
+          </div>
+        {% else %}
+          <div class="meta" style="color:#b91c1c;">Henüz reklama/ürüne bağlanmadı.</div>
+        {% endif %}
+        {% if ai_state.label %}
+          <div class="meta">AI Durumu: {{ ai_state.label }}{% if ai_state.description %} — {{ ai_state.description }}{% endif %}</div>
+        {% endif %}
+        {% if ai_state.needs_link %}
+          {% if lc.product_slug %}
+            <button id="aiRetryBtn" class="action" style="margin-top:8px; font-size:13px;">Ürün bağlandı, AI'yi sıraya al</button>
+          {% else %}
+            <div class="meta" style="color:#b91c1c;">Önce ilgili reklamı/postu ürüne bağlayın.</div>
+          {% endif %}
+        {% endif %}
+      </div>
     </div>
     {% if shadow and shadow.text and not inline_drafts %}
       <div style="margin:12px 0; padding:12px; border:1px dashed #93c5fd; background:#eff6ff; border-radius:10px;">
@@ -65,19 +117,22 @@
     <h3>AI Çıktısı</h3>
     {% if ai_status %}<div class="meta">Durum: {{ ai_status }}</div>{% endif %}
     <pre id="aiBox" style="background:#0b1021;color:#e5e7eb; padding:12px; border-radius:8px; max-height:300px; overflow:auto; white-space:pre-wrap;">{{ ai_json or 'Henüz AI verisi yok.' }}</pre>
-    {% if focus_product %}
-      <div style="margin-top:12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <h4 style="margin:0; color:#111827;">Ürün AI Talimatları
-            {% if focus_product.id %}
-              <a href="/ig/ai/products?focus={{ focus_product.slug or focus_product.name or 'default' }}" target="_blank" rel="noopener" class="meta" style="margin-left:6px;">(düzenle)</a>
-            {% endif %}
-          </h4>
+    <div style="margin-top:12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h4 style="margin:0; color:#111827;">Ürün AI Talimatları
+          {% if focus_product and focus_product.id %}
+            <a href="/ig/ai/products?focus={{ focus_product.slug or focus_product.name }}" target="_blank" rel="noopener" class="meta" style="margin-left:6px;">(düzenle)</a>
+          {% endif %}
+        </h4>
+        {% if focus_product %}
           <button id="toggleAiInstructions" type="button" class="action" style="font-size:12px; padding:4px 8px;">Göster</button>
-        </div>
+        {% endif %}
+      </div>
+      {% if focus_product %}
         <div id="aiInstructionsContent" style="display:none;">
           <div class="meta">
             Ürün: {{ focus_product.name or '-' }}
+            {% if focus_product.price %} · fiyat: {{ '%.0f' % focus_product.price }}₺{% endif %}
             {% if focus_product.confidence is not none %} · güven: {{ '%.2f' % focus_product.confidence }}{% endif %}
           </div>
           {% if focus_product.system %}
@@ -87,8 +142,12 @@
             <div style="margin-top:8px; white-space:pre-wrap; font-size:13px;"><strong>Prompt:</strong> {{ focus_product.prompt }}</div>
           {% endif %}
         </div>
-      </div>
-    {% endif %}
+      {% else %}
+        <div class="meta" style="color:#b91c1c;">
+          Bu konuşma henüz ürüne bağlanmadı. İlgili reklamı ürüne eşledikten sonra AI talimatlarını düzenleyebilirsiniz.
+        </div>
+      {% endif %}
+    </div>
     <div style="margin-top:12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
       <h4 style="margin:0 0 8px 0; color:#111827;">Zenginleştirme Durumu</h4>
       {% if enrich %}
@@ -166,7 +225,12 @@
                 </div>
                 {% if m.ai_decision_status != 'no_reply' %}
                 <div style="margin-top:6px">
-                  <a class="action" href="/ig/ai/products?focus={{ m.product_slug or 'default' }}" target="_blank" rel="noopener">Ürün AI mesajlarını düzenle ↗</a>
+                  {% set draft_slug = m.product_slug or (focus_product.slug if focus_product else None) %}
+                  {% if draft_slug %}
+                    <a class="action" href="/ig/ai/products?focus={{ draft_slug }}" target="_blank" rel="noopener">Ürün AI mesajlarını düzenle ↗</a>
+                  {% else %}
+                    <span class="meta" style="color:#b91c1c;">Ürün bağlantısı yok (AI talimatı düzenlenemez)</span>
+                  {% endif %}
                 </div>
                 {% endif %}
                 {% if m.ai_actions %}
@@ -282,6 +346,7 @@
       </form>
     </div>
     <script>
+      const conversationId = {{ conversation_id | tojson }};
       function fmtTs(){
         const nodes = document.querySelectorAll('.ts');
         for(const el of nodes){
@@ -312,6 +377,24 @@
           if (!r.ok) throw new Error('refresh failed');
           location.reload();
         } catch (e) { alert('Refresh error'); }
+      });
+      const aiRetryBtn = document.getElementById('aiRetryBtn');
+      aiRetryBtn?.addEventListener('click', async () => {
+        if (!confirm('Konuşmayı tekrar AI kuyruğuna almak istiyor musunuz?')) return;
+        aiRetryBtn.disabled = true; const prev = aiRetryBtn.textContent;
+        aiRetryBtn.textContent = 'Sıraya alınıyor...';
+        try {
+          const r = await fetch(`/ig/inbox/${conversationId}/ai/retry`, { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(js.error || 'retry_failed');
+          alert('AI kuyruğa eklendi. Birkaç saniye içinde durum güncellenecek.');
+          location.reload();
+        } catch (e) {
+          alert('AI kuyruğuna alma başarısız: ' + (e?.message || e));
+        } finally {
+          aiRetryBtn.disabled = false;
+          aiRetryBtn.textContent = prev;
+        }
       });
       // Manual enrich enqueue
       const enrichBtn = document.getElementById('enrichNow');

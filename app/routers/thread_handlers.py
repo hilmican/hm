@@ -13,6 +13,7 @@ from ..db import get_session
 from ..models import Message, IGAiDebugRun, Conversation
 from ..services.instagram_api import sync_latest_conversations, _get_base_token_and_id, GRAPH_VERSION
 from ..services.queue import enqueue
+from ..services.ai_shadow import touch_shadow_state
 from ..services.ai_ig import _detect_focus_product
 from ..services.monitoring import increment_counter
 
@@ -249,6 +250,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
         msgs = list(reversed(msgs))
         # Determine other party id from messages then resolve username
         other_label = None
+        other_username = None
         other_id = None
         contact_name = None
         contact_phone = None
@@ -329,6 +331,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     un = rowu.username if hasattr(rowu, "username") else rowu[0]
                     if un:
                         other_label = f"@{un}"
+                        other_username = str(un)
             except Exception:
                 pass
             # Collect enrichment status and queue info (build piecemeal, never fail the whole block)
@@ -400,6 +403,50 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                         linked_order_id = val or None
             except Exception:
                 pass
+        # Basic link/ad context from conversation row
+        link_context: dict[str, Any] = {
+            "link_type": getattr(convo, "last_link_type", None),
+            "link_id": getattr(convo, "last_link_id", None),
+            "ad_id": getattr(convo, "last_ad_id", None),
+            "ad_title": getattr(convo, "last_ad_title", None),
+            "ad_link": getattr(convo, "last_ad_link", None),
+        }
+        if not link_context["link_id"] and link_context["ad_id"]:
+            link_context["link_id"] = link_context["ad_id"]
+        link_context["has_link"] = bool(link_context.get("link_id"))
+        link_context["product_id"] = None
+        link_context["product_name"] = None
+        link_context["product_slug"] = None
+        if link_context.get("link_id"):
+            try:
+                from sqlalchemy import text as _text
+
+                row_link = session.exec(
+                    _text(
+                        """
+                        SELECT ap.product_id, p.name AS product_name, p.slug
+                        FROM ads_products ap
+                        LEFT JOIN product p ON ap.product_id = p.id
+                        WHERE ap.ad_id = :aid
+                          AND (:lt IS NULL OR ap.link_type = :lt)
+                        LIMIT 1
+                        """
+                    ).params(aid=str(link_context["link_id"]), lt=(link_context.get("link_type") or None))
+                ).first()
+                if row_link:
+                    link_context["product_id"] = getattr(row_link, "product_id", None) if hasattr(row_link, "product_id") else (row_link[0] if len(row_link) > 0 else None)
+                    link_context["product_name"] = getattr(row_link, "product_name", None) if hasattr(row_link, "product_name") else (row_link[1] if len(row_link) > 1 else None)
+                    link_context["product_slug"] = getattr(row_link, "slug", None) if hasattr(row_link, "slug") else (row_link[2] if len(row_link) > 2 else None)
+            except Exception:
+                pass
+        if link_context.get("link_id"):
+            try:
+                link_context["ad_edit_url"] = f"/ads/{link_context['link_id']}/edit"
+            except Exception:
+                link_context["ad_edit_url"] = None
+        else:
+            link_context["ad_edit_url"] = None
+
         # Resolve per-message sender usernames via ig_users only.
         # Enqueue missing ones for background enrichment instead of fetching inline.
         usernames: dict[str, str] = {}
@@ -448,7 +495,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
             try:
                 from sqlalchemy import text as _text
                 stmt_fp = _text(
-                    "SELECT id, name, ai_system_msg, ai_prompt_msg FROM product WHERE slug=:s OR name=:s LIMIT 1"
+                    "SELECT id, name, ai_system_msg, ai_prompt_msg, default_price, slug FROM product WHERE slug=:s OR name=:s LIMIT 1"
                 ).bindparams(s=str(focus_slug))
                 row_fp = session.exec(stmt_fp).first()
                 if row_fp:
@@ -456,14 +503,21 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     pname = getattr(row_fp, "name", None) if hasattr(row_fp, "name") else (row_fp[1] if len(row_fp) > 1 else None)
                     psys = getattr(row_fp, "ai_system_msg", None) if hasattr(row_fp, "ai_system_msg") else (row_fp[2] if len(row_fp) > 2 else None)
                     pprompt = getattr(row_fp, "ai_prompt_msg", None) if hasattr(row_fp, "ai_prompt_msg") else (row_fp[3] if len(row_fp) > 3 else None)
+                    pprice = getattr(row_fp, "default_price", None) if hasattr(row_fp, "default_price") else (row_fp[4] if len(row_fp) > 4 else None)
+                    pslug_real = getattr(row_fp, "slug", None) if hasattr(row_fp, "slug") else (row_fp[5] if len(row_fp) > 5 else None)
                     focus_product = {
                         "id": pid,
                         "name": pname,
-                        "slug": focus_slug,
+                        "slug": pslug_real or focus_slug,
                         "system": psys,
                         "prompt": pprompt,
+                        "price": pprice,
                         "confidence": float(focus_conf or 0.0),
                     }
+                    if not link_context.get("product_name"):
+                        link_context["product_name"] = pname
+                        link_context["product_slug"] = focus_product["slug"]
+                        link_context["product_id"] = pid
             except Exception:
                 focus_product = None
 
@@ -669,7 +723,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                         "draft_id": int(did) if did is not None else None,
                         "ai_model": getattr(rr, "model", None) if hasattr(rr, "model") else (rr[2] if len(rr) > 2 else None),
                         "ai_reason": getattr(rr, "reason", None) if hasattr(rr, "reason") else (rr[4] if len(rr) > 4 else None),
-                        "product_slug": focus_slug or "default",
+                        "product_slug": focus_slug or None,
                         "ai_actions": actions_list,
                     }
                     vms.append(vm)
@@ -680,6 +734,65 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 msgs.sort(key=lambda m: (getattr(m, "timestamp_ms", None) if hasattr(m, "timestamp_ms") else (m.get("timestamp_ms") if isinstance(m, dict) else 0)) or 0)
             except Exception:
                 pass
+        # AI shadow state indicators
+        ai_state = None
+        try:
+            from sqlalchemy import text as _text
+
+            row_state = session.exec(
+                _text(
+                    """
+                    SELECT status, next_attempt_at, postpone_count, last_inbound_ms
+                    FROM ai_shadow_state
+                    WHERE conversation_id=:cid
+                    LIMIT 1
+                    """
+                ).params(cid=int(conversation_id))
+            ).first()
+            if row_state:
+                status_val = getattr(row_state, "status", None) if hasattr(row_state, "status") else (row_state[0] if len(row_state) > 0 else None)
+                next_at = getattr(row_state, "next_attempt_at", None) if hasattr(row_state, "next_attempt_at") else (row_state[1] if len(row_state) > 1 else None)
+                postpone_val = getattr(row_state, "postpone_count", None) if hasattr(row_state, "postpone_count") else (row_state[2] if len(row_state) > 2 else None)
+                status = (status_val or "pending").lower()
+                status_labels = {
+                    "pending": "Sırada",
+                    "running": "Üretiliyor",
+                    "paused": "Beklemede",
+                    "needs_link": "Ürün bekleniyor",
+                    "exhausted": "Durdu",
+                    "error": "Hata",
+                }
+                status_desc = {
+                    "needs_link": "AI çalışmadan önce konuşmayı ilgili reklam/ürüne bağlayın.",
+                    "paused": "Kısa süre sonra yeniden denenecek.",
+                    "exhausted": "Üst üste denendi, manuel tetiklenmeli.",
+                    "error": "AI cevabı üretilirken hata oluştu.",
+                }
+                ai_state = {
+                    "status": status,
+                    "label": status_labels.get(status, status.title()),
+                    "description": status_desc.get(status),
+                    "next_attempt_at": next_at,
+                    "postpone_count": postpone_val,
+                    "needs_link": status == "needs_link",
+                }
+        except Exception:
+            ai_state = None
+
+        if ai_state and ai_state.get("needs_link"):
+            link_context["needs_link"] = True
+        else:
+            link_context["needs_link"] = False
+
+        user_context = {
+            "username": other_username,
+            "ig_user_id": str(convo.ig_user_id) if getattr(convo, "ig_user_id", None) else None,
+            "contact_name": contact_name,
+            "contact_phone": contact_phone,
+            "contact_address": contact_address,
+            "linked_order_id": linked_order_id,
+        }
+
         return templates.TemplateResponse(
             "ig_thread.html",
             {
@@ -702,6 +815,9 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 "ai_json": ai_json,
                 "shadow": shadow,
                 "inline_drafts": inline_drafts,
+                "link_context": link_context,
+                "ai_state": ai_state,
+                "user_context": user_context,
             },
         )
 
@@ -735,6 +851,35 @@ async def refresh_thread(conversation_id: str):
         except Exception:
             pass
         return {"status": "error", "error": str(e)}
+
+
+@router.post("/inbox/{conversation_id}/ai/retry")
+def retry_ai_for_thread(conversation_id: int):
+    try:
+        focus_slug, _ = _detect_focus_product(str(conversation_id))
+    except Exception:
+        focus_slug = None
+    if not focus_slug:
+        return {"status": "error", "error": "missing_product"}
+    last_ms = None
+    from sqlalchemy import text as _text
+
+    with get_session() as session:
+        row_ts = session.exec(
+            _text("SELECT last_message_timestamp_ms FROM conversations WHERE id=:cid LIMIT 1").params(cid=int(conversation_id))
+        ).first()
+        if row_ts:
+            last_ms = getattr(row_ts, "last_message_timestamp_ms", None) if hasattr(row_ts, "last_message_timestamp_ms") else (row_ts[0] if len(row_ts) > 0 else None)
+        session.exec(
+            _text(
+                "UPDATE ai_shadow_state SET status='pending', next_attempt_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+            ).params(cid=int(conversation_id))
+        )
+    try:
+        touch_shadow_state(conversation_id, int(last_ms or (_d.utcnow().timestamp() * 1000)), debounce_seconds=0)
+    except Exception:
+        pass
+    return {"status": "ok"}
 
 
 @router.post("/inbox/{conversation_id}/shadow/dismiss")

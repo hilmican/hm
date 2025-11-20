@@ -360,6 +360,18 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 
 	# Context from DB: product focus + stock + history
 	product_info, stock = _load_focus_product_and_stock(int(conversation_id))
+	product_info = product_info or {}
+	if not product_info.get("id"):
+		# Do not proceed when we can't identify a concrete product.
+		return {
+			"should_reply": False,
+			"reply_text": "",
+			"confidence": 0.0,
+			"reason": "missing_product_context",
+			"notes": "Konuşma herhangi bir reklam/post ürünü ile eşleşmediği için AI devre dışı.",
+			"missing_product_context": True,
+			"product_info": product_info,
+		}
 	history, last_customer_message = _load_history(int(conversation_id), limit=limit)
 	transcript = _format_transcript(
 		[

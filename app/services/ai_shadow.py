@@ -7,6 +7,7 @@ from sqlalchemy import text as _text
 
 from ..db import get_session
 from ..services.monitoring import increment_counter
+from .ai_ig import _detect_focus_product
 
 
 def touch_shadow_state(
@@ -40,7 +41,24 @@ def touch_shadow_state(
 	next_at = now + dt.timedelta(seconds=max(1, int(debounce_seconds)))
 
 	with get_session() as session:
-		try:
+        keep_needs_link = False
+        try:
+            row_status = session.exec(
+                _text("SELECT status FROM ai_shadow_state WHERE conversation_id=:cid LIMIT 1").params(cid=cid_int)
+            ).first()
+            if row_status:
+                current_status = getattr(row_status, "status", None) if hasattr(row_status, "status") else (row_status[0] if len(row_status) > 0 else None)
+                if (current_status or "").lower() == "needs_link":
+                    keep_needs_link = True
+                    try:
+                        focus_slug, _ = _detect_focus_product(str(conversation_id))
+                        if focus_slug:
+                            keep_needs_link = False
+                    except Exception:
+                        pass
+        except Exception:
+            keep_needs_link = False
+        try:
 			# Try INSERT IGNORE first (creates row if doesn't exist)
 			session.exec(
 				_text(
@@ -51,18 +69,22 @@ def touch_shadow_state(
 				).params(cid=cid_int, ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "))
 			)
 			# Then UPDATE to refresh values (affects both new and existing rows)
-			session.exec(
-				_text(
-					"""
-					UPDATE ai_shadow_state
-					SET last_inbound_ms=:ms,
-					    next_attempt_at=:na,
-					    status=CASE WHEN status='running' THEN status ELSE 'pending' END,
-					    updated_at=CURRENT_TIMESTAMP
-					WHERE conversation_id=:cid
-					"""
-				).params(ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "), cid=cid_int)
-			)
+            session.exec(
+                _text(
+                    """
+                    UPDATE ai_shadow_state
+                    SET last_inbound_ms=:ms,
+                        next_attempt_at=:na,
+                        status=CASE
+                            WHEN status='running' THEN status
+                            WHEN :keep = 1 AND status='needs_link' THEN status
+                            ELSE 'pending'
+                        END,
+                        updated_at=CURRENT_TIMESTAMP
+                    WHERE conversation_id=:cid
+                    """
+                ).params(ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "), cid=cid_int, keep=(1 if keep_needs_link else 0))
+            )
 		except Exception as e:
 			# Log error but don't crash
 			try:
