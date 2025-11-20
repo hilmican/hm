@@ -194,6 +194,8 @@ spec:
               value: "1"
             - name: AI_SHADOW_MODEL
               value: gpt-4o-mini
+            - name: AI_MAX_PRODUCT_IMAGES
+              value: "10"
             - name: DATABASE_URL
               value: "mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
           volumeMounts: [ { name: app-root, mountPath: /app } ]

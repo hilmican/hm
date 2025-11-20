@@ -495,11 +495,11 @@ async def upload_product_images(
             target = product_dir / filename
             target.write_bytes(content)
 
-            relative_path = f"products/{folder}/{filename}"
+            relative_path = f"products/{folder}/{filename}".lstrip("/")
             if cdn_base:
                 url = f"{cdn_base}/{relative_path}"
             else:
-                url = "/" + relative_path
+                url = f"/static/{relative_path}"
 
             img = ProductImage(
                 product_id=prod.id,
