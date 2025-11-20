@@ -82,7 +82,8 @@ def _attachments_have_visible_content(attachments: Any) -> bool:
 	for att in items:
 		if _attachment_item_has_media(att):
 			return True
-	if _extract_template_elements(items):
+	template_elements = _extract_template_elements(items)
+	if template_elements:
 		return True
 	return False
 
