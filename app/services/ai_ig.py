@@ -138,17 +138,17 @@ def _detect_focus_product(conversation_id: str) -> Tuple[Optional[str], float]:
 					).first()
 				else:
 					rp = None
-					if rp:
-						sku = getattr(rp, "sku", None) if hasattr(rp, "sku") else (rp[0] if len(rp) > 0 else None)
-						pid = getattr(rp, "product_id", None) if hasattr(rp, "product_id") else (rp[1] if len(rp) > 1 else None)
-						slug = getattr(rp, "slug", None) if hasattr(rp, "slug") else (rp[2] if len(rp) > 2 else None)
-						pname = getattr(rp, "name", None) if hasattr(rp, "name") else (rp[3] if len(rp) > 3 else None)
-						if sku:
-							return str(sku), 0.9
-						if slug:
-							return str(slug), 0.9
-						if pname:
-							return str(pname), 0.85
+				if rp:
+					sku = getattr(rp, "sku", None) if hasattr(rp, "sku") else (rp[0] if len(rp) > 0 else None)
+					pid = getattr(rp, "product_id", None) if hasattr(rp, "product_id") else (rp[1] if len(rp) > 1 else None)
+					slug = getattr(rp, "slug", None) if hasattr(rp, "slug") else (rp[2] if len(rp) > 2 else None)
+					pname = getattr(rp, "name", None) if hasattr(rp, "name") else (rp[3] if len(rp) > 3 else None)
+					if sku:
+						return str(sku), 0.9
+					if slug:
+						return str(slug), 0.9
+					if pname:
+						return str(pname), 0.85
 		except Exception:
 			pass
 		# Fallback: ad_id mapping from messages (backward compatibility)
