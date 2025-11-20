@@ -85,18 +85,28 @@ def main() -> None:
 				
 				# Log scan results every 20 loops (10 seconds)
 				if loop_count % 20 == 0:
-					total_in_queue = session.exec(_text("SELECT COUNT(*) FROM ai_shadow_state")).first()
-					# Extract count value from Row object (COUNT(*) returns a scalar in first column)
-					if total_in_queue:
-						if isinstance(total_in_queue, (tuple, list)):
-							total_count = int(total_in_queue[0] or 0)
-						elif hasattr(total_in_queue, "__getitem__"):
-							total_count = int(total_in_queue[0] or 0)
-						else:
-							total_count = 0
-					else:
+					total_count = 0
+					try:
+						# COUNT(*) returns a single integer value - access via index [0] from Row
+						total_count_row = session.exec(_text("SELECT COUNT(*) FROM ai_shadow_state")).first()
+						if total_count_row is not None:
+							# Direct index access - SQLAlchemy Row supports this
+							try:
+								val = total_count_row[0]
+								# Ensure we have a numeric value, not a function
+								if callable(val):
+									total_count = 0
+								else:
+									total_count = int(val or 0)
+							except (TypeError, ValueError, IndexError):
+								total_count = 0
+					except Exception as count_err:
+						# If count query fails, just use 0 - don't let it break the worker
 						total_count = 0
-					log.info("worker_reply: scan loop=%d found=%d due items total_in_queue=%d", loop_count, len(due), total_count)
+					try:
+						log.info("worker_reply: scan loop=%d found=%d due items total_in_queue=%d", loop_count, len(due), total_count)
+					except Exception:
+						pass
 		except Exception as e:
 			try:
 				log.warning("scan error: %s", e)
