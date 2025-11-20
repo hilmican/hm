@@ -108,33 +108,36 @@ def _detect_focus_product(conversation_id: str) -> Tuple[Optional[str], float]:
 				last_ad_id = getattr(row_conv, "last_ad_id", None) if hasattr(row_conv, "last_ad_id") else (row_conv[2] if len(row_conv) > 2 else None)
 				# Use last_link_id if present (handles both ads and posts)
 				link_id_to_check = last_link_id or last_ad_id
-				link_type_to_check = last_link_type or ("ad" if last_ad_id else None)
-				if link_id_to_check:
-					# Resolve product via ads_products (works for both ad and post link_type)
+				# Determine link_type: prefer last_link_type, fallback to 'ad' if last_ad_id exists
+				link_type_to_check = last_link_type if last_link_type else ("ad" if last_ad_id else None)
+				if link_id_to_check and link_type_to_check:
+					# Resolve product via ads_products with explicit link_type filter (works for both 'ad' and 'post')
 					rp = session.exec(
 						_text(
 							"""
 							SELECT ap.sku, ap.product_id, p.slug, p.name
 							FROM ads_products ap
 							LEFT JOIN product p ON ap.product_id = p.id
-							WHERE ap.ad_id = :id AND (ap.link_type = :link_type OR :link_type IS NULL)
+							WHERE ap.ad_id = :id AND ap.link_type = :link_type
 							LIMIT 1
 							"""
-						).params(id=str(link_id_to_check), link_type=link_type_to_check)
+						).params(id=str(link_id_to_check), link_type=str(link_type_to_check))
 					).first()
-					if not rp and link_type_to_check:
-						# Fallback: try without link_type filter (for backward compatibility)
-						rp = session.exec(
-							_text(
-								"""
-								SELECT ap.sku, ap.product_id, p.slug, p.name
-								FROM ads_products ap
-								LEFT JOIN product p ON ap.product_id = p.id
-								WHERE ap.ad_id = :id
-								LIMIT 1
-								"""
-							).params(id=str(link_id_to_check))
-						).first()
+				elif link_id_to_check:
+					# Fallback: try without link_type filter if link_type is unknown (backward compatibility)
+					rp = session.exec(
+						_text(
+							"""
+							SELECT ap.sku, ap.product_id, p.slug, p.name
+							FROM ads_products ap
+							LEFT JOIN product p ON ap.product_id = p.id
+							WHERE ap.ad_id = :id
+							LIMIT 1
+							"""
+						).params(id=str(link_id_to_check))
+					).first()
+				else:
+					rp = None
 					if rp:
 						sku = getattr(rp, "sku", None) if hasattr(rp, "sku") else (rp[0] if len(rp) > 0 else None)
 						pid = getattr(rp, "product_id", None) if hasattr(rp, "product_id") else (rp[1] if len(rp) > 1 else None)
