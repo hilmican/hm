@@ -257,19 +257,20 @@ def _select_product_images_for_reply(
 			ProductImage.id.asc(),
 		)
 		rows = session.exec(stmt).all()
-
-	for img in rows:
-		if len(out) >= MAX_AI_IMAGES_PER_REPLY:
-			break
-		if not img.url:
-			continue
-		out.append(
-			{
-				"id": img.id,
-				"url": img.url,
-				"variant_key": img.variant_key,
-			}
-		)
+		
+		# Materialize results while session is still active
+		for img in rows:
+			if len(out) >= MAX_AI_IMAGES_PER_REPLY:
+				break
+			if not img.url:
+				continue
+			out.append(
+				{
+					"id": img.id,
+					"url": img.url,
+					"variant_key": img.variant_key,
+				}
+			)
 	return out
 
 
