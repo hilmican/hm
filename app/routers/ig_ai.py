@@ -46,6 +46,13 @@ def _ms_to_datetime(value: Any) -> Optional[dt.datetime]:
         return None
 
 
+def _utc_to_turkey_time(utc_dt: Optional[dt.datetime]) -> Optional[dt.datetime]:
+    """Convert UTC datetime to Turkey timezone (GMT+3)."""
+    if utc_dt is None:
+        return None
+    return utc_dt + dt.timedelta(hours=3)
+
+
 def _collect_shadow_metrics(limit: int = 100) -> Dict[str, Any]:
     n = max(1, min(int(limit or 100), 200))
     now = dt.datetime.utcnow()
@@ -108,7 +115,12 @@ def _collect_shadow_metrics(limit: int = 100) -> Dict[str, Any]:
                     FROM ai_shadow_state s
                     LEFT JOIN conversations c ON c.id = s.conversation_id
                     LEFT JOIN ig_users u ON u.id = c.ig_user_id
-                    ORDER BY COALESCE(s.next_attempt_at, CURRENT_TIMESTAMP) ASC, s.updated_at DESC
+                    ORDER BY 
+                        COALESCE(
+                            (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id),
+                            (SELECT MAX(m.timestamp_ms) FROM message m WHERE m.conversation_id = s.conversation_id),
+                            s.updated_at
+                        ) DESC
                     LIMIT {n}
                     """
                 )
@@ -157,21 +169,52 @@ def _collect_shadow_metrics(limit: int = 100) -> Dict[str, Any]:
         if last_reply_at:
             time_since_last_reply = max(0.0, (now - last_reply_at).total_seconds())
 
+        # Convert UTC datetimes to Turkey time (GMT+3) for display
+        next_attempt_at_raw = _row_get(row, "next_attempt_at")
+        updated_at_raw = _row_get(row, "updated_at")
+        
+        def _parse_datetime(val):
+            """Parse datetime from string or return as-is if already datetime."""
+            if val is None:
+                return None
+            if isinstance(val, dt.datetime):
+                return val
+            if isinstance(val, str):
+                try:
+                    # Try ISO format
+                    return dt.datetime.fromisoformat(val.replace('Z', '+00:00'))
+                except Exception:
+                    try:
+                        # Try MySQL datetime format
+                        return dt.datetime.strptime(val, '%Y-%m-%d %H:%M:%S')
+                    except Exception:
+                        pass
+            return None
+        
+        next_attempt_at_turkey = _utc_to_turkey_time(_parse_datetime(next_attempt_at_raw)) if next_attempt_at_raw else None
+        updated_at_turkey = _utc_to_turkey_time(_parse_datetime(updated_at_raw)) if updated_at_raw else None
+        
+        last_message_at_turkey = _utc_to_turkey_time(last_message_at) if last_message_at else None
+        first_reply_at_turkey = _utc_to_turkey_time(first_reply_at) if first_reply_at else None
+        last_reply_at_turkey = _utc_to_turkey_time(last_reply_at) if last_reply_at else None
+        last_inbound_at_turkey = _utc_to_turkey_time(last_inbound_at) if last_inbound_at else None
+        first_message_at_turkey = _utc_to_turkey_time(first_message_at) if first_message_at else None
+        
         entries.append(
             {
                 "conversation_id": int(convo_id) if convo_id is not None else None,
                 "status": str(status),
-                "last_inbound_at": last_inbound_at,
-                "first_message_at": first_message_at,
-                "last_message_at": last_message_at,
-                "next_attempt_at": _row_get(row, "next_attempt_at"),
-                "updated_at": _row_get(row, "updated_at"),
+                "last_inbound_at": last_inbound_at_turkey,
+                "first_message_at": first_message_at_turkey,
+                "last_message_at": last_message_at_turkey,
+                "next_attempt_at": next_attempt_at_turkey,
+                "updated_at": updated_at_turkey,
                 "graph_conversation_id": _row_get(row, "graph_conversation_id"),
                 "username": _row_get(row, "username"),
                 "contact_name": _row_get(row, "contact_name"),
                 "reply_count": reply_count,
-                "first_reply_at": first_reply_at,
-                "last_reply_at": last_reply_at,
+                "first_reply_at": first_reply_at_turkey,
+                "last_reply_at": last_reply_at_turkey,
                 "wait_seconds": wait_seconds,
                 "time_to_first_reply_seconds": time_to_first_reply,
                 "time_since_last_reply_seconds": time_since_last_reply,
@@ -191,8 +234,9 @@ def _collect_shadow_metrics(limit: int = 100) -> Dict[str, Any]:
         "avg_reply_count": (total_replies / len(entries)) if entries else 0,
         "oldest_pending_seconds": oldest_pending,
     }
+    # Convert generated_at to Turkey time for display
     return {
-        "generated_at": now,
+        "generated_at": _utc_to_turkey_time(now) or now,
         "status_counts": status_counts,
         "entries": entries,
         "summary": summary,

@@ -55,7 +55,9 @@ def _set_status(conversation_id: int, status: str) -> None:
 
 def main() -> None:
 	log.info("worker_reply starting")
+	loop_count = 0
 	while True:
+		loop_count += 1
 		# Pull due states
 		due: list[dict[str, Any]] = []
 		try:
@@ -80,6 +82,12 @@ def main() -> None:
 						"status": (r.status if hasattr(r, "status") else r[3]) or "pending",
 					}
 					due.append(item)
+				
+				# Log scan results every 20 loops (10 seconds)
+				if loop_count % 20 == 0:
+					total_in_queue = session.exec(_text("SELECT COUNT(*) FROM ai_shadow_state")).first()
+					total_count = int(total_in_queue[0] if isinstance(total_in_queue, (tuple, list)) else (getattr(total_in_queue, "count", 0) if hasattr(total_in_queue, "count") else 0))
+					log.info("worker_reply: scan loop=%d found=%d due items total_in_queue=%d", loop_count, len(due), total_count)
 		except Exception as e:
 			try:
 				log.warning("scan error: %s", e)
@@ -91,6 +99,8 @@ def main() -> None:
 		if not due:
 			time.sleep(0.5)
 			continue
+		
+		log.info("worker_reply: processing %d due conversation(s)", len(due))
 
 		for st in due:
 			cid = st.get("conversation_id")

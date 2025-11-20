@@ -31,49 +31,26 @@ def touch_shadow_state(
 		# Avoid corrupting queue with non-integer ids
 		return
 
-	# Only enable AI shadow for conversations that have ad/product or post/product context
-	try:
-		with get_session() as session:
-			# Check if conversation has ad linked to product
-			row_ad = session.exec(
-				_text(
-					"""
-					SELECT 1
-					FROM conversations c
-					JOIN ads_products ap ON ap.ad_id = c.last_ad_id
-					WHERE c.id = :cid
-					LIMIT 1
-					"""
-				).params(cid=cid_int)
-			).first()
-			
-			# Check if conversation has posts linked to products
-			row_post = session.exec(
-				_text(
-					"""
-					SELECT 1
-					FROM message m
-					JOIN posts pst ON pst.message_id = m.id
-					JOIN posts_products pp ON pp.post_id = pst.post_id
-					WHERE m.conversation_id = :cid
-					LIMIT 1
-					"""
-				).params(cid=cid_int)
-			).first()
-			
-			if not row_ad and not row_post:
-				# No connected ad/product or post/product → do not enqueue in ai_shadow_state
-				return
-	except Exception:
-		# If this check fails, fail closed (no shadow) rather than crashing
-		return
+	# Enable AI shadow for ALL conversations (removed ad/product restriction)
+	# The AI can detect product focus from messages even without explicit ad/product links
+	# This allows processing conversations like "Ürün hakkında detaylı bilgi alabilir miyim?"
+	# where the product is detected from message context rather than ad/post links
 
 	now = dt.datetime.utcnow()
 	next_at = now + dt.timedelta(seconds=max(1, int(debounce_seconds)))
 
 	with get_session() as session:
 		try:
-			# Try update path first
+			# Try INSERT IGNORE first (creates row if doesn't exist)
+			session.exec(
+				_text(
+					"""
+					INSERT IGNORE INTO ai_shadow_state(conversation_id, last_inbound_ms, next_attempt_at, postpone_count, status, updated_at)
+					VALUES(:cid, :ms, :na, 0, 'pending', CURRENT_TIMESTAMP)
+					"""
+				).params(cid=cid_int, ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "))
+			)
+			# Then UPDATE to refresh values (affects both new and existing rows)
 			session.exec(
 				_text(
 					"""
@@ -86,19 +63,13 @@ def touch_shadow_state(
 					"""
 				).params(ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "), cid=cid_int)
 			)
-			# Insert if not exists
-			session.exec(
-				_text(
-					"""
-					INSERT INTO ai_shadow_state(conversation_id, last_inbound_ms, next_attempt_at, postpone_count, status, updated_at)
-					SELECT :cid, :ms, :na, 0, 'pending', CURRENT_TIMESTAMP
-					WHERE NOT EXISTS (SELECT 1 FROM ai_shadow_state WHERE conversation_id=:cid)
-					"""
-				).params(cid=cid_int, ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "))
-			)
-		except Exception:
-			# best-effort; do not propagate
-			pass
+		except Exception as e:
+			# Log error but don't crash
+			try:
+				import logging
+				logging.getLogger("ai_shadow").warning("touch_shadow_state failed for cid=%s: %s", cid_int, e)
+			except Exception:
+				pass
 
 
 def insert_draft(conversation_id: int, *, reply_text: str, model: Optional[str], confidence: Optional[float], reason: Optional[str], json_meta: Optional[str], attempt_no: int = 0, status: str = "suggested") -> int:
