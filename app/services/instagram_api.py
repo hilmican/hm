@@ -121,21 +121,35 @@ async def fetch_messages(conversation_id: str, limit: int = 50) -> List[Dict[str
         return msgs
 
 
-async def fetch_message_details(message_id: str) -> Dict[str, Any]:
+async def fetch_message_details(message_id: str, include_referral: bool = True) -> Dict[str, Any]:
     """Fetch one message by id with full fields. Used when conversation fetch returns only IDs."""
     token, _, _ = _get_base_token_and_id()
     base = f"https://graph.facebook.com/{GRAPH_VERSION}"
-    fields = (
-        "id,from{id,username},to,created_time,"
-        "message,referral,"
-        "attachments{id,mime_type,file_url,image_data{url,preview_url}}"
-    )
+    fields = [
+        "id",
+        "from{id,username}",
+        "to",
+        "created_time",
+        "message",
+        "attachments{id,mime_type,file_url,image_data{url,preview_url}}",
+    ]
+    if include_referral:
+        fields.insert(-1, "referral")
     path = f"/{message_id}"
-    params = {"access_token": token, "fields": fields, "platform": "instagram"}
+    params = {"access_token": token, "fields": ",".join(fields), "platform": "instagram"}
     async with httpx.AsyncClient() as client:
-        data = await _get(client, base + path, params)
-        # Some responses wrap in {id:..., ...}; return the object itself
-        return data
+        try:
+            data = await _get(client, base + path, params)
+            return data
+        except RuntimeError as err:
+            detail = str(err)
+            if include_referral and "nonexisting field (referral)" in detail:
+                try:
+                    _log.warning("fetch_message_details: retrying without referral mid=%s", str(message_id)[:60])
+                except Exception:
+                    pass
+                return await fetch_message_details(message_id, include_referral=False)
+            raise
 
 
 async def fetch_thread_messages(igba_id: str, ig_user_id: str, limit: int = 200, graph_conversation_id: Optional[str] = None) -> List[Dict[str, Any]]:
