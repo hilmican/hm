@@ -566,6 +566,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
 
         # Build attachment indices so template can render images (fallback: legacy attachments_json)
         att_map = {}
+        template_cards: dict[str, list[dict[str, Any]]] = {}
         for mm in msgs:
             if not mm.attachments_json:
                 continue
@@ -577,7 +578,37 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 elif isinstance(data, dict) and isinstance(data.get("data"), list):
                     items = data["data"]
                 if items:
-                    att_map[mm.ig_message_id or ""] = list(range(len(items)))
+                    mid_key = mm.ig_message_id or ""
+                    att_map[mid_key] = list(range(len(items)))
+                    cards: list[dict[str, Any]] = []
+                    for att in items:
+                        if not isinstance(att, dict):
+                            continue
+                        payload = att.get("payload") or {}
+                        generic = payload.get("generic") or {}
+                        elements = None
+                        if isinstance(generic, dict) and isinstance(generic.get("elements"), list):
+                            elements = generic.get("elements")
+                        elif isinstance(payload.get("elements"), list):
+                            elements = payload.get("elements")
+                        elif isinstance(payload.get("cards"), list):
+                            elements = payload.get("cards")
+                        if not isinstance(elements, list):
+                            continue
+                        for el in elements:
+                            if not isinstance(el, dict):
+                                continue
+                            cards.append(
+                                {
+                                    "title": el.get("title") or el.get("header"),
+                                    "subtitle": el.get("subtitle") or el.get("description"),
+                                    "image_url": el.get("image_url") or el.get("image") or el.get("media_url"),
+                                    "buttons": el.get("buttons") or [],
+                                    "default_action": el.get("default_action") or {},
+                                }
+                            )
+                    if cards:
+                        template_cards[mid_key] = cards
             except Exception:
                 pass
         # New: Build local attachment id map from attachments table
@@ -818,6 +849,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 "link_context": link_context,
                 "ai_state": ai_state,
                 "user_context": user_context,
+                "template_cards": template_cards,
             },
         )
 

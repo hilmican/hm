@@ -32,6 +32,116 @@ class _InsertResult:
 # MySQL-only backend
 
 
+def _iter_attachment_items(attachments: Any) -> List[dict]:
+	if isinstance(attachments, list):
+		return [att for att in attachments if isinstance(att, dict)]
+	if isinstance(attachments, dict):
+		data = attachments.get("data")
+		if isinstance(data, list):
+			return [att for att in data if isinstance(att, dict)]
+	return []
+
+
+def _attachment_item_has_media(att: dict) -> bool:
+	if att.get("file_url") or att.get("image_url") or att.get("video_url"):
+		return True
+	image_data = att.get("image_data")
+	if isinstance(image_data, dict) and (image_data.get("url") or image_data.get("preview_url")):
+		return True
+	payload = att.get("payload")
+	if isinstance(payload, dict):
+		if payload.get("url") or payload.get("attachment_id"):
+			return True
+		image_data = payload.get("image_data")
+		if isinstance(image_data, dict) and (image_data.get("url") or image_data.get("preview_url")):
+			return True
+	return False
+
+
+def _extract_template_elements(attachments: Any) -> List[dict]:
+	elements: List[dict] = []
+	for att in _iter_attachment_items(attachments):
+		payload = att.get("payload") or {}
+		candidates: List[dict] = []
+		generic = payload.get("generic")
+		if isinstance(generic, dict) and isinstance(generic.get("elements"), list):
+			candidates = [el for el in generic.get("elements") if isinstance(el, dict)]
+		elif isinstance(payload.get("elements"), list):
+			candidates = [el for el in payload.get("elements") if isinstance(el, dict)]
+		elif isinstance(payload.get("cards"), list):
+			candidates = [el for el in payload.get("cards") if isinstance(el, dict)]
+		if candidates:
+			elements.extend(candidates)
+	return elements
+
+
+def _attachments_have_visible_content(attachments: Any) -> bool:
+	if not attachments:
+		return False
+	items = _iter_attachment_items(attachments)
+	for att in items:
+		if _attachment_item_has_media(att):
+			return True
+	if _extract_template_elements(items):
+		return True
+	return False
+
+
+def _derive_template_preview(attachments: Any) -> Optional[str]:
+	elements = _extract_template_elements(attachments)
+	if not elements:
+		return None
+	first = elements[0]
+	title = (first.get("title") or first.get("header") or "").strip()
+	subtitle = (first.get("subtitle") or first.get("description") or "").strip()
+	if title and subtitle:
+		return f"{title} — {subtitle}"
+	return title or subtitle or None
+
+
+def _fetch_message_details_sync(mid: str) -> Optional[Dict[str, Any]]:
+	if not mid:
+		return None
+	try:
+		import asyncio
+
+		loop = asyncio.new_event_loop()
+		try:
+			asyncio.set_event_loop(loop)
+			return loop.run_until_complete(fetch_message_details(str(mid)))
+		finally:
+			asyncio.set_event_loop(None)
+			loop.close()
+	except Exception as e:
+		try:
+			_log.debug("ingest: detail fetch failed mid=%s err=%s", str(mid)[:60], str(e)[:200])
+		except Exception:
+			pass
+		return None
+
+
+def _maybe_expand_attachments(mid: Optional[str], attachments: Any) -> Any:
+	if not mid:
+		return attachments
+	if _attachments_have_visible_content(attachments):
+		return attachments
+	detail = _fetch_message_details_sync(str(mid))
+	if not detail:
+		return attachments
+	alt = detail.get("attachments")
+	if not alt:
+		message_field = detail.get("message")
+		if isinstance(message_field, dict):
+			alt = message_field.get("attachments")
+	if _attachments_have_visible_content(alt):
+		try:
+			_log.debug("ingest: expanded attachments via Graph detail mid=%s", str(mid)[:60])
+		except Exception:
+			pass
+		return alt
+	return attachments
+
+
 def _ensure_ig_account(conn, igba_id: str) -> None:
 	"""Ensure ig_accounts row exists for given igba_id (MySQL dialect)."""
 	conn.exec_driver_sql(
@@ -434,7 +544,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 				pass
 	
 	text_val = message_obj.get("text")
-	attachments = message_obj.get("attachments")
+	attachments = _maybe_expand_attachments(str(mid), message_obj.get("attachments"))
 	# Story reply (best-effort)
 	story_id = None
 	story_url = None
@@ -464,6 +574,8 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		post_id = None
 		post_title = None
 		post_url = None
+	if not text_val:
+		text_val = _derive_template_preview(attachments)
 	# Ad/referral extraction (best-effort)
 	ad_id = None
 	ad_link = None
@@ -1317,6 +1429,7 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		recipient_id = None
 	# Attachments may be top-level (Graph fetch) or nested under message (webhook)
 	attachments = event.get("attachments") or (message_obj.get("attachments") if isinstance(message_obj, dict) else None)
+	attachments = _maybe_expand_attachments(str(mid), attachments)
 	# Story reply (rare in Graph fetch; best-effort if present)
 	story_id = None
 	story_url = None
@@ -1327,6 +1440,8 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 	except Exception:
 		story_id = None
 		story_url = None
+	if not text_val:
+		text_val = _derive_template_preview(attachments)
 	ts_ms = None
 	try:
 		ts = event.get("created_time") or event.get("timestamp")
