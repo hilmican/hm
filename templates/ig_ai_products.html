@@ -47,6 +47,91 @@
       <button type="submit">Kaydet</button>
     </form>
 
+    <hr style="margin:24px 0;" />
+
+    <h2>Ürün Fotoğrafları</h2>
+    <div class="meta">
+      Dosya yapısı örneği:
+      <code>products/{{ (skus[0] if skus else focus) }}/image-x.jpg</code>.<br />
+      Burada yüklediğiniz fotoğraflardan hangilerini AI'ın müşteriye gönderebileceğini
+      seçebilir ve gönderim sırasını belirleyebilirsiniz.
+    </div>
+
+    <!-- Upload form -->
+    <form method="post"
+          action="/ig/ai/products/images/upload"
+          enctype="multipart/form-data"
+          style="margin-top:12px; margin-bottom:16px;">
+      <input type="hidden" name="focus" value="{{ focus }}" />
+      <div class="field">
+        <label>Yeni Fotoğraflar Yükle (birden fazla seçebilirsiniz)</label>
+        <input type="file" name="files" multiple />
+      </div>
+      <button type="submit">Fotoğrafları Yükle</button>
+    </form>
+
+    <!-- Existing images / AI configuration -->
+    {% if images %}
+    <form method="post" action="/ig/ai/products/images/save" style="margin-top:8px;">
+      <input type="hidden" name="focus" value="{{ focus }}" />
+      <table style="width:100%; border-collapse:collapse; margin-top:8px;">
+        <thead>
+          <tr style="text-align:left; border-bottom:1px solid #e5e7eb;">
+            <th style="padding:6px;">Önizleme</th>
+            <th style="padding:6px;">URL</th>
+            <th style="padding:6px;">AI Göndersin mi?</th>
+            <th style="padding:6px;">AI Sırası</th>
+            <th style="padding:6px;">Varyant Anahtarı</th>
+            <th style="padding:6px;">Sil</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for img in images %}
+          <tr style="border-bottom:1px solid #f3f4f6;">
+            <td style="padding:6px; width:120px;">
+              <input type="hidden" name="image_ids[]" value="{{ img.id }}" />
+              <img src="{{ img.url }}" alt="" style="max-width:110px; max-height:110px; border-radius:8px; border:1px solid #e5e7eb;" />
+            </td>
+            <td style="padding:6px; font-size:12px; color:#4b5563; word-break:break-all;">
+              {{ img.url }}
+            </td>
+            <td style="padding:6px; text-align:center;">
+              <input type="checkbox"
+                     name="ai_send_{{ img.id }}"
+                     value="1"
+                     {% if img.ai_send %}checked{% endif %} />
+            </td>
+            <td style="padding:6px; width:80px;">
+              <input type="number"
+                     name="ai_send_order_{{ img.id }}"
+                     min="1"
+                     style="width:70px; padding:4px 6px; border:1px solid #e5e7eb; border-radius:6px;"
+                     value="{{ img.ai_send_order or '' }}" />
+            </td>
+            <td style="padding:6px; width:140px;">
+              <input type="text"
+                     name="variant_key_{{ img.id }}"
+                     placeholder="örn. krem, acik-gri"
+                     style="width:130px; padding:4px 6px; border:1px solid #e5e7eb; border-radius:6px;"
+                     value="{{ img.variant_key or '' }}" />
+            </td>
+            <td style="padding:6px; text-align:center;">
+              <input type="checkbox" name="delete_{{ img.id }}" value="1" />
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div style="margin-top:10px;">
+        <button type="submit">Fotoğraf Ayarlarını Kaydet</button>
+      </div>
+    </form>
+    {% else %}
+      <div class="meta" style="margin-top:8px;">
+        Bu ürün için henüz fotoğraf eklenmemiş.
+      </div>
+    {% endif %}
+
     <div class="row" style="margin-top:18px">
       <div class="box">
         <h3 style="margin:0 0 8px 0">Reklam Eşlemesi</h3>

@@ -1235,7 +1235,13 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
 
 @router.post("/inbox/{conversation_id}/send")
 async def send_message(conversation_id: str, body: dict):
-    """Send a text reply to the other party in this conversation and persist locally.
+    """Send a reply (optional images + text) to the other party and persist locally.
+
+    Body format:
+      {
+        "text": "Merhabalar abim ...",
+        "image_urls": ["https://.../image-1.jpg", "https://.../image-2.jpg"]
+      }
 
     conversation_id formats supported:
     - "dm:<ig_user_id>" (preferred)
@@ -1245,6 +1251,16 @@ async def send_message(conversation_id: str, body: dict):
     if not text_val or not isinstance(text_val, str) or not text_val.strip():
         raise HTTPException(status_code=400, detail="Message text is required")
     text_val = text_val.strip()
+
+    # Optional list of image URLs to send before the text
+    image_urls_raw = (body or {}).get("image_urls") or []
+    if isinstance(image_urls_raw, str):
+        image_urls_raw = [image_urls_raw]
+    image_urls: list[str] = []
+    if isinstance(image_urls_raw, list):
+        for u in image_urls_raw:
+            if isinstance(u, str) and u.strip():
+                image_urls.append(u.strip())
 
     # Resolve recipient (other party IG user id)
     other_id: str | None = None
@@ -1274,12 +1290,51 @@ async def send_message(conversation_id: str, body: dict):
         raise HTTPException(status_code=400, detail="Sending requires a Page access token (IG_PAGE_ACCESS_TOKEN)")
     base = f"https://graph.facebook.com/{GRAPH_VERSION}"
     url = base + "/me/messages"
-    payload = {
-        "recipient": {"id": other_id},
-        "messaging_type": "RESPONSE",
-        "message": {"text": text_val},
-    }
+
     async with httpx.AsyncClient() as client:
+        # 1) Send image messages first (if any)
+        for img_url in image_urls:
+            img_payload = {
+                "recipient": {"id": other_id},
+                "messaging_type": "RESPONSE",
+                "message": {
+                    "attachment": {
+                        "type": "image",
+                        "payload": {
+                            "url": img_url,
+                        },
+                    }
+                },
+            }
+            try:
+                r_img = await client.post(
+                    url,
+                    params={"access_token": token},
+                    json=img_payload,
+                    timeout=20,
+                )
+                r_img.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                try:
+                    detail = e.response.text
+                except Exception:
+                    detail = str(e)
+                try:
+                    _log.warning("Graph image send failed url=%s err=%s", img_url, detail[:200])
+                except Exception:
+                    pass
+            except Exception as e:
+                try:
+                    _log.warning("Graph image send failed url=%s err=%s", img_url, str(e)[:200])
+                except Exception:
+                    pass
+
+        # 2) Send the text message
+        payload = {
+            "recipient": {"id": other_id},
+            "messaging_type": "RESPONSE",
+            "message": {"text": text_val},
+        }
         try:
             r = await client.post(url, params={"access_token": token}, json=payload, timeout=20)
             r.raise_for_status()

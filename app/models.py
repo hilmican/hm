@@ -131,6 +131,45 @@ class Product(SQLModel, table=True):
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 
+class ProductImage(SQLModel, table=True):
+    __tablename__ = "product_images"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    product_id: int = Field(foreign_key="product.id", index=True)
+
+    # Absolute/public URL, typically built from IMAGE_CDN_BASE_URL + \"products/{sku}/image-x.jpg\"
+    url: str = Field(description="Public image URL for this product")
+
+    # Optional variant key such as \"krem\", \"acik-gri\" or \"krem-m\"
+    variant_key: Optional[str] = Field(
+        default=None,
+        index=True,
+        description="Variant/color key used for variant-aware image selection",
+    )
+
+    # General gallery order
+    position: int = Field(
+        default=1,
+        index=True,
+        description="Display order within the product's gallery",
+    )
+
+    # AI configuration
+    ai_send: bool = Field(
+        default=True,
+        index=True,
+        description="If true, AI is allowed to send this image in replies",
+    )
+    ai_send_order: Optional[int] = Field(
+        default=None,
+        index=True,
+        description="Relative order when AI sends multiple images (1,2,3,...).",
+    )
+
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
 class ImportRun(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(index=True, description="bizim|kargo")

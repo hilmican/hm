@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
+import time
+from pathlib import Path
 from typing import Optional, Any, Dict, List
 
-from fastapi import APIRouter, Request, HTTPException, Form
-from sqlalchemy import text
+from fastapi import APIRouter, Request, HTTPException, Form, UploadFile, File
+from sqlalchemy import text, func as _func
 from sqlmodel import select
 import datetime as dt
 
@@ -272,9 +275,10 @@ def start_process(body: dict):
 def product_ai_page(request: Request, focus: str):
     """
     Edit AI instructions for a single product identified by slug or name.
-    Renders ig_ai_products.html with current ai_system_msg / ai_prompt_msg / pretext_id.
+    Renders ig_ai_products.html with current ai_system_msg / ai_prompt_msg / pretext_id
+    and product image configuration.
     """
-    from ..models import Product, AIPretext
+    from ..models import Product, AIPretext, ProductImage, Item
 
     focus_s = (focus or "").strip()
     if not focus_s:
@@ -290,8 +294,36 @@ def product_ai_page(request: Request, focus: str):
             raise HTTPException(status_code=404, detail="Product not found for focus")
         
         # Load all pretexts for dropdown
-        pretexts = session.exec(select(AIPretext).order_by(AIPretext.is_default.desc(), AIPretext.id.asc())).all()
-        pretext_list = [{"id": p.id, "name": p.name, "is_default": p.is_default} for p in pretexts]
+        pretexts = session.exec(
+            select(AIPretext).order_by(AIPretext.is_default.desc(), AIPretext.id.asc())
+        ).all()
+        pretext_list = [
+            {"id": p.id, "name": p.name, "is_default": p.is_default} for p in pretexts
+        ]
+
+        # Load product images
+        images = session.exec(
+            select(ProductImage)
+            .where(ProductImage.product_id == row.id)
+            .order_by(ProductImage.position.asc(), ProductImage.id.asc())
+        ).all()
+        image_list = [
+            {
+                "id": img.id,
+                "url": img.url,
+                "variant_key": img.variant_key,
+                "position": img.position,
+                "ai_send": bool(img.ai_send),
+                "ai_send_order": img.ai_send_order,
+            }
+            for img in images
+        ]
+
+        # Collect SKUs to help the operator understand the folder naming
+        items = session.exec(
+            select(Item).where(Item.product_id == row.id).order_by(Item.id.asc())
+        ).all()
+        sku_list = [it.sku for it in items if getattr(it, "sku", None)]
         
     name = row.name or focus_s
     templates = request.app.state.templates
@@ -305,6 +337,8 @@ def product_ai_page(request: Request, focus: str):
             "ai_prompt_msg": row.ai_prompt_msg or "",
             "pretext_id": row.pretext_id,
             "pretexts": pretext_list,
+            "images": image_list,
+            "skus": sku_list,
         },
     )
 
@@ -352,6 +386,163 @@ def save_product_ai(
     # Redirect back to the edit page for this product
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url=f"/ig/ai/products?focus={prod.slug or focus_s}", status_code=303)
+
+
+@router.post("/products/images/upload")
+async def upload_product_images(
+    focus: str = Form(...),
+    files: List[UploadFile] = File(...),
+):
+    """
+    Upload one or more images for the focused product.
+
+    Files are stored under IMAGE_UPLOAD_ROOT/products/{folder}/filename where:
+      - folder is the primary SKU when available, otherwise product slug.
+
+    The stored URL is:
+      {IMAGE_CDN_BASE_URL.rstrip('/')}/{relative_path}
+    where relative_path = 'products/{folder}/{filename}'.
+    If IMAGE_CDN_BASE_URL is not set, fall back to '/products/{folder}/{filename}'.
+    """
+    from ..models import Product, Item, ProductImage
+
+    focus_s = (focus or "").strip()
+    if not focus_s:
+        raise HTTPException(status_code=400, detail="focus is required")
+
+    with get_session() as session:
+        prod = session.exec(
+            select(Product)
+            .where((Product.slug == focus_s) | (Product.name == focus_s))
+            .limit(1)
+        ).first()
+        if not prod:
+            raise HTTPException(status_code=404, detail="Product not found for focus")
+
+        # Determine folder name: prefer first SKU, else product slug
+        item = session.exec(
+            select(Item).where(Item.product_id == prod.id).order_by(Item.id.asc())
+        ).first()
+        folder = (item.sku if item and item.sku else (prod.slug or focus_s)).strip()
+
+        # Determine starting position for new images
+        max_pos_row = session.exec(
+            select(_func.max(ProductImage.position)).where(
+                ProductImage.product_id == prod.id
+            )
+        ).first()
+        base_pos = int(max_pos_row[0] or 0) if max_pos_row else 0
+
+        root = Path(os.getenv("IMAGE_UPLOAD_ROOT", "static")).resolve()
+        product_dir = root / "products" / folder
+        product_dir.mkdir(parents=True, exist_ok=True)
+
+        cdn_base = (os.getenv("IMAGE_CDN_BASE_URL", "") or "").rstrip("/")
+
+        for idx, file in enumerate(files):
+            content = await file.read()
+            if not content:
+                continue
+            original_name = file.filename or f"image-{idx}.jpg"
+            _, ext = os.path.splitext(original_name)
+            if not ext:
+                ext = ".jpg"
+            filename = f"image-{int(time.time() * 1000)}-{idx}{ext}"
+            target = product_dir / filename
+            target.write_bytes(content)
+
+            relative_path = f"products/{folder}/{filename}"
+            if cdn_base:
+                url = f"{cdn_base}/{relative_path}"
+            else:
+                url = "/" + relative_path
+
+            img = ProductImage(
+                product_id=prod.id,
+                url=url,
+                position=base_pos + idx + 1,
+                ai_send=True,
+                ai_send_order=base_pos + idx + 1,
+            )
+            session.add(img)
+
+        # Flush so ids are assigned if needed by follow-up requests
+        session.flush()
+
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(
+        url=f"/ig/ai/products?focus={prod.slug or focus_s}", status_code=303
+    )
+
+
+@router.post("/products/images/save")
+async def save_product_images(request: Request):
+    """
+    Persist per-image AI configuration (ai_send, ai_send_order, variant_key)
+    for the focused product.
+    """
+    from ..models import Product, ProductImage
+
+    form = await request.form()
+    focus = (form.get("focus") or "").strip()
+    if not focus:
+        raise HTTPException(status_code=400, detail="focus is required")
+
+    # Use image_ids[] as the canonical list of rows present in the table
+    image_ids = (
+        form.getlist("image_ids[]") if hasattr(form, "getlist") else form.getlist("image_ids")  # type: ignore[attr-defined]
+    )
+
+    with get_session() as session:
+        prod = session.exec(
+            select(Product)
+            .where((Product.slug == focus) | (Product.name == focus))
+            .limit(1)
+        ).first()
+        if not prod:
+            raise HTTPException(status_code=404, detail="Product not found for focus")
+
+        for sid in image_ids:
+            try:
+                iid = int(sid)
+            except Exception:
+                continue
+            img = session.exec(
+                select(ProductImage).where(ProductImage.id == iid)
+            ).first()
+            if not img:
+                continue
+
+            # Optional delete
+            if form.get(f"delete_{iid}"):
+                session.delete(img)
+                continue
+
+            # ai_send checkbox
+            img.ai_send = bool(form.get(f"ai_send_{iid}"))
+
+            # ai_send_order integer or None
+            raw_order = (form.get(f"ai_send_order_{iid}") or "").strip()
+            if raw_order:
+                try:
+                    img.ai_send_order = int(raw_order)
+                except Exception:
+                    img.ai_send_order = None
+            else:
+                img.ai_send_order = None
+
+            # variant_key (may be empty)
+            raw_variant = (form.get(f"variant_key_{iid}") or "").strip()
+            img.variant_key = raw_variant or None
+
+            session.add(img)
+
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(
+        url=f"/ig/ai/products?focus={focus}", status_code=303
+    )
 
 
 @router.get("/process/runs")

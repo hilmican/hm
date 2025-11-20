@@ -7,10 +7,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Message, Product, Item, Conversation, IGUser, AIPretext
+from ..models import Message, Product, Item, Conversation, IGUser, AIPretext, ProductImage
 from .ai import AIClient
 from .ai_context import VariantExclusions, parse_variant_exclusions, variant_is_excluded
 from .ai_ig import _detect_focus_product
+
+
+MAX_AI_IMAGES_PER_REPLY = int(os.getenv("AI_MAX_PRODUCT_IMAGES", "3"))
 
 
 def _format_transcript(messages: List[Dict[str, Any]], max_chars: int = 16000) -> str:
@@ -189,6 +192,87 @@ def _load_focus_product_and_stock(conversation_id: int) -> Tuple[Optional[Dict[s
 	return product_info, stock
 
 
+def _guess_variant_key_from_message(
+    stock: List[Dict[str, Any]], last_customer_message: str
+) -> Optional[str]:
+	"""
+	Heuristic: if last customer message contains exactly one of the known
+	color values in stock, treat that as the preferred variant_key.
+	"""
+	text = (last_customer_message or "").strip().lower()
+	if not text or not stock:
+		return None
+	colors: set[str] = set()
+	for entry in stock:
+		try:
+			c = (entry.get("color") or "").strip().lower()
+		except Exception:
+			c = ""
+		if c:
+			colors.add(c)
+	if not colors:
+		return None
+	matches = [c for c in colors if c in text]
+	if len(matches) == 1:
+		return matches[0]
+	return None
+
+
+def _select_product_images_for_reply(
+	product_id: Optional[int],
+	*,
+	variant_key: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+	"""
+	Fetch product images marked for AI, optionally preferring a given variant_key.
+
+	- Always filters by product_id and ai_send = true.
+	- If variant_key is provided, prefers images with that key but still allows
+	  generic images (variant_key is NULL).
+	- Applies ai_send_order first, then position, then id.
+	"""
+	if not product_id:
+		return []
+
+	from sqlmodel import select as _select
+	from sqlalchemy import or_  # type: ignore[import]
+
+	out: List[Dict[str, Any]] = []
+	with get_session() as session:
+		stmt = _select(ProductImage).where(
+			ProductImage.product_id == int(product_id),
+			ProductImage.ai_send == True,  # noqa: E712
+		)
+		if variant_key:
+			vk = variant_key.strip().lower()
+			stmt = stmt.where(
+				or_(
+					ProductImage.variant_key.is_(None),
+					ProductImage.variant_key == vk,
+				)
+			)
+		stmt = stmt.order_by(
+			ProductImage.ai_send_order.asc().nullslast(),
+			ProductImage.position.asc(),
+			ProductImage.id.asc(),
+		)
+		rows = session.exec(stmt).all()
+
+	for img in rows:
+		if len(out) >= MAX_AI_IMAGES_PER_REPLY:
+			break
+		if not img.url:
+			continue
+		out.append(
+			{
+				"id": img.id,
+				"url": img.url,
+				"variant_key": img.variant_key,
+			}
+		)
+	return out
+
+
 def _load_customer_info(conversation_id: int) -> Dict[str, Any]:
 	"""Load customer information (username, name, contact_name) from IGUser."""
 	customer_info = {
@@ -281,6 +365,15 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 		]
 	)
 
+	# Choose product images for this reply (based on product + last customer message)
+	product_images: List[Dict[str, Any]] = []
+	try:
+		pid = product_info.get("id") if isinstance(product_info, dict) else None
+		variant_key = _guess_variant_key_from_message(stock, last_customer_message)
+		product_images = _select_product_images_for_reply(pid, variant_key=variant_key)
+	except Exception:
+		product_images = []
+
 	store_conf: Dict[str, Any] = {
 		"brand": "HiMan",
 		"shipping": {"carrier": "SÜRAT", "eta_business_days": "2-3", "transparent_bag": True},
@@ -295,6 +388,7 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 		"history": history,
 		"last_customer_message": last_customer_message,
 		"transcript": transcript,
+		"product_images": product_images,
 	}
 	# Wrap context JSON in a clear instruction so the model returns our desired schema
 	context_json = json.dumps(user_payload, ensure_ascii=False)
@@ -458,6 +552,8 @@ HITAP KURALLARI:
 		"notes": notes,
 		"model": client.model,
 	}
+	if product_images:
+		reply["product_images"] = product_images
 	if include_meta:
 		# Attach debug metadata so callers (e.g., worker) can persist it for inspection.
 		# user_payload is a dict; system prompt and raw_response may be large, so consumers
