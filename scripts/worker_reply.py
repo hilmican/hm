@@ -65,7 +65,7 @@ def main() -> None:
 				rows = session.exec(
 					_text(
 						"""
-						SELECT conversation_id, last_inbound_ms, postpone_count, COALESCE(status,'pending') AS status
+						SELECT conversation_id, last_inbound_ms, postpone_count, ai_images_sent, COALESCE(status,'pending') AS status
 						FROM ai_shadow_state
 						WHERE (status = 'pending' OR status IS NULL)
 						  AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
@@ -79,7 +79,8 @@ def main() -> None:
 						"conversation_id": r.conversation_id if hasattr(r, "conversation_id") else r[0],
 						"last_inbound_ms": int((r.last_inbound_ms if hasattr(r, "last_inbound_ms") else r[1]) or 0),
 						"postpone_count": int((r.postpone_count if hasattr(r, "postpone_count") else r[2]) or 0),
-						"status": (r.status if hasattr(r, "status") else r[3]) or "pending",
+						"ai_images_sent": bool((r.ai_images_sent if hasattr(r, "ai_images_sent") else (r[3] if len(r) > 3 else 0)) or 0),
+						"status": (r.status if hasattr(r, "status") else (r[4] if len(r) > 4 else None)) or "pending",
 					}
 					due.append(item)
 				
@@ -158,6 +159,7 @@ def main() -> None:
 				# Decide whether we should actually propose a reply
 				should_reply = bool(data.get("should_reply", True))
 				reply_text = (data.get("reply_text") or "").strip()
+				product_images = data.get("product_images") or []
 				try:
 					# Log raw data (truncated) for debugging model behavior
 					try:
@@ -188,12 +190,13 @@ def main() -> None:
 							decision_text += f"\n\nSebep: {reason_text}"
 						if notes_text:
 							decision_text += f"\n\nNot: {notes_text}"
+						actions_json = None
 						with get_session() as session:
 							session.exec(
 								_text(
 									"""
-									INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, attempt_no, status, created_at)
-									VALUES(:cid, :txt, :model, :conf, :reason, :meta, :att, 'no_reply', CURRENT_TIMESTAMP)
+									INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, attempt_no, status, created_at)
+									VALUES(:cid, :txt, :model, :conf, :reason, :meta, :actions, :att, 'no_reply', CURRENT_TIMESTAMP)
 									"""
 								).params(
 									cid=int(cid),
@@ -202,6 +205,7 @@ def main() -> None:
 									conf=(float(data.get("confidence") or 0.6)),
 									reason=reason_text,
 									meta=json.dumps(data.get("debug_meta"), ensure_ascii=False) if data.get("debug_meta") else None,
+									actions=actions_json,
 									att=int(postpones or 0),
 								)
 							)
@@ -219,13 +223,46 @@ def main() -> None:
 					_set_status(cid, "paused")
 					continue
 				# Persist draft
+				actions: list[dict[str, Any]] = []
+				image_urls = []
+				try:
+					for img in product_images:
+						if isinstance(img, dict) and img.get("url"):
+							image_urls.append(str(img.get("url")))
+				except Exception:
+					image_urls = []
+				if image_urls and not bool(st.get("ai_images_sent")):
+					action_entry = {
+						"type": "send_product_images",
+						"image_count": len(image_urls),
+						"image_urls": image_urls,
+						"trigger": "first_ai_response",
+					}
+					try:
+						debug_meta = data.get("debug_meta")
+						if isinstance(debug_meta, dict):
+							user_payload = debug_meta.get("user_payload")
+							if isinstance(user_payload, dict):
+								product_focus = user_payload.get("product_focus")
+								if isinstance(product_focus, dict):
+									action_entry["product_id"] = product_focus.get("id")
+									action_entry["product_name"] = product_focus.get("name")
+									action_entry["product_slug"] = product_focus.get("slug") or product_focus.get("slug_or_sku")
+					except Exception:
+						pass
+					actions.append(action_entry)
+					try:
+						data["actions"] = actions
+					except Exception:
+						pass
+				actions_json = json.dumps(actions, ensure_ascii=False) if actions else None
 				try:
 					with get_session() as session:
 						session.exec(
 							_text(
 								"""
-								INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, attempt_no, status, created_at)
-								VALUES(:cid, :txt, :model, :conf, :reason, :meta, :att, 'suggested', CURRENT_TIMESTAMP)
+								INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, attempt_no, status, created_at)
+								VALUES(:cid, :txt, :model, :conf, :reason, :meta, :actions, :att, 'suggested', CURRENT_TIMESTAMP)
 								"""
 							).params(
 								cid=int(cid),
@@ -234,6 +271,7 @@ def main() -> None:
 								conf=(float(data.get("confidence") or 0.6)),
 								reason=(data.get("reason") or "auto"),
 								meta=json.dumps(data.get("debug_meta"), ensure_ascii=False) if data.get("debug_meta") else None,
+								actions=actions_json,
 								att=int(postpones or 0),
 							)
 						)
@@ -243,6 +281,12 @@ def main() -> None:
 								"UPDATE ai_shadow_state SET status='suggested', updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
 							).params(cid=int(cid))
 						)
+						if actions_json:
+							session.exec(
+								_text(
+									"UPDATE ai_shadow_state SET ai_images_sent=1 WHERE conversation_id=:cid"
+								).params(cid=int(cid))
+							)
 				except Exception as pe:
 					try:
 						log.warning("persist draft error cid=%s err=%s", cid, pe)

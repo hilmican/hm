@@ -766,6 +766,7 @@ def init_db() -> None:
                             next_attempt_at DATETIME NULL,
                             postpone_count INT NOT NULL DEFAULT 0,
                             status VARCHAR(32) NULL,
+                            ai_images_sent TINYINT(1) NOT NULL DEFAULT 0,
                             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             INDEX idx_ai_shadow_next_attempt (next_attempt_at),
                             INDEX idx_ai_shadow_status (status),
@@ -786,6 +787,7 @@ def init_db() -> None:
                             confidence DOUBLE NULL,
                             reason VARCHAR(128) NULL,
                             json_meta LONGTEXT NULL,
+                            actions_json LONGTEXT NULL,
                             attempt_no INT NULL DEFAULT 0,
                             status VARCHAR(32) NULL,
                             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -795,6 +797,31 @@ def init_db() -> None:
                         )
                         """
                     )
+                except Exception:
+                    pass
+                # Backfill columns for legacy tables
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ai_shadow_state' AND COLUMN_NAME = 'ai_images_sent'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE ai_shadow_state ADD COLUMN ai_images_sent TINYINT(1) NOT NULL DEFAULT 0")
+                except Exception:
+                    pass
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ai_shadow_reply' AND COLUMN_NAME = 'actions_json'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE ai_shadow_reply ADD COLUMN actions_json LONGTEXT NULL")
                 except Exception:
                     pass
                 return

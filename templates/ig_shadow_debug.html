@@ -28,6 +28,31 @@
       {% if draft.created_at %} · Oluşturulma: {{ draft.created_at }}{% endif %}
     </div>
 
+    {% if actions %}
+    <div class="section">
+      <h3>Planlanan Aksiyonlar</h3>
+      <ul>
+        {% for action in actions %}
+          <li style="margin-bottom:8px;">
+            <strong>{{ action.type }}</strong>
+            {% if action.trigger %} · tetikleyici: {{ action.trigger }}{% endif %}
+            {% if action.image_count %} · {{ action.image_count }} görsel{% endif %}
+            {% if action.product_name %} · ürün: {{ action.product_name }}{% elif action.product_slug %} · ürün: {{ action.product_slug }}{% endif %}
+            {% if action.type == 'send_product_images' and action.image_urls %}
+              <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+                {% for img_url in action.image_urls %}
+                  <a href="{{ img_url }}" target="_blank" rel="noopener" style="display:inline-block; border:1px solid #e5e7eb; border-radius:6px; overflow:hidden;">
+                    <img src="{{ img_url }}" alt="product" style="width:90px; height:90px; object-fit:cover;" />
+                  </a>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
     <div class="section">
       <h3>AI Cevabı (reply_text)</h3>
       <pre>{{ (draft.reply_text or '') }}</pre>

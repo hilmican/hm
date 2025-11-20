@@ -33,6 +33,28 @@
         <div class="meta" style="margin-top:6px;">
           model={{ shadow.model or '-' }} · güven={{ ('%.2f' % shadow.confidence) if shadow.confidence is not none else '-' }} · sebep={{ shadow.reason or '-' }}
         </div>
+        {% if shadow.actions %}
+          <div style="margin-top:8px;">
+            <div class="meta" style="font-weight:600; color:#1f2937;">🤖 Planlanan Aksiyonlar</div>
+            {% for action in shadow.actions %}
+              <div class="meta" style="margin-top:4px;">
+                • {{ action.type }}
+                {% if action.trigger %} · tetikleyici: {{ action.trigger }}{% endif %}
+                {% if action.image_count %} · {{ action.image_count }} görsel{% endif %}
+                {% if action.product_name %} · ürün: {{ action.product_name }}{% elif action.product_slug %} · ürün: {{ action.product_slug }}{% endif %}
+              </div>
+              {% if action.type == 'send_product_images' and action.image_urls %}
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+                  {% for img_url in action.image_urls %}
+                    <a href="{{ img_url }}" target="_blank" rel="noopener" style="display:inline-block; border:1px solid #e5e7eb; border-radius:6px; overflow:hidden;">
+                      <img src="{{ img_url }}" alt="AI product" style="width:80px; height:80px; object-fit:cover;" />
+                    </a>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            {% endfor %}
+          </div>
+        {% endif %}
         <div style="margin-top:8px; display:flex; gap:8px;">
           <button id="useShadow" class="action" type="button">Metni kutuya al</button>
           <button id="dismissShadow" class="action" type="button" style="border-color:#ef4444;color:#ef4444">Gizle</button>
@@ -147,6 +169,28 @@
                   <a class="action" href="/ig/ai/products?focus={{ m.product_slug or 'default' }}" target="_blank" rel="noopener">Ürün AI mesajlarını düzenle ↗</a>
                 </div>
                 {% endif %}
+                {% if m.ai_actions %}
+                  <div style="margin-top:8px;">
+                    <div class="meta" style="font-weight:600; color:#1f2937;">🤖 Planlanan Aksiyonlar</div>
+                    {% for action in m.ai_actions %}
+                      <div class="meta" style="margin-top:4px;">
+                        • {{ action.type }}
+                        {% if action.trigger %} · tetikleyici: {{ action.trigger }}{% endif %}
+                        {% if action.image_count %} · {{ action.image_count }} görsel{% endif %}
+                        {% if action.product_name %} · ürün: {{ action.product_name }}{% elif action.product_slug %} · ürün: {{ action.product_slug }}{% endif %}
+                      </div>
+                      {% if action.type == 'send_product_images' and action.image_urls %}
+                        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+                          {% for img_url in action.image_urls %}
+                            <a href="{{ img_url }}" target="_blank" rel="noopener" style="display:inline-block; border:1px solid #e5e7eb; border-radius:6px; overflow:hidden;">
+                              <img src="{{ img_url }}" alt="AI product" style="width:80px; height:80px; object-fit:cover;" />
+                            </a>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                {% endif %}
               {% endif %}
             </div>
             {% set local_ids = att_ids_map.get(m.ig_message_id or '') %}
@@ -197,6 +241,28 @@
             <div class="meta" style="margin-top:6px;">
               model={{ shadow.model or '-' }} · güven={{ ('%.2f' % shadow.confidence) if shadow.confidence is not none else '-' }} · sebep={{ shadow.reason or '-' }}
             </div>
+            {% if shadow.actions %}
+              <div style="margin-top:8px;">
+                <div class="meta" style="font-weight:600; color:#1f2937;">🤖 Planlanan Aksiyonlar</div>
+                {% for action in shadow.actions %}
+                  <div class="meta" style="margin-top:4px;">
+                    • {{ action.type }}
+                    {% if action.trigger %} · tetikleyici: {{ action.trigger }}{% endif %}
+                    {% if action.image_count %} · {{ action.image_count }} görsel{% endif %}
+                    {% if action.product_name %} · ürün: {{ action.product_name }}{% elif action.product_slug %} · ürün: {{ action.product_slug }}{% endif %}
+                  </div>
+                  {% if action.type == 'send_product_images' and action.image_urls %}
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+                      {% for img_url in action.image_urls %}
+                        <a href="{{ img_url }}" target="_blank" rel="noopener" style="display:inline-block; border:1px solid #e5e7eb; border-radius:6px; overflow:hidden;">
+                          <img src="{{ img_url }}" alt="AI product" style="width:80px; height:80px; object-fit:cover;" />
+                        </a>
+                      {% endfor %}
+                    </div>
+                  {% endif %}
+                {% endfor %}
+              </div>
+            {% endif %}
             <div style="margin-top:8px; display:flex; gap:8px;">
               <button id="sendDraft" class="action" type="button">Gönder</button>
               <button id="editDraft" class="action" type="button">Düzenle</button>

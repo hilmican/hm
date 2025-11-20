@@ -113,10 +113,20 @@ def parse_variant_exclusions(raw: Optional[Any]) -> VariantExclusions:
 	if isinstance(data, dict):
 		for key in ("colors", "color_list", "renkler"):
 			if key in data and data[key] is not None:
-				_ingest_iterable(exclusions, data[key] if isinstance(data[key], list) else [data[key]])
+				items = data[key] if isinstance(data[key], list) else [data[key]]
+				for item in items:
+					if isinstance(item, dict):
+						_add_entry(exclusions, color=item.get("color") or item.get("renk"), size=item.get("size") or item.get("beden"))
+					else:
+						_add_entry(exclusions, color=item)
 		for key in ("sizes", "size_list", "bedenler"):
 			if key in data and data[key] is not None:
-				_ingest_iterable(exclusions, data[key] if isinstance(data[key], list) else [data[key]])
+				items = data[key] if isinstance(data[key], list) else [data[key]]
+				for item in items:
+					if isinstance(item, dict):
+						_add_entry(exclusions, color=item.get("color") or item.get("renk"), size=item.get("size") or item.get("beden"))
+					else:
+						_add_entry(exclusions, size=item)
 		for key in ("variants", "entries", "exclude"):
 			if key in data and data[key] is not None:
 				_ingest_iterable(exclusions, data[key] if isinstance(data[key], list) else [data[key]])

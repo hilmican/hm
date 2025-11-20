@@ -96,7 +96,7 @@ def shadow_debug(request: Request, draft_id: int):
         row = session.exec(
             _text(
                 """
-                SELECT id, conversation_id, reply_text, model, confidence, reason, json_meta, status, created_at
+                SELECT id, conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, status, created_at
                 FROM ai_shadow_reply
                 WHERE id = :id
                 LIMIT 1
@@ -113,8 +113,9 @@ def shadow_debug(request: Request, draft_id: int):
         confidence = getattr(row, "confidence", None) if hasattr(row, "confidence") else (row[4] if len(row) > 4 else None)
         reason = getattr(row, "reason", None) if hasattr(row, "reason") else (row[5] if len(row) > 5 else None)
         json_meta = getattr(row, "json_meta", None) if hasattr(row, "json_meta") else (row[6] if len(row) > 6 else None)
-        status = getattr(row, "status", None) if hasattr(row, "status") else (row[7] if len(row) > 7 else None)
-        created_at = getattr(row, "created_at", None) if hasattr(row, "created_at") else (row[8] if len(row) > 8 else None)
+        actions_json = getattr(row, "actions_json", None) if hasattr(row, "actions_json") else (row[7] if len(row) > 7 else None)
+        status = getattr(row, "status", None) if hasattr(row, "status") else (row[8] if len(row) > 8 else None)
+        created_at = getattr(row, "created_at", None) if hasattr(row, "created_at") else (row[9] if len(row) > 9 else None)
     debug_meta = None
     if json_meta:
         try:
@@ -146,6 +147,12 @@ def shadow_debug(request: Request, draft_id: int):
         "status": status,
         "created_at": created_at,
     }
+    actions = None
+    if actions_json:
+        try:
+            actions = json.loads(actions_json)
+        except Exception:
+            actions = None
     return templates.TemplateResponse(
         "ig_shadow_debug.html",
         {
@@ -153,6 +160,7 @@ def shadow_debug(request: Request, draft_id: int):
             "conversation_id": convo_id,
             "draft": draft,
             "debug_meta": debug_meta,
+            "actions": actions,
         },
     )
 
@@ -580,10 +588,23 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
             from sqlalchemy import text as _text
             rows_shadow = session.exec(
                 _text(
-                    "SELECT id, reply_text, model, confidence, reason, created_at, status FROM ai_shadow_reply WHERE conversation_id=:cid ORDER BY created_at ASC LIMIT 200"
+                    "SELECT id, reply_text, model, confidence, reason, created_at, status, actions_json FROM ai_shadow_reply WHERE conversation_id=:cid ORDER BY created_at ASC LIMIT 200"
                 ).params(cid=int(conversation_id))
             ).all()
             # Represent the last one (if any) in 'shadow' for legacy panel rendering
+            def _parse_actions(raw_val: Any) -> list[dict[str, Any]]:
+                if not raw_val:
+                    return []
+                try:
+                    if isinstance(raw_val, str):
+                        parsed = json.loads(raw_val)
+                    else:
+                        parsed = raw_val
+                    if isinstance(parsed, list):
+                        return parsed  # type: ignore[return-value]
+                except Exception:
+                    pass
+                return []
             if rows_shadow:
                 rlast = rows_shadow[-1]
                 shadow = {
@@ -593,6 +614,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     "confidence": getattr(rlast, "confidence", None) if hasattr(rlast, "confidence") else (rlast[3] if len(rlast) > 3 else None),
                     "reason": getattr(rlast, "reason", None) if hasattr(rlast, "reason") else (rlast[4] if len(rlast) > 4 else None),
                     "created_at": getattr(rlast, "created_at", None) if hasattr(rlast, "created_at") else (rlast[5] if len(rlast) > 5 else None),
+                    "actions": _parse_actions(getattr(rlast, "actions_json", None) if hasattr(rlast, "actions_json") else (rlast[7] if len(rlast) > 7 else None)),
                 }
                 try:
                     ca = shadow.get("created_at")
@@ -620,6 +642,8 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 try:
                     txt = getattr(rr, "reply_text", None) if hasattr(rr, "reply_text") else (rr[1] if len(rr) > 1 else None)
                     status = getattr(rr, "status", None) if hasattr(rr, "status") else (rr[6] if len(rr) > 6 else None)
+                    actions_val = getattr(rr, "actions_json", None) if hasattr(rr, "actions_json") else (rr[7] if len(rr) > 7 else None)
+                    actions_list = _parse_actions(actions_val)
                     # Include all records, even if empty text (for no_reply decisions)
                     if not txt:
                         txt = ""  # Will be handled in template
@@ -646,6 +670,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                         "ai_model": getattr(rr, "model", None) if hasattr(rr, "model") else (rr[2] if len(rr) > 2 else None),
                         "ai_reason": getattr(rr, "reason", None) if hasattr(rr, "reason") else (rr[4] if len(rr) > 4 else None),
                         "product_slug": focus_slug or "default",
+                        "ai_actions": actions_list,
                     }
                     vms.append(vm)
                 except Exception:

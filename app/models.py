@@ -452,6 +452,7 @@ class AiShadowState(SQLModel, table=True):
 	next_attempt_at: Optional[dt.datetime] = Field(default=None, index=True)
 	postpone_count: int = Field(default=0, index=True)
 	status: Optional[str] = Field(default="pending", index=True, description="pending|running|suggested|paused|exhausted|error")
+	ai_images_sent: bool = Field(default=False, description="Whether AI already scheduled product images for this conversation")
 	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 
 
@@ -465,6 +466,7 @@ class AiShadowReply(SQLModel, table=True):
 	confidence: Optional[float] = None
 	reason: Optional[str] = None
 	json_meta: Optional[str] = Field(default=None, sa_column=Column(Text))
+	actions_json: Optional[str] = Field(default=None, sa_column=Column(Text), description="Serialized list of automated actions (e.g., send_product_images)")
 	attempt_no: Optional[int] = 0
 	status: Optional[str] = Field(default="suggested", index=True, description="suggested|dismissed|expired|error")
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)

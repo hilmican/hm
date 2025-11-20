@@ -45,8 +45,8 @@ def touch_shadow_state(
 			session.exec(
 				_text(
 					"""
-					INSERT IGNORE INTO ai_shadow_state(conversation_id, last_inbound_ms, next_attempt_at, postpone_count, status, updated_at)
-					VALUES(:cid, :ms, :na, 0, 'pending', CURRENT_TIMESTAMP)
+					INSERT IGNORE INTO ai_shadow_state(conversation_id, last_inbound_ms, next_attempt_at, postpone_count, status, ai_images_sent, updated_at)
+					VALUES(:cid, :ms, :na, 0, 'pending', 0, CURRENT_TIMESTAMP)
 					"""
 				).params(cid=cid_int, ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "))
 			)
@@ -72,7 +72,18 @@ def touch_shadow_state(
 				pass
 
 
-def insert_draft(conversation_id: int, *, reply_text: str, model: Optional[str], confidence: Optional[float], reason: Optional[str], json_meta: Optional[str], attempt_no: int = 0, status: str = "suggested") -> int:
+def insert_draft(
+	conversation_id: int,
+	*,
+	reply_text: str,
+	model: Optional[str],
+	confidence: Optional[float],
+	reason: Optional[str],
+	json_meta: Optional[str],
+	actions_json: Optional[str] = None,
+	attempt_no: int = 0,
+	status: str = "suggested",
+) -> int:
 	if not conversation_id or not reply_text:
 		return 0
 	try:
@@ -85,8 +96,8 @@ def insert_draft(conversation_id: int, *, reply_text: str, model: Optional[str],
 			session.exec(
 				_text(
 					"""
-					INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, attempt_no, status, created_at)
-					VALUES(:cid, :txt, :m, :c, :r, :j, :a, :s, CURRENT_TIMESTAMP)
+					INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, attempt_no, status, created_at)
+					VALUES(:cid, :txt, :m, :c, :r, :j, :actions, :a, :s, CURRENT_TIMESTAMP)
 					"""
 				).params(
 					cid=cid_int,
@@ -95,6 +106,7 @@ def insert_draft(conversation_id: int, *, reply_text: str, model: Optional[str],
 					c=(confidence if confidence is not None else None),
 					r=(reason or None),
 					j=(json_meta or None),
+					actions=(actions_json or None),
 					a=int(attempt_no or 0),
 					s=(status or "suggested"),
 				)

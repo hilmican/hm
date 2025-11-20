@@ -235,7 +235,7 @@ def _select_product_images_for_reply(
 		return []
 
 	from sqlmodel import select as _select
-	from sqlalchemy import or_  # type: ignore[import]
+	from sqlalchemy import case, or_  # type: ignore[import]
 
 	out: List[Dict[str, Any]] = []
 	with get_session() as session:
@@ -251,8 +251,10 @@ def _select_product_images_for_reply(
 					ProductImage.variant_key == vk,
 				)
 			)
+		order_nulls = case((ProductImage.ai_send_order.is_(None), 1), else_=0)
 		stmt = stmt.order_by(
-			ProductImage.ai_send_order.asc().nullslast(),
+			order_nulls.asc(),
+			ProductImage.ai_send_order.asc(),
 			ProductImage.position.asc(),
 			ProductImage.id.asc(),
 		)
