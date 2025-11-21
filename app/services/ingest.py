@@ -592,16 +592,17 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 	referral_json_val = None
 	try:
 		ref = (event.get("referral") or message_obj.get("referral") or {})
-		try:
-			_log_up.info(
-				"insert.webhook: referral raw mid=%s type=%s keys=%s",
-				str(mid),
-				type(ref).__name__,
-				list(ref.keys()) if isinstance(ref, dict) else None,
-			)
-		except Exception:
-			pass
-		if isinstance(ref, dict):
+		# Only process referral if it's a dict with actual data (not empty)
+		if isinstance(ref, dict) and ref:
+			try:
+				_log_up.info(
+					"insert.webhook: referral raw mid=%s type=%s keys=%s",
+					str(mid),
+					type(ref).__name__,
+					list(ref.keys()),
+				)
+			except Exception:
+				pass
 			ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
 			ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
 			ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
@@ -1540,16 +1541,17 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 	referral_json_val = None
 	try:
 		ref = (event.get("referral") or message_obj.get("referral") or {})
-		try:
-			_log_up.info(
-				"upsert.graph: referral raw mid=%s type=%s keys=%s",
-				str(mid),
-				type(ref).__name__,
-				list(ref.keys()) if isinstance(ref, dict) else None,
-			)
-		except Exception:
-			pass
-		if isinstance(ref, dict):
+		# Only process referral if it's a dict with actual data (not empty)
+		if isinstance(ref, dict) and ref:
+			try:
+				_log_up.info(
+					"upsert.graph: referral raw mid=%s type=%s keys=%s",
+					str(mid),
+					type(ref).__name__,
+					list(ref.keys()),
+				)
+			except Exception:
+				pass
 			ad_id = str(ref.get("ad_id") or ref.get("ad_id_v2") or "") or None
 			ad_link = ref.get("ad_link") or ref.get("url") or ref.get("link") or None
 			ad_title = ref.get("headline") or ref.get("source") or ref.get("type") or None
