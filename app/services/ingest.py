@@ -189,7 +189,13 @@ def _ensure_ig_user_with_data(ig_user_id: str, igba_id: str | None = None) -> No
 	try:
 		import asyncio
 
-		loop = asyncio.get_event_loop()
+		# Create new event loop if one doesn't exist (same pattern as _fetch_message_details_sync)
+		try:
+			loop = asyncio.get_event_loop()
+		except RuntimeError:
+			loop = asyncio.new_event_loop()
+			asyncio.set_event_loop(loop)
+		
 		from .enrichers import enrich_user
 
 		result = loop.run_until_complete(enrich_user(ig_user_id))
