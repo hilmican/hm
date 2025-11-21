@@ -60,6 +60,17 @@ async def _get(client: httpx.AsyncClient, url: str, params: Dict[str, Any]) -> D
                 # Break immediately - don't retry 403s
                 break
             
+            # Don't retry 400 errors for nonexisting referral field - not transient, message type doesn't support it
+            if status_code == 400 and last_body and "nonexisting field (referral)" in last_body:
+                try:
+                    _log.warning("graph http %s attempt=%s code=%s url=%s body_snip=%s (skipping retries - referral not supported)", 
+                                type(e).__name__, attempt+1, status_code, safe_url, 
+                                (last_body[:160] if last_body else None))
+                except Exception:
+                    pass
+                # Break immediately - don't retry for this specific error
+                break
+            
             try:
                 _log.warning("graph http %s attempt=%s code=%s url=%s body_snip=%s", 
                             type(e).__name__, attempt+1, status_code, safe_url, 
