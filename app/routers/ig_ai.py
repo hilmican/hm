@@ -1592,7 +1592,7 @@ def save_ai_settings(
     enabled = ai_reply_sending_enabled.lower() in ("true", "1", "yes", "on")
     
     # Validate model
-    valid_models = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+    valid_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
     if ai_model not in valid_models:
         ai_model = "gpt-4o-mini"
     
