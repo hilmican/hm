@@ -22,6 +22,29 @@ logging.basicConfig(level=logging.INFO)
 AUTO_SEND_CONFIDENCE_THRESHOLD = float(os.getenv("AI_AUTO_SEND_CONFIDENCE", "0.7"))
 
 
+def _decode_escape_sequences(text: str) -> str:
+	"""
+	Decode literal escape sequences like \\n, \\t, etc. to actual characters.
+	
+	When AI returns JSON with double-escaped sequences (e.g., "text\\nhere"),
+	json.loads() converts them to literal strings (e.g., "text\nhere" as literal).
+	This function converts those literal escape sequences to actual characters.
+	"""
+	if not isinstance(text, str):
+		return text
+	try:
+		# Only decode if we detect literal escape sequences
+		# Check for common escape sequences that might be literal
+		if '\\n' in text or '\\t' in text or '\\r' in text:
+			# Use encode/decode to convert literal escape sequences
+			# Encode to latin-1 (which preserves bytes 0-255), then decode with unicode_escape
+			return text.encode('latin-1').decode('unicode_escape')
+		return text
+	except Exception:
+		# If decoding fails, return original text
+		return text
+
+
 DEBOUNCE_SECONDS = 30
 POSTPONE_WINDOW_SECONDS = 180  # 3 minutes
 POSTPONE_MAX = 3
@@ -236,7 +259,9 @@ def main() -> None:
 					continue
 				# Decide whether we should actually propose a reply
 				should_reply = bool(data.get("should_reply", True))
-				reply_text = (data.get("reply_text") or "").strip()
+				reply_text_raw = (data.get("reply_text") or "").strip()
+				# Decode any literal escape sequences (e.g., \\n -> actual newline)
+				reply_text = _decode_escape_sequences(reply_text_raw)
 				product_images = data.get("product_images") or []
 				try:
 					# Log raw data (truncated) for debugging model behavior
