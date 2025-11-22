@@ -593,28 +593,44 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
                 except Exception:
                     pass
         
-        # 2) Send the text message
+        # 2) Send the text message(s) - split by newlines to send each line separately
         if text and text.strip():
-            payload = {
-                "recipient": {"id": recipient_id},
-                "messaging_type": "RESPONSE",
-                "message": {"text": text.strip()},
-            }
-            try:
-                r = await client.post(url, params={"access_token": token}, json=payload, timeout=20)
-                r.raise_for_status()
-                resp = r.json()
-                if resp.get("message_id"):
-                    results["message_id"] = resp["message_id"]
-                    results["message_ids"].append(resp["message_id"])
-            except httpx.HTTPStatusError as e:
+            # Split text by newlines and filter out empty lines
+            text_lines = [line.strip() for line in text.split('\n') if line.strip()]
+            
+            if not text_lines:
+                # If all lines were empty after stripping, send the original text as-is
+                text_lines = [text.strip()]
+            
+            # Send each line as a separate message
+            for idx, line_text in enumerate(text_lines):
+                payload = {
+                    "recipient": {"id": recipient_id},
+                    "messaging_type": "RESPONSE",
+                    "message": {"text": line_text},
+                }
                 try:
-                    detail = e.response.text
-                except Exception:
-                    detail = str(e)
-                raise RuntimeError(f"Graph send failed: {detail}")
-            except Exception as e:
-                raise RuntimeError(f"Graph send failed: {e}")
+                    r = await client.post(url, params={"access_token": token}, json=payload, timeout=20)
+                    r.raise_for_status()
+                    resp = r.json()
+                    if resp.get("message_id"):
+                        # Store the first message_id as the primary one
+                        if idx == 0:
+                            results["message_id"] = resp["message_id"]
+                        results["message_ids"].append(resp["message_id"])
+                    
+                    # Add a small delay between messages to avoid rate limiting (except for the last one)
+                    if idx < len(text_lines) - 1:
+                        import asyncio
+                        await asyncio.sleep(0.3)  # 300ms delay between messages
+                except httpx.HTTPStatusError as e:
+                    try:
+                        detail = e.response.text
+                    except Exception:
+                        detail = str(e)
+                    raise RuntimeError(f"Graph send failed (message {idx + 1}/{len(text_lines)}): {detail}")
+                except Exception as e:
+                    raise RuntimeError(f"Graph send failed (message {idx + 1}/{len(text_lines)}): {e}")
     
     return results
 

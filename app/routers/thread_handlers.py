@@ -692,9 +692,18 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 return []
             if rows_shadow:
                 rlast = rows_shadow[-1]
+                reply_text_raw = getattr(rlast, "reply_text", None) if hasattr(rlast, "reply_text") else (rlast[1] if len(rlast) > 1 else None)
+                # Split reply text by newlines for display as separate messages
+                reply_text_lines = []
+                if reply_text_raw:
+                    lines = [line.strip() for line in str(reply_text_raw).split('\n') if line.strip()]
+                    if not lines:
+                        lines = [str(reply_text_raw).strip()]
+                    reply_text_lines = lines
                 shadow = {
                     "id": getattr(rlast, "id", None) if hasattr(rlast, "id") else (rlast[0] if len(rlast) > 0 else None),
-                    "text": getattr(rlast, "reply_text", None) if hasattr(rlast, "reply_text") else (rlast[1] if len(rlast) > 1 else None),
+                    "text": reply_text_raw,
+                    "text_lines": reply_text_lines,  # Split lines for display
                     "model": getattr(rlast, "model", None) if hasattr(rlast, "model") else (rlast[2] if len(rlast) > 2 else None),
                     "confidence": getattr(rlast, "confidence", None) if hasattr(rlast, "confidence") else (rlast[3] if len(rlast) > 3 else None),
                     "reason": getattr(rlast, "reason", None) if hasattr(rlast, "reason") else (rlast[4] if len(rlast) > 4 else None),
@@ -733,6 +742,17 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     # Include all records, even if empty text (for no_reply decisions)
                     if not txt:
                         txt = ""  # Will be handled in template
+                    
+                    # Split text by newlines to show as separate messages
+                    text_lines = []
+                    if txt:
+                        lines = [line.strip() for line in str(txt).split('\n') if line.strip()]
+                        if not lines:
+                            lines = [str(txt).strip()]
+                        text_lines = lines
+                    else:
+                        text_lines = [""]
+                    
                     did = getattr(rr, "id", None) if hasattr(rr, "id") else (rr[0] if len(rr) > 0 else None)
                     ca = getattr(rr, "created_at", None) if hasattr(rr, "created_at") else (rr[5] if len(rr) > 5 else None)
                     ts = None
@@ -747,23 +767,25 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     if normalized_status not in ["sent", "error", "no_reply", "suggested", "dismissed", "expired"]:
                         normalized_status = "suggested"
                     
-                    vm = {
-                        "direction": "out",
-                        "text": str(txt) if txt else "",
-                        "timestamp_ms": ts or 0,
-                        "sender_username": "AI",
-                        "ig_message_id": None,
-                        "ig_sender_id": None,
-                        "ig_recipient_id": None,
-                        "is_ai_draft": True,
-                        "ai_decision_status": normalized_status,  # Pass status to template
-                        "draft_id": int(did) if did is not None else None,
-                        "ai_model": getattr(rr, "model", None) if hasattr(rr, "model") else (rr[2] if len(rr) > 2 else None),
-                        "ai_reason": getattr(rr, "reason", None) if hasattr(rr, "reason") else (rr[4] if len(rr) > 4 else None),
-                        "product_slug": focus_slug or None,
-                        "ai_actions": actions_list,
-                    }
-                    vms.append(vm)
+                    # Create a separate virtual message for each line
+                    for line_idx, line_text in enumerate(text_lines):
+                        vm = {
+                            "direction": "out",
+                            "text": line_text,
+                            "timestamp_ms": ts or 0,
+                            "sender_username": "AI",
+                            "ig_message_id": None,
+                            "ig_sender_id": None,
+                            "ig_recipient_id": None,
+                            "is_ai_draft": True,
+                            "ai_decision_status": normalized_status,  # Pass status to template
+                            "draft_id": int(did) if did is not None else None,
+                            "ai_model": getattr(rr, "model", None) if hasattr(rr, "model") else (rr[2] if len(rr) > 2 else None),
+                            "ai_reason": getattr(rr, "reason", None) if hasattr(rr, "reason") else (rr[4] if len(rr) > 4 else None),
+                            "product_slug": focus_slug or None,
+                            "ai_actions": actions_list if line_idx == 0 else [],  # Only show actions on first message
+                        }
+                        vms.append(vm)
                 except Exception:
                     continue
             msgs = list(msgs) + vms

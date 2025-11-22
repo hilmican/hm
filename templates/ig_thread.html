@@ -96,7 +96,17 @@
       <div style="margin:12px 0; padding:12px; border:1px dashed #93c5fd; background:#eff6ff; border-radius:10px;">
         <div style="font-weight:600; color:#1e40af; margin-bottom:6px;">AI Öneri (gönderilmedi)</div>
       {% endif %}
-        <div style="white-space:pre-wrap; color:#111827;">{{ shadow.text }}</div>
+        {% if shadow.text_lines and shadow.text_lines|length > 1 %}
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+            {% for line in shadow.text_lines %}
+              <div class="msg out" style="margin:0;">
+                <div class="bubble" style="margin-left:auto; margin-right:0;">{{ line }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div style="white-space:pre-wrap; color:#111827;">{{ shadow.text }}</div>
+        {% endif %}
         {% if shadow.timestamp_ms %}
           <div class="meta"><span class="ts" data-ts="{{ shadow.timestamp_ms }}">{{ shadow.timestamp_ms }}</span></div>
         {% endif %}
