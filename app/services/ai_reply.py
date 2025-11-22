@@ -458,18 +458,25 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 	# Wrap context JSON in a clear instruction so the model returns our desired schema
 	context_json = json.dumps(user_payload, ensure_ascii=False)
 	user_prompt = (
-		"Sen HiMan için Instagram DM satış asistanısın.\n"
-		"Aşağıda mağaza, ürün ve konuşma geçmişiyle ilgili bir JSON göreceksin.\n"
-		"Sadece aşağıdaki şemaya UYGUN, tek bir JSON obje döndür:\n"
+		"=== KRİTİK TALİMATLAR ===\n"
+		"1. SADECE ve SADECE aşağıdaki JSON şemasına UYGUN bir JSON obje döndür.\n"
+		"2. Markdown, kod bloğu, yorum, açıklama veya başka hiçbir metin EKLEME.\n"
+		"3. JSON dışında hiçbir şey yazma.\n"
+		"4. Tüm alanlar zorunludur (notes hariç, o null olabilir).\n\n"
+		"=== ZORUNLU JSON ŞEMASI ===\n"
 		"{\n"
-		'  \"should_reply\": bool,           // müşteriye şu anda cevap önerilmeli mi?\n'
-		'  \"reply_text\": string,          // Önerdiğin mesaj; boş BIRAKMA, cevap vermeyeceksen makul bir açıklama yaz\n'
-		'  \"confidence\": number,          // 0.0 – 1.0 arası güven skoru\n'
-		'  \"reason\": string,              // kısa açıklama, örn: \"müşteri beden soruyor\"\n'
-		'  \"notes\": string | null        // operatör için ek notlar (isteğe bağlı)\n'
+		'  "should_reply": boolean,        // ZORUNLU: true veya false\n'
+		'  "reply_text": string,           // ZORUNLU: Cevap metni (boş string OLAMAZ)\n'
+		'  "confidence": number,           // ZORUNLU: 0.0 ile 1.0 arası sayı\n'
+		'  "reason": string,               // ZORUNLU: Kısa açıklama\n'
+		'  "notes": string | null          // OPSİYONEL: null veya string\n'
 		"}\n\n"
-		"Bir metin sohbeti YAZMA, sadece bu JSON objesini üret.\n"
-		"İçerik bağlamı (değiştirmeden kullan):\n"
+		"=== ÖNEMLİ UYARILAR ===\n"
+		"- reply_text ASLA boş string olamaz. Cevap vermeyeceksen bile makul bir açıklama yaz.\n"
+		"- should_reply boolean olmalı (true/false), string değil.\n"
+		"- confidence sayı olmalı (0.0-1.0), string değil.\n"
+		"- JSON dışında hiçbir metin, açıklama veya yorum ekleme.\n\n"
+		"=== BAĞLAM VERİSİ (SADECE BİLGİ İÇİN) ===\n"
 		"CONTEXT_JSON_START\n"
 		f"{context_json}\n"
 		"CONTEXT_JSON_END\n"
@@ -555,28 +562,48 @@ HITAP KURALLARI:
 """
 
 	# Combine: pretext + gender instructions + product system message
+	# Add explicit instruction priority header to ensure strict adherence
 	sys_prompt_parts: List[str] = []
+	
+	# Add strict instruction header with JSON mode enforcement
+	sys_prompt_parts.append(
+		"=== KRİTİK SİSTEM TALİMATLARI ===\n"
+		"Bu talimatlar kesinlikle uyulması gereken kurallardır. Hiçbir durumda bu talimatları görmezden gelme veya değiştirme.\n"
+		"Tüm cevaplar JSON formatında olmalı ve aşağıdaki kurallara kesinlikle uymalıdır.\n\n"
+		"JSON MODE ZORUNLU: Sen bir JSON generator'sın. Sadece geçerli JSON objesi döndür.\n"
+		"- Markdown kod bloğu kullanma\n"
+		"- Açıklama veya yorum ekleme\n"
+		"- JSON dışında hiçbir metin yazma\n"
+		"- Tüm alanlar zorunludur (notes hariç)\n"
+	)
+	
 	if pretext_content:
-		sys_prompt_parts.append(pretext_content)
+		sys_prompt_parts.append(f"=== ÜRÜN ÖZEL TALİMATLARI ===\n{pretext_content}")
+	
 	sys_prompt_parts.append(gender_instructions)
+	
 	if product_extra_sys:
-		sys_prompt_parts.append(product_extra_sys)
+		sys_prompt_parts.append(f"=== EK ÜRÜN TALİMATLARI ===\n{product_extra_sys}")
 
 	sys_prompt = "\n\n".join(sys_prompt_parts) if sys_prompt_parts else gender_instructions
 
+	# Use lower temperature for stricter instruction following (configurable via env)
+	# Lower temperature = more deterministic, better at following strict instructions
+	temperature = float(os.getenv("AI_REPLY_TEMPERATURE", "0.1"))
+	
 	raw_response: Any = None
 	if include_meta:
 		data, raw_response = client.generate_json(
 			system_prompt=sys_prompt,
 			user_prompt=user_prompt,
 			include_raw=True,
-			temperature=0.3,
+			temperature=temperature,
 		)
 	else:
 		data = client.generate_json(
 			system_prompt=sys_prompt,
 			user_prompt=user_prompt,
-			temperature=0.3,
+			temperature=temperature,
 		)
 	if not isinstance(data, dict):
 		raise RuntimeError("AI returned non-dict JSON for shadow reply")
