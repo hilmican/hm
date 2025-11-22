@@ -325,14 +325,12 @@ def main() -> None:
 				if should_auto_send and conversation_id_for_send:
 					try:
 						log.info("ai_shadow: auto-sending reply for conversation_id=%s confidence=%.2f", cid, confidence)
-						# Extract image URLs from actions
+						# Use image URLs that were already extracted from product_images
+						# Send images if we have them and haven't sent them before
 						image_urls_to_send: list[str] = []
-						if actions:
-							for action in actions:
-								if isinstance(action, dict) and action.get("type") == "send_product_images":
-									urls = action.get("image_urls") or []
-									if isinstance(urls, list):
-										image_urls_to_send.extend([str(u) for u in urls if u])
+						if image_urls and not bool(st.get("ai_images_sent")):
+							image_urls_to_send = image_urls
+							log.info("ai_shadow: including %d image(s) in reply", len(image_urls_to_send))
 						
 						# Send message via async function
 						loop = None
@@ -350,7 +348,19 @@ def main() -> None:
 							)
 						)
 						sent_message_id = result.get("message_id") or (result.get("message_ids")[0] if result.get("message_ids") else None)
-						log.info("ai_shadow: auto-sent reply message_id=%s conversation_id=%s", sent_message_id, cid)
+						log.info("ai_shadow: auto-sent reply message_id=%s conversation_id=%s images_sent=%d", sent_message_id, cid, len(image_urls_to_send) if image_urls_to_send else 0)
+						
+						# Mark images as sent if we actually sent any
+						if image_urls_to_send:
+							try:
+								with get_session() as session:
+									session.exec(
+										_text(
+											"UPDATE ai_shadow_state SET ai_images_sent=1 WHERE conversation_id=:cid"
+										).params(cid=int(cid))
+									)
+							except Exception:
+								pass
 						
 						# Persist the sent message to Message table
 						if sent_message_id:
