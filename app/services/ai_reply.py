@@ -23,20 +23,47 @@ def _decode_escape_sequences(text: str) -> str:
 	When AI returns JSON with double-escaped sequences (e.g., "text\\nhere"),
 	json.loads() converts them to literal strings (e.g., "text\nhere" as literal).
 	This function converts those literal escape sequences to actual characters.
+	
+	Also handles cases where escape sequences might be stored with literal backslashes
+	(e.g., "text\\nhere" as a 4-character string: backslash, backslash, n).
+	
+	This handles:
+	- Literal backslash-n (2 chars: '\' + 'n') -> actual newline
+	- Double-escaped backslash-n (4 chars: '\\' + '\\' + 'n') -> actual newline
+	- Any number of backslash layers
 	"""
 	if not isinstance(text, str):
 		return text
 	try:
-		# Only decode if we detect literal escape sequences
-		# Check for common escape sequences that might be literal
-		if '\\n' in text or '\\t' in text or '\\r' in text:
-			# Use encode/decode to convert literal escape sequences
-			# Encode to latin-1 (which preserves bytes 0-255), then decode with unicode_escape
-			return text.encode('latin-1').decode('unicode_escape')
-		return text
+		# Convert string to bytes representation to see actual bytes
+		# This helps us understand what's really stored
+		text_bytes = text.encode('utf-8', errors='ignore')
+		
+		# Strategy: Use regex to find and replace all literal backslash-n sequences
+		# regardless of how many backslashes there are
+		import re
+		
+		# Pattern: one or more backslashes followed by 'n', 't', or 'r'
+		# Match literal backslash sequences (not actual newlines)
+		patterns = [
+			(r'\\+n', '\n'),  # One or more backslashes + n -> newline
+			(r'\\+t', '\t'),  # One or more backslashes + t -> tab
+			(r'\\+r', '\r'),  # One or more backslashes + r -> return
+		]
+		
+		result = text
+		for pattern, replacement in patterns:
+			# Replace all matches (greedy match for multiple backslashes)
+			result = re.sub(pattern, replacement, result)
+		
+		return result
 	except Exception:
-		# If decoding fails, return original text
-		return text
+		# If decoding fails, try simple replace as fallback
+		try:
+			result = text.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
+			return result
+		except Exception:
+			return text
 
 
 def _format_transcript(messages: List[Dict[str, Any]], max_chars: int = 16000) -> str:

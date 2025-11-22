@@ -693,12 +693,21 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
             if rows_shadow:
                 rlast = rows_shadow[-1]
                 reply_text_raw = getattr(rlast, "reply_text", None) if hasattr(rlast, "reply_text") else (rlast[1] if len(rlast) > 1 else None)
+                # Decode any escape sequences that might still be in the stored text
+                if reply_text_raw:
+                    # Import decode function locally
+                    from ..services.ai_reply import _decode_escape_sequences
+                    reply_text_raw = _decode_escape_sequences(str(reply_text_raw))
+                    # Ensure it's a string after decoding
+                    reply_text_raw = str(reply_text_raw) if reply_text_raw else None
                 # Split reply text by newlines for display as separate messages
                 reply_text_lines = []
                 if reply_text_raw:
+                    # Split by actual newlines (not literal \n sequences)
                     lines = [line.strip() for line in str(reply_text_raw).split('\n') if line.strip()]
+                    # If no non-empty lines, use the original text (might be single line)
                     if not lines:
-                        lines = [str(reply_text_raw).strip()]
+                        lines = [str(reply_text_raw).strip()] if str(reply_text_raw).strip() else []
                     reply_text_lines = lines
                 shadow = {
                     "id": getattr(rlast, "id", None) if hasattr(rlast, "id") else (rlast[0] if len(rlast) > 0 else None),
@@ -743,6 +752,10 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     if not txt:
                         txt = ""  # Will be handled in template
                     
+                    # Decode any escape sequences that might still be in the stored text
+                    if txt:
+                        from ..services.ai_reply import _decode_escape_sequences
+                        txt = _decode_escape_sequences(str(txt))
                     # Split text by newlines to show as separate messages
                     text_lines = []
                     if txt:

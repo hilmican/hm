@@ -96,7 +96,7 @@
       <div style="margin:12px 0; padding:12px; border:1px dashed #93c5fd; background:#eff6ff; border-radius:10px;">
         <div style="font-weight:600; color:#1e40af; margin-bottom:6px;">AI Öneri (gönderilmedi)</div>
       {% endif %}
-        {% if shadow.text_lines and shadow.text_lines|length > 1 %}
+        {% if shadow.text_lines and shadow.text_lines|length > 0 %}
           <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
             {% for line in shadow.text_lines %}
               <div class="msg out" style="margin:0;">
@@ -371,7 +371,15 @@
         <div class="msg out">
           <div class="bubble" style="border:1px dashed #93c5fd; background:#eff6ff;">
             <div style="font-weight:600; color:#1e40af; margin-bottom:6px;">AI Öneri (gönderilmedi)</div>
-            <div style="white-space:pre-wrap; color:#111827;">{{ shadow.text }}</div>
+            {% if shadow.text_lines and shadow.text_lines|length > 0 %}
+              <div style="display:flex; flex-direction:column; gap:4px; margin-top:4px;">
+                {% for line in shadow.text_lines %}
+                  <div>{{ line }}</div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div style="white-space:pre-wrap; color:#111827;">{{ shadow.text }}</div>
+            {% endif %}
             <div class="meta" style="margin-top:6px;">
               model={{ shadow.model or '-' }} · güven={{ ('%.2f' % shadow.confidence) if shadow.confidence is not none else '-' }} · sebep={{ shadow.reason or '-' }}
             </div>
