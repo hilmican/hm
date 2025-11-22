@@ -361,9 +361,9 @@ def main() -> None:
 									# Check if message already exists
 									existing = session.exec(select(Message).where(Message.ig_message_id == str(sent_message_id))).first()
 									if not existing:
-									# Get sender/recipient IDs
-									import os
-									entity_id = os.getenv("IG_PAGE_ID") or os.getenv("IG_USER_ID") or ""
+										# Get sender/recipient IDs
+										import os
+										entity_id = os.getenv("IG_PAGE_ID") or os.getenv("IG_USER_ID") or ""
 										now_ms = _now_ms()
 										msg = Message(
 											ig_sender_id=str(entity_id),
