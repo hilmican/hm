@@ -509,3 +509,113 @@ async def sync_latest_conversations(limit: int = 25) -> int:
     return saved
 
 
+async def send_message(conversation_id: str, text: str, image_urls: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Send a message to an Instagram conversation via Graph API.
+    
+    Args:
+        conversation_id: Graph conversation ID or dm:<ig_user_id> format
+        text: Message text to send
+        image_urls: Optional list of image URLs to send before the text
+        
+    Returns:
+        Dict with message_id and status
+    """
+    token, entity_id, is_page = _get_base_token_and_id()
+    if not is_page:
+        raise RuntimeError("Sending requires a Page access token (IG_PAGE_ACCESS_TOKEN)")
+    
+    # Resolve recipient ID from conversation_id
+    recipient_id: Optional[str] = None
+    if conversation_id.startswith("dm:"):
+        recipient_id = conversation_id.split(":", 1)[1] or None
+    else:
+        # For Graph conversation IDs, we need to resolve the other party
+        # Try to get from conversations table
+        from sqlalchemy import text as _text
+        from ..db import get_session
+        with get_session() as session:
+            row = session.exec(
+                _text(
+                    "SELECT ig_user_id FROM conversations WHERE graph_conversation_id=:gc OR id=:gc LIMIT 1"
+                ).params(gc=str(conversation_id))
+            ).first()
+            if row:
+                recipient_id = (row.ig_user_id if hasattr(row, "ig_user_id") else (row[0] if len(row) > 0 else None)) or None
+    
+    if not recipient_id:
+        raise RuntimeError(f"Could not resolve recipient for conversation_id={conversation_id}")
+    
+    base = f"https://graph.facebook.com/{GRAPH_VERSION}"
+    url = base + "/me/messages"
+    
+    image_urls = image_urls or []
+    results: Dict[str, Any] = {"message_ids": [], "status": "ok"}
+    
+    async with httpx.AsyncClient() as client:
+        # 1) Send image messages first (if any)
+        for img_url in image_urls:
+            img_payload = {
+                "recipient": {"id": recipient_id},
+                "messaging_type": "RESPONSE",
+                "message": {
+                    "attachment": {
+                        "type": "image",
+                        "payload": {
+                            "url": img_url,
+                        },
+                    }
+                },
+            }
+            try:
+                r_img = await client.post(
+                    url,
+                    params={"access_token": token},
+                    json=img_payload,
+                    timeout=20,
+                )
+                r_img.raise_for_status()
+                resp_img = r_img.json()
+                if resp_img.get("message_id"):
+                    results["message_ids"].append(resp_img["message_id"])
+            except httpx.HTTPStatusError as e:
+                try:
+                    detail = e.response.text
+                except Exception:
+                    detail = str(e)
+                try:
+                    _log.warning("Graph image send failed url=%s err=%s", img_url, detail[:200])
+                except Exception:
+                    pass
+            except Exception as e:
+                try:
+                    _log.warning("Graph image send failed url=%s err=%s", img_url, str(e)[:200])
+                except Exception:
+                    pass
+        
+        # 2) Send the text message
+        if text and text.strip():
+            payload = {
+                "recipient": {"id": recipient_id},
+                "messaging_type": "RESPONSE",
+                "message": {"text": text.strip()},
+            }
+            try:
+                r = await client.post(url, params={"access_token": token}, json=payload, timeout=20)
+                r.raise_for_status()
+                resp = r.json()
+                if resp.get("message_id"):
+                    results["message_id"] = resp["message_id"]
+                    results["message_ids"].append(resp["message_id"])
+            except httpx.HTTPStatusError as e:
+                try:
+                    detail = e.response.text
+                except Exception:
+                    detail = str(e)
+                raise RuntimeError(f"Graph send failed: {detail}")
+            except Exception as e:
+                raise RuntimeError(f"Graph send failed: {e}")
+    
+    return results
+
+

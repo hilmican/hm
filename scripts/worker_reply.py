@@ -4,14 +4,20 @@ import logging
 import datetime as dt
 from typing import Any, Optional
 import json
+import os
+import asyncio
 
 from app.db import get_session
 from sqlalchemy import text as _text
 
 from app.services.ai_reply import draft_reply
+from app.services.instagram_api import send_message
 
 log = logging.getLogger("worker.reply")
 logging.basicConfig(level=logging.INFO)
+
+# Minimum confidence threshold to auto-send AI replies (0.0-1.0)
+AUTO_SEND_CONFIDENCE_THRESHOLD = float(os.getenv("AI_AUTO_SEND_CONFIDENCE", "0.7"))
 
 
 DEBOUNCE_SECONDS = 30
@@ -287,30 +293,130 @@ def main() -> None:
 					except Exception:
 						pass
 				actions_json = json.dumps(actions, ensure_ascii=False) if actions else None
+				confidence = float(data.get("confidence") or 0.6)
+				
+				# Check if we should auto-send this reply
+				should_auto_send = confidence >= AUTO_SEND_CONFIDENCE_THRESHOLD
+				status_to_set = "sent" if should_auto_send else "suggested"
+				
+				# Get conversation graph_id or construct dm: format for sending
+				conversation_id_for_send: Optional[str] = None
+				graph_conversation_id: Optional[str] = None
+				ig_user_id: Optional[str] = None
+				try:
+					with get_session() as session:
+						row_conv = session.exec(
+							_text(
+								"SELECT graph_conversation_id, ig_user_id FROM conversations WHERE id=:cid LIMIT 1"
+							).params(cid=int(cid))
+						).first()
+						if row_conv:
+							graph_conversation_id = (row_conv.graph_conversation_id if hasattr(row_conv, "graph_conversation_id") else (row_conv[0] if len(row_conv) > 0 else None)) or None
+							ig_user_id = (row_conv.ig_user_id if hasattr(row_conv, "ig_user_id") else (row_conv[1] if len(row_conv) > 1 else None)) or None
+						if graph_conversation_id:
+							conversation_id_for_send = str(graph_conversation_id)
+						elif ig_user_id:
+							conversation_id_for_send = f"dm:{ig_user_id}"
+				except Exception:
+					pass
+				
+				# Auto-send if confidence threshold met
+				sent_message_id: Optional[str] = None
+				if should_auto_send and conversation_id_for_send:
+					try:
+						log.info("ai_shadow: auto-sending reply for conversation_id=%s confidence=%.2f", cid, confidence)
+						# Extract image URLs from actions
+						image_urls_to_send: list[str] = []
+						if actions:
+							for action in actions:
+								if isinstance(action, dict) and action.get("type") == "send_product_images":
+									urls = action.get("image_urls") or []
+									if isinstance(urls, list):
+										image_urls_to_send.extend([str(u) for u in urls if u])
+						
+						# Send message via async function
+						loop = None
+						try:
+							loop = asyncio.get_event_loop()
+						except RuntimeError:
+							loop = asyncio.new_event_loop()
+							asyncio.set_event_loop(loop)
+						
+						result = loop.run_until_complete(
+							send_message(
+								conversation_id=conversation_id_for_send,
+								text=reply_text,
+								image_urls=image_urls_to_send if image_urls_to_send else None,
+							)
+						)
+						sent_message_id = result.get("message_id") or (result.get("message_ids")[0] if result.get("message_ids") else None)
+						log.info("ai_shadow: auto-sent reply message_id=%s conversation_id=%s", sent_message_id, cid)
+						
+						# Persist the sent message to Message table
+						if sent_message_id:
+							try:
+								with get_session() as session:
+									from app.models import Message
+									from sqlmodel import select
+									# Check if message already exists
+									existing = session.exec(select(Message).where(Message.ig_message_id == str(sent_message_id))).first()
+									if not existing:
+									# Get sender/recipient IDs
+									import os
+									entity_id = os.getenv("IG_PAGE_ID") or os.getenv("IG_USER_ID") or ""
+										now_ms = _now_ms()
+										msg = Message(
+											ig_sender_id=str(entity_id),
+											ig_recipient_id=str(ig_user_id) if ig_user_id else None,
+											ig_message_id=str(sent_message_id),
+											text=reply_text,
+											timestamp_ms=now_ms,
+											conversation_id=int(cid),
+											direction="out",
+											ai_status="sent",
+											ai_json=json.dumps({"auto_sent": True, "confidence": confidence, "reason": data.get("reason")}, ensure_ascii=False),
+										)
+										session.add(msg)
+										session.commit()
+							except Exception as persist_err:
+								try:
+									log.warning("persist sent message error cid=%s err=%s", cid, persist_err)
+								except Exception:
+									pass
+					except Exception as send_err:
+						try:
+							log.warning("auto-send error cid=%s err=%s", cid, send_err)
+						except Exception:
+							pass
+						# Fall back to suggested status if send fails
+						status_to_set = "suggested"
+						should_auto_send = False
+				
 				try:
 					with get_session() as session:
 						session.exec(
 							_text(
 								"""
 								INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, attempt_no, status, created_at)
-								VALUES(:cid, :txt, :model, :conf, :reason, :meta, :actions, :att, 'suggested', CURRENT_TIMESTAMP)
+								VALUES(:cid, :txt, :model, :conf, :reason, :meta, :actions, :att, :status, CURRENT_TIMESTAMP)
 								"""
 							).params(
 								cid=int(cid),
 								txt=reply_text,
 								model=str(data.get("model") or ""),
-								conf=(float(data.get("confidence") or 0.6)),
+								conf=confidence,
 								reason=(data.get("reason") or "auto"),
 								meta=json.dumps(data.get("debug_meta"), ensure_ascii=False) if data.get("debug_meta") else None,
 								actions=actions_json,
 								att=int(postpones or 0),
+								status=status_to_set,
 							)
 						)
-						# Mark state as suggested so UI can pick it up
+						# Mark state as suggested or sent
 						session.exec(
 							_text(
-								"UPDATE ai_shadow_state SET status='suggested', updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
-							).params(cid=int(cid))
+								"UPDATE ai_shadow_state SET status=:s, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+							).params(s=status_to_set, cid=int(cid))
 						)
 						if actions_json:
 							session.exec(

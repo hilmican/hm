@@ -341,6 +341,86 @@ async def refresh_inbox(limit: int = 25):
         return {"status": "error", "error": str(e)}
 
 
+@router.get("/inbox/ai-replied")
+async def ai_replied_messages(
+    request: Request,
+    limit: int = 50,
+):
+    """List of conversations where AI has automatically replied."""
+    with get_session() as session:
+        from sqlalchemy import text as _text
+        rows = session.exec(
+            _text(
+                """
+                SELECT DISTINCT
+                    c.id AS convo_id,
+                    c.last_message_timestamp_ms AS timestamp_ms,
+                    c.last_message_text AS text,
+                    c.last_sender_username AS sender_username,
+                    c.last_message_direction AS direction,
+                    c.ig_user_id,
+                    u.username AS other_username,
+                    u.name AS other_name,
+                    (SELECT COUNT(*) FROM ai_shadow_reply r WHERE r.conversation_id = c.id AND r.status = 'sent') AS ai_reply_count,
+                    (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = c.id AND r.status = 'sent') AS last_ai_reply_at
+                FROM conversations c
+                INNER JOIN ai_shadow_reply r ON r.conversation_id = c.id AND r.status = 'sent'
+                LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id
+                ORDER BY (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = c.id AND r.status = 'sent') DESC
+                LIMIT :n
+                """
+            ).params(n=int(limit))
+        ).all()
+        
+        conversations = []
+        for r in rows:
+            try:
+                conversations.append({
+                    "conversation_id": (r.convo_id if hasattr(r, "convo_id") else r[0]),
+                    "timestamp_ms": (getattr(r, "timestamp_ms", None) if hasattr(r, "timestamp_ms") else (r[1] if len(r) > 1 else None)),
+                    "text": (getattr(r, "text", None) if hasattr(r, "text") else (r[2] if len(r) > 2 else None)),
+                    "sender_username": (getattr(r, "sender_username", None) if hasattr(r, "sender_username") else (r[3] if len(r) > 3 else None)),
+                    "direction": (getattr(r, "direction", None) if hasattr(r, "direction") else (r[4] if len(r) > 4 else None)),
+                    "ig_user_id": (getattr(r, "ig_user_id", None) if hasattr(r, "ig_user_id") else (r[5] if len(r) > 5 else None)),
+                    "other_username": (getattr(r, "other_username", None) if hasattr(r, "other_username") else (r[6] if len(r) > 6 else None)),
+                    "other_name": (getattr(r, "other_name", None) if hasattr(r, "other_name") else (r[7] if len(r) > 7 else None)),
+                    "ai_reply_count": (getattr(r, "ai_reply_count", None) if hasattr(r, "ai_reply_count") else (r[8] if len(r) > 8 else None)),
+                    "last_ai_reply_at": (getattr(r, "last_ai_reply_at", None) if hasattr(r, "last_ai_reply_at") else (r[9] if len(r) > 9 else None)),
+                })
+            except Exception:
+                continue
+        
+        # Build display names
+        labels = {}
+        names = {}
+        for conv in conversations:
+            cid = conv.get("conversation_id")
+            if not cid:
+                continue
+            username = conv.get("other_username")
+            if username:
+                labels[cid] = f"@{username}"
+            else:
+                labels[cid] = str(cid)
+            name = conv.get("other_name")
+            if name:
+                names[cid] = name
+        
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "ig_inbox.html",
+            {
+                "request": request,
+                "conversations": conversations,
+                "labels": labels,
+                "names": names,
+                "ad_map": {},
+                "q": "",
+                "title": "AI Cevaplanan Mesajlar",
+            },
+        )
+
+
 @router.post("/inbox/clear-enrich")
 def clear_enrich_queues():
     # Purge Redis lists for enrich jobs and delete queued rows from jobs table

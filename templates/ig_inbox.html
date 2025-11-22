@@ -15,8 +15,13 @@
   </head>
   <body>
     {% include "_nav.html" %}
-    <h1>Instagram Gelen Kutusu</h1>
+    <h1>{{ title or "Instagram Gelen Kutusu" }}</h1>
     <div class="toolbar">
+      {% if not title or title == "Instagram Gelen Kutusu" %}
+      <a href="/ig/inbox/ai-replied" class="meta-link" style="background:#10b981;color:#fff;border-color:#10b981;">AI Cevaplanan Mesajlar</a>
+      {% else %}
+      <a href="/ig/inbox" class="meta-link">Tüm Konuşmalar</a>
+      {% endif %}
       <form method="get" action="/ig/inbox" style="display:flex;gap:8px;align-items:center;">
         <input type="text" name="q" placeholder="Mesajlarda ara..." value="{{ q or '' }}" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;min-width:280px" />
         <select name="has_ad" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;">

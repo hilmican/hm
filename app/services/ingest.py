@@ -718,6 +718,20 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 			return None
 		message_id = int(msg_row.id if hasattr(msg_row, "id") else msg_row[0])
 		
+		# Always update raw_json with the latest callback data (even if message already existed)
+		# This ensures we capture all callback data including reply_to for investigation
+		raw_json_data = json.dumps(event, ensure_ascii=False)
+		try:
+			session.exec(
+				text("UPDATE message SET raw_json = :raw_json WHERE ig_message_id = :mid").params(
+					raw_json=raw_json_data,
+					mid=str(mid)
+				)
+			)
+		except Exception:
+			# Best-effort; don't fail if update fails
+			pass
+		
 		# Create Message object for return value
 		row = Message(
 			id=message_id,
@@ -727,7 +741,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 			text=text_val,
 			attachments_json=json.dumps(attachments, ensure_ascii=False) if attachments is not None else None,
 			timestamp_ms=int(timestamp_ms) if isinstance(timestamp_ms, (int, float, str)) and str(timestamp_ms).isdigit() else None,
-			raw_json=json.dumps(event, ensure_ascii=False),
+			raw_json=raw_json_data,
 			conversation_id=int(conversation_pk) if conversation_pk is not None else None,
 			direction=direction,
 			story_id=story_id,
@@ -750,6 +764,19 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 			# Insert failed and message doesn't exist - return None
 			return None
 		message_id = int(msg_row.id if hasattr(msg_row, "id") else msg_row[0])
+		# Always update raw_json with the latest callback data (even if message already existed)
+		# This ensures we capture all callback data including reply_to for investigation
+		raw_json_data = json.dumps(event, ensure_ascii=False)
+		try:
+			session.exec(
+				text("UPDATE message SET raw_json = :raw_json WHERE ig_message_id = :mid").params(
+					raw_json=raw_json_data,
+					mid=str(mid)
+				)
+			)
+		except Exception:
+			# Best-effort; don't fail if update fails
+			pass
 		# Fetch full row for return value
 		row = session.get(Message, message_id)
 		if not row:
@@ -1419,7 +1446,21 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 	exists = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid").params(mid=str(mid))).first()
 	if exists:
 		row = exists
-		return int(row.id if hasattr(row, "id") else row[0])
+		message_id = int(row.id if hasattr(row, "id") else row[0])
+		# Always update raw_json with the latest callback data (even if message already existed)
+		# This ensures we capture all callback data including reply_to for investigation
+		raw_json_data = json.dumps(event, ensure_ascii=False)
+		try:
+			session.exec(
+				text("UPDATE message SET raw_json = :raw_json WHERE ig_message_id = :mid").params(
+					raw_json=raw_json_data,
+					mid=str(mid)
+				)
+			)
+		except Exception:
+			# Best-effort; don't fail if update fails
+			pass
+		return message_id
 	sender_id = (event.get("from") or event.get("sender") or {}).get("id")
 	# Best-effort capture of username when hydrating via Graph messages API
 	sender_username = None
