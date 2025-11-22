@@ -699,6 +699,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     "confidence": getattr(rlast, "confidence", None) if hasattr(rlast, "confidence") else (rlast[3] if len(rlast) > 3 else None),
                     "reason": getattr(rlast, "reason", None) if hasattr(rlast, "reason") else (rlast[4] if len(rlast) > 4 else None),
                     "created_at": getattr(rlast, "created_at", None) if hasattr(rlast, "created_at") else (rlast[5] if len(rlast) > 5 else None),
+                    "status": getattr(rlast, "status", None) if hasattr(rlast, "status") else (rlast[6] if len(rlast) > 6 else None),
                     "actions": _parse_actions(getattr(rlast, "actions_json", None) if hasattr(rlast, "actions_json") else (rlast[7] if len(rlast) > 7 else None)),
                 }
                 try:
@@ -741,6 +742,11 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                             ts = int(ts)
                         except Exception:
                             ts = None
+                    # Normalize status for template
+                    normalized_status = (status or "suggested").lower()
+                    if normalized_status not in ["sent", "error", "no_reply", "suggested", "dismissed", "expired"]:
+                        normalized_status = "suggested"
+                    
                     vm = {
                         "direction": "out",
                         "text": str(txt) if txt else "",
@@ -750,7 +756,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                         "ig_sender_id": None,
                         "ig_recipient_id": None,
                         "is_ai_draft": True,
-                        "ai_decision_status": status,  # Pass status to template
+                        "ai_decision_status": normalized_status,  # Pass status to template
                         "draft_id": int(did) if did is not None else None,
                         "ai_model": getattr(rr, "model", None) if hasattr(rr, "model") else (rr[2] if len(rr) > 2 else None),
                         "ai_reason": getattr(rr, "reason", None) if hasattr(rr, "reason") else (rr[4] if len(rr) > 4 else None),

@@ -190,12 +190,24 @@ spec:
               value: redis://hm-redis.hm.svc.cluster.local:6379/0
             - name: OPENAI_API_KEY
               valueFrom: { secretKeyRef: { name: hm-openai, key: OPENAI_API_KEY } }
+            - name: IG_PAGE_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_PAGE_ID } }
+            - name: IG_PAGE_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_PAGE_ACCESS_TOKEN } }
+            - name: IG_USER_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_USER_ID } }
+            - name: IG_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
+            - name: IG_GRAPH_API_VERSION
+              value: v21.0
             - name: AI_SHADOW_ENABLED
               value: "1"
             - name: AI_SHADOW_MODEL
               value: gpt-4o-mini
             - name: AI_MAX_PRODUCT_IMAGES
               value: "10"
+            - name: AI_AUTO_SEND_CONFIDENCE
+              value: "0.7"
             - name: DATABASE_URL
               value: "mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
           volumeMounts: [ { name: app-root, mountPath: /app } ]
