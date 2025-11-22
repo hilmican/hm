@@ -36,7 +36,10 @@ class AIClient:
         self._api_key = api_key or os.getenv("OPENAI_API_KEY") or ""
         self._model = model
         self._enabled = bool(self._api_key and OpenAI is not None)
-        self._client = OpenAI(api_key=self._api_key) if self._enabled else None
+        # Configure timeout: default 30 seconds, configurable via OPENAI_TIMEOUT env var
+        timeout_seconds = float(os.getenv("OPENAI_TIMEOUT", "30.0"))
+        self._timeout = timeout_seconds
+        self._client = OpenAI(api_key=self._api_key, timeout=timeout_seconds) if self._enabled else None
 
     @property
     def enabled(self) -> bool:
@@ -98,7 +101,7 @@ class AIClient:
             available = max(safety_out_min, ctx_limit - in_tokens - safety_in)
             max_output_tokens = max(1, min(desired, available))
 
-        # JSON mode
+        # JSON mode (timeout is set on client initialization)
         response = self._client.chat.completions.create(
             model=self._model,
             messages=messages,  # type: ignore[arg-type]

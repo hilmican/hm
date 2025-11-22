@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from typing import Any, Optional
 
 from sqlalchemy import text as _text
@@ -14,7 +15,7 @@ def touch_shadow_state(
 	conversation_id: str | int,
 	last_inbound_ms: Optional[int],
 	*,
-	debounce_seconds: int = 30,
+	debounce_seconds: int | None = None,
 ) -> None:
 	"""Upsert or update the shadow state for a conversation when a new inbound message arrives.
 
@@ -37,6 +38,10 @@ def touch_shadow_state(
 	# This allows processing conversations like "Ürün hakkında detaylı bilgi alabilir miyim?"
 	# where the product is detected from message context rather than ad/post links
 
+	# Use provided debounce_seconds, or get from env var, or default to 5 seconds
+	if debounce_seconds is None:
+		debounce_seconds = int(os.getenv("AI_REPLY_DEBOUNCE_SECONDS", "5"))
+	
 	now = dt.datetime.utcnow()
 	next_at = now + dt.timedelta(seconds=max(1, int(debounce_seconds)))
 
