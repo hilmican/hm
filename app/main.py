@@ -126,7 +126,9 @@ def create_app() -> FastAPI:
 			pass
 		# Init AI client (optional)
 		try:
-			app.state.ai = AIClient()
+			from .services.ai import get_ai_model_from_settings
+			model = get_ai_model_from_settings()
+			app.state.ai = AIClient(model=model)
 		except Exception:
 			app.state.ai = None
 		# Ensure media directories exist when app boots

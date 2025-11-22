@@ -1045,10 +1045,11 @@ def _auto_link_instagram_post(message_id: int, message_text: Optional[str], atta
 			product_list = [{"id": p.id, "name": p.name, "slug": p.slug} for p in products]
 
 		try:
-			from .ai import AIClient
+			from .ai import AIClient, get_ai_model_from_settings
 			from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
 
-			ai = AIClient()
+			model = get_ai_model_from_settings()
+			ai = AIClient(model=model)
 			if not ai or not getattr(ai, "enabled", False):
 				_log.debug("ingest: AI not available for post linking")
 				return
@@ -1223,10 +1224,11 @@ def _auto_link_ad(ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -
 			product_list = [{"id": p.id, "name": p.name} for p in products]
 
 		try:
-			from .ai import AIClient
+			from .ai import AIClient, get_ai_model_from_settings
 			from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
 
-			ai = AIClient()
+			model = get_ai_model_from_settings()
+			ai = AIClient(model=model)
 			if not ai or not getattr(ai, "enabled", False):
 				_log.debug("ingest: AI not available for ad linking")
 				return

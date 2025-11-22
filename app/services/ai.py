@@ -152,3 +152,33 @@ class AIClient:
         return data
 
 
+def get_ai_model_from_settings(default: str = "gpt-4o-mini") -> str:
+    """Get the AI model from system settings.
+    
+    Args:
+        default: Default model to use if setting is not found
+        
+    Returns:
+        The model name from settings or default
+    """
+    try:
+        from ..db import get_session
+        from ..models import SystemSetting
+        from sqlmodel import select
+        
+        with get_session() as session:
+            setting = session.exec(
+                select(SystemSetting).where(SystemSetting.key == "ai_model")
+            ).first()
+            
+            if setting and setting.value:
+                # Validate model
+                valid_models = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+                if setting.value in valid_models:
+                    return setting.value
+            return default
+    except Exception:
+        # If there's any error, return default
+        return default
+
+

@@ -38,6 +38,19 @@
             Bu kapalıysa, hiçbir ürün için AI cevap göndermez (gölge cevaplar yine de çalışır).
           </div>
         </div>
+        <div class="field">
+          <label for="ai_model">AI Model</label>
+          <select name="ai_model" id="ai_model" style="width:100%; max-width:300px; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+            <option value="gpt-4o-mini" {% if ai_model == "gpt-4o-mini" %}selected{% endif %}>gpt-4o-mini</option>
+            <option value="gpt-4o" {% if ai_model == "gpt-4o" %}selected{% endif %}>gpt-4o</option>
+            <option value="gpt-4-turbo" {% if ai_model == "gpt-4-turbo" %}selected{% endif %}>gpt-4-turbo</option>
+            <option value="gpt-4" {% if ai_model == "gpt-4" %}selected{% endif %}>gpt-4</option>
+            <option value="gpt-3.5-turbo" {% if ai_model == "gpt-3.5-turbo" %}selected{% endif %}>gpt-3.5-turbo</option>
+          </select>
+          <div class="meta">
+            AI yanıtları için kullanılacak OpenAI modeli. Gölge cevaplar (shadow replies) için ayrı model kullanılır.
+          </div>
+        </div>
         <button type="submit">Ayarları Kaydet</button>
       </div>
     </form>

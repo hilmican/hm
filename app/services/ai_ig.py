@@ -16,7 +16,9 @@ class AIAdapter:
 	"""Adapter to allow swapping to OpenAI Agents/Assistants later without changing call sites."""
 	def __init__(self, mode: str = "direct"):
 		self._mode = mode
-		self._client = AIClient()
+		from .ai import get_ai_model_from_settings
+		model = get_ai_model_from_settings()
+		self._client = AIClient(model=model)
 
 	def generate_json(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.2) -> Dict[str, Any]:
 		# For now, direct JSON-mode; later, branch by self._mode and call Assistants API.
@@ -405,7 +407,9 @@ def propose_reply(conversation_id: str, customer_text: str) -> Dict[str, Any]:
 	"""Call the AI client in JSON mode and return the parsed dict (or empty on error)."""
 	sys, usr = build_prompt(conversation_id, customer_text)
 	try:
-		client = AIClient()
+		from .ai import get_ai_model_from_settings
+		model = get_ai_model_from_settings()
+		client = AIClient(model=model)
 		data = client.generate_json(system_prompt=sys, user_prompt=usr, temperature=0.2)
 		if isinstance(data, tuple):
 			data = data[0]
@@ -464,7 +468,9 @@ def analyze_conversation(conversation_id: str, *, limit: int = 200, run_id: Opti
     Returns a dict with keys: purchase_detected, buyer_name, phone, address, notes,
     product_mentions (list), possible_order_ids (list)
     """
-    client = AIClient()
+    from .ai import get_ai_model_from_settings
+    model = get_ai_model_from_settings()
+    client = AIClient(model=model)
     if not client.enabled:
         raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")
     with get_session() as session:

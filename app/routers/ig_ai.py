@@ -1560,6 +1560,15 @@ def ai_settings_page(request: Request):
                 global_enabled = setting.value.lower() in ("true", "1", "yes")
             except Exception:
                 global_enabled = False
+        
+        # Get AI model setting
+        model_setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_model")
+        ).first()
+        
+        ai_model = "gpt-4o-mini"  # Default model
+        if model_setting:
+            ai_model = model_setting.value
     
     templates = request.app.state.templates
     return templates.TemplateResponse(
@@ -1567,6 +1576,7 @@ def ai_settings_page(request: Request):
         {
             "request": request,
             "ai_reply_sending_enabled": global_enabled,
+            "ai_model": ai_model,
         },
     )
 
@@ -1574,13 +1584,20 @@ def ai_settings_page(request: Request):
 @router.post("/settings/save")
 def save_ai_settings(
     ai_reply_sending_enabled: str = Form(default="false"),
+    ai_model: str = Form(default="gpt-4o-mini"),
 ):
     """Save global AI reply settings."""
     from ..models import SystemSetting
     
     enabled = ai_reply_sending_enabled.lower() in ("true", "1", "yes", "on")
     
+    # Validate model
+    valid_models = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+    if ai_model not in valid_models:
+        ai_model = "gpt-4o-mini"
+    
     with get_session() as session:
+        # Save global AI reply sending enabled setting
         setting = session.exec(
             select(SystemSetting).where(SystemSetting.key == "ai_reply_sending_enabled_global")
         ).first()
@@ -1596,6 +1613,24 @@ def save_ai_settings(
                 description="Global toggle for AI reply sending (shadow replies always run)",
             )
             session.add(setting)
+        
+        # Save AI model setting
+        model_setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_model")
+        ).first()
+        
+        if model_setting:
+            model_setting.value = ai_model
+            model_setting.updated_at = dt.datetime.utcnow()
+            session.add(model_setting)
+        else:
+            model_setting = SystemSetting(
+                key="ai_model",
+                value=ai_model,
+                description="AI model to use for generating replies (shadow replies use separate model)",
+            )
+            session.add(model_setting)
+        
         session.commit()
     
     from fastapi.responses import RedirectResponse

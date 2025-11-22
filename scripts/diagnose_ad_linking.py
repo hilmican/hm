@@ -124,8 +124,9 @@ def diagnose_conversation(conversation_id: int):
         # Check AI client status
         print("🤖 AI Client Status:")
         try:
-            from app.services.ai import AIClient
-            ai = AIClient()
+            from app.services.ai import AIClient, get_ai_model_from_settings
+            model = get_ai_model_from_settings()
+            ai = AIClient(model=model)
             if ai.enabled:
                 print(f"   ✓ AI is enabled (model: {ai.model})")
             else:
