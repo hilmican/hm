@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AI Cevap Ayarları</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .field { margin-bottom: 16px; }
+      label { display:block; font-weight:600; margin-bottom:8px; color:#111827; }
+      input[type="checkbox"] { width:20px; height:20px; margin-right:8px; }
+      button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:10px 14px; cursor:pointer; margin-top:8px; }
+      .meta { color:#6b7280; font-size:12px; margin-top:6px; }
+      .box { border:1px solid #e5e7eb; border-radius:10px; padding:16px; margin-bottom:16px; max-width:600px; }
+      .warning { background:#fef3c7; border:1px solid #f59e0b; border-radius:8px; padding:12px; margin-bottom:16px; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>AI Cevap Ayarları</h1>
+    
+    <div class="warning">
+      <strong>⚠️ Önemli:</strong> Gölge cevaplar (shadow replies) her zaman çalışır ve test edilir. 
+      Bu ayarlar sadece AI'ın gerçekten müşterilere cevap göndermesini kontrol eder.
+    </div>
+
+    <form method="post" action="/ig/ai/settings/save">
+      <div class="box">
+        <div class="field">
+          <label>
+            <input type="checkbox" 
+                   name="ai_reply_sending_enabled" 
+                   value="1" 
+                   {% if ai_reply_sending_enabled %}checked{% endif %} />
+            Global AI Cevap Gönderme Aktif
+          </label>
+          <div class="meta">
+            Tüm ürünler için AI'ın gerçekten cevap göndermesine izin ver. 
+            Bu kapalıysa, hiçbir ürün için AI cevap göndermez (gölge cevaplar yine de çalışır).
+          </div>
+        </div>
+        <button type="submit">Ayarları Kaydet</button>
+      </div>
+    </form>
+
+    <div class="box">
+      <h3 style="margin:0 0 8px 0">Ürün Bazlı Kontrol</h3>
+      <div class="meta">
+        Her ürün için ayrı ayrı AI cevap göndermeyi açıp kapatabilirsiniz. 
+        <a href="/ig/ai/products">Ürün AI sayfasına git</a> ve her ürün için "AI Cevap Gönderme Aktif" 
+        seçeneğini kullanın.
+      </div>
+    </div>
+  </body>
+</html>
+

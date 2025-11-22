@@ -9,9 +9,11 @@ import asyncio
 
 from app.db import get_session
 from sqlalchemy import text as _text
+from sqlmodel import select
 
 from app.services.ai_reply import draft_reply
 from app.services.instagram_api import send_message
+from app.models import SystemSetting, Product
 
 log = logging.getLogger("worker.reply")
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +25,45 @@ AUTO_SEND_CONFIDENCE_THRESHOLD = float(os.getenv("AI_AUTO_SEND_CONFIDENCE", "0.7
 DEBOUNCE_SECONDS = 30
 POSTPONE_WINDOW_SECONDS = 180  # 3 minutes
 POSTPONE_MAX = 3
+
+
+def _is_ai_reply_sending_enabled(conversation_id: int) -> tuple[bool, bool]:
+	"""
+	Check if AI reply sending is enabled globally and for the product.
+	Returns (global_enabled, product_enabled).
+	Shadow replies always run regardless of these settings.
+	"""
+	# Check global setting
+	global_enabled = False
+	try:
+		with get_session() as session:
+			setting = session.exec(
+				select(SystemSetting).where(SystemSetting.key == "ai_reply_sending_enabled_global")
+			).first()
+			if setting:
+				global_enabled = setting.value.lower() in ("true", "1", "yes")
+	except Exception:
+		global_enabled = False
+	
+	# Check product setting
+	product_enabled = True  # Default to enabled
+	try:
+		with get_session() as session:
+			# Get product from conversation's focus product
+			from app.services.ai_ig import _detect_focus_product
+			focus_slug, _ = _detect_focus_product(str(conversation_id))
+			if focus_slug:
+				prod = session.exec(
+					select(Product).where(
+						(Product.slug == focus_slug) | (Product.name == focus_slug)
+					).limit(1)
+				).first()
+				if prod:
+					product_enabled = getattr(prod, "ai_reply_sending_enabled", True)
+	except Exception:
+		product_enabled = True
+	
+	return global_enabled, product_enabled
 
 
 def _utcnow() -> dt.datetime:
@@ -297,6 +338,16 @@ def main() -> None:
 				
 				# Check if we should auto-send this reply
 				should_auto_send = confidence >= AUTO_SEND_CONFIDENCE_THRESHOLD
+				
+				# Check global and product settings
+				global_enabled, product_enabled = _is_ai_reply_sending_enabled(cid)
+				if not global_enabled or not product_enabled:
+					should_auto_send = False
+					if not global_enabled:
+						log.info("ai_shadow: auto-send disabled globally for conversation_id=%s", cid)
+					if not product_enabled:
+						log.info("ai_shadow: auto-send disabled for product in conversation_id=%s", cid)
+				
 				status_to_set = "sent" if should_auto_send else "suggested"
 				
 				# Get conversation graph_id or construct dm: format for sending

@@ -44,6 +44,20 @@
           <a href="/ig/ai/pretexts" target="_blank">Pretext'leri yönet</a>
         </div>
       </div>
+      <div class="field">
+        <label>
+          <input type="checkbox" 
+                 name="ai_reply_sending_enabled" 
+                 value="1" 
+                 {% if ai_reply_sending_enabled %}checked{% endif %} 
+                 style="width:20px; height:20px; margin-right:8px;" />
+          AI Cevap Gönderme Aktif
+        </label>
+        <div class="meta" style="margin-top:6px;">
+          Bu ürün için AI'ın gerçekten cevap göndermesine izin ver. 
+          Gölge cevaplar (shadow replies) her zaman çalışır, bu ayar sadece gerçek gönderimi kontrol eder.
+        </div>
+      </div>
       <button type="submit">Kaydet</button>
     </form>
 

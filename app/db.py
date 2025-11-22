@@ -566,6 +566,8 @@ def init_db() -> None:
                     if 'pretext_id' not in have_cols:
                         conn.exec_driver_sql("ALTER TABLE product ADD COLUMN pretext_id INT NULL")
                         conn.exec_driver_sql("CREATE INDEX idx_product_pretext_id ON product(pretext_id)")
+                    if 'ai_reply_sending_enabled' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN ai_reply_sending_enabled TINYINT(1) NOT NULL DEFAULT 1")
                 except Exception:
                     pass
                 # Ensure ai_pretext table exists
@@ -822,6 +824,20 @@ def init_db() -> None:
                     ).fetchone()
                     if row is None:
                         conn.exec_driver_sql("ALTER TABLE ai_shadow_reply ADD COLUMN actions_json LONGTEXT NULL")
+                except Exception:
+                    pass
+                # Create system_settings table
+                try:
+                    conn.exec_driver_sql(
+                        """
+                        CREATE TABLE IF NOT EXISTS system_settings (
+                            `key` VARCHAR(128) PRIMARY KEY,
+                            value TEXT NOT NULL,
+                            description TEXT NULL,
+                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
                 except Exception:
                     pass
                 return

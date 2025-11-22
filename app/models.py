@@ -127,6 +127,10 @@ class Product(SQLModel, table=True):
         index=True,
         description="Which pretext to use for this product (prepended to system message)",
     )
+    ai_reply_sending_enabled: bool = Field(
+        default=True,
+        description="Whether AI can actually send replies for this product (shadow replies always run)",
+    )
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
@@ -470,6 +474,14 @@ class AiShadowReply(SQLModel, table=True):
 	attempt_no: Optional[int] = 0
 	status: Optional[str] = Field(default="suggested", index=True, description="suggested|dismissed|expired|error")
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class SystemSetting(SQLModel, table=True):
+	__tablename__ = "system_settings"
+	key: str = Field(primary_key=True, description="Setting key")
+	value: str = Field(description="Setting value (JSON-encoded if needed)")
+	description: Optional[str] = Field(default=None, description="Human-readable description")
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 
 class CostType(SQLModel, table=True):

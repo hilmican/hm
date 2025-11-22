@@ -369,7 +369,7 @@ def product_ai_page(request: Request, focus: str):
         ).all()
         sku_list = [it.sku for it in items if getattr(it, "sku", None)]
         
-    name = row.name or focus_s
+        name = row.name or focus_s
     templates = request.app.state.templates
     return templates.TemplateResponse(
         "ig_ai_products.html",
@@ -383,6 +383,7 @@ def product_ai_page(request: Request, focus: str):
             "pretexts": pretext_list,
             "images": image_list,
             "skus": sku_list,
+            "ai_reply_sending_enabled": getattr(row, "ai_reply_sending_enabled", True),
         },
     )
 
@@ -393,6 +394,7 @@ def save_product_ai(
     ai_system_msg: str = Form(default=""),
     ai_prompt_msg: str = Form(default=""),
     pretext_id: str = Form(default=""),
+    ai_reply_sending_enabled: str = Form(default="true"),
 ):
     """
     Persist AI instructions for the focused product.
@@ -426,6 +428,8 @@ def save_product_ai(
             except Exception:
                 pretext_id_val = None
         prod.pretext_id = pretext_id_val
+        # Handle ai_reply_sending_enabled
+        prod.ai_reply_sending_enabled = ai_reply_sending_enabled.lower() in ("true", "1", "yes", "on")
         session.add(prod)
     # Redirect back to the edit page for this product
     from fastapi.responses import RedirectResponse
@@ -1537,5 +1541,64 @@ def mark_unlinked(body: dict):
             except Exception:
                 pass
     return {"status": "ok"}
+
+
+@router.get("/settings")
+def ai_settings_page(request: Request):
+    """Global AI reply settings page."""
+    from ..models import SystemSetting
+    
+    with get_session() as session:
+        # Get global AI reply sending enabled setting
+        setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_reply_sending_enabled_global")
+        ).first()
+        
+        global_enabled = False  # Default to disabled for safety
+        if setting:
+            try:
+                global_enabled = setting.value.lower() in ("true", "1", "yes")
+            except Exception:
+                global_enabled = False
+    
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        "ig_ai_settings.html",
+        {
+            "request": request,
+            "ai_reply_sending_enabled": global_enabled,
+        },
+    )
+
+
+@router.post("/settings/save")
+def save_ai_settings(
+    ai_reply_sending_enabled: str = Form(default="false"),
+):
+    """Save global AI reply settings."""
+    from ..models import SystemSetting
+    
+    enabled = ai_reply_sending_enabled.lower() in ("true", "1", "yes", "on")
+    
+    with get_session() as session:
+        setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_reply_sending_enabled_global")
+        ).first()
+        
+        if setting:
+            setting.value = "true" if enabled else "false"
+            setting.updated_at = dt.datetime.utcnow()
+            session.add(setting)
+        else:
+            setting = SystemSetting(
+                key="ai_reply_sending_enabled_global",
+                value="true" if enabled else "false",
+                description="Global toggle for AI reply sending (shadow replies always run)",
+            )
+            session.add(setting)
+        session.commit()
+    
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/ig/ai/settings", status_code=303)
 
 
