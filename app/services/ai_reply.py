@@ -11,6 +11,8 @@ from ..models import Message, Product, Item, Conversation, IGUser, AIPretext, Pr
 from .ai import AIClient
 from .ai_context import VariantExclusions, parse_variant_exclusions, variant_is_excluded
 from .ai_ig import _detect_focus_product
+from .ai_utils import parse_height_weight, calculate_size_suggestion, detect_color_count
+from .prompts import get_global_system_prompt
 
 
 MAX_AI_IMAGES_PER_REPLY = int(os.getenv("AI_MAX_PRODUCT_IMAGES", "3"))
@@ -447,15 +449,57 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 		"payment_options": ["cod_cash", "cod_card"],
 	}
 
+	# Parse height and weight from last customer message
+	parsed_hw = parse_height_weight(last_customer_message)
+	height_cm = parsed_hw.get("height_cm")
+	weight_kg = parsed_hw.get("weight_kg")
+	
+	# Calculate size suggestion if we have height/weight and product_id
+	size_suggestion: Optional[str] = None
+	product_id_val = product_info.get("id") if product_info else None
+	if height_cm and weight_kg and product_id_val:
+		try:
+			size_suggestion = calculate_size_suggestion(height_cm, weight_kg, product_id_val)
+		except Exception:
+			size_suggestion = None
+	
+	# Detect if product has multiple colors
+	has_multiple_colors = detect_color_count(stock)
+	
+	# Check for double price (2'li fiyat) - look for items with quantity=2 or special pricing
+	# For now, we'll check if there's a pattern in stock items that suggests 2-item pricing
+	# This is a simple heuristic - can be enhanced with actual product configuration
+	double_price: Optional[float] = None
+	# TODO: Add proper double_price detection from product configuration or stock patterns
+	
+	# Build parsed data structure
+	parsed_data: Dict[str, Any] = {}
+	if height_cm:
+		parsed_data["height_cm"] = height_cm
+	if weight_kg:
+		parsed_data["weight_kg"] = weight_kg
+	if size_suggestion:
+		parsed_data["size_suggestion"] = size_suggestion
+	
+	# Build product_focus with additional metadata
+	product_focus_data: Dict[str, Any] = product_info or {"id": None, "name": None, "slug_or_sku": None, "slug": None, "confidence": 0.0}
+	product_focus_data["has_multiple_colors"] = has_multiple_colors
+	if double_price is not None:
+		product_focus_data["double_price"] = double_price
+
 	user_payload: Dict[str, Any] = {
 		"store": store_conf,
-		"product_focus": product_info or {"id": None, "name": None, "slug_or_sku": None, "slug": None, "confidence": 0.0},
+		"product_focus": product_focus_data,
 		"stock": stock,
 		"history": history,
 		"last_customer_message": last_customer_message,
 		"transcript": transcript,
 		"product_images": product_images,
 	}
+	
+	# Add parsed data if available
+	if parsed_data:
+		user_payload["parsed"] = parsed_data
 	# Wrap context JSON in a clear instruction so the model returns our desired schema
 	context_json = json.dumps(user_payload, ensure_ascii=False)
 	user_prompt = (
@@ -521,8 +565,12 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 							).first()
 						if pretext:
 							pretext_content = pretext.content
+						else:
+							# Fallback to file-based global system prompt if no pretext in DB
+							pretext_content = get_global_system_prompt()
 		except Exception:
-			pass
+			# Fallback to file-based global system prompt on error
+			pretext_content = get_global_system_prompt()
 	else:
 		# No product focus - use default pretext
 		try:
@@ -536,8 +584,12 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 					).first()
 				if pretext:
 					pretext_content = pretext.content
+				else:
+					# Fallback to file-based global system prompt if no pretext in DB
+					pretext_content = get_global_system_prompt()
 		except Exception:
-			pass
+			# Fallback to file-based global system prompt on error
+			pretext_content = get_global_system_prompt()
 
 	# Build gender detection instructions
 	gender_instructions = f"""

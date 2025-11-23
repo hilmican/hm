@@ -84,6 +84,49 @@ def get_ig_purchase_prompt() -> str:
 	return IG_PURCHASE_SYSTEM_PROMPT
 
 
+def get_global_system_prompt() -> str:
+	"""
+	Return the current global system prompt (default pretext) for Instagram conversation replies.
+	- If a prompt file is present, use it with mtime-based cache.
+	- Else, fall back to a minimal default.
+	"""
+	key = "global_system"
+	now = time.time()
+	refresh_sec = float(os.getenv("PROMPT_REFRESH_SECONDS", "5"))
+	# throttle stat calls
+	if key in _PROMPT_CACHE and (now - _PROMPT_LAST_CHECK.get(key, 0.0) < max(1.0, refresh_sec)):
+		return _PROMPT_CACHE[key][0]
+	_PROMPT_LAST_CHECK[key] = now
+	# resolve file path
+	custom_path = os.getenv("GLOBAL_SYSTEM_PROMPT_FILE")
+	if custom_path:
+		p = Path(custom_path)
+	else:
+		p = Path("app/services/prompts/REVISED_GLOBAL_SYSTEM_PROMPT.txt")
+	try:
+		if p.exists():
+			mt = p.stat().st_mtime
+			cached = _PROMPT_CACHE.get(key)
+			if (not cached) or (mt != cached[1]):
+				txt = _read_file_text(p)
+				if txt and txt.strip():
+					_PROMPT_CACHE[key] = (txt, mt)
+					return txt
+			# unchanged -> return cached
+			if cached:
+				return cached[0]
+	except Exception:
+		# ignore file/permission errors; fall back to minimal default
+		pass
+	# fallback to minimal default
+	default_prompt = (
+		"Sen HiMan için Instagram DM satış asistanısın. Kısa ve net yanıtla; satış akışını ilerlet.\n"
+		"JSON MODE ZORUNLU: Sadece geçerli JSON objesi döndür."
+	)
+	_PROMPT_CACHE[key] = (default_prompt, _PROMPT_CACHE.get(key, (None, 0.0))[1] if _PROMPT_CACHE.get(key) else 0.0)
+	return default_prompt
+
+
 # Instagram purchase detection and contact extraction prompt (strict JSON)
 IG_PURCHASE_SYSTEM_PROMPT = (
     "Sen bir Instagram DM satış analiz yardımcısısın. "
