@@ -155,6 +155,31 @@ class AIClient:
         return data
 
 
+def get_ai_shadow_model_from_settings(default: str = "gpt-4o-mini") -> str:
+	"""Get shadow AI model from SystemSetting, with fallback to env var and then default."""
+	# First try env var (for backward compatibility)
+	env_model = os.getenv("AI_SHADOW_MODEL")
+	if env_model:
+		return env_model
+	
+	# Then try SystemSetting
+	try:
+		from ..db import get_session
+		from ..models import SystemSetting
+		from sqlmodel import select
+		
+		with get_session() as session:
+			setting = session.exec(
+				select(SystemSetting).where(SystemSetting.key == "ai_shadow_model")
+			).first()
+			if setting and setting.value:
+				return setting.value
+	except Exception:
+		pass
+	
+	return default
+
+
 def get_ai_model_from_settings(default: str = "gpt-4o-mini") -> str:
     """Get the AI model from system settings.
     

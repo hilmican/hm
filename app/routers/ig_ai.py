@@ -2004,6 +2004,18 @@ def ai_settings_page(request: Request):
         ai_model = "gpt-4o-mini"  # Default model
         if model_setting:
             ai_model = model_setting.value
+        
+        # Get AI shadow model setting
+        shadow_model_setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_shadow_model")
+        ).first()
+        
+        ai_shadow_model = os.getenv("AI_SHADOW_MODEL", "gpt-4o-mini")  # Default: try env var first, then default
+        if shadow_model_setting:
+            ai_shadow_model = shadow_model_setting.value
+        elif not os.getenv("AI_SHADOW_MODEL"):
+            # If no env var and no setting, use same as regular model as default
+            ai_shadow_model = ai_model
     
     templates = request.app.state.templates
     return templates.TemplateResponse(
@@ -2012,6 +2024,7 @@ def ai_settings_page(request: Request):
             "request": request,
             "ai_reply_sending_enabled": global_enabled,
             "ai_model": ai_model,
+            "ai_shadow_model": ai_shadow_model,
         },
     )
 
@@ -2020,6 +2033,7 @@ def ai_settings_page(request: Request):
 def save_ai_settings(
     ai_reply_sending_enabled: str = Form(default="false"),
     ai_model: str = Form(default="gpt-4o-mini"),
+    ai_shadow_model: str = Form(default="gpt-4o-mini"),
 ):
     """Save global AI reply settings."""
     from ..models import SystemSetting
@@ -2065,6 +2079,28 @@ def save_ai_settings(
                 description="AI model to use for generating replies (shadow replies use separate model)",
             )
             session.add(model_setting)
+        
+        # Validate shadow model
+        valid_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+        if ai_shadow_model not in valid_models:
+            ai_shadow_model = "gpt-4o-mini"
+        
+        # Save AI shadow model setting
+        shadow_model_setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_shadow_model")
+        ).first()
+        
+        if shadow_model_setting:
+            shadow_model_setting.value = ai_shadow_model
+            shadow_model_setting.updated_at = dt.datetime.utcnow()
+            session.add(shadow_model_setting)
+        else:
+            shadow_model_setting = SystemSetting(
+                key="ai_shadow_model",
+                value=ai_shadow_model,
+                description="AI model to use for generating shadow replies (test/draft replies)",
+            )
+            session.add(shadow_model_setting)
         
         session.commit()
     

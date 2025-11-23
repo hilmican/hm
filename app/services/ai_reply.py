@@ -404,7 +404,8 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 	  - reason: str         (short explanation for debugging)
 	  - notes: str|null
 	"""
-	client = AIClient(model=os.getenv("AI_SHADOW_MODEL", "gpt-4o-mini"))
+	from .ai import get_ai_shadow_model_from_settings
+	client = AIClient(model=get_ai_shadow_model_from_settings())
 	if not client.enabled:
 		raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")
 
