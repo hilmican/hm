@@ -1,0 +1,237 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Ürün İnceleme: {{ product.name }}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background: #f9fafb; }
+      .container { max-width: 1400px; margin: 0 auto; }
+      .header { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+      .header h1 { margin: 0 0 10px 0; color: #111827; }
+      .meta { color: #6b7280; font-size: 14px; margin: 4px 0; }
+      .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin: 20px 0; }
+      .stat-card { background: white; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+      .stat-card h3 { margin: 0 0 8px 0; font-size: 14px; color: #6b7280; font-weight: 500; }
+      .stat-card .value { font-size: 32px; font-weight: 600; color: #111827; }
+      .product-info { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+      .product-info h2 { margin: 0 0 16px 0; color: #111827; }
+      .prompt-box { background: #f9fafb; padding: 12px; border-radius: 6px; border-left: 4px solid #2563eb; margin: 8px 0; }
+      .prompt-box label { display: block; font-weight: 600; margin-bottom: 6px; color: #374151; font-size: 14px; }
+      .prompt-box pre { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 13px; color: #111827; margin: 0; }
+      .export-form { background: white; padding: 16px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+      .export-form form { display: flex; gap: 12px; align-items: end; }
+      .export-form label { display: block; font-weight: 600; margin-bottom: 6px; color: #374151; font-size: 14px; }
+      .export-form input, .export-form select { padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px; }
+      .export-form button { background: #2563eb; color: white; border: none; border-radius: 6px; padding: 10px 20px; cursor: pointer; font-weight: 500; }
+      .export-form button:hover { background: #1d4ed8; }
+      .conversation-card { background: white; padding: 20px; border-radius: 10px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+      .conversation-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
+      .conversation-header h3 { margin: 0; color: #111827; font-size: 16px; }
+      .conversation-header a { color: #2563eb; text-decoration: none; font-size: 14px; }
+      .conversation-header a:hover { text-decoration: underline; }
+      .conversation-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: #6b7280; }
+      .section { margin-top: 20px; }
+      .section-title { font-weight: 600; color: #374151; margin-bottom: 12px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
+      .message-item, .reply-item { background: #f9fafb; padding: 12px; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid #e5e7eb; }
+      .message-item.inbound { border-left-color: #3b82f6; }
+      .message-item.outbound { border-left-color: #10b981; }
+      .reply-item.shadow { border-left-color: #f59e0b; }
+      .message-text, .reply-text { white-space: pre-wrap; font-size: 14px; color: #111827; margin: 0 0 6px 0; }
+      .message-meta, .reply-meta { font-size: 12px; color: #6b7280; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; margin-left: 8px; }
+      .badge-blue { background: #dbeafe; color: #1e40af; }
+      .badge-green { background: #d1fae5; color: #065f46; }
+      .badge-yellow { background: #fef3c7; color: #92400e; }
+      .badge-gray { background: #f3f4f6; color: #374151; }
+      .empty-state { text-align: center; padding: 40px; color: #6b7280; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <div class="container">
+      <div class="header">
+        <h1>Ürün İnceleme: {{ product.name }}</h1>
+        <div class="meta">Slug: {{ product.slug }}</div>
+        <div style="margin-top: 12px;">
+          <a href="/ig/ai/products?focus={{ product.slug }}" style="color: #2563eb; text-decoration: none;">← AI Ayarlarına Dön</a>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat-card">
+          <h3>Toplam Konuşma</h3>
+          <div class="value">{{ total_conversations }}</div>
+        </div>
+        <div class="stat-card">
+          <h3>Müşteri Soruları</h3>
+          <div class="value">{{ total_questions }}</div>
+        </div>
+        <div class="stat-card">
+          <h3>Gölge Cevaplar</h3>
+          <div class="value">{{ total_shadow_replies }}</div>
+        </div>
+        <div class="stat-card">
+          <h3>Gerçek Cevaplar</h3>
+          <div class="value">{{ total_actual_replies }}</div>
+        </div>
+      </div>
+
+      <div class="product-info">
+        <h2>Ürün Bilgileri ve Prompt'lar</h2>
+        <div class="prompt-box">
+          <label>Sistem Mesajı (ai_system_msg)</label>
+          <pre>{{ product.ai_system_msg or "(Boş)" }}</pre>
+        </div>
+        <div class="prompt-box">
+          <label>Prompt Mesajı (ai_prompt_msg)</label>
+          <pre>{{ product.ai_prompt_msg or "(Boş)" }}</pre>
+        </div>
+        {% if pretext %}
+        <div class="meta" style="margin-top: 12px;">
+          <strong>Pretext:</strong> {{ pretext.name }}
+          {% if pretext.is_default %}<span class="badge badge-gray">Varsayılan</span>{% endif %}
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="export-form">
+        <form method="get" action="/ig/ai/products/{{ product.slug }}/export">
+          <div>
+            <label>Konuşma Sayısı</label>
+            <input type="number" name="conversation_limit" value="{{ total_conversations }}" min="1" max="1000" />
+          </div>
+          <div>
+            <label>Format</label>
+            <select name="format">
+              <option value="json">JSON</option>
+              <option value="csv">CSV</option>
+            </select>
+          </div>
+          <div>
+            <button type="submit">Dışa Aktar</button>
+          </div>
+        </form>
+        <div class="meta" style="margin-top: 8px;">
+          Konuşmaları, gölge cevapları ve gerçek cevapları dışa aktar.
+        </div>
+      </div>
+
+      {% if conversations %}
+        {% for conv in conversations %}
+        <div class="conversation-card">
+          <div class="conversation-header">
+            <div>
+              <h3>
+                Konuşma #{{ conv.conversation_id }}
+                {% if conv.username %}
+                  <span class="badge badge-blue">@{{ conv.username }}</span>
+                {% endif %}
+              </h3>
+              <div class="conversation-meta">
+                {% if conv.contact_name %}
+                  <span>İsim: {{ conv.contact_name }}</span>
+                {% endif %}
+                {% if conv.contact_phone %}
+                  <span>Tel: {{ conv.contact_phone }}</span>
+                {% endif %}
+                {% if conv.last_message_at %}
+                  <span>Son Mesaj: {{ conv.last_message_at.strftime('%Y-%m-%d %H:%M') if conv.last_message_at else '-' }}</span>
+                {% endif %}
+                <span>Soru: {{ conv.question_count }}</span>
+                <span>Gölge: {{ conv.shadow_reply_count }}</span>
+                <span>Gerçek: {{ conv.actual_reply_count }}</span>
+              </div>
+            </div>
+            <div>
+              <a href="/ig/inbox/{{ conv.conversation_id }}" target="_blank">Konuşmayı Aç →</a>
+            </div>
+          </div>
+
+          {% if conv.client_questions %}
+          <div class="section">
+            <div class="section-title">Müşteri Soruları ({{ conv.client_questions|length }})</div>
+            {% for q in conv.client_questions %}
+            <div class="message-item inbound">
+              <div class="message-text">{{ q.text or "(Boş mesaj)" }}</div>
+              <div class="message-meta">
+                {% if q.sender_username %}@{{ q.sender_username }} · {% endif %}
+                {% if q.timestamp_ms %}
+                  <span class="ts" data-ts="{{ q.timestamp_ms }}">{{ q.timestamp_ms }}</span>
+                {% else %}
+                  {{ q.created_at.strftime('%Y-%m-%d %H:%M:%S') if q.created_at else '-' }}
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          {% if conv.shadow_replies %}
+          <div class="section">
+            <div class="section-title">Gölge Cevaplar ({{ conv.shadow_replies|length }})</div>
+            {% for sr in conv.shadow_replies %}
+            <div class="reply-item shadow">
+              <div class="reply-text">{{ sr.reply_text or "(Boş cevap)" }}</div>
+              <div class="reply-meta">
+                {% if sr.model %}Model: {{ sr.model }} · {% endif %}
+                {% if sr.confidence is not none %}Güven: {{ "%.2f"|format(sr.confidence) }} · {% endif %}
+                {% if sr.reason %}Sebep: {{ sr.reason }} · {% endif %}
+                {% if sr.status %}<span class="badge badge-yellow">{{ sr.status }}</span>{% endif %}
+                {{ sr.created_at.strftime('%Y-%m-%d %H:%M:%S') if sr.created_at else '-' }}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          {% if conv.actual_replies %}
+          <div class="section">
+            <div class="section-title">Gerçek Cevaplar ({{ conv.actual_replies|length }})</div>
+            {% for ar in conv.actual_replies %}
+            <div class="message-item outbound">
+              <div class="message-text">{{ ar.text or "(Boş mesaj)" }}</div>
+              <div class="message-meta">
+                {% if ar.sender_username %}@{{ ar.sender_username }} · {% endif %}
+                {% if ar.ai_status %}<span class="badge badge-green">{{ ar.ai_status }}</span>{% endif %}
+                {% if ar.timestamp_ms %}
+                  <span class="ts" data-ts="{{ ar.timestamp_ms }}">{{ ar.timestamp_ms }}</span>
+                {% else %}
+                  {{ ar.created_at.strftime('%Y-%m-%d %H:%M:%S') if ar.created_at else '-' }}
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="conversation-card">
+          <div class="empty-state">
+            <p>Bu ürün için henüz konuşma bulunmuyor.</p>
+            <p class="meta">Ürün, reklamlar üzerinden konuşmalara bağlandığında burada görünecektir.</p>
+          </div>
+        </div>
+      {% endif %}
+    </div>
+
+    <script>
+      // Format timestamps
+      document.querySelectorAll('.ts[data-ts]').forEach(el => {
+        const ts = parseInt(el.getAttribute('data-ts'));
+        if (ts && !isNaN(ts)) {
+          const date = new Date(ts);
+          el.textContent = date.toLocaleString('tr-TR', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+          });
+        }
+      });
+    </script>
+  </body>
+</html>
+

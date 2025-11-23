@@ -593,6 +593,388 @@ async def save_product_images(request: Request):
     )
 
 
+@router.get("/products/{product_slug}/review")
+def product_review_page(request: Request, product_slug: str, limit: int = 100):
+    """
+    Review page for a product showing:
+    - Product data and prompts
+    - All conversations linked to this product (via ads)
+    - Client questions (inbound messages)
+    - Shadow replies
+    - Actual agent replies (outbound messages)
+    """
+    from ..models import Product, Conversation, Message, AiShadowReply
+    
+    with get_session() as session:
+        # Get product
+        product = session.exec(
+            select(Product).where(Product.slug == product_slug).limit(1)
+        ).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        
+        # Find all conversations linked to this product via ads
+        # Get ad_ids for this product from ads_products table
+        ad_ids_rows = session.exec(
+            text(
+                """
+                SELECT DISTINCT ad_id FROM ads_products 
+                WHERE product_id = :pid
+                """
+            ).params(pid=product.id)
+        ).all()
+        
+        ad_ids = [str(r[0] if isinstance(r, tuple) else getattr(r, "ad_id", r)) for r in ad_ids_rows if r]
+        
+        # Find conversations that have messages with these ad_ids
+        conversations = []
+        if ad_ids:
+            # Build parameter list for IN clause
+            params = {}
+            placeholders = []
+            for i, aid in enumerate(ad_ids):
+                param_name = f"aid_{i}"
+                placeholders.append(f":{param_name}")
+                params[param_name] = str(aid)
+            params["lim"] = limit
+            
+            placeholders_str = ",".join(placeholders)
+            
+            convo_rows = session.exec(
+                text(
+                    f"""
+                    SELECT DISTINCT c.id, c.ig_user_id, c.graph_conversation_id,
+                           c.last_message_at, c.last_message_text, c.last_sender_username,
+                           u.username, u.contact_name, u.contact_phone
+                    FROM conversations c
+                    LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id
+                    INNER JOIN message m ON m.conversation_id = c.id
+                    WHERE m.ad_id IN ({placeholders_str})
+                    ORDER BY c.last_message_at DESC
+                    LIMIT :lim
+                    """
+                ).params(**params)
+            ).all()
+        else:
+            convo_rows = []
+        
+        # Build conversation data with messages, shadow replies, and actual replies
+        conversation_data = []
+        for row in convo_rows:
+            try:
+                convo_id = row[0] if isinstance(row, tuple) else getattr(row, "id", row)
+                ig_user_id = row[1] if isinstance(row, tuple) else getattr(row, "ig_user_id", None)
+                graph_convo_id = row[2] if isinstance(row, tuple) else getattr(row, "graph_conversation_id", None)
+                last_msg_at = row[3] if isinstance(row, tuple) else getattr(row, "last_message_at", None)
+                last_msg_text = row[4] if isinstance(row, tuple) else getattr(row, "last_message_text", None)
+                last_sender = row[5] if isinstance(row, tuple) else getattr(row, "last_sender_username", None)
+                username = row[6] if isinstance(row, tuple) else getattr(row, "username", None)
+                contact_name = row[7] if isinstance(row, tuple) else getattr(row, "contact_name", None)
+                contact_phone = row[8] if isinstance(row, tuple) else getattr(row, "contact_phone", None)
+                
+                # Get all messages for this conversation
+                messages = session.exec(
+                    select(Message)
+                    .where(Message.conversation_id == convo_id)
+                    .order_by(Message.timestamp_ms.asc())
+                ).all()
+                
+                # Get shadow replies for this conversation
+                shadow_replies = session.exec(
+                    select(AiShadowReply)
+                    .where(AiShadowReply.conversation_id == convo_id)
+                    .order_by(AiShadowReply.created_at.asc())
+                ).all()
+                
+                # Separate messages by direction
+                client_questions = [m for m in messages if m.direction == "in"]
+                actual_replies = [m for m in messages if m.direction == "out"]
+                
+                conversation_data.append({
+                    "conversation_id": convo_id,
+                    "graph_conversation_id": graph_convo_id,
+                    "ig_user_id": ig_user_id,
+                    "username": username,
+                    "contact_name": contact_name,
+                    "contact_phone": contact_phone,
+                    "last_message_at": last_msg_at,
+                    "last_message_text": last_msg_text,
+                    "last_sender_username": last_sender,
+                    "client_questions": [
+                        {
+                            "id": m.id,
+                            "text": m.text,
+                            "timestamp_ms": m.timestamp_ms,
+                            "sender_username": m.sender_username,
+                            "created_at": m.created_at,
+                        }
+                        for m in client_questions
+                    ],
+                    "shadow_replies": [
+                        {
+                            "id": r.id,
+                            "reply_text": r.reply_text,
+                            "model": r.model,
+                            "confidence": r.confidence,
+                            "reason": r.reason,
+                            "status": r.status,
+                            "created_at": r.created_at,
+                        }
+                        for r in shadow_replies
+                    ],
+                    "actual_replies": [
+                        {
+                            "id": m.id,
+                            "text": m.text,
+                            "timestamp_ms": m.timestamp_ms,
+                            "sender_username": m.sender_username,
+                            "created_at": m.created_at,
+                            "ai_status": m.ai_status,
+                        }
+                        for m in actual_replies
+                    ],
+                    "question_count": len(client_questions),
+                    "shadow_reply_count": len(shadow_replies),
+                    "actual_reply_count": len(actual_replies),
+                })
+            except Exception as e:
+                import logging
+                logging.getLogger("ig_ai").error(f"Error processing conversation: {e}")
+                continue
+        
+        # Get pretext if exists
+        pretext = None
+        if product.pretext_id:
+            from ..models import AIPretext
+            pretext = session.get(AIPretext, product.pretext_id)
+        
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "ig_ai_product_review.html",
+            {
+                "request": request,
+                "product": product,
+                "pretext": pretext,
+                "conversations": conversation_data,
+                "total_conversations": len(conversation_data),
+                "total_questions": sum(c["question_count"] for c in conversation_data),
+                "total_shadow_replies": sum(c["shadow_reply_count"] for c in conversation_data),
+                "total_actual_replies": sum(c["actual_reply_count"] for c in conversation_data),
+            },
+        )
+
+
+@router.get("/products/{product_slug}/export")
+def export_product_data(
+    request: Request,
+    product_slug: str,
+    format: str = "json",
+    conversation_limit: int = 100,
+):
+    """
+    Export product data including conversations, shadow replies, and actual replies.
+    """
+    from ..models import Product, Conversation, Message, AiShadowReply
+    from fastapi.responses import JSONResponse, Response
+    import json
+    
+    with get_session() as session:
+        # Get product
+        product = session.exec(
+            select(Product).where(Product.slug == product_slug).limit(1)
+        ).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        
+        # Find all conversations linked to this product via ads
+        ad_ids_rows = session.exec(
+            text(
+                """
+                SELECT DISTINCT ad_id FROM ads_products 
+                WHERE product_id = :pid
+                """
+            ).params(pid=product.id)
+        ).all()
+        
+        ad_ids = [str(r[0] if isinstance(r, tuple) else getattr(r, "ad_id", r)) for r in ad_ids_rows if r]
+        
+        conversations = []
+        if ad_ids:
+            # Build parameter list for IN clause
+            params = {}
+            placeholders = []
+            for i, aid in enumerate(ad_ids):
+                param_name = f"aid_{i}"
+                placeholders.append(f":{param_name}")
+                params[param_name] = str(aid)
+            params["lim"] = conversation_limit
+            
+            placeholders_str = ",".join(placeholders)
+            
+            convo_rows = session.exec(
+                text(
+                    f"""
+                    SELECT DISTINCT c.id, c.ig_user_id, c.graph_conversation_id,
+                           c.last_message_at, u.username, u.contact_name, u.contact_phone
+                    FROM conversations c
+                    LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id
+                    INNER JOIN message m ON m.conversation_id = c.id
+                    WHERE m.ad_id IN ({placeholders_str})
+                    ORDER BY c.last_message_at DESC
+                    LIMIT :lim
+                    """
+                ).params(**params)
+            ).all()
+        else:
+            convo_rows = []
+        
+        # Build export data
+        export_data = {
+            "product": {
+                "id": product.id,
+                "name": product.name,
+                "slug": product.slug,
+                "ai_system_msg": product.ai_system_msg,
+                "ai_prompt_msg": product.ai_prompt_msg,
+            },
+            "conversation_count": len(convo_rows),
+            "exported_at": dt.datetime.utcnow().isoformat(),
+            "conversations": [],
+        }
+        
+        for row in convo_rows:
+            try:
+                convo_id = row[0] if isinstance(row, tuple) else getattr(row, "id", row)
+                
+                # Get all messages
+                messages = session.exec(
+                    select(Message)
+                    .where(Message.conversation_id == convo_id)
+                    .order_by(Message.timestamp_ms.asc())
+                ).all()
+                
+                # Get shadow replies
+                shadow_replies = session.exec(
+                    select(AiShadowReply)
+                    .where(AiShadowReply.conversation_id == convo_id)
+                    .order_by(AiShadowReply.created_at.asc())
+                ).all()
+                
+                export_data["conversations"].append({
+                    "conversation_id": convo_id,
+                    "graph_conversation_id": row[2] if isinstance(row, tuple) else getattr(row, "graph_conversation_id", None),
+                    "ig_user_id": row[1] if isinstance(row, tuple) else getattr(row, "ig_user_id", None),
+                    "username": row[4] if isinstance(row, tuple) else getattr(row, "username", None),
+                    "contact_name": row[5] if isinstance(row, tuple) else getattr(row, "contact_name", None),
+                    "contact_phone": row[6] if isinstance(row, tuple) else getattr(row, "contact_phone", None),
+                    "client_questions": [
+                        {
+                            "id": m.id,
+                            "text": m.text,
+                            "timestamp_ms": m.timestamp_ms,
+                            "sender_username": m.sender_username,
+                            "created_at": m.created_at.isoformat() if m.created_at else None,
+                        }
+                        for m in messages if m.direction == "in"
+                    ],
+                    "shadow_replies": [
+                        {
+                            "id": r.id,
+                            "reply_text": r.reply_text,
+                            "model": r.model,
+                            "confidence": r.confidence,
+                            "reason": r.reason,
+                            "status": r.status,
+                            "created_at": r.created_at.isoformat() if r.created_at else None,
+                        }
+                        for r in shadow_replies
+                    ],
+                    "actual_replies": [
+                        {
+                            "id": m.id,
+                            "text": m.text,
+                            "timestamp_ms": m.timestamp_ms,
+                            "sender_username": m.sender_username,
+                            "created_at": m.created_at.isoformat() if m.created_at else None,
+                            "ai_status": m.ai_status,
+                        }
+                        for m in messages if m.direction == "out"
+                    ],
+                })
+            except Exception as e:
+                import logging
+                logging.getLogger("ig_ai").error(f"Error exporting conversation: {e}")
+                continue
+        
+        if format.lower() == "json":
+            return JSONResponse(content=export_data)
+        else:
+            # CSV format (simplified - could be enhanced)
+            import csv
+            import io
+            
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # Header
+            writer.writerow([
+                "Conversation ID", "Graph Conversation ID", "Username", "Contact Name", "Contact Phone",
+                "Question Text", "Question Timestamp", "Shadow Reply Text", "Shadow Confidence", "Shadow Status",
+                "Actual Reply Text", "Actual Reply Timestamp", "AI Status"
+            ])
+            
+            # Data rows
+            for conv in export_data["conversations"]:
+                # Get max length to iterate
+                max_len = max(
+                    len(conv["client_questions"]),
+                    len(conv["shadow_replies"]),
+                    len(conv["actual_replies"]),
+                    1
+                )
+                
+                for i in range(max_len):
+                    row = [
+                        conv["conversation_id"],
+                        conv["graph_conversation_id"],
+                        conv["username"],
+                        conv["contact_name"],
+                        conv["contact_phone"],
+                    ]
+                    
+                    # Question
+                    if i < len(conv["client_questions"]):
+                        q = conv["client_questions"][i]
+                        row.extend([q["text"], q["timestamp_ms"]])
+                    else:
+                        row.extend(["", ""])
+                    
+                    # Shadow reply
+                    if i < len(conv["shadow_replies"]):
+                        sr = conv["shadow_replies"][i]
+                        row.extend([sr["reply_text"], sr["confidence"], sr["status"]])
+                    else:
+                        row.extend(["", "", ""])
+                    
+                    # Actual reply
+                    if i < len(conv["actual_replies"]):
+                        ar = conv["actual_replies"][i]
+                        row.extend([ar["text"], ar["timestamp_ms"], ar["ai_status"]])
+                    else:
+                        row.extend(["", "", ""])
+                    
+                    writer.writerow(row)
+            
+            output.seek(0)
+            return Response(
+                content=output.getvalue(),
+                media_type="text/csv",
+                headers={
+                    "Content-Disposition": f'attachment; filename="product_{product_slug}_export.csv"'
+                }
+            )
+
+
 @router.get("/process/runs")
 def list_runs(limit: int = 50):
     with get_session() as session:

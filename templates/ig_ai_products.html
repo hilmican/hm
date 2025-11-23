@@ -18,7 +18,12 @@
   <body>
     {% include "_nav.html" %}
     <h1>Ürün AI Mesajları</h1>
-    <div class="meta">Odak: {{ name }} (slug: {{ focus }})</div>
+    <div class="meta">
+      Odak: {{ name }} (slug: {{ focus }})
+      <span style="margin-left: 16px;">
+        <a href="/ig/ai/products/{{ focus }}/review" style="color: #2563eb; text-decoration: none;">📊 İnceleme Sayfasına Git →</a>
+      </span>
+    </div>
     <form method="post" action="/ig/ai/products/save" style="margin-top:16px">
       <input type="hidden" name="focus" value="{{ focus }}" />
       <div class="field">
