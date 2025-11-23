@@ -975,6 +975,59 @@ def export_product_data(
             )
 
 
+@router.get("/products/reviews")
+def product_reviews_list(request: Request, limit: int = 500):
+    """
+    List all products with links to their review pages.
+    Shows products that have conversations linked to them.
+    """
+    from ..models import Product
+    from sqlalchemy import text as _text
+    
+    with get_session() as session:
+        # Get all products that have ads linked to them (meaning they might have conversations)
+        products_rows = session.exec(
+            _text(
+                """
+                SELECT DISTINCT p.id, p.name, p.slug, p.ai_system_msg, p.ai_prompt_msg,
+                       (SELECT COUNT(DISTINCT c.id)
+                        FROM conversations c
+                        INNER JOIN message m ON m.conversation_id = c.id
+                        INNER JOIN ads_products ap ON ap.ad_id = m.ad_id
+                        WHERE ap.product_id = p.id) AS conversation_count
+                FROM product p
+                INNER JOIN ads_products ap ON ap.product_id = p.id
+                ORDER BY p.name ASC
+                LIMIT :lim
+                """
+            ).params(lim=limit)
+        ).all()
+        
+        products = []
+        for row in products_rows:
+            try:
+                products.append({
+                    "id": row[0] if isinstance(row, tuple) else getattr(row, "id", row),
+                    "name": row[1] if isinstance(row, tuple) else getattr(row, "name", row),
+                    "slug": row[2] if isinstance(row, tuple) else getattr(row, "slug", row),
+                    "ai_system_msg": row[3] if isinstance(row, tuple) else getattr(row, "ai_system_msg", None),
+                    "ai_prompt_msg": row[4] if isinstance(row, tuple) else getattr(row, "ai_prompt_msg", None),
+                    "conversation_count": int(row[5] if isinstance(row, tuple) else getattr(row, "conversation_count", 0) or 0),
+                })
+            except Exception:
+                continue
+        
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "ig_ai_product_reviews_list.html",
+            {
+                "request": request,
+                "products": products,
+                "total": len(products),
+            },
+        )
+
+
 @router.get("/process/runs")
 def list_runs(limit: int = 50):
     with get_session() as session:

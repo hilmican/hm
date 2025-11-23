@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Ürün İncelemeleri</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background: #f9fafb; }
+      .container { max-width: 1200px; margin: 0 auto; }
+      .header { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+      .header h1 { margin: 0; color: #111827; }
+      .meta { color: #6b7280; font-size: 14px; margin-top: 8px; }
+      .product-card { background: white; padding: 16px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
+      .product-info { flex: 1; }
+      .product-name { font-weight: 600; color: #111827; font-size: 16px; margin-bottom: 4px; }
+      .product-slug { color: #6b7280; font-size: 13px; margin-bottom: 8px; }
+      .product-stats { display: flex; gap: 16px; font-size: 13px; color: #6b7280; }
+      .product-actions { display: flex; gap: 8px; }
+      .btn { padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 500; }
+      .btn-primary { background: #2563eb; color: white; }
+      .btn-primary:hover { background: #1d4ed8; }
+      .btn-secondary { background: #e5e7eb; color: #374151; }
+      .btn-secondary:hover { background: #d1d5db; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; margin-left: 8px; background: #dbeafe; color: #1e40af; }
+      .empty-state { text-align: center; padding: 40px; color: #6b7280; background: white; border-radius: 10px; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <div class="container">
+      <div class="header">
+        <h1>Ürün AI İncelemeleri</h1>
+        <div class="meta">AI cevapları, gölge cevapları ve müşteri sorularını incelemek için ürünleri seçin.</div>
+      </div>
+
+      {% if products %}
+        {% for product in products %}
+        <div class="product-card">
+          <div class="product-info">
+            <div class="product-name">
+              {{ product.name }}
+              {% if product.conversation_count > 0 %}
+                <span class="badge">{{ product.conversation_count }} konuşma</span>
+              {% endif %}
+            </div>
+            <div class="product-slug">Slug: {{ product.slug }}</div>
+            <div class="product-stats">
+              {% if product.ai_system_msg %}
+                <span>✓ Sistem mesajı var</span>
+              {% endif %}
+              {% if product.ai_prompt_msg %}
+                <span>✓ Prompt mesajı var</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="product-actions">
+            <a href="/ig/ai/products/{{ product.slug }}/review" class="btn btn-primary">📊 İnceleme</a>
+            <a href="/ig/ai/products?focus={{ product.slug }}" class="btn btn-secondary">⚙️ Ayarlar</a>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty-state">
+          <p>Henüz reklamlara bağlı ürün bulunmuyor.</p>
+          <p class="meta">Ürünler reklamlara bağlandığında burada görünecektir.</p>
+        </div>
+      {% endif %}
+    </div>
+  </body>
+</html>
+
