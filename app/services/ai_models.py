@@ -15,19 +15,24 @@ DEFAULT_MODEL = "gpt-4o-mini"
 
 # Fallback list used when there is no data in DB yet
 DEFAULT_MODEL_WHITELIST: List[str] = [
+    "gpt-5",
     "gpt-5-mini",
     "gpt-5-pro",
-    "gpt-5",
-    "gpt-4o-mini",
     "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
     "gpt-4-turbo",
     "gpt-4",
     "gpt-3.5-turbo",
-    "o1-preview",
+    "o1",
     "o1-mini",
+    "o1-preview",
 ]
 
 SETTING_KEY = "ai_model_whitelist"
+MAX_MODELS = 64
 
 
 def _read_setting() -> List[str]:
@@ -66,14 +71,18 @@ def get_model_whitelist() -> List[str]:
 
 
 def normalize_model_choice(model_name: str | None, default: str | None = None, *, log_prefix: str | None = None) -> str:
+    candidate = (model_name or "").strip()
     whitelist = get_model_whitelist()
-    if model_name and model_name in whitelist:
-        return model_name
-    if model_name and log_prefix:
-        logging.warning("%s falling back to default model because '%s' is not in whitelist", log_prefix, model_name)
+    if candidate and candidate in whitelist:
+        return candidate
+    if candidate and log_prefix:
+        logging.warning("%s falling back because '%s' not in whitelist", log_prefix, candidate)
+    fallback = (default or "").strip()
+    if fallback:
+        return fallback
     if whitelist:
         return whitelist[0]
-    return default or DEFAULT_MODEL
+    return DEFAULT_MODEL
 
 
 def refresh_openai_model_whitelist() -> Dict[str, List[str]]:
@@ -86,7 +95,7 @@ def refresh_openai_model_whitelist() -> Dict[str, List[str]]:
             continue
         if _is_supported_model_id(mid):
             fetched.append(mid)
-    cleaned = sorted(set(fetched), key=str.lower)
+    cleaned = sorted(set(fetched), key=str.lower)[:MAX_MODELS]
     if not cleaned:
         raise RuntimeError("OpenAI model list did not return any supported GPT/o1 models")
 
@@ -99,8 +108,15 @@ def refresh_openai_model_whitelist() -> Dict[str, List[str]]:
 
 
 def _is_supported_model_id(model_id: str) -> bool:
-    prefixes = ("gpt-", "o1", "omni", "chatgpt", "text-", "ft:")
-    return model_id.startswith(prefixes)
+    allowed_prefixes = (
+        "gpt-5",
+        "gpt-4",
+        "gpt-4o",
+        "gpt-4.1",
+        "gpt-3.5",
+        "o1",
+    )
+    return model_id.startswith(allowed_prefixes)
 
 
 def group_model_names(models: List[str]) -> Dict[str, List[str]]:
