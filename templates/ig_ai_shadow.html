@@ -13,12 +13,17 @@
     .metric-card .value { font-size:28px; font-weight:600; }
     .metric-card .sub { font-size:13px; opacity:0.8; }
     .status-grid { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
-    .status-chip { padding:8px 12px; border-radius:10px; background:#eef2ff; color:#312e81; font-weight:500; min-width:120px; display:flex; justify-content:space-between; border:1px solid rgba(99,102,241,0.25); }
+    .status-chip { padding:8px 12px; border-radius:10px; background:#eef2ff; color:#312e81; font-weight:500; min-width:120px; display:flex; justify-content:space-between; border:1px solid rgba(99,102,241,0.25); cursor:pointer; transition:background 0.2s, color 0.2s; }
+    .status-chip.active { background:#2563eb; color:#fff; border-color:#2563eb; }
     table { width:100%; border-collapse:collapse; font-size:14px; }
     th, td { padding:10px 8px; border-bottom:1px solid #f1f5f9; text-align:left; vertical-align:top; }
     th { font-size:13px; text-transform:uppercase; letter-spacing:0.05em; color:#475569; background:#f8fafc; position:sticky; top:0; z-index:1; }
     tr:hover { background:#f8fafc; }
     .muted { color:#6b7280; font-size:12px; }
+    .actions { display:flex; gap:6px; flex-wrap:wrap; }
+    .action-btn { border:1px solid #d1d5db; background:#fff; color:#111827; border-radius:6px; padding:4px 10px; cursor:pointer; font-size:12px; }
+    .action-btn.reset { border-color:#ef4444; color:#ef4444; background:#fff; }
+    .action-btn:disabled { opacity:0.6; cursor:not-allowed; }
     .status-pill { display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; text-transform:capitalize; }
     .status-pending { background:#fef3c7; color:#92400e; }
     .status-running { background:#dbeafe; color:#1e3a8a; }
@@ -77,12 +82,15 @@
   <div class="card">
     <div class="card-header">
       <h3>Durum Dağılımı</h3>
-      <div class="muted">Son güncelleme: <span id="generatedAt">{{ fmt_dt(generated_at) }}</span></div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="muted">Son güncelleme: <span id="generatedAt">{{ fmt_dt(generated_at) }}</span></div>
+        <button class="action-btn reset" id="resetErrorsBtn" type="button">Tüm error kayıtlarını sıfırla</button>
+      </div>
     </div>
     <div class="status-grid" id="statusChips">
       {% if status_counts %}
         {% for st, count in status_counts.items() %}
-          <div class="status-chip">
+          <div class="status-chip{% if status_filter and status_filter == st %} active{% endif %}" data-status="{{ st }}">
             <span>{{ st }}</span>
             <span>{{ count }}</span>
           </div>
@@ -115,6 +123,7 @@
             <th>Yanıt Sayısı</th>
             <th>Planlanan</th>
             <th>Güncellendi</th>
+            <th>İşlem</th>
           </tr>
         </thead>
         <tbody id="shadowTableBody">
@@ -148,6 +157,13 @@
             <td>{{ entry.reply_count }}</td>
             <td>{{ fmt_dt(entry.next_attempt_at) }}</td>
             <td>{{ fmt_dt(entry.updated_at) }}</td>
+            <td>
+              {% if entry.status == 'error' %}
+                <button type="button" class="action-btn reset reset-row-btn" data-cid="{{ entry.conversation_id }}">Sıfırla</button>
+              {% else %}
+                <span class="muted">-</span>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -156,90 +172,183 @@
   </div>
 
   <script>
-    const LIMIT = {{ limit }};
-    const refreshBtn = document.getElementById('refreshBtn');
+    (function(){
+      const LIMIT = {{ limit }};
+      const refreshBtn = document.getElementById('refreshBtn');
+      const resetErrorsBtn = document.getElementById('resetErrorsBtn');
+      let currentFilter = ("{{ status_filter or '' }}").toLowerCase();
+      const initialEntries = {{ entries_serialized|tojson }};
+      const initialStatusCounts = {{ status_counts|tojson }};
+      const initialSummary = {{ summary|tojson }};
+      const initialGeneratedAt = "{{ generated_at.isoformat() }}";
+      let lastData = {
+        entries: initialEntries,
+        status_counts: initialStatusCounts,
+        summary: initialSummary,
+        generated_at: initialGeneratedAt,
+      };
 
-    function fmtDuration(seconds){
-      if (seconds === null || seconds === undefined) return '-';
-      if (seconds < 60) return seconds.toFixed(1) + ' sn';
-      if (seconds < 3600) return (seconds/60).toFixed(1) + ' dk';
-      return (seconds/3600).toFixed(1) + ' sa';
-    }
-
-    function fmtDate(iso){
-      if (!iso) return '-';
-      const d = new Date(iso);
-      if (isNaN(d.getTime())) return '-';
-      return d.toLocaleString();
-    }
-
-    function renderStatusChips(data){
-      const container = document.getElementById('statusChips');
-      if (!container) return;
-      container.innerHTML = '';
-      const entries = Object.entries(data || {});
-      if (!entries.length){
-        container.innerHTML = '<div class="muted">Kuyrukta kayıt yok.</div>';
-        return;
+      function fmtDuration(seconds){
+        if (seconds === null || seconds === undefined) return '-';
+        if (seconds < 60) return seconds.toFixed(1) + ' sn';
+        if (seconds < 3600) return (seconds/60).toFixed(1) + ' dk';
+        return (seconds/3600).toFixed(1) + ' sa';
       }
-      for (const [status, count] of entries){
-        const div = document.createElement('div');
-        div.className = 'status-chip';
-        div.innerHTML = `<span>${status}</span><span>${count}</span>`;
-        container.appendChild(div);
-      }
-    }
 
-    function renderTable(entries){
-      const tbody = document.getElementById('shadowTableBody');
-      if (!tbody) return;
-      tbody.innerHTML = '';
-      for (const entry of (entries || [])){
-        const tr = document.createElement('tr');
-        const username = entry.username ? '@' + entry.username : '';
-        const contact = entry.contact_name ? entry.contact_name : '';
-        tr.innerHTML = `
-          <td>
-            ${entry.conversation_id ? `<a href="/ig/inbox/${entry.conversation_id}" target="_blank">#${entry.conversation_id}</a>` : '-'}
-            <div class="muted">${[username, contact].filter(Boolean).join(' · ')}</div>
-          </td>
-          <td><span class="status-pill status-${entry.status || 'pending'}">${entry.status || '-'}</span></td>
-          <td>${fmtDate(entry.last_message_at || entry.last_inbound_at)}</td>
-          <td>${fmtDuration(entry.wait_seconds)}</td>
-          <td>${fmtDate(entry.first_reply_at)}<div class="muted">${fmtDuration(entry.time_to_first_reply_seconds)}</div></td>
-          <td>${fmtDate(entry.last_reply_at)}<div class="muted">${fmtDuration(entry.time_since_last_reply_seconds)}</div></td>
-          <td>${entry.reply_count ?? 0}</td>
-          <td>${fmtDate(entry.next_attempt_at)}</td>
-          <td>${fmtDate(entry.updated_at)}</td>
-        `;
-        tbody.appendChild(tr);
+      function fmtDate(iso){
+        if (!iso) return '-';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return '-';
+        return d.toLocaleString();
       }
-    }
 
-    async function refreshData(){
-      if (refreshBtn) refreshBtn.disabled = true;
-      try{
-        const res = await fetch(`/ig/ai/shadow/monitor/data?limit=${LIMIT}`);
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
-        if (data.summary){
-          document.getElementById('metricTotalQueue').textContent = data.summary.total_queue ?? 0;
-          document.getElementById('metricReady').textContent = data.summary.ready_to_run ?? 0;
-          document.getElementById('metricAvgFirst').textContent = data.summary.avg_first_reply_seconds != null ? fmtDuration(data.summary.avg_first_reply_seconds) : '-';
-          document.getElementById('metricAvgReplies').textContent = (data.summary.avg_reply_count ?? 0).toFixed(1);
+      function applyFilter(entries){
+        if (!currentFilter) return entries || [];
+        return (entries || []).filter((entry) => ((entry.status || '').toLowerCase() === currentFilter));
+      }
+
+      function updateUrlFilter(){
+        const url = new URL(window.location.href);
+        if (currentFilter){
+          url.searchParams.set('status', currentFilter);
+        } else {
+          url.searchParams.delete('status');
         }
-        document.getElementById('generatedAt').textContent = fmtDate(data.generated_at);
-        renderStatusChips(data.status_counts || {});
-        renderTable(data.entries || []);
-      } catch (err){
-        console.error('refresh error', err);
-      } finally {
-        if (refreshBtn) refreshBtn.disabled = false;
+        window.history.replaceState({}, '', url);
       }
-    }
 
-    refreshBtn?.addEventListener('click', refreshData);
-    setInterval(refreshData, 10000);
+      function renderStatusChips(data){
+        const container = document.getElementById('statusChips');
+        if (!container) return;
+        container.innerHTML = '';
+        const entries = Object.entries(data || {});
+        if (!entries.length){
+          container.innerHTML = '<div class="muted">Kuyrukta kayıt yok.</div>';
+          return;
+        }
+        for (const [status, count] of entries){
+          const div = document.createElement('div');
+          const normalized = (status || '').toLowerCase();
+          div.className = 'status-chip' + (currentFilter && normalized === currentFilter ? ' active' : '');
+          div.dataset.status = status;
+          div.innerHTML = `<span>${status}</span><span>${count}</span>`;
+          div.addEventListener('click', ()=>{
+            currentFilter = (currentFilter === normalized) ? '' : normalized;
+            updateUrlFilter();
+            renderStatusChips(data);
+            renderTable(applyFilter(lastData.entries || []));
+          });
+          container.appendChild(div);
+        }
+      }
+
+      function renderTable(entries){
+        const tbody = document.getElementById('shadowTableBody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        for (const entry of (entries || [])){
+          const tr = document.createElement('tr');
+          const username = entry.username ? '@' + entry.username : '';
+          const contact = entry.contact_name ? entry.contact_name : '';
+          const canReset = (entry.status || '').toLowerCase() === 'error' && entry.conversation_id;
+          tr.innerHTML = `
+            <td>
+              ${entry.conversation_id ? `<a href="/ig/inbox/${entry.conversation_id}" target="_blank">#${entry.conversation_id}</a>` : '-'}
+              <div class="muted">${[username, contact].filter(Boolean).join(' · ')}</div>
+            </td>
+            <td><span class="status-pill status-${entry.status || 'pending'}">${entry.status || '-'}</span></td>
+            <td>${fmtDate(entry.last_message_at || entry.last_inbound_at)}</td>
+            <td>${fmtDuration(entry.wait_seconds)}</td>
+            <td>${fmtDate(entry.first_reply_at)}<div class="muted">${fmtDuration(entry.time_to_first_reply_seconds)}</div></td>
+            <td>${fmtDate(entry.last_reply_at)}<div class="muted">${fmtDuration(entry.time_since_last_reply_seconds)}</div></td>
+            <td>${entry.reply_count ?? 0}</td>
+            <td>${fmtDate(entry.next_attempt_at)}</td>
+            <td>${fmtDate(entry.updated_at)}</td>
+            <td>
+              ${canReset ? `<button type="button" class="action-btn reset reset-row-btn" data-cid="${entry.conversation_id}">Sıfırla</button>` : '<span class="muted">-</span>'}
+            </td>
+          `;
+          tbody.appendChild(tr);
+        }
+        bindRowActions();
+      }
+
+      function bindRowActions(){
+        document.querySelectorAll('.reset-row-btn').forEach((btn)=>{
+          btn.addEventListener('click', ()=>{
+            const cid = Number(btn.dataset.cid);
+            if (!cid) return;
+            if (!confirm(`#${cid} konuşması tekrar kuyruğa alınsın mı?`)) return;
+            performReset(cid, btn);
+          });
+        });
+      }
+
+      async function performReset(conversationId, button){
+        try{
+          if (button) button.disabled = true;
+          const res = await fetch('/ig/ai/shadow/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: conversationId ? JSON.stringify({ conversation_id: conversationId }) : '{}',
+          });
+          const data = await res.json().catch(()=>({}));
+          alert(`Sıfırlanan kayıt: ${data.reset ?? 0}`);
+          refreshData();
+        } catch (err){
+          console.error('reset error', err);
+          alert('Sıfırlama hatası: ' + err);
+        } finally {
+          if (button) button.disabled = false;
+        }
+      }
+
+      async function refreshData(){
+        if (refreshBtn) refreshBtn.disabled = true;
+        try{
+          const params = new URLSearchParams({ limit: String(LIMIT) });
+          if (currentFilter) params.set('status', currentFilter);
+          const res = await fetch(`/ig/ai/shadow/monitor/data?${params.toString()}`);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json();
+          lastData = data;
+          if (data.status_filter) {
+            currentFilter = data.status_filter;
+          }
+          if (data.summary){
+            document.getElementById('metricTotalQueue').textContent = data.summary.total_queue ?? 0;
+            document.getElementById('metricReady').textContent = data.summary.ready_to_run ?? 0;
+            document.getElementById('metricAvgFirst').textContent = data.summary.avg_first_reply_seconds != null ? fmtDuration(data.summary.avg_first_reply_seconds) : '-';
+            document.getElementById('metricAvgReplies').textContent = (data.summary.avg_reply_count ?? 0).toFixed(1);
+          }
+          document.getElementById('generatedAt').textContent = fmtDate(data.generated_at);
+          renderStatusChips(data.status_counts || {});
+          renderTable(applyFilter(data.entries || []));
+        } catch (err){
+          console.error('refresh error', err);
+        } finally {
+          if (refreshBtn) refreshBtn.disabled = false;
+        }
+      }
+
+      function init(){
+        renderStatusChips(initialStatusCounts);
+        renderTable(applyFilter(initialEntries));
+        if (lastData.generated_at){
+          document.getElementById('generatedAt').textContent = fmtDate(lastData.generated_at);
+        }
+        updateUrlFilter();
+      }
+
+      resetErrorsBtn?.addEventListener('click', ()=>{
+        if (!confirm('Tüm error durumundaki konuşmalar tekrar kuyruğa alınsın mı?')) return;
+        performReset(null, resetErrorsBtn);
+      });
+
+      refreshBtn?.addEventListener('click', refreshData);
+      setInterval(refreshData, 10000);
+      init();
+    })();
   </script>
 </body>
 </html>

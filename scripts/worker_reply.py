@@ -225,6 +225,18 @@ def main() -> None:
 				cid = None
 			if not cid:
 				continue
+			# Skip rows that are still marked as error
+			try:
+				with get_session() as session:
+					row = session.exec(
+						_text("SELECT status FROM ai_shadow_state WHERE conversation_id=:cid").params(cid=int(cid))
+					).first()
+					status = row.status if row and hasattr(row, "status") else (row[0] if row else None)
+			except Exception:
+				status = None
+			if status == "error":
+				log.info("ai_shadow: skipping conversation_id=%s due to error status", cid)
+				continue
 			last_ms = int(st.get("last_inbound_ms") or 0)
 			postpones = int(st.get("postpone_count") or 0)
 			# If user likely still typing, postpone

@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Optional, Any, Dict, List
 
-from fastapi import APIRouter, Request, HTTPException, Form, UploadFile, File
+from fastapi import APIRouter, Request, HTTPException, Form, UploadFile, File, Body
 from sqlalchemy import text, func as _func
 from sqlmodel import select
 import datetime as dt
@@ -65,12 +65,13 @@ def _utc_to_turkey_time(utc_dt: Optional[dt.datetime]) -> Optional[dt.datetime]:
     return utc_dt + dt.timedelta(hours=3)
 
 
-def _collect_shadow_metrics(limit: int = 100) -> Dict[str, Any]:
+def _collect_shadow_metrics(limit: int = 100, status_filter: str | None = None) -> Dict[str, Any]:
     n = max(1, min(int(limit or 100), 200))
     now = dt.datetime.utcnow()
     status_counts: Dict[str, int] = {}
     entries: List[Dict[str, Any]] = []
     ready_count = 0
+    normalized_filter = (status_filter or "").strip().lower() or None
 
     with get_session() as session:
         try:
@@ -212,26 +213,28 @@ def _collect_shadow_metrics(limit: int = 100) -> Dict[str, Any]:
         last_inbound_at_turkey = _utc_to_turkey_time(last_inbound_at) if last_inbound_at else None
         first_message_at_turkey = _utc_to_turkey_time(first_message_at) if first_message_at else None
         
-        entries.append(
-            {
-                "conversation_id": int(convo_id) if convo_id is not None else None,
-                "status": str(status),
-                "last_inbound_at": last_inbound_at_turkey,
-                "first_message_at": first_message_at_turkey,
-                "last_message_at": last_message_at_turkey,
-                "next_attempt_at": next_attempt_at_turkey,
-                "updated_at": updated_at_turkey,
-                "graph_conversation_id": _row_get(row, "graph_conversation_id"),
-                "username": _row_get(row, "username"),
-                "contact_name": _row_get(row, "contact_name"),
-                "reply_count": reply_count,
-                "first_reply_at": first_reply_at_turkey,
-                "last_reply_at": last_reply_at_turkey,
-                "wait_seconds": wait_seconds,
-                "time_to_first_reply_seconds": time_to_first_reply,
-                "time_since_last_reply_seconds": time_since_last_reply,
-            }
-        )
+        entry_status = str(status)
+        entry = {
+            "conversation_id": int(convo_id) if convo_id is not None else None,
+            "status": entry_status,
+            "last_inbound_at": last_inbound_at_turkey,
+            "first_message_at": first_message_at_turkey,
+            "last_message_at": last_message_at_turkey,
+            "next_attempt_at": next_attempt_at_turkey,
+            "updated_at": updated_at_turkey,
+            "graph_conversation_id": _row_get(row, "graph_conversation_id"),
+            "username": _row_get(row, "username"),
+            "contact_name": _row_get(row, "contact_name"),
+            "reply_count": reply_count,
+            "first_reply_at": first_reply_at_turkey,
+            "last_reply_at": last_reply_at_turkey,
+            "wait_seconds": wait_seconds,
+            "time_to_first_reply_seconds": time_to_first_reply,
+            "time_since_last_reply_seconds": time_since_last_reply,
+        }
+        if normalized_filter and entry_status.lower() != normalized_filter:
+            continue
+        entries.append(entry)
 
     oldest_pending = max(
         [e["wait_seconds"] or 0 for e in entries if e["status"] == "pending" and e.get("wait_seconds") is not None],
@@ -254,6 +257,17 @@ def _collect_shadow_metrics(limit: int = 100) -> Dict[str, Any]:
         "summary": summary,
         "limit": n,
     }
+
+
+def _serialize_shadow_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert datetime objects to ISO strings so templates/JSON can consume them easily."""
+    out: Dict[str, Any] = {}
+    for key, value in entry.items():
+        if isinstance(value, dt.datetime):
+            out[key] = value.isoformat()
+        else:
+            out[key] = value
+    return out
 
 
 @router.get("/process")
@@ -1239,48 +1253,67 @@ def preview_process(body: dict):
 
 
 @router.get("/shadow/monitor")
-def shadow_monitor(request: Request, limit: int = 50):
-    data = _collect_shadow_metrics(limit)
+def shadow_monitor(request: Request, limit: int = 50, status: str | None = None):
+    safe_status = (status or "").strip().lower() or None
+    data = _collect_shadow_metrics(limit, status_filter=safe_status)
     templates = request.app.state.templates
-    ctx = {"request": request, **data}
+    ctx = {
+        "request": request,
+        **data,
+        "status_filter": safe_status or "",
+        "entries_serialized": [_serialize_shadow_entry(e) for e in data["entries"]],
+    }
     return templates.TemplateResponse("ig_ai_shadow.html", ctx)
 
 
 @router.get("/shadow/monitor/data")
-def shadow_monitor_data(limit: int = 50):
-    data = _collect_shadow_metrics(limit)
-
-    def _serialize_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
-        out = dict(entry)
-        for key in [
-            "last_inbound_at",
-            "first_message_at",
-            "last_message_at",
-            "next_attempt_at",
-            "updated_at",
-            "first_reply_at",
-            "last_reply_at",
-        ]:
-            val = out.get(key)
-            if isinstance(val, dt.datetime):
-                out[key] = val.isoformat()
-            elif val is None:
-                out[key] = None
-            else:
-                try:
-                    out[key] = str(val)
-                except Exception:
-                    out[key] = None
-        return out
-
+def shadow_monitor_data(limit: int = 50, status: str | None = None):
+    safe_status = (status or "").strip().lower() or None
+    data = _collect_shadow_metrics(limit, status_filter=safe_status)
     payload = {
         "generated_at": data["generated_at"].isoformat(),
         "status_counts": data["status_counts"],
         "summary": data["summary"],
         "limit": data["limit"],
-        "entries": [_serialize_entry(e) for e in data["entries"]],
+        "entries": [_serialize_shadow_entry(e) for e in data["entries"]],
+        "status_filter": safe_status or "",
     }
     return payload
+
+
+@router.post("/shadow/reset")
+def shadow_reset(body: dict | None = Body(default=None)):
+    """Reset one or all shadow states back to pending so worker can retry."""
+    from ..models import AiShadowState
+
+    target_cid = None
+    if body and body.get("conversation_id") is not None:
+        try:
+            target_cid = int(body.get("conversation_id"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="conversation_id must be an integer")
+
+    with get_session() as session:
+        query = select(AiShadowState)
+        if target_cid:
+            query = query.where(AiShadowState.conversation_id == target_cid)
+        else:
+            query = query.where(AiShadowState.status == "error")
+        rows = session.exec(query).all()
+        if not rows:
+            return {"status": "ok", "reset": 0}
+
+        now = dt.datetime.utcnow()
+        count = 0
+        for row in rows:
+            row.status = "pending"
+            row.next_attempt_at = None
+            row.postpone_count = 0
+            row.updated_at = now
+            session.add(row)
+            count += 1
+        session.commit()
+    return {"status": "ok", "reset": count}
 
 
 @router.get("/run/{run_id}/logs")
