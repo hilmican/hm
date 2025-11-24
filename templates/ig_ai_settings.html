@@ -100,6 +100,17 @@
           <div class="meta">
             Bazı yeni modeller yalnızca temperature=1 değerini kabul eder. İhtiyaca göre 0 ile 2 arasında ayarlayabilirsiniz.
           </div>
+          <label style="display:flex; align-items:center; gap:6px; margin-top:8px;">
+            <input type="checkbox"
+                   name="ai_shadow_temp_opt_out"
+                   id="ai_shadow_temp_opt_out"
+                   value="1"
+                   {% if ai_shadow_temp_opt_out %}checked{% endif %} />
+            Temperature parametresini API'ye gönderme (model varsayılanını kullan)
+          </label>
+          <div class="meta">
+            GPT-5 gibi bazı modeller parametre kabul etmiyorsa bu seçeneği işaretleyin.
+          </div>
         </div>
         <button type="submit">Ayarları Kaydet</button>
       </div>
@@ -122,5 +133,19 @@
       </div>
     </div>
   </body>
+  <script>
+    (function(){
+      const checkbox = document.getElementById('ai_shadow_temp_opt_out');
+      const input = document.getElementById('ai_shadow_temperature');
+      if(!checkbox || !input) return;
+      const sync = () => {
+        const disabled = checkbox.checked;
+        input.disabled = disabled;
+        input.style.opacity = disabled ? 0.5 : 1;
+      };
+      checkbox.addEventListener('change', sync);
+      sync();
+    })();
+  </script>
 </html>
 

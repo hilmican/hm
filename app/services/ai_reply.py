@@ -8,7 +8,12 @@ from sqlmodel import select
 
 from ..db import get_session
 from ..models import Message, Product, Item, Conversation, IGUser, AIPretext, ProductImage
-from .ai import AIClient, get_ai_shadow_model_from_settings, get_shadow_temperature_setting
+from .ai import (
+	AIClient,
+	get_ai_shadow_model_from_settings,
+	get_shadow_temperature_setting,
+	is_shadow_temperature_opt_out,
+)
 from .ai_context import VariantExclusions, parse_variant_exclusions, variant_is_excluded
 from .ai_ig import _detect_focus_product
 from .ai_utils import parse_height_weight, calculate_size_suggestion, detect_color_count
@@ -639,24 +644,26 @@ HITAP KURALLARI:
 
 	sys_prompt = "\n\n".join(sys_prompt_parts) if sys_prompt_parts else gender_instructions
 
-	# Use lower temperature for stricter instruction following (configurable via env)
-	# Lower temperature = more deterministic, better at following strict instructions
+	# Use lower temperature for stricter instruction following, unless disabled
 	temperature = get_shadow_temperature_setting()
+	temp_opt_out = is_shadow_temperature_opt_out()
+	
+	def _build_gen_kwargs(include_raw: bool = False) -> Dict[str, Any]:
+		kwargs: Dict[str, Any] = {
+			"system_prompt": sys_prompt,
+			"user_prompt": user_prompt,
+		}
+		if include_raw:
+			kwargs["include_raw"] = True
+		if not temp_opt_out:
+			kwargs["temperature"] = temperature
+		return kwargs
 	
 	raw_response: Any = None
 	if include_meta:
-		data, raw_response = client.generate_json(
-			system_prompt=sys_prompt,
-			user_prompt=user_prompt,
-			include_raw=True,
-			temperature=temperature,
-		)
+		data, raw_response = client.generate_json(**_build_gen_kwargs(include_raw=True))
 	else:
-		data = client.generate_json(
-			system_prompt=sys_prompt,
-			user_prompt=user_prompt,
-			temperature=temperature,
-		)
+		data = client.generate_json(**_build_gen_kwargs())
 	if not isinstance(data, dict):
 		raise RuntimeError("AI returned non-dict JSON for shadow reply")
 

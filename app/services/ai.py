@@ -68,7 +68,7 @@ class AIClient:
         *,
         system_prompt: str,
         user_prompt: str,
-        temperature: float = 0.2,
+        temperature: float | None = 0.2,
         max_output_tokens: int | None = None,
         extra_messages: Optional[list[dict[str, Any]]] = None,
         include_raw: bool = False,
@@ -118,9 +118,10 @@ class AIClient:
         completion_kwargs = {
             "model": self._model,
             "messages": messages,  # type: ignore[arg-type]
-            "temperature": temperature,
             "response_format": {"type": "json_object"},
         }
+        if temperature is not None:
+            completion_kwargs["temperature"] = temperature
         completion_kwargs[self._token_param] = max_output_tokens
 
         # JSON mode (timeout is set on client initialization)
@@ -235,6 +236,35 @@ def get_shadow_temperature_setting(default: float = 0.1) -> float:
     if env_temp:
         return _sanitize(env_temp, default)
     return _sanitize(default, default)
+
+
+def is_shadow_temperature_opt_out() -> bool:
+    """Whether we should avoid sending a temperature param altogether."""
+    def _as_bool(val: str | bool | None, fallback: bool = False) -> bool:
+        if isinstance(val, bool):
+            return val
+        if val is None:
+            return fallback
+        return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+    try:
+        from ..db import get_session
+        from ..models import SystemSetting
+        from sqlmodel import select
+
+        with get_session() as session:
+            setting = session.exec(
+                select(SystemSetting).where(SystemSetting.key == "ai_shadow_temperature_opt_out")
+            ).first()
+            if setting and setting.value is not None:
+                return _as_bool(setting.value)
+    except Exception:
+        logging.getLogger("ai_shadow").warning("Shadow temperature opt-out lookup failed", exc_info=True)
+
+    env_val = os.getenv("AI_SHADOW_TEMPERATURE_OPT_OUT")
+    if env_val is not None:
+        return _as_bool(env_val)
+    return False
 
 
 def get_ai_model_from_settings(default: str = "gpt-4o-mini") -> str:

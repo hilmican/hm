@@ -2034,6 +2034,13 @@ def ai_settings_page(request: Request):
         if shadow_model_setting and shadow_model_setting.value:
             ai_shadow_model = shadow_model_setting.value
         ai_shadow_model = normalize_model_choice(ai_shadow_model, default=ai_model, log_prefix="AI settings page shadow")
+
+        temp_opt_out_setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_shadow_temperature_opt_out")
+        ).first()
+        ai_shadow_temp_opt_out = False
+        if temp_opt_out_setting and temp_opt_out_setting.value:
+            ai_shadow_temp_opt_out = str(temp_opt_out_setting.value).strip().lower() in ("1","true","yes","on")
     
     templates = request.app.state.templates
     return templates.TemplateResponse(
@@ -2044,6 +2051,7 @@ def ai_settings_page(request: Request):
             "ai_model": ai_model,
             "ai_shadow_model": ai_shadow_model,
             "ai_shadow_temperature": shadow_temperature,
+            "ai_shadow_temp_opt_out": ai_shadow_temp_opt_out,
             "model_groups": model_groups,
             "model_refresh_msg": status_msg,
         },
@@ -2056,6 +2064,7 @@ def save_ai_settings(
     ai_model: str = Form(default="gpt-4o-mini"),
     ai_shadow_model: str = Form(default="gpt-4o-mini"),
     ai_shadow_temperature: str = Form(default="0.1"),
+    ai_shadow_temp_opt_out: str = Form(default="0"),
 ):
     """Save global AI reply settings."""
     from ..models import SystemSetting
@@ -2077,6 +2086,8 @@ def save_ai_settings(
         return max(0.0, min(value, 2.0))
 
     shadow_temperature = _normalize_temp(ai_shadow_temperature)
+    temp_opt_out = ai_shadow_temp_opt_out.lower() in ("true", "1", "yes", "on")
+
     log.info(
         "Saving AI settings enabled=%s raw_model=%s raw_shadow=%s normalized_model=%s normalized_shadow=%s temp=%.2f",
         enabled,
@@ -2165,6 +2176,24 @@ def save_ai_settings(
                 description="Temperature parameter for AI shadow replies (0-2)",
             )
             session.add(temp_setting)
+
+        # Save temperature opt-out flag
+        temp_opt_setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_shadow_temperature_opt_out")
+        ).first()
+
+        opt_value = "true" if temp_opt_out else "false"
+        if temp_opt_setting:
+            temp_opt_setting.value = opt_value
+            temp_opt_setting.updated_at = dt.datetime.utcnow()
+            session.add(temp_opt_setting)
+        else:
+            temp_opt_setting = SystemSetting(
+                key="ai_shadow_temperature_opt_out",
+                value=opt_value,
+                description="If true, do not send temperature param (use model default)",
+            )
+            session.add(temp_opt_setting)
         
         session.commit()
     
