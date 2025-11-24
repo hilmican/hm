@@ -14,6 +14,13 @@ import datetime as dt
 from ..db import get_session
 from ..services.queue import enqueue, delete_job
 from ..services.monitoring import get_ai_run_logs
+from ..services.ai_models import (
+    get_model_whitelist,
+    group_model_names,
+    normalize_model_choice,
+    refresh_openai_model_whitelist,
+)
+from urllib.parse import quote as _quote
 
 
 router = APIRouter(prefix="/ig/ai", tags=["instagram-ai"])
@@ -1983,6 +1990,10 @@ def ai_settings_page(request: Request):
     """Global AI reply settings page."""
     from ..models import SystemSetting
     
+    status_msg = request.query_params.get("msg")
+    model_whitelist = get_model_whitelist()
+    model_groups = group_model_names(model_whitelist)
+    
     with get_session() as session:
         # Get global AI reply sending enabled setting
         setting = session.exec(
@@ -2004,18 +2015,17 @@ def ai_settings_page(request: Request):
         ai_model = "gpt-4o-mini"  # Default model
         if model_setting:
             ai_model = model_setting.value
+        ai_model = normalize_model_choice(ai_model, log_prefix="AI settings page model")
         
         # Get AI shadow model setting
         shadow_model_setting = session.exec(
             select(SystemSetting).where(SystemSetting.key == "ai_shadow_model")
         ).first()
         
-        ai_shadow_model = os.getenv("AI_SHADOW_MODEL", "gpt-4o-mini")  # Default: try env var first, then default
-        if shadow_model_setting:
+        ai_shadow_model = os.getenv("AI_SHADOW_MODEL") or ai_model
+        if shadow_model_setting and shadow_model_setting.value:
             ai_shadow_model = shadow_model_setting.value
-        elif not os.getenv("AI_SHADOW_MODEL"):
-            # If no env var and no setting, use same as regular model as default
-            ai_shadow_model = ai_model
+        ai_shadow_model = normalize_model_choice(ai_shadow_model, default=ai_model, log_prefix="AI settings page shadow")
     
     templates = request.app.state.templates
     return templates.TemplateResponse(
@@ -2025,6 +2035,8 @@ def ai_settings_page(request: Request):
             "ai_reply_sending_enabled": global_enabled,
             "ai_model": ai_model,
             "ai_shadow_model": ai_shadow_model,
+            "model_groups": model_groups,
+            "model_refresh_msg": status_msg,
         },
     )
 
@@ -2040,10 +2052,8 @@ def save_ai_settings(
     
     enabled = ai_reply_sending_enabled.lower() in ("true", "1", "yes", "on")
     
-    # Validate model
-    valid_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
-    if ai_model not in valid_models:
-        ai_model = "gpt-4o-mini"
+    ai_model = normalize_model_choice(ai_model, log_prefix="AI settings save model")
+    ai_shadow_model = normalize_model_choice(ai_shadow_model, default=ai_model, log_prefix="AI settings save shadow")
     
     with get_session() as session:
         # Save global AI reply sending enabled setting
@@ -2080,8 +2090,8 @@ def save_ai_settings(
             )
             session.add(model_setting)
         
-        # Validate shadow model
-        valid_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+        # Validate shadow model - only real OpenAI models
+        valid_models = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo", "o1-preview", "o1-mini"]
         if ai_shadow_model not in valid_models:
             ai_shadow_model = "gpt-4o-mini"
         
@@ -2106,5 +2116,18 @@ def save_ai_settings(
     
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/ig/ai/settings", status_code=303)
+
+
+@router.post("/settings/refresh-models")
+def refresh_ai_models():
+    """Sync the model whitelist with OpenAI /models endpoint."""
+    try:
+        summary = refresh_openai_model_whitelist()
+        msg = f"Model listesi güncellendi. +{len(summary['added'])} / -{len(summary['removed'])} model"
+    except Exception as exc:
+        msg = f"Model listesi güncellenemedi: {exc}"
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url=f"/ig/ai/settings?msg={_quote(msg)}", status_code=303)
 
 

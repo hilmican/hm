@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple, Union
 import json
+import logging
 import os
 
 try:
@@ -9,6 +10,8 @@ try:
     from openai import OpenAI  # type: ignore
 except Exception:  # pragma: no cover
     OpenAI = None  # type: ignore
+
+from .ai_models import get_model_whitelist, normalize_model_choice
 
 
 def _estimate_tokens(text: str) -> int:
@@ -34,7 +37,7 @@ class AIClient:
 
     def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini") -> None:
         self._api_key = api_key or os.getenv("OPENAI_API_KEY") or ""
-        self._model = model
+        self._model = normalize_model_choice(model, log_prefix="AIClient")
         self._enabled = bool(self._api_key and OpenAI is not None)
         # Configure timeout: default 30 seconds, configurable via OPENAI_TIMEOUT env var
         timeout_seconds = float(os.getenv("OPENAI_TIMEOUT", "30.0"))
@@ -160,7 +163,7 @@ def get_ai_shadow_model_from_settings(default: str = "gpt-4o-mini") -> str:
 	# First try env var (for backward compatibility)
 	env_model = os.getenv("AI_SHADOW_MODEL")
 	if env_model:
-		return env_model
+		return normalize_model_choice(env_model, default=default, log_prefix="AI shadow env")
 	
 	# Then try SystemSetting
 	try:
@@ -173,11 +176,11 @@ def get_ai_shadow_model_from_settings(default: str = "gpt-4o-mini") -> str:
 				select(SystemSetting).where(SystemSetting.key == "ai_shadow_model")
 			).first()
 			if setting and setting.value:
-				return setting.value
+				return normalize_model_choice(setting.value, default=default, log_prefix="AI shadow DB")
 	except Exception:
 		pass
 	
-	return default
+	return normalize_model_choice(default, log_prefix="AI shadow default")
 
 
 def get_ai_model_from_settings(default: str = "gpt-4o-mini") -> str:
@@ -200,11 +203,8 @@ def get_ai_model_from_settings(default: str = "gpt-4o-mini") -> str:
             ).first()
             
             if setting and setting.value:
-                # Validate model
-                valid_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
-                if setting.value in valid_models:
-                    return setting.value
-            return default
+                return normalize_model_choice(setting.value, default=default, log_prefix="AI model DB")
+            return normalize_model_choice(default, log_prefix="AI model default")
     except Exception:
         # If there's any error, return default
         return default

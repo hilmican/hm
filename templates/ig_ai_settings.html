@@ -23,6 +23,17 @@
       Bu ayarlar sadece AI'ın gerçekten müşterilere cevap göndermesini kontrol eder.
     </div>
 
+    {% if model_refresh_msg %}
+    <div class="warning" style="background:#ecfdf5; border-color:#10b981; color:#065f46;">
+      {{ model_refresh_msg }}
+    </div>
+    {% endif %}
+
+    <form method="post" action="/ig/ai/settings/refresh-models" style="margin-bottom:16px; max-width:600px;">
+      <button type="submit" style="background:#059669;">AI Model listesini OpenAI'den güncelle</button>
+      <div class="meta">Yeni modeller whitelist'e eklenir, OpenAI'de silinenler listeden çıkar.</div>
+    </form>
+
     <form method="post" action="/ig/ai/settings/save">
       <div class="box">
         <div class="field">
@@ -41,20 +52,17 @@
         <div class="field">
           <label for="ai_model">AI Model (Gerçek Cevaplar)</label>
           <select name="ai_model" id="ai_model" style="width:100%; max-width:300px; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
-            <optgroup label="GPT-5 Models">
-              <option value="gpt-5" {% if ai_model == "gpt-5" %}selected{% endif %}>gpt-5</option>
-              <option value="gpt-5-mini" {% if ai_model == "gpt-5-mini" %}selected{% endif %}>gpt-5-mini</option>
-              <option value="gpt-5-nano" {% if ai_model == "gpt-5-nano" %}selected{% endif %}>gpt-5-nano</option>
-            </optgroup>
-            <optgroup label="GPT-4 Models">
-              <option value="gpt-4o" {% if ai_model == "gpt-4o" %}selected{% endif %}>gpt-4o</option>
-              <option value="gpt-4o-mini" {% if ai_model == "gpt-4o-mini" %}selected{% endif %}>gpt-4o-mini</option>
-              <option value="gpt-4-turbo" {% if ai_model == "gpt-4-turbo" %}selected{% endif %}>gpt-4-turbo</option>
-              <option value="gpt-4" {% if ai_model == "gpt-4" %}selected{% endif %}>gpt-4</option>
-            </optgroup>
-            <optgroup label="GPT-3.5 Models">
-              <option value="gpt-3.5-turbo" {% if ai_model == "gpt-3.5-turbo" %}selected{% endif %}>gpt-3.5-turbo</option>
-            </optgroup>
+            {% if model_groups %}
+              {% for label, bucket in model_groups.items() %}
+                <optgroup label="{{ label }}">
+                  {% for model in bucket %}
+                    <option value="{{ model }}" {% if ai_model == model %}selected{% endif %}>{{ model }}</option>
+                  {% endfor %}
+                </optgroup>
+              {% endfor %}
+            {% else %}
+              <option value="{{ ai_model }}" selected>{{ ai_model }}</option>
+            {% endif %}
           </select>
           <div class="meta">
             Müşterilere gönderilecek gerçek AI yanıtları için kullanılacak OpenAI modeli.
@@ -63,20 +71,17 @@
         <div class="field">
           <label for="ai_shadow_model">Gölge Cevaplar Modeli (Shadow Replies)</label>
           <select name="ai_shadow_model" id="ai_shadow_model" style="width:100%; max-width:300px; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
-            <optgroup label="GPT-5 Models">
-              <option value="gpt-5" {% if ai_shadow_model == "gpt-5" %}selected{% endif %}>gpt-5</option>
-              <option value="gpt-5-mini" {% if ai_shadow_model == "gpt-5-mini" %}selected{% endif %}>gpt-5-mini</option>
-              <option value="gpt-5-nano" {% if ai_shadow_model == "gpt-5-nano" %}selected{% endif %}>gpt-5-nano</option>
-            </optgroup>
-            <optgroup label="GPT-4 Models">
-              <option value="gpt-4o" {% if ai_shadow_model == "gpt-4o" %}selected{% endif %}>gpt-4o</option>
-              <option value="gpt-4o-mini" {% if ai_shadow_model == "gpt-4o-mini" %}selected{% endif %}>gpt-4o-mini</option>
-              <option value="gpt-4-turbo" {% if ai_shadow_model == "gpt-4-turbo" %}selected{% endif %}>gpt-4-turbo</option>
-              <option value="gpt-4" {% if ai_shadow_model == "gpt-4" %}selected{% endif %}>gpt-4</option>
-            </optgroup>
-            <optgroup label="GPT-3.5 Models">
-              <option value="gpt-3.5-turbo" {% if ai_shadow_model == "gpt-3.5-turbo" %}selected{% endif %}>gpt-3.5-turbo</option>
-            </optgroup>
+            {% if model_groups %}
+              {% for label, bucket in model_groups.items() %}
+                <optgroup label="{{ label }}">
+                  {% for model in bucket %}
+                    <option value="{{ model }}" {% if ai_shadow_model == model %}selected{% endif %}>{{ model }}</option>
+                  {% endfor %}
+                </optgroup>
+              {% endfor %}
+            {% else %}
+              <option value="{{ ai_shadow_model }}" selected>{{ ai_shadow_model }}</option>
+            {% endif %}
           </select>
           <div class="meta">
             Gölge cevaplar (test/taslak cevaplar) için kullanılacak OpenAI modeli. Bu cevaplar müşterilere gönderilmez, sadece gözden geçirme için üretilir.
