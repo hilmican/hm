@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 import json
 import logging
 import os
+from math import isfinite
 
 try:
     # OpenAI v1.x client
@@ -202,6 +203,38 @@ def get_ai_shadow_model_from_settings(default: str = "gpt-4o-mini") -> str:
         return normalize_model_choice(env_model, default=default, log_prefix="AI shadow env")
 
     return normalize_model_choice(default, log_prefix="AI shadow default")
+
+
+def get_shadow_temperature_setting(default: float = 0.1) -> float:
+    """Return temperature (0-2 range) for shadow replies, preferring DB over env."""
+
+    def _sanitize(value: float | str | None, fallback: float) -> float:
+        try:
+            temp = float(value) if value is not None else fallback
+            if not isfinite(temp):
+                raise ValueError("non-finite")
+        except Exception:
+            return fallback
+        return max(0.0, min(temp, 2.0))
+
+    try:
+        from ..db import get_session
+        from ..models import SystemSetting
+        from sqlmodel import select
+
+        with get_session() as session:
+            setting = session.exec(
+                select(SystemSetting).where(SystemSetting.key == "ai_shadow_temperature")
+            ).first()
+            if setting and setting.value:
+                default = _sanitize(setting.value, default)
+    except Exception:
+        logging.getLogger("ai_shadow").warning("Shadow temperature DB lookup failed", exc_info=True)
+
+    env_temp = os.getenv("AI_REPLY_TEMPERATURE")
+    if env_temp:
+        return _sanitize(env_temp, default)
+    return _sanitize(default, default)
 
 
 def get_ai_model_from_settings(default: str = "gpt-4o-mini") -> str:

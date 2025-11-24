@@ -87,6 +87,20 @@
             Gölge cevaplar (test/taslak cevaplar) için kullanılacak OpenAI modeli. Bu cevaplar müşterilere gönderilmez, sadece gözden geçirme için üretilir.
           </div>
         </div>
+        <div class="field">
+          <label for="ai_shadow_temperature">Model Parametreleri (Temperature)</label>
+          <input type="number"
+                 name="ai_shadow_temperature"
+                 id="ai_shadow_temperature"
+                 step="0.1"
+                 min="0"
+                 max="2"
+                 value="{{ '%.2f'|format(ai_shadow_temperature or 0.1) }}"
+                 style="width:100%; max-width:160px; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;" />
+          <div class="meta">
+            Bazı yeni modeller yalnızca temperature=1 değerini kabul eder. İhtiyaca göre 0 ile 2 arasında ayarlayabilirsiniz.
+          </div>
+        </div>
         <button type="submit">Ayarları Kaydet</button>
       </div>
     </form>

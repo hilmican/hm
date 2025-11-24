@@ -406,7 +406,7 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 	  - reason: str         (short explanation for debugging)
 	  - notes: str|null
 	"""
-	from .ai import get_ai_shadow_model_from_settings
+from .ai import get_ai_shadow_model_from_settings, get_shadow_temperature_setting
 	client = AIClient(model=get_ai_shadow_model_from_settings())
 	if not client.enabled:
 		raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")
@@ -642,7 +642,7 @@ HITAP KURALLARI:
 
 	# Use lower temperature for stricter instruction following (configurable via env)
 	# Lower temperature = more deterministic, better at following strict instructions
-	temperature = float(os.getenv("AI_REPLY_TEMPERATURE", "0.1"))
+	temperature = get_shadow_temperature_setting()
 	
 	raw_response: Any = None
 	if include_meta:

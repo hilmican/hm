@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 import os
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ import datetime as dt
 from ..db import get_session
 from ..services.queue import enqueue, delete_job
 from ..services.monitoring import get_ai_run_logs
+from ..services.ai import get_shadow_temperature_setting
 from ..services.ai_models import (
     get_model_whitelist,
     group_model_names,
@@ -1998,6 +2000,8 @@ def ai_settings_page(request: Request):
     model_whitelist = get_model_whitelist()
     model_groups = group_model_names(model_whitelist)
     
+    shadow_temperature = get_shadow_temperature_setting()
+
     with get_session() as session:
         # Get global AI reply sending enabled setting
         setting = session.exec(
@@ -2039,6 +2043,7 @@ def ai_settings_page(request: Request):
             "ai_reply_sending_enabled": global_enabled,
             "ai_model": ai_model,
             "ai_shadow_model": ai_shadow_model,
+            "ai_shadow_temperature": shadow_temperature,
             "model_groups": model_groups,
             "model_refresh_msg": status_msg,
         },
@@ -2050,6 +2055,7 @@ def save_ai_settings(
     ai_reply_sending_enabled: str = Form(default="false"),
     ai_model: str = Form(default="gpt-4o-mini"),
     ai_shadow_model: str = Form(default="gpt-4o-mini"),
+    ai_shadow_temperature: str = Form(default="0.1"),
 ):
     """Save global AI reply settings."""
     from ..models import SystemSetting
@@ -2060,13 +2066,25 @@ def save_ai_settings(
     
     ai_model = normalize_model_choice(ai_model, log_prefix="AI settings save model")
     ai_shadow_model = normalize_model_choice(ai_shadow_model, default=ai_model, log_prefix="AI settings save shadow")
+
+    def _normalize_temp(raw: str, fallback: float = 0.1) -> float:
+        try:
+            value = float(raw)
+            if not math.isfinite(value):
+                raise ValueError("non-finite")
+        except Exception:
+            value = fallback
+        return max(0.0, min(value, 2.0))
+
+    shadow_temperature = _normalize_temp(ai_shadow_temperature)
     log.info(
-        "Saving AI settings enabled=%s raw_model=%s raw_shadow=%s normalized_model=%s normalized_shadow=%s",
+        "Saving AI settings enabled=%s raw_model=%s raw_shadow=%s normalized_model=%s normalized_shadow=%s temp=%.2f",
         enabled,
         raw_model,
         raw_shadow,
         ai_model,
         ai_shadow_model,
+        shadow_temperature,
     )
     
     with get_session() as session:
@@ -2130,6 +2148,23 @@ def save_ai_settings(
                 description="AI model to use for generating shadow replies (test/draft replies)",
             )
             session.add(shadow_model_setting)
+
+        # Save temperature
+        temp_setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_shadow_temperature")
+        ).first()
+
+        if temp_setting:
+            temp_setting.value = f"{shadow_temperature:.3f}"
+            temp_setting.updated_at = dt.datetime.utcnow()
+            session.add(temp_setting)
+        else:
+            temp_setting = SystemSetting(
+                key="ai_shadow_temperature",
+                value=f"{shadow_temperature:.3f}",
+                description="Temperature parameter for AI shadow replies (0-2)",
+            )
+            session.add(temp_setting)
         
         session.commit()
     
