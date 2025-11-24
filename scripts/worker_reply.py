@@ -248,7 +248,7 @@ def main() -> None:
 				cid = None
 			if not cid:
 				continue
-			# Skip rows that are still marked as error
+			# Skip rows that are still marked as error or running
 			try:
 				with get_session() as session:
 					row = session.exec(
@@ -260,6 +260,38 @@ def main() -> None:
 			if status == "error":
 				log.info("ai_shadow: skipping conversation_id=%s due to error status", cid)
 				continue
+			if status == "running":
+				log.info("ai_shadow: skipping conversation_id=%s due to running status (another worker processing)", cid)
+				continue
+			# Check if we just sent a reply very recently (within last 10 seconds) to prevent duplicate sends
+			try:
+				with get_session() as session:
+					recent_reply = session.exec(
+						_text(
+							"SELECT id, created_at FROM ai_shadow_reply WHERE conversation_id=:cid AND status='sent' ORDER BY created_at DESC LIMIT 1"
+						).params(cid=int(cid))
+					).first()
+					if recent_reply:
+						created_at = recent_reply.created_at if hasattr(recent_reply, "created_at") else (recent_reply[1] if len(recent_reply) > 1 else None)
+						if created_at:
+							if isinstance(created_at, str):
+								try:
+									from dateutil import parser
+									created_at = parser.parse(created_at)
+								except Exception:
+									# If parsing fails, skip the check
+									pass
+							if isinstance(created_at, dt.datetime):
+								# Handle timezone-aware datetimes
+								if created_at.tzinfo is not None:
+									created_at = created_at.replace(tzinfo=None)
+								time_since = (dt.datetime.utcnow() - created_at).total_seconds()
+								if time_since < 10:  # Less than 10 seconds ago
+									log.info("ai_shadow: skipping conversation_id=%s - just sent reply %.1f seconds ago", cid, time_since)
+									continue
+			except Exception:
+				# If check fails, continue processing (don't block on this)
+				pass
 			last_ms = int(st.get("last_inbound_ms") or 0)
 			postpones = int(st.get("postpone_count") or 0)
 			current_state = _coerce_state(st.get("state_json"))
@@ -488,8 +520,12 @@ def main() -> None:
 								image_urls=image_urls_to_send if image_urls_to_send else None,
 							)
 						)
-						sent_message_id = result.get("message_id") or (result.get("message_ids")[0] if result.get("message_ids") else None)
-						log.info("ai_shadow: auto-sent reply message_id=%s conversation_id=%s images_sent=%d", sent_message_id, cid, len(image_urls_to_send) if image_urls_to_send else 0)
+						# Get all message IDs (send_message splits by newlines and sends multiple messages)
+						all_message_ids = result.get("message_ids") or []
+						if result.get("message_id") and result.get("message_id") not in all_message_ids:
+							all_message_ids.insert(0, result.get("message_id"))
+						sent_message_id = all_message_ids[0] if all_message_ids else None
+						log.info("ai_shadow: auto-sent reply message_ids=%s conversation_id=%s images_sent=%d", all_message_ids, cid, len(image_urls_to_send) if image_urls_to_send else 0)
 						
 						# Mark images as sent if we actually sent any
 						if image_urls_to_send:
@@ -503,35 +539,45 @@ def main() -> None:
 							except Exception:
 								pass
 						
-						# Persist the sent message to Message table
-						if sent_message_id:
+						# Persist ALL sent messages to Message table to prevent re-processing via webhooks
+						if all_message_ids:
 							try:
 								with get_session() as session:
 									from app.models import Message
 									from sqlmodel import select
-									# Check if message already exists
-									existing = session.exec(select(Message).where(Message.ig_message_id == str(sent_message_id))).first()
-									if not existing:
-										# Get sender/recipient IDs
-										import os
-										entity_id = os.getenv("IG_PAGE_ID") or os.getenv("IG_USER_ID") or ""
-										now_ms = _now_ms()
-										msg = Message(
-											ig_sender_id=str(entity_id),
-											ig_recipient_id=str(ig_user_id) if ig_user_id else None,
-											ig_message_id=str(sent_message_id),
-											text=reply_text,
-											timestamp_ms=now_ms,
-											conversation_id=int(cid),
-											direction="out",
-											ai_status="sent",
-											ai_json=json.dumps({"auto_sent": True, "confidence": confidence, "reason": data.get("reason"), "state": new_state}, ensure_ascii=False),
-										)
-										session.add(msg)
-										session.commit()
+									import os
+									entity_id = os.getenv("IG_PAGE_ID") or os.getenv("IG_USER_ID") or ""
+									now_ms = _now_ms()
+									# Split reply_text by newlines to match the messages that were sent
+									text_lines = [line.strip() for line in reply_text.split('\n') if line.strip()]
+									if not text_lines:
+										text_lines = [reply_text.strip()]
+									
+									# Persist each message with its corresponding text line
+									for idx, msg_id in enumerate(all_message_ids):
+										if not msg_id:
+											continue
+										# Check if message already exists
+										existing = session.exec(select(Message).where(Message.ig_message_id == str(msg_id))).first()
+										if not existing:
+											# Use the corresponding text line, or the full text if we have fewer lines than messages
+											msg_text = text_lines[idx] if idx < len(text_lines) else (text_lines[-1] if text_lines else reply_text)
+											msg = Message(
+												ig_sender_id=str(entity_id),
+												ig_recipient_id=str(ig_user_id) if ig_user_id else None,
+												ig_message_id=str(msg_id),
+												text=msg_text,
+												timestamp_ms=now_ms + idx,  # Slight offset to maintain order
+												conversation_id=int(cid),
+												direction="out",
+												ai_status="sent",
+												ai_json=json.dumps({"auto_sent": True, "confidence": confidence, "reason": data.get("reason"), "state": new_state, "message_index": idx, "total_messages": len(all_message_ids)}, ensure_ascii=False),
+											)
+											session.add(msg)
+									session.commit()
 							except Exception as persist_err:
 								try:
-									log.warning("persist sent message error cid=%s err=%s", cid, persist_err)
+									log.warning("persist sent messages error cid=%s err=%s", cid, persist_err)
 								except Exception:
 									pass
 					except Exception as send_err:
