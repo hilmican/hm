@@ -69,15 +69,16 @@ def get_model_whitelist() -> List[str]:
 
 
 def normalize_model_choice(model_name: str | None, default: str | None = None, *, log_prefix: str | None = None) -> str:
+    """Keep whatever user selected; only fall back when empty."""
     candidate = (model_name or "").strip()
-    whitelist = get_model_whitelist()
-    if candidate and candidate in whitelist:
+    if candidate:
         return candidate
-    if candidate and log_prefix:
-        logging.warning("%s falling back because '%s' not in whitelist", log_prefix, candidate)
     fallback = (default or "").strip()
     if fallback:
+        if log_prefix:
+            logging.warning("%s using fallback '%s' because model empty", log_prefix, fallback)
         return fallback
+    whitelist = get_model_whitelist()
     if whitelist:
         return whitelist[0]
     return DEFAULT_MODEL
