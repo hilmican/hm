@@ -159,28 +159,26 @@ class AIClient:
 
 
 def get_ai_shadow_model_from_settings(default: str = "gpt-4o-mini") -> str:
-	"""Get shadow AI model from SystemSetting, with fallback to env var and then default."""
-	# First try env var (for backward compatibility)
-	env_model = os.getenv("AI_SHADOW_MODEL")
-	if env_model:
-		return normalize_model_choice(env_model, default=default, log_prefix="AI shadow env")
-	
-	# Then try SystemSetting
-	try:
-		from ..db import get_session
-		from ..models import SystemSetting
-		from sqlmodel import select
-		
-		with get_session() as session:
-			setting = session.exec(
-				select(SystemSetting).where(SystemSetting.key == "ai_shadow_model")
-			).first()
-			if setting and setting.value:
-				return normalize_model_choice(setting.value, default=default, log_prefix="AI shadow DB")
-	except Exception:
-		pass
-	
-	return normalize_model_choice(default, log_prefix="AI shadow default")
+    """Get shadow AI model from DB first, falling back to env var and default."""
+    try:
+        from ..db import get_session
+        from ..models import SystemSetting
+        from sqlmodel import select
+
+        with get_session() as session:
+            setting = session.exec(
+                select(SystemSetting).where(SystemSetting.key == "ai_shadow_model")
+            ).first()
+            if setting and setting.value:
+                return normalize_model_choice(setting.value, default=default, log_prefix="AI shadow DB")
+    except Exception:
+        logging.getLogger("ai_shadow").warning("Shadow model DB lookup failed", exc_info=True)
+
+    env_model = os.getenv("AI_SHADOW_MODEL")
+    if env_model:
+        return normalize_model_choice(env_model, default=default, log_prefix="AI shadow env")
+
+    return normalize_model_choice(default, log_prefix="AI shadow default")
 
 
 def get_ai_model_from_settings(default: str = "gpt-4o-mini") -> str:
