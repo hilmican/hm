@@ -7,9 +7,10 @@ import os
 
 try:
     # OpenAI v1.x client
-    from openai import OpenAI  # type: ignore
+    from openai import OpenAI, BadRequestError  # type: ignore
 except Exception:  # pragma: no cover
     OpenAI = None  # type: ignore
+    BadRequestError = Exception  # type: ignore
 
 from .ai_models import get_model_whitelist, normalize_model_choice
 
@@ -39,10 +40,19 @@ class AIClient:
         self._api_key = api_key or os.getenv("OPENAI_API_KEY") or ""
         self._model = normalize_model_choice(model, log_prefix="AIClient")
         self._enabled = bool(self._api_key and OpenAI is not None)
+        self._token_param = self._detect_token_param(self._model)
         # Configure timeout: default 30 seconds, configurable via OPENAI_TIMEOUT env var
         timeout_seconds = float(os.getenv("OPENAI_TIMEOUT", "30.0"))
         self._timeout = timeout_seconds
         self._client = OpenAI(api_key=self._api_key, timeout=timeout_seconds) if self._enabled else None
+
+    @staticmethod
+    def _detect_token_param(model_name: str) -> str:
+        """Newer JSON endpoints expect max_completion_tokens instead of max_tokens."""
+        prefixes = ("gpt-5", "gpt-4.1", "o1", "o3", "o4")
+        if any(model_name.startswith(p) for p in prefixes):
+            return "max_completion_tokens"
+        return "max_tokens"
 
     @property
     def enabled(self) -> bool:
@@ -104,14 +114,27 @@ class AIClient:
             available = max(safety_out_min, ctx_limit - in_tokens - safety_in)
             max_output_tokens = max(1, min(desired, available))
 
+        completion_kwargs = {
+            "model": self._model,
+            "messages": messages,  # type: ignore[arg-type]
+            "temperature": temperature,
+            "response_format": {"type": "json_object"},
+        }
+        completion_kwargs[self._token_param] = max_output_tokens
+
         # JSON mode (timeout is set on client initialization)
-        response = self._client.chat.completions.create(
-            model=self._model,
-            messages=messages,  # type: ignore[arg-type]
-            temperature=temperature,
-            response_format={"type": "json_object"},
-            max_tokens=max_output_tokens,
-        )
+        try:
+            response = self._client.chat.completions.create(**completion_kwargs)
+        except BadRequestError as exc:
+            msg = str(exc).lower()
+            if "max_completion_tokens" in msg and self._token_param == "max_tokens":
+                # Retry once using the new parameter expected by GPT-4.1/5 style models
+                completion_kwargs.pop("max_tokens", None)
+                completion_kwargs["max_completion_tokens"] = max_output_tokens
+                self._token_param = "max_completion_tokens"
+                response = self._client.chat.completions.create(**completion_kwargs)
+            else:
+                raise
         txt = (response.choices[0].message.content or "").strip()
         try:
             print("[AI DEBUG] in_tokens=", in_tokens, "max_tokens=", max_output_tokens, "raw_len=", len(txt))
