@@ -3,7 +3,7 @@
   .topnav .inner { display:flex; align-items:center; gap:14px; padding:10px 12px; position:relative; }
   .topnav a { color:#e5e7eb; text-decoration:none; font-size:14px; }
   .topnav .brand { font-weight:600; padding:6px 10px; border-radius:6px; background:#0b1220; border:1px solid rgba(255,255,255,0.06); }
-  .menu { display:flex; align-items:center; gap:8px; }
+  .menu { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .menu-item { position:relative; }
   .menu-item > a { display:inline-block; padding:6px 10px; border-radius:6px; }
   .menu-item > a:hover { background:#1f2a44; }
@@ -13,6 +13,8 @@
   .menu-item.has-sub:hover .submenu { display:block; }
   .spacer { flex:1; }
   .logout { background:#ef4444; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; }
+  .debug-link { background:#f97316; color:#fff; border-radius:6px; padding:6px 14px; font-weight:600; letter-spacing:0.05em; }
+  .debug-link:hover { background:#ea580c; color:#fff; }
   @media (max-width: 900px){
     .menu { flex-wrap: wrap; }
   }
@@ -21,6 +23,9 @@
   <div class="inner">
     <a class="brand" href="/dashboard">{{ t(request, 'nav.brand') }}</a>
     <div class="menu">
+      <div class="menu-item">
+        <a href="/ig/debug/env" class="debug-link" title="{{ t(request, 'nav.debug_env') }}">DEBUG</a>
+      </div>
       <div class="menu-item has-sub">
         <a href="#">{{ t(request, 'nav.data') }}</a>
         <div class="submenu">
@@ -55,7 +60,6 @@
           <a href="/ig/ai/products/reviews">📊 Ürün AI İncelemeleri</a>
           <a href="/ig/ai/unlinked">{{ t(request, 'nav.unlinked_purchases') }}</a>
           <a href="/ig/ai/link-suggest">{{ t(request, 'nav.link_conversation') }}</a>
-          <a href="/ig/debug/env">{{ t(request, 'nav.debug_env') }}</a>
         </div>
       </div>
       <div class="menu-item has-sub">

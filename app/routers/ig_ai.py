@@ -2104,10 +2104,15 @@ def save_ai_settings(
             )
             session.add(model_setting)
         
-        # Validate shadow model - only real OpenAI models
-        valid_models = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo", "o1-preview", "o1-mini"]
-        if ai_shadow_model not in valid_models:
-            ai_shadow_model = "gpt-4o-mini"
+        # Ensure selected shadow model exists in whitelist; otherwise fall back to main model
+        whitelist = set(get_model_whitelist() or [])
+        if whitelist and ai_shadow_model not in whitelist:
+            log.warning(
+                "AI settings save shadow model %s not in whitelist; falling back to %s",
+                ai_shadow_model,
+                ai_model,
+            )
+            ai_shadow_model = ai_model
         
         # Save AI shadow model setting
         shadow_model_setting = session.exec(
