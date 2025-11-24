@@ -400,7 +400,26 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 	return history_trimmed, last_customer_message
 
 
-def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = False) -> Dict[str, Any]:
+def _normalize_state(value: Any, *, fallback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+	if isinstance(value, dict):
+		return value  # type: ignore[return-value]
+	if isinstance(value, str) and value.strip():
+		try:
+			parsed = json.loads(value)
+			if isinstance(parsed, dict):
+				return parsed  # type: ignore[return-value]
+		except Exception:
+			return fallback or {}
+	return fallback or {}
+
+
+def draft_reply(
+	conversation_id: int,
+	*,
+	limit: int = 40,
+	include_meta: bool = False,
+	state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
 	"""
 	Create a suggested reply (shadow) for a conversation.
 
@@ -500,6 +519,8 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 		"transcript": transcript,
 		"product_images": product_images,
 	}
+	state_payload = dict(state or {})
+	user_payload["state"] = state_payload
 	
 	# Add parsed data if available
 	if parsed_data:
@@ -518,7 +539,8 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 		'  "reply_text": string,           // ZORUNLU: Cevap metni (boş string OLAMAZ)\n'
 		'  "confidence": number,           // ZORUNLU: 0.0 ile 1.0 arası sayı\n'
 		'  "reason": string,               // ZORUNLU: Kısa açıklama\n'
-		'  "notes": string | null          // OPSİYONEL: null veya string\n'
+		'  "notes": string | null,         // OPSİYONEL: null veya string\n'
+		'  "state": object | null          // OPSİYONEL: Güncel durum sözlüğü (örn. {"asked_color": true})\n'
 		"}\n\n"
 		"=== ÖNEMLİ UYARILAR ===\n"
 		"- reply_text ASLA boş string olamaz. Cevap vermeyeceksen bile makul bir açıklama yaz.\n"
@@ -704,6 +726,7 @@ HITAP KURALLARI:
 		"notes": notes,
 		"model": client.model,
 	}
+	reply["state"] = _normalize_state(data.get("state"), fallback=state_payload)
 	if product_images:
 		reply["product_images"] = product_images
 	if include_meta:

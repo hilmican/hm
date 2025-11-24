@@ -673,7 +673,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
             from sqlalchemy import text as _text
             rows_shadow = session.exec(
                 _text(
-                    "SELECT id, reply_text, model, confidence, reason, created_at, status, actions_json FROM ai_shadow_reply WHERE conversation_id=:cid ORDER BY created_at ASC LIMIT 200"
+                    "SELECT id, reply_text, model, confidence, reason, created_at, status, actions_json, state_json FROM ai_shadow_reply WHERE conversation_id=:cid ORDER BY created_at ASC LIMIT 200"
                 ).params(cid=int(conversation_id))
             ).all()
             # Represent the last one (if any) in 'shadow' for legacy panel rendering
@@ -709,6 +709,20 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     if not lines:
                         lines = [str(reply_text_raw).strip()] if str(reply_text_raw).strip() else []
                     reply_text_lines = lines
+                def _parse_state(raw_val: Any) -> dict[str, Any]:
+                    if not raw_val:
+                        return {}
+                    if isinstance(raw_val, dict):
+                        return raw_val  # type: ignore[return-value]
+                    try:
+                        if isinstance(raw_val, str):
+                            parsed = json.loads(raw_val)
+                            if isinstance(parsed, dict):
+                                return parsed  # type: ignore[return-value]
+                    except Exception:
+                        return {}
+                    return {}
+
                 shadow = {
                     "id": getattr(rlast, "id", None) if hasattr(rlast, "id") else (rlast[0] if len(rlast) > 0 else None),
                     "text": reply_text_raw,
@@ -719,6 +733,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     "created_at": getattr(rlast, "created_at", None) if hasattr(rlast, "created_at") else (rlast[5] if len(rlast) > 5 else None),
                     "status": getattr(rlast, "status", None) if hasattr(rlast, "status") else (rlast[6] if len(rlast) > 6 else None),
                     "actions": _parse_actions(getattr(rlast, "actions_json", None) if hasattr(rlast, "actions_json") else (rlast[7] if len(rlast) > 7 else None)),
+                    "state": _parse_state(getattr(rlast, "state_json", None) if hasattr(rlast, "state_json") else (rlast[8] if len(rlast) > 8 else None)),
                 }
                 try:
                     ca = shadow.get("created_at")
@@ -747,6 +762,8 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     txt = getattr(rr, "reply_text", None) if hasattr(rr, "reply_text") else (rr[1] if len(rr) > 1 else None)
                     status = getattr(rr, "status", None) if hasattr(rr, "status") else (rr[6] if len(rr) > 6 else None)
                     actions_val = getattr(rr, "actions_json", None) if hasattr(rr, "actions_json") else (rr[7] if len(rr) > 7 else None)
+                    state_val = getattr(rr, "state_json", None) if hasattr(rr, "state_json") else (rr[8] if len(rr) > 8 else None)
+                    state_dict = _parse_state(state_val)
                     actions_list = _parse_actions(actions_val)
                     # Include all records, even if empty text (for no_reply decisions)
                     if not txt:
@@ -797,6 +814,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                             "ai_reason": getattr(rr, "reason", None) if hasattr(rr, "reason") else (rr[4] if len(rr) > 4 else None),
                             "product_slug": focus_slug or None,
                             "ai_actions": actions_list if line_idx == 0 else [],  # Only show actions on first message
+                            "ai_state": state_dict if state_dict else None,
                         }
                         vms.append(vm)
                 except Exception:

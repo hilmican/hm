@@ -139,13 +139,35 @@ def _postpone(conversation_id: int, *, increment: bool = True) -> None:
 			)
 
 
-def _set_status(conversation_id: int, status: str) -> None:
+def _set_status(conversation_id: int, status: str, *, state_json: Optional[str] = None) -> None:
 	with get_session() as session:
-		session.exec(
-			_text(
-				"UPDATE ai_shadow_state SET status=:s, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
-			).params(s=status, cid=int(conversation_id))
-		)
+		if state_json is None:
+			session.exec(
+				_text(
+					"UPDATE ai_shadow_state SET status=:s, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+				).params(s=status, cid=int(conversation_id))
+			)
+		else:
+			session.exec(
+				_text(
+					"UPDATE ai_shadow_state SET status=:s, state_json=:state, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+				).params(s=status, state=state_json, cid=int(conversation_id))
+			)
+
+
+def _coerce_state(raw: Any, fallback: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+	if isinstance(raw, dict):
+		return raw
+	if isinstance(raw, str) and raw.strip():
+		try:
+			parsed = json.loads(raw)
+			if isinstance(parsed, dict):
+				return parsed  # type: ignore[return-value]
+		except Exception:
+			return fallback or {}
+	if raw is None:
+		return fallback or {}
+	return fallback or {}
 
 
 def main() -> None:
@@ -160,7 +182,7 @@ def main() -> None:
 				rows = session.exec(
 					_text(
 						"""
-						SELECT conversation_id, last_inbound_ms, postpone_count, ai_images_sent, COALESCE(status,'pending') AS status
+						SELECT conversation_id, last_inbound_ms, postpone_count, ai_images_sent, COALESCE(status,'pending') AS status, state_json
 						FROM ai_shadow_state
 						WHERE (status = 'pending' OR status IS NULL)
 						  AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
@@ -176,6 +198,7 @@ def main() -> None:
 						"postpone_count": int((r.postpone_count if hasattr(r, "postpone_count") else r[2]) or 0),
 						"ai_images_sent": bool((r.ai_images_sent if hasattr(r, "ai_images_sent") else (r[3] if len(r) > 3 else 0)) or 0),
 						"status": (r.status if hasattr(r, "status") else (r[4] if len(r) > 4 else None)) or "pending",
+						"state_json": getattr(r, "state_json", None) if hasattr(r, "state_json") else (r[5] if len(r) > 5 else None),
 					}
 					due.append(item)
 				
@@ -239,10 +262,11 @@ def main() -> None:
 				continue
 			last_ms = int(st.get("last_inbound_ms") or 0)
 			postpones = int(st.get("postpone_count") or 0)
+			current_state = _coerce_state(st.get("state_json"))
 			# If user likely still typing, postpone
 			if last_ms > 0 and (_now_ms() - last_ms) < (DEBOUNCE_SECONDS * 1000):
 				if postpones >= POSTPONE_MAX:
-					_set_status(cid, "exhausted")
+					_set_status(cid, "exhausted", state_json=st.get("state_json"))
 					continue
 				_postpone(cid, increment=True)
 				continue
@@ -262,7 +286,9 @@ def main() -> None:
 					log.info("ai_shadow: generating draft for conversation_id=%s", cid)
 				except Exception:
 					pass
-				data = draft_reply(int(cid), limit=40, include_meta=True)
+				data = draft_reply(int(cid), limit=40, include_meta=True, state=current_state)
+				new_state = _coerce_state(data.get("state"), fallback=current_state)
+				state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
 				# Block when conversation isn't linked to a product/ad
 				if data.get("missing_product_context"):
 					warning_text = data.get("notes") or "Konuşma ürüne/posta bağlanmadan AI çalışmaz."
@@ -273,8 +299,8 @@ def main() -> None:
 							session.exec(
 								_text(
 									"""
-									INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, attempt_no, status, created_at)
-									VALUES(:cid, :txt, :model, :conf, :reason, :meta, NULL, :att, 'info', CURRENT_TIMESTAMP)
+									INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, state_json, attempt_no, status, created_at)
+									VALUES(:cid, :txt, :model, :conf, :reason, :meta, NULL, :state, :att, 'info', CURRENT_TIMESTAMP)
 									"""
 								).params(
 									cid=int(cid),
@@ -283,13 +309,14 @@ def main() -> None:
 									conf=0.0,
 									reason=reason_text,
 									meta=json.dumps(meta, ensure_ascii=False),
+									state=state_json_dump,
 									att=int(postpones or 0),
 								)
 							)
 							session.exec(
 								_text(
-									"UPDATE ai_shadow_state SET status='needs_link', updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
-								).params(cid=int(cid))
+									"UPDATE ai_shadow_state SET status='needs_link', state_json=:state, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+								).params(state=state_json_dump, cid=int(cid))
 							)
 					except Exception:
 						pass
@@ -335,8 +362,8 @@ def main() -> None:
 							session.exec(
 								_text(
 									"""
-									INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, attempt_no, status, created_at)
-									VALUES(:cid, :txt, :model, :conf, :reason, :meta, :actions, :att, 'no_reply', CURRENT_TIMESTAMP)
+									INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, state_json, attempt_no, status, created_at)
+									VALUES(:cid, :txt, :model, :conf, :reason, :meta, :actions, :state, :att, 'no_reply', CURRENT_TIMESTAMP)
 									"""
 								).params(
 									cid=int(cid),
@@ -346,21 +373,22 @@ def main() -> None:
 									reason=reason_text,
 									meta=json.dumps(data.get("debug_meta"), ensure_ascii=False) if data.get("debug_meta") else None,
 									actions=actions_json,
+									state=state_json_dump,
 									att=int(postpones or 0),
 								)
 							)
 							# Mark state as paused
 							session.exec(
 								_text(
-									"UPDATE ai_shadow_state SET status='paused', updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
-								).params(cid=int(cid))
+									"UPDATE ai_shadow_state SET status='paused', state_json=:state, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+								).params(state=state_json_dump, cid=int(cid))
 							)
 					except Exception as pe:
 						try:
 							log.warning("persist no-reply decision error cid=%s err=%s", cid, pe)
 						except Exception:
 							pass
-					_set_status(cid, "paused")
+					_set_status(cid, "paused", state_json=state_json_dump)
 					continue
 				# Persist draft
 				actions: list[dict[str, Any]] = []
@@ -497,7 +525,7 @@ def main() -> None:
 											conversation_id=int(cid),
 											direction="out",
 											ai_status="sent",
-											ai_json=json.dumps({"auto_sent": True, "confidence": confidence, "reason": data.get("reason")}, ensure_ascii=False),
+											ai_json=json.dumps({"auto_sent": True, "confidence": confidence, "reason": data.get("reason"), "state": new_state}, ensure_ascii=False),
 										)
 										session.add(msg)
 										session.commit()
@@ -520,8 +548,8 @@ def main() -> None:
 						session.exec(
 							_text(
 								"""
-								INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, attempt_no, status, created_at)
-								VALUES(:cid, :txt, :model, :conf, :reason, :meta, :actions, :att, :status, CURRENT_TIMESTAMP)
+								INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, state_json, attempt_no, status, created_at)
+								VALUES(:cid, :txt, :model, :conf, :reason, :meta, :actions, :state, :att, :status, CURRENT_TIMESTAMP)
 								"""
 							).params(
 								cid=int(cid),
@@ -531,6 +559,7 @@ def main() -> None:
 								reason=(data.get("reason") or "auto"),
 								meta=json.dumps(data.get("debug_meta"), ensure_ascii=False) if data.get("debug_meta") else None,
 								actions=actions_json,
+								state=state_json_dump,
 								att=int(postpones or 0),
 								status=status_to_set,
 							)
@@ -538,8 +567,8 @@ def main() -> None:
 						# Mark state as suggested or sent
 						session.exec(
 							_text(
-								"UPDATE ai_shadow_state SET status=:s, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
-							).params(s=status_to_set, cid=int(cid))
+								"UPDATE ai_shadow_state SET status=:s, state_json=:state, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+							).params(s=status_to_set, state=state_json_dump, cid=int(cid))
 						)
 						if actions_json:
 							session.exec(
@@ -552,13 +581,13 @@ def main() -> None:
 						log.warning("persist draft error cid=%s err=%s", cid, pe)
 					except Exception:
 						pass
-					_set_status(cid, "error")
+					_set_status(cid, "error", state_json=state_json_dump)
 			except Exception as ge:
 				try:
 					log.warning("generate error cid=%s err=%s", cid, ge)
 				except Exception:
 					pass
-				_set_status(cid, "error")
+				_set_status(cid, "error", state_json=state_json_dump if "state_json_dump" in locals() else st.get("state_json"))
 
 
 if __name__ == "__main__":

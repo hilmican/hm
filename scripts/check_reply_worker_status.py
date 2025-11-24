@@ -50,7 +50,7 @@ def check_conversation(conversation_id: int):
         # Check ai_shadow_state
         shadow = session.exec(
             _text("""
-                SELECT conversation_id, status, last_inbound_ms, next_attempt_at, updated_at, postpone_count
+                SELECT conversation_id, status, last_inbound_ms, next_attempt_at, updated_at, postpone_count, state_json
                 FROM ai_shadow_state
                 WHERE conversation_id = :cid
             """).params(cid=conversation_id)
@@ -63,6 +63,8 @@ def check_conversation(conversation_id: int):
             print(f"   next_attempt_at: {shadow[3] if len(shadow) > 3 else 'N/A'}")
             print(f"   updated_at: {shadow[4] if len(shadow) > 4 else 'N/A'}")
             print(f"   postpone_count: {shadow[5] if len(shadow) > 5 else 'N/A'}")
+            if len(shadow) > 6 and shadow[6]:
+                print(f"   state_json: {shadow[6]}")
         else:
             print(f"\n❌ No ai_shadow_state entry found")
             print(f"   → This confirms why reply-worker isn't processing it")

@@ -135,6 +135,9 @@
             {% endfor %}
           </div>
         {% endif %}
+        {% if shadow.state %}
+        <div class="meta" style="margin-top:8px; white-space:pre-wrap;">📌 Durum: {{ shadow.state }}</div>
+        {% endif %}
         <div style="margin-top:8px; display:flex; gap:8px;">
           <button id="useShadow" class="action" type="button">Metni kutuya al</button>
           <button id="dismissShadow" class="action" type="button" style="border-color:#ef4444;color:#ef4444">Gizle</button>
@@ -292,6 +295,9 @@
                     {% endfor %}
                   </div>
                 {% endif %}
+              {% if m.ai_state %}
+              <div class="meta" style="margin-top:4px;">📌 Durum: {{ m.ai_state }}</div>
+              {% endif %}
               {% endif %}
             </div>
             {% set cards = template_cards.get(m.ig_message_id or '') %}

@@ -108,6 +108,7 @@ def insert_draft(
 	reason: Optional[str],
 	json_meta: Optional[str],
 	actions_json: Optional[str] = None,
+	state_json: Optional[str] = None,
 	attempt_no: int = 0,
 	status: str = "suggested",
 ) -> int:
@@ -123,8 +124,8 @@ def insert_draft(
 			session.exec(
 				_text(
 					"""
-					INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, attempt_no, status, created_at)
-					VALUES(:cid, :txt, :m, :c, :r, :j, :actions, :a, :s, CURRENT_TIMESTAMP)
+					INSERT INTO ai_shadow_reply(conversation_id, reply_text, model, confidence, reason, json_meta, actions_json, state_json, attempt_no, status, created_at)
+					VALUES(:cid, :txt, :m, :c, :r, :j, :actions, :state, :a, :s, CURRENT_TIMESTAMP)
 					"""
 				).params(
 					cid=cid_int,
@@ -134,6 +135,7 @@ def insert_draft(
 					r=(reason or None),
 					j=(json_meta or None),
 					actions=(actions_json or None),
+					state=(state_json or None),
 					a=int(attempt_no or 0),
 					s=(status or "suggested"),
 				)
