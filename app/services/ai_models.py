@@ -18,11 +18,11 @@ DEFAULT_MODEL_WHITELIST: List[str] = [
     "gpt-5",
     "gpt-5-mini",
     "gpt-5-pro",
-    "gpt-4o",
-    "gpt-4o-mini",
+    "gpt-5-nano",
     "gpt-4.1",
     "gpt-4.1-mini",
-    "gpt-4.1-nano",
+    "gpt-4o",
+    "gpt-4o-mini",
     "gpt-4-turbo",
     "gpt-4",
     "gpt-3.5-turbo",
@@ -32,8 +32,6 @@ DEFAULT_MODEL_WHITELIST: List[str] = [
 ]
 
 SETTING_KEY = "ai_model_whitelist"
-MAX_MODELS = 64
-
 
 def _read_setting() -> List[str]:
     with get_session() as session:
@@ -93,9 +91,8 @@ def refresh_openai_model_whitelist() -> Dict[str, List[str]]:
         mid = getattr(model, "id", None)
         if not isinstance(mid, str):
             continue
-        if _is_supported_model_id(mid):
-            fetched.append(mid)
-    cleaned = sorted(set(fetched), key=str.lower)[:MAX_MODELS]
+        fetched.append(mid)
+    cleaned = sorted(set(fetched), key=str.lower)
     if not cleaned:
         raise RuntimeError("OpenAI model list did not return any supported GPT/o1 models")
 
@@ -108,15 +105,8 @@ def refresh_openai_model_whitelist() -> Dict[str, List[str]]:
 
 
 def _is_supported_model_id(model_id: str) -> bool:
-    allowed_prefixes = (
-        "gpt-5",
-        "gpt-4",
-        "gpt-4o",
-        "gpt-4.1",
-        "gpt-3.5",
-        "o1",
-    )
-    return model_id.startswith(allowed_prefixes)
+    # With LONGTEXT support we keep all OpenAI models. Function kept for potential future filtering.
+    return True
 
 
 def group_model_names(models: List[str]) -> Dict[str, List[str]]:
