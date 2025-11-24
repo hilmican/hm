@@ -8,7 +8,7 @@ from sqlmodel import select
 
 from ..db import get_session
 from ..models import Message, Product, Item, Conversation, IGUser, AIPretext, ProductImage
-from .ai import AIClient
+from .ai import AIClient, get_ai_shadow_model_from_settings, get_shadow_temperature_setting
 from .ai_context import VariantExclusions, parse_variant_exclusions, variant_is_excluded
 from .ai_ig import _detect_focus_product
 from .ai_utils import parse_height_weight, calculate_size_suggestion, detect_color_count
@@ -406,7 +406,6 @@ def draft_reply(conversation_id: int, *, limit: int = 40, include_meta: bool = F
 	  - reason: str         (short explanation for debugging)
 	  - notes: str|null
 	"""
-from .ai import get_ai_shadow_model_from_settings, get_shadow_temperature_setting
 	client = AIClient(model=get_ai_shadow_model_from_settings())
 	if not client.enabled:
 		raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")
