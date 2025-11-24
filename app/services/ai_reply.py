@@ -652,11 +652,10 @@ HITAP KURALLARI:
 		kwargs: Dict[str, Any] = {
 			"system_prompt": sys_prompt,
 			"user_prompt": user_prompt,
+			"temperature": None if temp_opt_out else temperature,
 		}
 		if include_raw:
 			kwargs["include_raw"] = True
-		if not temp_opt_out:
-			kwargs["temperature"] = temperature
 		return kwargs
 	
 	raw_response: Any = None
