@@ -1,0 +1,272 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock Conversation Tester</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background:#f9fafb; }
+      .container { max-width: 1200px; margin: 0 auto; }
+      .toolbar { display:flex; gap:8px; margin-bottom:12px; }
+      .card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:16px; margin-bottom:16px; }
+      .card h2 { margin:0 0 12px 0; color:#111827; font-size:18px; }
+      .card h3 { margin:0 0 12px 0; color:#111827; font-size:16px; }
+      .form-group { margin-bottom:12px; }
+      .form-group label { display:block; margin-bottom:4px; color:#374151; font-size:14px; font-weight:500; }
+      .form-group input, .form-group textarea { width:100%; padding:8px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px; }
+      .form-group textarea { min-height:80px; resize:vertical; }
+      .form-group small { display:block; margin-top:4px; color:#6b7280; font-size:12px; }
+      button { background:#2563eb; color:#fff; border:none; border-radius:6px; padding:8px 16px; cursor:pointer; font-size:14px; }
+      button:hover { background:#1d4ed8; }
+      button.secondary { background:#6b7280; }
+      button.secondary:hover { background:#4b5563; }
+      button.danger { background:#ef4444; }
+      button.danger:hover { background:#dc2626; }
+      a { color:#2563eb; text-decoration:none; }
+      a:hover { text-decoration:underline; }
+      .msg { margin:8px 0; display:flex; }
+      .bubble { max-width: 70%; padding:10px 12px; border-radius:12px; }
+      .in .bubble { background:#f3f4f6; margin-right:auto; }
+      .out .bubble { background:#dbeafe; margin-left:auto; }
+      .meta { color:#6b7280; font-size:12px; margin-top:4px; }
+      .shadow-reply { margin:12px 0; padding:12px; border:1px solid #93c5fd; background:#eff6ff; border-radius:10px; }
+      .shadow-reply.sent { border-color:#10b981; background:#d1fae5; }
+      .shadow-reply.error { border-color:#f59e0b; background:#fef3c7; }
+      .shadow-reply h4 { margin:0 0 8px 0; color:#1e40af; font-size:14px; }
+      .shadow-reply.sent h4 { color:#059669; }
+      .shadow-reply.error h4 { color:#d97706; }
+      .conversation-list { display:grid; gap:8px; }
+      .conversation-item { padding:12px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; }
+      .conversation-item:hover { border-color:#2563eb; }
+      .conversation-item h4 { margin:0 0 4px 0; font-size:14px; }
+      .conversation-item .meta { font-size:12px; }
+      .two-col { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+      @media (max-width: 768px) {
+        .two-col { grid-template-columns: 1fr; }
+      }
+      .status-badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:500; }
+      .status-pending { background:#fef3c7; color:#d97706; }
+      .status-suggested { background:#dbeafe; color:#1e40af; }
+      .status-sent { background:#d1fae5; color:#059669; }
+      .status-error { background:#fee2e2; color:#dc2626; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <div class="container">
+      <div class="toolbar">
+        <a href="/ig/inbox">← Back to Inbox</a>
+        {% if conversation_id %}
+        <a href="/ig/mock-tester">← Back to Tester</a>
+        <a href="/ig/inbox/{{ conversation_id }}" target="_blank">View in Full Thread →</a>
+        {% endif %}
+      </div>
+
+      {% if conversation_id %}
+        {# Conversation View #}
+        <div class="card">
+          <h2>Mock Conversation #{{ conversation_id }}</h2>
+          {% if user %}
+          <div class="meta">
+            User: {% if user.username %}@{{ user.username }}{% endif %} ({{ user.ig_user_id }})
+            {% if user.name %} · {{ user.name }}{% endif %}
+          </div>
+          {% endif %}
+          {% if conversation %}
+          <div class="meta">
+            Link: {% if conversation.last_link_type %}{{ conversation.last_link_type }}{% endif %} 
+            {% if conversation.last_link_id %}{{ conversation.last_link_id }}{% endif %}
+          </div>
+          {% endif %}
+        </div>
+
+        {# Shadow State #}
+        {% if shadow_state %}
+        <div class="card">
+          <h3>Shadow Reply State</h3>
+          <div class="meta">
+            Status: <span class="status-badge status-{{ shadow_state.status or 'pending' }}">{{ shadow_state.status or 'pending' }}</span>
+            {% if shadow_state.next_attempt_at %}
+            · Next attempt: {{ shadow_state.next_attempt_at }}
+            {% endif %}
+            {% if shadow_state.postpone_count %}
+            · Postponed: {{ shadow_state.postpone_count }} times
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+
+        {# Shadow Replies #}
+        {% if shadow_replies %}
+        <div class="card">
+          <h3>AI Shadow Replies</h3>
+          {% for reply in shadow_replies %}
+          <div class="shadow-reply {{ reply.status }}">
+            <h4>
+              {% if reply.status == 'sent' %}✓ Sent
+              {% elif reply.status == 'error' %}⚠ Error
+              {% elif reply.status == 'suggested' %}💡 Suggested
+              {% else %}{{ reply.status|title }}{% endif %}
+            </h4>
+            <div style="white-space:pre-wrap; color:#111827; margin:8px 0;">{{ reply.reply_text }}</div>
+            <div class="meta">
+              Model: {{ reply.model or '-' }} · 
+              Confidence: {{ '%.2f' % reply.confidence if reply.confidence is not none else '-' }} · 
+              Reason: {{ reply.reason or '-' }} · 
+              Created: {{ reply.created_at }}
+            </div>
+            {% if reply.actions_json %}
+            <div style="margin-top:8px;">
+              <div class="meta" style="font-weight:600;">Actions JSON:</div>
+              <pre style="font-size:11px; background:#f3f4f6; padding:8px; border-radius:4px; overflow:auto;">{{ reply.actions_json }}</pre>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {# Messages #}
+        <div class="card">
+          <h3>Messages</h3>
+          <div id="messages">
+            {% for msg in messages %}
+            <div class="msg {{ msg.direction }}">
+              <div class="bubble">
+                <div>{{ msg.text or '(no text)' }}</div>
+                <div class="meta">
+                  {{ msg.direction }} · 
+                  {% if msg.timestamp_ms %}
+                  <span class="ts" data-ts="{{ msg.timestamp_ms }}">{{ msg.timestamp_ms }}</span>
+                  {% endif %}
+                  {% if msg.ai_status %}
+                  · AI: {{ msg.ai_status }}
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        {# Send Message Form #}
+        <div class="card">
+          <h3>Send Message as Client</h3>
+          <form method="POST" action="/ig/mock-tester/{{ conversation_id }}/send" id="sendForm">
+            <div class="form-group">
+              <label for="message_text">Message Text</label>
+              <textarea name="message_text" id="message_text" required placeholder="Type your message as the client..."></textarea>
+            </div>
+            <button type="submit">Send Message</button>
+          </form>
+        </div>
+
+      {% else %}
+        {# Main Index View #}
+        <div class="card">
+          <h2>Create New Mock Conversation</h2>
+          <form method="POST" action="/ig/mock-tester/create">
+            <div class="two-col">
+              <div>
+                <div class="form-group">
+                  <label for="ad_id">Ad ID</label>
+                  <input type="text" name="ad_id" id="ad_id" placeholder="e.g., 123456789">
+                  <small>Instagram ad ID (optional, for linking to product)</small>
+                </div>
+                <div class="form-group">
+                  <label for="ad_link">Ad Link</label>
+                  <input type="text" name="ad_link" id="ad_link" placeholder="https://...">
+                  <small>URL of the ad (optional)</small>
+                </div>
+                <div class="form-group">
+                  <label for="ad_title">Ad Title</label>
+                  <input type="text" name="ad_title" id="ad_title" placeholder="Product Name">
+                  <small>Title/headline of the ad (optional)</small>
+                </div>
+                <div class="form-group">
+                  <label for="ad_name">Ad Name</label>
+                  <input type="text" name="ad_name" id="ad_name" placeholder="Ad Campaign Name">
+                  <small>Name of the ad campaign (optional)</small>
+                </div>
+                <div class="form-group">
+                  <label for="ad_image_url">Ad Image URL</label>
+                  <input type="text" name="ad_image_url" id="ad_image_url" placeholder="https://...">
+                  <small>Image URL for the ad (optional)</small>
+                </div>
+              </div>
+              <div>
+                <div class="form-group">
+                  <label for="username">Mock Username</label>
+                  <input type="text" name="username" id="username" placeholder="mock_user_123">
+                  <small>Username for the mock user (auto-generated if empty)</small>
+                </div>
+                <div class="form-group">
+                  <label for="name">Mock User Name</label>
+                  <input type="text" name="name" id="name" placeholder="Mock User">
+                  <small>Display name for the mock user (auto-generated if empty)</small>
+                </div>
+                <div class="form-group">
+                  <label for="initial_message_text">Initial Message</label>
+                  <textarea name="initial_message_text" id="initial_message_text" placeholder="Merhaba, bu ürün hakkında bilgi alabilir miyim?">Merhaba, bu ürün hakkında bilgi alabilir miyim?</textarea>
+                  <small>First message from the client (simulating ad click)</small>
+                </div>
+              </div>
+            </div>
+            <button type="submit">Create Mock Conversation</button>
+          </form>
+        </div>
+
+        {# Existing Conversations #}
+        {% if mock_conversations %}
+        <div class="card">
+          <h2>Recent Mock Conversations</h2>
+          <div class="conversation-list">
+            {% for conv in mock_conversations %}
+            <div class="conversation-item">
+              <h4>
+                <a href="/ig/mock-tester/{{ conv.conversation_id }}">
+                  Conversation #{{ conv.conversation_id }}
+                </a>
+              </h4>
+              <div class="meta">
+                User: {% if conv.username %}@{{ conv.username }}{% else %}{{ conv.ig_user_id }}{% endif %}
+                {% if conv.name %} · {{ conv.name }}{% endif %}
+                {% if conv.last_message_text %}
+                · Last: {{ conv.last_message_text[:50] }}{% if conv.last_message_text|length > 50 %}...{% endif %}
+                {% endif %}
+                {% if conv.last_message_at %}
+                · {{ conv.last_message_at }}
+                {% endif %}
+                {% if conv.link_id %}
+                · Link: {{ conv.link_type or 'ad' }} {{ conv.link_id }}
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      {% endif %}
+    </div>
+
+    <script>
+      // Format timestamps
+      document.querySelectorAll('.ts[data-ts]').forEach(el => {
+        const ts = parseInt(el.getAttribute('data-ts'));
+        if (ts) {
+          const date = new Date(ts);
+          el.textContent = date.toLocaleString();
+        }
+      });
+
+      // Auto-refresh conversation view every 5 seconds
+      {% if conversation_id %}
+      setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          location.reload();
+        }
+      }, 5000);
+      {% endif %}
+    </script>
+  </body>
+</html>
+
