@@ -257,15 +257,6 @@
           el.textContent = date.toLocaleString();
         }
       });
-
-      // Auto-refresh conversation view every 5 seconds
-      {% if conversation_id %}
-      setInterval(() => {
-        if (document.visibilityState === 'visible') {
-          location.reload();
-        }
-      }, 5000);
-      {% endif %}
     </script>
   </body>
 </html>
