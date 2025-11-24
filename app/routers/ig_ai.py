@@ -21,6 +21,9 @@ from ..services.ai_models import (
     refresh_openai_model_whitelist,
 )
 from urllib.parse import quote as _quote
+import logging
+
+log = logging.getLogger("ig_ai.settings")
 
 
 router = APIRouter(prefix="/ig/ai", tags=["instagram-ai"])
@@ -1991,6 +1994,7 @@ def ai_settings_page(request: Request):
     from ..models import SystemSetting
     
     status_msg = request.query_params.get("msg")
+    log.debug("Rendering AI settings page msg=%s", status_msg)
     model_whitelist = get_model_whitelist()
     model_groups = group_model_names(model_whitelist)
     
@@ -2051,9 +2055,19 @@ def save_ai_settings(
     from ..models import SystemSetting
     
     enabled = ai_reply_sending_enabled.lower() in ("true", "1", "yes", "on")
+    raw_model = ai_model
+    raw_shadow = ai_shadow_model
     
     ai_model = normalize_model_choice(ai_model, log_prefix="AI settings save model")
     ai_shadow_model = normalize_model_choice(ai_shadow_model, default=ai_model, log_prefix="AI settings save shadow")
+    log.info(
+        "Saving AI settings enabled=%s raw_model=%s raw_shadow=%s normalized_model=%s normalized_shadow=%s",
+        enabled,
+        raw_model,
+        raw_shadow,
+        ai_model,
+        ai_shadow_model,
+    )
     
     with get_session() as session:
         # Save global AI reply sending enabled setting
