@@ -553,7 +553,7 @@ def draft_reply(
 			"product_info": product_info,
 		}
 	history, last_customer_message = _load_history(int(conversation_id), limit=limit)
-	conversation_flags = _detect_conversation_flags(history, product_focus_data)
+	conversation_flags = _detect_conversation_flags(history, product_info)
 	transcript = _format_transcript(
 		[
 			{"direction": h.get("dir"), "timestamp_ms": h.get("timestamp_ms"), "text": h.get("text")}
