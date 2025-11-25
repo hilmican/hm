@@ -4,7 +4,7 @@ import datetime as dt
 import logging
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlmodel import select
 
@@ -648,15 +648,6 @@ def draft_reply(
 	double_price: Optional[float] = None
 	# TODO: Add proper double_price detection from product configuration or stock patterns
 	
-	# Build parsed data structure
-	parsed_data: Dict[str, Any] = {}
-	if height_cm:
-		parsed_data["height_cm"] = height_cm
-	if weight_kg:
-		parsed_data["weight_kg"] = weight_kg
-	if size_suggestion:
-		parsed_data["size_suggestion"] = size_suggestion
-	
 	# Build product_focus with additional metadata
 	product_focus_data: Dict[str, Any] = product_info or {"id": None, "name": None, "slug_or_sku": None, "slug": None, "confidence": 0.0}
 	product_focus_data["has_multiple_colors"] = has_multiple_colors
@@ -678,25 +669,81 @@ def draft_reply(
 	if conversation_flags:
 		user_payload["conversation_flags"] = conversation_flags
 	function_callbacks: List[Dict[str, Any]] = []
+	tools: List[Dict[str, Any]] = []
+	tool_handlers: Dict[str, Callable[[Dict[str, Any]], str]] = {}
+	measurements_from_tool = False
 	
-	# Add parsed data if available
-	if parsed_data:
-		user_payload["parsed"] = parsed_data
-		try:
-			log.info("draft_reply parsed_payload conversation_id=%s data=%s", conversation_id, parsed_data)
-		except Exception:
-			pass
-		callback_entry: Dict[str, Any] = {
-			"name": "set_customer_measurements",
-			"arguments": {k: v for k, v in parsed_data.items() if k in ("height_cm", "weight_kg") and v},
-			"result": {},
-		}
-		if size_suggestion:
-			callback_entry["result"]["size_suggestion"] = size_suggestion
-		function_callbacks.append(callback_entry)
-		_log_function_callback(conversation_id, callback_entry["name"], callback_entry["arguments"], callback_entry["result"])
 	# Wrap context JSON in a clear instruction so the model returns our desired schema
 	context_json = json.dumps(user_payload, ensure_ascii=False)
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "set_customer_measurements",
+				"description": "Kullanıcının verdiği boy ve kilo bilgilerini backend'e ilet.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"height_cm": {
+							"type": "integer",
+							"description": "Kullanıcının boyu (santimetre). Örnek: 178",
+						},
+						"weight_kg": {
+							"type": "integer",
+							"description": "Kullanıcının kilosu (kg). Örnek: 78",
+						},
+					},
+					"required": ["height_cm", "weight_kg"],
+				},
+			},
+		}
+	)
+
+	def _handle_measurement_tool(args: Dict[str, Any]) -> str:
+		nonlocal height_cm, weight_kg, size_suggestion, measurements_from_tool
+		height_val = args.get("height_cm")
+		weight_val = args.get("weight_kg")
+		try:
+			if height_val is not None:
+				height_cm = int(height_val)
+		except (ValueError, TypeError):
+			pass
+		try:
+			if weight_val is not None:
+				weight_kg = int(weight_val)
+		except (ValueError, TypeError):
+			pass
+		if height_cm and weight_kg and product_id_val:
+			try:
+				size_suggestion_local = calculate_size_suggestion(height_cm, weight_kg, product_id_val)
+				if size_suggestion_local:
+					size_suggestion = size_suggestion_local
+			except Exception:
+				pass
+		callback_result: Dict[str, Any] = {}
+		if size_suggestion:
+			callback_result["size_suggestion"] = size_suggestion
+		callback_entry = {
+			"name": "set_customer_measurements",
+			"arguments": {
+				"height_cm": height_cm,
+				"weight_kg": weight_kg,
+			},
+			"result": callback_result,
+		}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, callback_entry["name"], callback_entry["arguments"], callback_result)
+		measurements_from_tool = True
+		payload = {
+			"height_cm": height_cm,
+			"weight_kg": weight_kg,
+		}
+		if size_suggestion:
+			payload["size_suggestion"] = size_suggestion
+		return json.dumps(payload, ensure_ascii=False)
+
+	tool_handlers["set_customer_measurements"] = _handle_measurement_tool
+
 	user_prompt = (
 		"=== KRİTİK TALİMATLAR ===\n"
 		"1. SADECE ve SADECE aşağıdaki JSON şemasına UYGUN bir JSON obje döndür.\n"
@@ -721,7 +768,15 @@ def draft_reply(
 		"CONTEXT_JSON_START\n"
 		f"{context_json}\n"
 		"CONTEXT_JSON_END\n"
+		"\n=== FONKSİYON TALİMATI ===\n"
+		"- Kullanıcı boy+kilo verdiğinde `set_customer_measurements` fonksiyonunu MUTLAKA çağır.\n"
+		"- Fonksiyon çıktısındaki `size_suggestion` varsa aynen kullan; yoksa beden tablosunu takip et.\n"
+		"- Fonksiyon çağrısı yapmadan yeni ölçü isteme.\n"
 	)
+	if function_callbacks:
+		user_prompt += "\n=== FONKSİYON ÇAĞRILARI ===\n"
+		user_prompt += json.dumps(function_callbacks, ensure_ascii=False)
+		user_prompt += "\nBu kayıtlar backend fonksiyon çağrılarının sonucudur; ölçümleri tekrar isteme.\n"
 
 	# Load customer info for gender detection
 	customer_info = _load_customer_info(int(conversation_id))
@@ -862,12 +917,16 @@ HITAP KURALLARI:
 	temperature = get_shadow_temperature_setting()
 	temp_opt_out = is_shadow_temperature_opt_out()
 	
-	def _build_gen_kwargs(include_raw: bool = False) -> Dict[str, Any]:
+		def _build_gen_kwargs(include_raw: bool = False) -> Dict[str, Any]:
 		kwargs: Dict[str, Any] = {
 			"system_prompt": sys_prompt,
 			"user_prompt": user_prompt,
 			"temperature": None if temp_opt_out else temperature,
 		}
+			if tools:
+				kwargs["tools"] = tools
+				kwargs["tool_choice"] = "auto"
+				kwargs["tool_handlers"] = tool_handlers
 		if include_raw:
 			kwargs["include_raw"] = True
 		return kwargs
@@ -920,8 +979,23 @@ HITAP KURALLARI:
 		"notes": notes,
 		"model": client.model,
 	}
+	if parsed_data:
+		reply["parsed"] = parsed_data
 	if function_callbacks:
 		reply["function_callbacks"] = function_callbacks
+	parsed_data: Dict[str, Any] = {}
+	if height_cm:
+		parsed_data["height_cm"] = height_cm
+	if weight_kg:
+		parsed_data["weight_kg"] = weight_kg
+	if size_suggestion:
+		parsed_data["size_suggestion"] = size_suggestion
+	if parsed_data:
+		reply["parsed"] = parsed_data
+		try:
+			log.info("draft_reply parsed_payload conversation_id=%s data=%s", conversation_id, parsed_data)
+		except Exception:
+			pass
 	reply["state"] = _normalize_state(data.get("state"), fallback=state_payload)
 	if product_images:
 		reply["product_images"] = product_images

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import json
 import logging
 import os
@@ -73,11 +73,14 @@ class AIClient:
         extra_messages: Optional[list[dict[str, Any]]] = None,
         include_raw: bool = False,
         image_urls: Optional[List[str]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        tool_handlers: Optional[Dict[str, Callable[[Dict[str, Any]], str]]] = None,
     ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], str]]:
         if not self._enabled or not self._client:
             raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")
 
-        messages: list[dict[str, str]] = []
+        messages: list[dict[str, Any]] = []
         if system_prompt:
             # Ensure the system prompt contains the word "json" so OpenAI allows JSON mode
             sys_txt = str(system_prompt)
@@ -135,41 +138,91 @@ class AIClient:
             available = max(safety_out_min, ctx_limit - in_tokens - safety_in)
             max_output_tokens = max(1, min(desired, available))
 
-        completion_kwargs = {
-            "model": self._model,
-            "messages": messages,  # type: ignore[arg-type]
-            "response_format": {"type": "json_object"},
-        }
-        if temperature is not None:
-            completion_kwargs["temperature"] = temperature
-        completion_kwargs[self._token_param] = max_output_tokens
+        def _build_kwargs(current_messages: list[dict[str, Any]]) -> Dict[str, Any]:
+            payload: Dict[str, Any] = {
+                "model": self._model,
+                "messages": current_messages,
+                "response_format": {"type": "json_object"},
+            }
+            if temperature is not None:
+                payload["temperature"] = temperature
+            payload[self._token_param] = max_output_tokens
+            if tools:
+                payload["tools"] = tools
+                if tool_choice is not None:
+                    payload["tool_choice"] = tool_choice
+            return payload
 
-        # JSON mode (timeout is set on client initialization)
-        try:
-            response = self._client.chat.completions.create(**completion_kwargs)
-        except BadRequestError as exc:
-            msg = str(exc).lower()
-            if "temperature" in msg and "unsupported" in msg and "1" in msg:
-                # Some newer models only accept the default temperature=1.
-                # Remove the parameter and retry once with provider default.
-                if "temperature" in completion_kwargs:
-                    logging.getLogger("ai").warning(
-                        "Model %s rejected temperature=%s; retrying with provider default",
-                        self._model,
-                        completion_kwargs.get("temperature"),
-                    )
-                    completion_kwargs.pop("temperature", None)
-                    response = self._client.chat.completions.create(**completion_kwargs)
-                    msg = None
-            if msg:
+        def _run_completion(current_messages: list[dict[str, Any]]) -> Any:
+            completion_kwargs = _build_kwargs(current_messages)
+            try:
+                return self._client.chat.completions.create(**completion_kwargs)
+            except BadRequestError as exc:
+                msg = str(exc).lower()
+                if "temperature" in msg and "unsupported" in msg and "1" in msg:
+                    if "temperature" in completion_kwargs:
+                        logging.getLogger("ai").warning(
+                            "Model %s rejected temperature=%s; retrying with provider default",
+                            self._model,
+                            completion_kwargs.get("temperature"),
+                        )
+                        completion_kwargs.pop("temperature", None)
+                        return self._client.chat.completions.create(**completion_kwargs)
                 if "max_completion_tokens" in msg and self._token_param == "max_tokens":
-                    # Retry once using the new parameter expected by GPT-4.1/5 style models
                     completion_kwargs.pop("max_tokens", None)
                     completion_kwargs["max_completion_tokens"] = max_output_tokens
                     self._token_param = "max_completion_tokens"
-                    response = self._client.chat.completions.create(**completion_kwargs)
-                else:
-                    raise
+                    return self._client.chat.completions.create(**completion_kwargs)
+                raise
+
+        response = _run_completion(messages)
+        tool_loop_count = 0
+        max_tool_loops = int(os.getenv("AI_MAX_TOOL_CALLS", "3"))
+        while getattr(response.choices[0].message, "tool_calls", None):
+            if not tool_handlers:
+                raise RuntimeError("Model requested a tool call but no handlers were provided.")
+            if tool_loop_count >= max_tool_loops:
+                raise RuntimeError("Exceeded maximum tool call iterations.")
+            tool_loop_count += 1
+            choice = response.choices[0]
+            assistant_entry: Dict[str, Any] = {
+                "role": "assistant",
+                "content": choice.message.content or "",
+                "tool_calls": [],
+            }
+            for tool_call in choice.message.tool_calls or []:
+                assistant_entry["tool_calls"].append(
+                    {
+                        "id": tool_call.id,
+                        "type": tool_call.type,
+                        "function": {
+                            "name": tool_call.function.name,
+                            "arguments": tool_call.function.arguments,
+                        },
+                    }
+                )
+            messages.append(assistant_entry)
+            for tool_call in choice.message.tool_calls or []:
+                handler = tool_handlers.get(tool_call.function.name)
+                if handler is None:
+                    raise RuntimeError(f"No handler registered for tool {tool_call.function.name}")
+                try:
+                    args = json.loads(tool_call.function.arguments or "{}")
+                except Exception:
+                    args = {}
+                try:
+                    tool_output = handler(args) or ""
+                except Exception as handler_exc:
+                    tool_output = json.dumps({"error": str(handler_exc)}, ensure_ascii=False)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_output,
+                    }
+                )
+            response = _run_completion(messages)
+
         txt = (response.choices[0].message.content or "").strip()
         try:
             print("[AI DEBUG] in_tokens=", in_tokens, "max_tokens=", max_output_tokens, "raw_len=", len(txt))

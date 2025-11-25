@@ -11,6 +11,39 @@ from ..models import Product, Item
 
 size_log = logging.getLogger("ai.size_matrix")
 DECIMAL_HEIGHT_PATTERN = re.compile(r'(?<!\d)1[\s\.,/-]+([5-9][0-9])(?!\d)', re.IGNORECASE)
+NUMBER_WORDS = {
+	"sıfır": 0,
+	"bir": 1,
+	"iki": 2,
+	"üç": 3,
+	"dört": 4,
+	"bes": 5,
+	"beş": 5,
+	"alti": 6,
+	"altı": 6,
+	"yedi": 7,
+	"sekiz": 8,
+	"dokuz": 9,
+	"on": 10,
+	"onbir": 11,
+	"on bir": 11,
+	"oniki": 12,
+	"on iki": 12,
+	"onüç": 13,
+	"on üç": 13,
+	"ondört": 14,
+	"on dört": 14,
+	"onbes": 15,
+	"on beş": 15,
+	"onaltı": 16,
+	"on altı": 16,
+	"onyedi": 17,
+	"on yedi": 17,
+	"onsekiz": 18,
+	"on sekiz": 18,
+	"ondokuz": 19,
+	"on dokuz": 19,
+}
 
 NUMERIC_SIZE_MATRIX: Dict[int, List[tuple[int, str]]] = {
 	160: [
@@ -158,8 +191,16 @@ def parse_height_weight(message: str) -> Dict[str, Optional[int]]:
 	if not message or not isinstance(message, str):
 		return {"height_cm": None, "weight_kg": None}
 	
+	if not message or not isinstance(message, str):
+		return {"height_cm": None, "weight_kg": None}
+	
+	lowered = message.lower()
+	for word, val in NUMBER_WORDS.items():
+		if word in lowered:
+			lowered = lowered.replace(word, str(val))
+	
 	# Normalize decimal-like heights (e.g., "1.75", "1 75") into 3-digit cm values
-	normalized_message = DECIMAL_HEIGHT_PATTERN.sub(lambda m: f"1{m.group(1)}", message)
+	normalized_message = DECIMAL_HEIGHT_PATTERN.sub(lambda m: f"1{m.group(1)}", lowered)
 	
 	# Extract all numbers from the normalized message
 	numbers = re.findall(r'\d+', normalized_message)
