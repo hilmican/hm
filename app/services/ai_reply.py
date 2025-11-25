@@ -479,6 +479,31 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 	return history_trimmed, last_customer_message
 
 
+def _detect_conversation_flags(history: List[Dict[str, Any]], product_info: Optional[Dict[str, Any]]) -> Dict[str, bool]:
+	flags: Dict[str, bool] = {}
+	product_name = ""
+	if isinstance(product_info, dict):
+		product_name = str(
+			product_info.get("name")
+			or product_info.get("slug")
+			or product_info.get("slug_or_sku")
+			or ""
+		).lower()
+	for entry in history:
+		if (entry.get("dir") or "in").lower() != "out":
+			continue
+		text = (entry.get("text") or "").strip().lower()
+		if not text:
+			continue
+		if "₺" in text or "adet" in text:
+			flags["intro_shared"] = True
+		if product_name and product_name in text:
+			flags["product_name_shared"] = True
+		if flags.get("intro_shared") and (not product_name or flags.get("product_name_shared")):
+			break
+	return flags
+
+
 def _normalize_state(value: Any, *, fallback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 	if isinstance(value, dict):
 		return value  # type: ignore[return-value]
@@ -528,6 +553,7 @@ def draft_reply(
 			"product_info": product_info,
 		}
 	history, last_customer_message = _load_history(int(conversation_id), limit=limit)
+	conversation_flags = _detect_conversation_flags(history, product_focus_data)
 	transcript = _format_transcript(
 		[
 			{"direction": h.get("dir"), "timestamp_ms": h.get("timestamp_ms"), "text": h.get("text")}
@@ -601,6 +627,8 @@ def draft_reply(
 	state_payload = dict(state or {})
 	hail_already_sent = bool(state_payload.get("hail_sent"))
 	user_payload["state"] = state_payload
+	if conversation_flags:
+		user_payload["conversation_flags"] = conversation_flags
 	
 	# Add parsed data if available
 	if parsed_data:
@@ -709,6 +737,15 @@ Kurallar:
 3. Selamlama sadece ilk yanıtta yapılır; asla ikinci kez tekrarlama.
 """
 
+	repeat_guard_instructions = f"""
+## Tekrar Kontrolü
+
+conversation_flags.intro_shared = {"true" if conversation_flags.get("intro_shared") else "false"}
+
+- Eğer intro_shared true ise fiyatı ve ürün özetini tekrarlama; sadece yeni bilgiler (ör. beden sonucu, kargo/ödeme adımı) paylaş.
+- intro_shared false ise ilk mesajda fiyatı net yazıp kısa teknik özeti tek seferde ver.
+"""
+
 	gender_instructions = f"""
 ## Müşteri Hitap Kuralları
 
@@ -751,6 +788,7 @@ HITAP KURALLARI:
 		sys_prompt_parts.append(f"=== ÜRÜN ÖZEL TALİMATLARI ===\n{pretext_content}")
 	
 	sys_prompt_parts.append(hail_instructions)
+	sys_prompt_parts.append(repeat_guard_instructions)
 	sys_prompt_parts.append(gender_instructions)
 	
 	if product_extra_sys:

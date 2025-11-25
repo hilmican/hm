@@ -16,6 +16,7 @@ from ..services.queue import enqueue
 from ..services.ai_shadow import touch_shadow_state
 from ..services.ai_ig import _detect_focus_product
 from ..services.monitoring import increment_counter
+from ..services.ai_reply import _load_history
 
 router = APIRouter()
 
@@ -93,6 +94,8 @@ def shadow_debug(request: Request, draft_id: int):
     """
     from sqlalchemy import text as _text
     templates = request.app.state.templates
+    conversation_info: dict[str, Any] | None = None
+    history_preview: list[dict[str, Any]] = []
     with get_session() as session:
         row = session.exec(
             _text(
@@ -117,6 +120,28 @@ def shadow_debug(request: Request, draft_id: int):
         actions_json = getattr(row, "actions_json", None) if hasattr(row, "actions_json") else (row[7] if len(row) > 7 else None)
         status = getattr(row, "status", None) if hasattr(row, "status") else (row[8] if len(row) > 8 else None)
         created_at = getattr(row, "created_at", None) if hasattr(row, "created_at") else (row[9] if len(row) > 9 else None)
+        if convo_id:
+            try:
+                conv = session.get(Conversation, int(convo_id))
+                user_row = None
+                if conv and conv.ig_user_id:
+                    user_row = session.exec(
+                        _text("SELECT username, name FROM ig_users WHERE ig_user_id=:uid LIMIT 1").params(uid=str(conv.ig_user_id))
+                    ).first()
+                conversation_info = {
+                    "ig_user_id": str(conv.ig_user_id) if conv and conv.ig_user_id else None,
+                    "username": getattr(user_row, "username", None) if user_row and hasattr(user_row, "username") else (user_row[0] if user_row and len(user_row) > 0 else None),
+                    "name": getattr(user_row, "name", None) if user_row and hasattr(user_row, "name") else (user_row[1] if user_row and len(user_row) > 1 else None),
+                    "is_mock": bool(conv and conv.ig_user_id and str(conv.ig_user_id).startswith("mock_")),
+                    "last_message_at": getattr(conv, "last_message_at", None) if conv else None,
+                }
+            except Exception:
+                conversation_info = None
+    if convo_id:
+        try:
+            history_preview, _ = _load_history(int(convo_id), limit=12)
+        except Exception:
+            history_preview = []
     debug_meta = None
     if json_meta:
         try:
@@ -162,6 +187,8 @@ def shadow_debug(request: Request, draft_id: int):
             "draft": draft,
             "debug_meta": debug_meta,
             "actions": actions,
+            "conversation_info": conversation_info,
+            "history_preview": history_preview,
         },
     )
 

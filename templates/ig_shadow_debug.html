@@ -28,6 +28,41 @@
       {% if draft.created_at %} · Oluşturulma: {{ draft.created_at }}{% endif %}
     </div>
 
+    {% if conversation_info %}
+    <div class="section">
+      <h3>Konuşma Bilgisi</h3>
+      <div class="meta">
+        Kullanıcı: {% if conversation_info.username %}@{{ conversation_info.username }}{% else %}(username yok){% endif %}
+        {% if conversation_info.name %} · {{ conversation_info.name }}{% endif %}
+      </div>
+      <div class="meta">
+        IG User ID: {{ conversation_info.ig_user_id or '-' }}
+        {% if conversation_info.is_mock %}
+          <span class="pill">Mock</span>
+        {% endif %}
+      </div>
+      {% if conversation_info.last_message_at %}
+      <div class="meta">Son mesaj: {{ conversation_info.last_message_at }}</div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if history_preview %}
+    <div class="section">
+      <h3>AI'ya Aktarılan Geçmiş (Özet)</h3>
+      <ul style="padding-left:16px; margin:0;">
+        {% for msg in history_preview %}
+          <li style="margin-bottom:6px;">
+            <strong>{{ (msg.dir or msg.direction or 'in')|upper }}</strong>
+            {% if msg.timestamp_ms %} · {{ msg.timestamp_ms }}{% endif %}
+            · {{ msg.text or '(boş)' }}
+          </li>
+        {% endfor %}
+      </ul>
+      <div class="meta">Not: Bu liste mevcut kurallara göre yeniden oluşturulmuştur.</div>
+    </div>
+    {% endif %}
+
     {% if actions %}
     <div class="section">
       <h3>Planlanan Aksiyonlar</h3>
