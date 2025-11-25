@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import json
 import logging
 import os
@@ -72,6 +72,7 @@ class AIClient:
         max_output_tokens: int | None = None,
         extra_messages: Optional[list[dict[str, Any]]] = None,
         include_raw: bool = False,
+        image_urls: Optional[List[str]] = None,
     ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], str]]:
         if not self._enabled or not self._client:
             raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")
@@ -94,9 +95,28 @@ class AIClient:
         if extra_messages:
             for m in extra_messages:
                 # minimal validation to avoid type errors
-                if isinstance(m, dict) and "role" in m and "content" in m:
-                    messages.append({"role": str(m["role"]), "content": str(m["content"])})
-        messages.append({"role": "user", "content": user_prompt})
+                if not (isinstance(m, dict) and "role" in m and "content" in m):
+                    continue
+                role = str(m["role"])
+                content = m["content"]
+                if isinstance(content, (list, dict)):
+                    messages.append({"role": role, "content": content})
+                else:
+                    messages.append({"role": role, "content": str(content or "")})
+        if image_urls:
+            parts: list[dict[str, Any]] = []
+            if user_prompt:
+                parts.append({"type": "text", "text": user_prompt})
+            for img in image_urls:
+                if not img:
+                    continue
+                parts.append({"type": "image_url", "image_url": {"url": str(img)}})
+            if parts:
+                messages.append({"role": "user", "content": parts})
+            else:
+                messages.append({"role": "user", "content": user_prompt})
+        else:
+            messages.append({"role": "user", "content": user_prompt})
 
         # Compute dynamic max tokens if not provided
         if max_output_tokens is None:

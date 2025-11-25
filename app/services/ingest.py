@@ -1,6 +1,11 @@
-import json
+import base64
 import datetime as dt
+import hashlib
+import io
+import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -13,6 +18,14 @@ _log = _lg.getLogger("ingest")
 _log_up = _lg.getLogger("ingest.upsert")
 from .queue import enqueue
 from sqlalchemy import text as _sql_text
+import httpx
+
+try:
+	from PIL import Image as _PILImage
+	_PIL_STORY_AVAILABLE = True
+except Exception:
+	_PILImage = None  # type: ignore
+	_PIL_STORY_AVAILABLE = False
 
 
 @dataclass
@@ -23,11 +36,201 @@ class _InsertResult:
 	conversation_id: Optional[int]
 	timestamp_ms: Optional[int]
 	direction: Optional[str]
+	story_id: Optional[str]
+	story_url: Optional[str]
 	ad_id: Optional[str]
 	ad_link: Optional[str]
 	ad_title: Optional[str]
 	ad_name: Optional[str]
 	referral_json: Optional[str]
+
+_STORY_MEDIA_SUBDIR = "stories"
+
+
+@dataclass
+class _StoryMediaResult:
+	path: Path
+	thumb_path: Optional[Path]
+	mime: str
+	data_url: Optional[str]
+
+
+def _story_link_key(story_id: Optional[str]) -> Optional[str]:
+	sid = str(story_id or "").strip()
+	if not sid:
+		return None
+	return sid if sid.startswith("story:") else f"story:{sid}"
+
+
+def _sanitize_story_filename(story_id: str) -> str:
+	sid = "".join(ch if ch.isalnum() else "_" for ch in str(story_id))
+	return sid[:80] or "story"
+
+
+def _row_value(row: Any, attr: str, idx: int) -> Any:
+	if row is None:
+		return None
+	if hasattr(row, attr):
+		return getattr(row, attr, None)
+	if isinstance(row, (list, tuple)) and len(row) > idx:
+		return row[idx]
+	return None
+
+
+def _story_media_roots() -> tuple[Path, Path]:
+	media_root = Path(os.getenv("MEDIA_ROOT", "data/media")).resolve() / _STORY_MEDIA_SUBDIR
+	thumb_root = Path(os.getenv("THUMBS_ROOT", "data/thumbs")).resolve() / _STORY_MEDIA_SUBDIR
+	media_root.mkdir(parents=True, exist_ok=True)
+	thumb_root.mkdir(parents=True, exist_ok=True)
+	return media_root, thumb_root
+
+
+def _story_media_paths(story_id: str, mime: Optional[str]) -> tuple[Path, Path]:
+	media_root, thumb_root = _story_media_roots()
+	now = dt.datetime.utcnow()
+	subdir = Path(f"{now.year:04d}") / f"{now.month:02d}" / f"{now.day:02d}"
+	ext = "jpg"
+	if mime:
+		m = mime.split(";")[0].strip().lower()
+		if "/" in m:
+			ext = m.split("/", 1)[1] or ext
+		elif m.startswith("image"):
+			ext = "jpg"
+	filename = f"{_sanitize_story_filename(story_id)}.{ext}"
+	path = media_root / subdir / filename
+	thumb = thumb_root / subdir / f"{_sanitize_story_filename(story_id)}_thumb.jpg"
+	return path, thumb
+
+
+def _write_story_file(path: Path, content: bytes) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_bytes(content)
+
+
+def _make_story_thumb(content: bytes, thumb_path: Path) -> None:
+	if not _PIL_STORY_AVAILABLE:
+		return
+	try:
+		thumb_path.parent.mkdir(parents=True, exist_ok=True)
+		img = _PILImage.open(io.BytesIO(content))  # type: ignore[arg-type]
+		img.thumbnail((512, 512))
+		img.save(thumb_path, format="JPEG", quality=85)
+	except Exception:
+		pass
+
+
+def _encode_story_data_url(content: bytes, mime: Optional[str]) -> str:
+	m = (mime or "image/jpeg").split(";")[0].strip() or "image/jpeg"
+	return f"data:{m};base64,{base64.b64encode(content).decode('ascii')}"
+
+
+def _download_story_media_bytes(story_url: str) -> Optional[tuple[bytes, str]]:
+	if not story_url:
+		return None
+	try:
+		with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+			resp = client.get(story_url, headers={"User-Agent": "HiManStoryBot/1.0"})
+			resp.raise_for_status()
+			mime = resp.headers.get("content-type", "image/jpeg")
+			mime_clean = mime.split(";")[0].strip() if mime else "image/jpeg"
+			return resp.content, mime_clean or "image/jpeg"
+	except Exception as exc:
+		try:
+			_log_up.warning("story media download failed url=%s err=%s", story_url[:120], str(exc)[:200])
+		except Exception:
+			pass
+		return None
+
+
+def _ensure_story_media_cached(session, story_id: str, story_url: Optional[str], cached_row: Optional[Any]) -> Optional[_StoryMediaResult]:
+	if not story_id:
+		return None
+	path_val = None
+	mime_val = None
+	thumb_val = None
+	if cached_row:
+		path_val = _row_value(cached_row, "media_path", 2)
+		mime_val = _row_value(cached_row, "media_mime", 4)
+		thumb_val = _row_value(cached_row, "media_thumb_path", 3)
+	if path_val:
+		try:
+			path_obj = Path(path_val)
+			if path_obj.exists():
+				content = path_obj.read_bytes()
+				data_url = _encode_story_data_url(content, mime_val or "image/jpeg")
+				return _StoryMediaResult(
+					path=path_obj,
+					thumb_path=(Path(thumb_val) if thumb_val else None),
+					mime=mime_val or "image/jpeg",
+					data_url=data_url,
+				)
+		except Exception:
+			pass
+	if not story_url:
+		return None
+	download = _download_story_media_bytes(story_url)
+	if not download:
+		return None
+	content, mime = download
+	path, thumb = _story_media_paths(story_id, mime)
+	try:
+		_write_story_file(path, content)
+		if thumb:
+			_make_story_thumb(content, thumb)
+	except Exception:
+		return None
+	checksum = hashlib.sha256(content).hexdigest()
+	try:
+		session.exec(
+			_sql_text(
+				"""
+				UPDATE stories
+				SET media_path=:path,
+				    media_thumb_path=:thumb,
+				    media_mime=:mime,
+				    media_checksum=:chk,
+				    media_fetched_at=CURRENT_TIMESTAMP
+				WHERE story_id=:sid
+				"""
+			).bindparams(path=str(path), thumb=(str(thumb) if thumb else None), mime=mime, chk=checksum, sid=str(story_id))
+		)
+	except Exception:
+		pass
+	return _StoryMediaResult(path=path, thumb_path=thumb, mime=mime, data_url=_encode_story_data_url(content, mime))
+
+
+def _ensure_story_cached_in_ads(session, story_id: str, story_url: Optional[str]) -> None:
+	key = _story_link_key(story_id)
+	if not key:
+		return
+	label = f"Story {story_id}"
+	try:
+		stmt = _sql_text(
+			"INSERT IGNORE INTO ads(ad_id, link_type, name, image_url, link, updated_at) VALUES (:id, 'story', :name, :url, :url, CURRENT_TIMESTAMP)"
+		).bindparams(id=str(key), name=label, url=story_url)
+		session.exec(stmt)
+	except Exception:
+		try:
+			stmt_alt = _sql_text(
+				"INSERT OR IGNORE INTO ads(ad_id, link_type, name, image_url, link, updated_at) VALUES (:id, 'story', :name, :url, :url, CURRENT_TIMESTAMP)"
+			).bindparams(id=str(key), name=label, url=story_url)
+			session.exec(stmt_alt)
+		except Exception:
+			try:
+				stmt_sel = _sql_text("SELECT ad_id FROM ads WHERE ad_id=:id").bindparams(id=str(key))
+				row = session.exec(stmt_sel).first()
+				if row:
+					stmt_update = _sql_text(
+						"UPDATE ads SET link_type='story', name=COALESCE(:name,name), image_url=COALESCE(:url,image_url), link=COALESCE(:url,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id"
+					).bindparams(id=str(key), name=label, url=story_url)
+					session.exec(stmt_update)
+				else:
+					stmt_insert = _sql_text(
+						"INSERT INTO ads(ad_id, link_type, name, image_url, link, updated_at) VALUES (:id, 'story', :name, :url, :url, CURRENT_TIMESTAMP)"
+					).bindparams(id=str(key), name=label, url=story_url)
+					session.exec(stmt_insert)
+			except Exception:
+				pass
 
 # MySQL-only backend
 
@@ -344,6 +547,7 @@ def _update_conversation_summary_from_message(
 	ad_id: Optional[str],
 	ad_link: Optional[str],
 	ad_title: Optional[str],
+	story_id: Optional[str] = None,
 	post_id: Optional[str] = None,
 ) -> None:
 	"""
@@ -388,13 +592,18 @@ def _update_conversation_summary_from_message(
 		except Exception:
 			ts_dt = None
 		
-		# Determine link_type and link_id (prioritize post over ad)
+		# Determine link_type and link_id (prioritize story > post > ad)
 		link_type = None
 		link_id = None
-		if post_id:
+		if story_id:
+			story_key = _story_link_key(story_id)
+			if story_key:
+				link_type = 'story'
+				link_id = story_key
+		if not link_type and post_id:
 			link_type = 'post'
 			link_id = str(post_id)
-		elif ad_id:
+		elif not link_type and ad_id:
 			link_type = 'ad'
 			link_id = str(ad_id)
 		
@@ -794,6 +1003,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		ad_id=str(ad_id) if ad_id is not None else None,
 		ad_link=ad_link,
 		ad_title=ad_title,
+		story_id=str(story_id) if story_id is not None else None,
 		post_id=post_id,
 	)
 	# upsert ads cache
@@ -954,6 +1164,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		if story_id:
 			session.exec(_sql_text("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES (:id, :url, CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
 			session.exec(_sql_text("UPDATE stories SET url=COALESCE(:url,url), updated_at=CURRENT_TIMESTAMP WHERE story_id=:id")).params(id=str(story_id), url=(str(story_url) if story_url else None))
+			_ensure_story_cached_in_ads(session, str(story_id), story_url)
 	except Exception:
 		pass
 	shadow_ts = None
@@ -971,6 +1182,8 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		conversation_id=int(conversation_pk) if conversation_pk is not None else None,
 		timestamp_ms=shadow_ts,
 		direction=direction,
+		story_id=str(story_id) if story_id is not None else None,
+		story_url=story_url,
 		ad_id=str(ad_id) if ad_id is not None else None,
 		ad_link=ad_link,
 		ad_title=ad_title,
@@ -1001,6 +1214,203 @@ def _derive_ad_title_for_linking(
 		except Exception:
 			pass
 	return ad_title_final or ad_name
+
+
+def _auto_link_story_reply(message_id: int, story_id: Optional[str], story_url: Optional[str], message_text: Optional[str]) -> None:
+	"""
+	Automatically match an inbound story reply to a product using the story image.
+	"""
+	if not story_id:
+		return
+	story_key = _story_link_key(story_id)
+	if not story_key:
+		return
+	try:
+		from ..models import Product
+		from sqlmodel import select
+	except Exception:
+		return
+	story_meta: Dict[str, Any] = {}
+	product_entries: List[Dict[str, Any]] = []
+	media_result: Optional[_StoryMediaResult] = None
+	with get_session() as session:
+		existing = session.exec(
+			_sql_text("SELECT story_id, product_id FROM stories_products WHERE story_id=:sid LIMIT 1").bindparams(
+				sid=str(story_id)
+			)
+		).first()
+		if existing:
+			existing_pid = getattr(existing, "product_id", None) if hasattr(existing, "product_id") else (
+				existing[1] if isinstance(existing, (list, tuple)) and len(existing) > 1 else None
+			)
+			if existing_pid:
+				return
+		story_row = session.exec(
+			_sql_text("SELECT story_id, url, media_path, media_thumb_path, media_mime FROM stories WHERE story_id=:sid LIMIT 1").bindparams(
+				sid=str(story_id)
+			)
+		).first()
+		cached_url = story_url or _row_value(story_row, "url", 1)
+		media_result = _ensure_story_media_cached(session, str(story_id), cached_url, story_row)
+		_ensure_story_cached_in_ads(session, str(story_id), cached_url)
+		story_meta["url"] = cached_url
+		story_meta["media"] = media_result
+		products = session.exec(select(Product).limit(500)).all()
+		for prod in products:
+			if prod.id is None or not prod.name:
+				continue
+			product_entries.append({"id": int(prod.id), "name": prod.name, "slug": prod.slug})
+	try:
+		from .ai import AIClient, get_ai_model_from_settings
+		from ..services.prompts import STORY_PRODUCT_MATCH_SYSTEM_PROMPT
+	except Exception:
+		return
+	try:
+		model = get_ai_model_from_settings()
+		ai = AIClient(model=model)
+		if not getattr(ai, "enabled", False):
+			return
+	except Exception:
+		return
+	image_sources: List[str] = []
+	final_url = story_meta.get("url")
+	if final_url:
+		image_sources.append(str(final_url))
+	if media_result and media_result.data_url:
+		image_sources.append(media_result.data_url)
+	if not image_sources:
+		return
+	body = {
+		"story_id": str(story_id),
+		"message_text": (message_text or "").strip(),
+		"known_products": [{"id": p["id"], "name": p["name"]} for p in product_entries if p.get("id") and p.get("name")],
+	}
+	user_prompt = (
+		"Lütfen SADECE geçerli JSON döndür. Markdown/kod bloğu/yorum ekleme. "
+		"Tüm alanlar çift tırnaklı olmalı.\nGirdi:\n" + json.dumps(body, ensure_ascii=False)
+	)
+	try:
+		suggestion = ai.generate_json(
+			system_prompt=STORY_PRODUCT_MATCH_SYSTEM_PROMPT,
+			user_prompt=user_prompt,
+			image_urls=image_sources[:2],
+			temperature=0.2,
+		)
+	except Exception as exc:
+		try:
+			_log_up.warning("story auto-link AI error story=%s err=%s", str(story_id), str(exc)[:200])
+		except Exception:
+			pass
+		return
+	product_id = suggestion.get("product_id")
+	product_name = suggestion.get("product_name")
+	confidence = suggestion.get("confidence", 0.0)
+	confidence_float = float(confidence) if confidence is not None else 0.0
+	if product_id is not None:
+		try:
+			product_id = int(product_id)
+		except (TypeError, ValueError):
+			product_id = None
+	if product_id is None and product_name:
+		try:
+			from ..utils.slugify import slugify
+		except Exception:
+			slugify = None  # type: ignore
+		if slugify:
+			slug = slugify(product_name)
+			with get_session() as session:
+				existing_prod = session.exec(select(Product).where(Product.slug == slug)).first()
+				if existing_prod:
+					product_id = existing_prod.id
+				else:
+					new_product = Product(name=product_name, slug=slug, default_unit="adet", default_price=None)
+					session.add(new_product)
+					session.flush()
+					if new_product.id:
+						product_id = new_product.id
+	min_confidence = 0.7
+	if not product_id or confidence_float < min_confidence:
+		try:
+			_log.debug(
+				"ingest: story %s not auto-linked (product_id=%s confidence=%.2f < %.2f)",
+				str(story_id),
+				product_id,
+				confidence_float,
+				min_confidence,
+			)
+		except Exception:
+			pass
+		return
+	ai_result_json = json.dumps(suggestion, ensure_ascii=False)
+	with get_session() as session:
+		try:
+			session.exec(
+				_sql_text(
+					"""
+					INSERT INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json)
+					VALUES(:sid, :pid, NULL, 1, :conf, :raw)
+					ON DUPLICATE KEY UPDATE
+						product_id=VALUES(product_id),
+						auto_linked=1,
+						confidence=VALUES(confidence),
+						ai_result_json=VALUES(ai_result_json)
+					"""
+				).bindparams(
+					sid=str(story_id),
+					pid=int(product_id),
+					conf=float(confidence_float),
+					raw=ai_result_json,
+				)
+			)
+		except Exception:
+			try:
+				session.exec(
+					_sql_text(
+						"INSERT OR REPLACE INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json) VALUES(:sid, :pid, NULL, 1, :conf, :raw)"
+					).bindparams(sid=str(story_id), pid=int(product_id), conf=float(confidence_float), raw=ai_result_json)
+				)
+			except Exception:
+				session.exec(
+					_sql_text(
+						"UPDATE stories_products SET product_id=:pid, auto_linked=1, confidence=:conf, ai_result_json=:raw WHERE story_id=:sid"
+					).bindparams(sid=str(story_id), pid=int(product_id), conf=float(confidence_float), raw=ai_result_json)
+				)
+		try:
+			session.exec(
+				_sql_text(
+					"""
+					INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked)
+					VALUES(:aid, 'story', :pid, NULL, 1)
+					ON DUPLICATE KEY UPDATE
+						product_id=VALUES(product_id),
+						auto_linked=1,
+						link_type='story'
+					"""
+				).bindparams(aid=str(story_key), pid=int(product_id))
+			)
+		except Exception:
+			try:
+				session.exec(
+					_sql_text(
+						"INSERT OR REPLACE INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:aid, 'story', :pid, NULL, 1)"
+					).bindparams(aid=str(story_key), pid=int(product_id))
+				)
+			except Exception:
+				session.exec(
+					_sql_text(
+						"UPDATE ads_products SET product_id=:pid, link_type='story', auto_linked=1 WHERE ad_id=:aid"
+					).bindparams(aid=str(story_key), pid=int(product_id))
+				)
+	try:
+		_log.info(
+			"ingest: auto-linked story %s (message_id=%s) to product %s (confidence=%.2f)",
+			str(story_id),
+			message_id,
+			product_id,
+			confidence_float,
+		)
+	except Exception:
+		pass
 
 
 def _auto_link_instagram_post(message_id: int, message_text: Optional[str], attachments: Any) -> None:
@@ -1684,6 +2094,7 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		ad_id=str(ad_id) if ad_id is not None else None,
 		ad_link=ad_link,
 		ad_title=ad_title,
+		story_id=str(story_id) if story_id is not None else None,
 	)
 	# story cache
 	try:
@@ -1691,6 +2102,7 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 			from sqlalchemy import text as _t
 			session.exec(_t("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES (:id,:url,CURRENT_TIMESTAMP)")).params(id=str(story_id), url=(str(story_url) if story_url else None))
 			session.exec(_t("UPDATE stories SET url=COALESCE(:url,url), updated_at=CURRENT_TIMESTAMP WHERE story_id=:id")).params(id=str(story_id), url=(str(story_url) if story_url else None))
+			_ensure_story_cached_in_ads(session, str(story_id), story_url)
 	except Exception:
 		pass
 	return int(row.id)
@@ -1803,6 +2215,19 @@ def handle(raw_event_id: int) -> int:
 						)
 				except Exception:
 					pass
+				try:
+					if insert_result.story_id and (insert_result.direction or "in") == "in":
+						_auto_link_story_reply(
+							insert_result.message_id,
+							insert_result.story_id,
+							insert_result.story_url,
+							insert_result.message_text,
+						)
+				except Exception as e:
+					try:
+						_log.warning("ingest: auto-link story deferred error mid=%s err=%s", str(mid), str(e))
+					except Exception:
+						pass
 				try:
 					if insert_result.attachments:
 						_auto_link_instagram_post(insert_result.message_id, insert_result.message_text, insert_result.attachments)

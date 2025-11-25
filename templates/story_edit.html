@@ -22,13 +22,30 @@
         <div>
           <div><strong>Story ID:</strong> {{ story.story_id or '-' }}</div>
           {% if story.url %}<div><a href="{{ story.url }}" target="_blank" rel="noopener">Story link ↗</a></div>{% endif %}
+          {% if story.media_path %}<div class="meta">Yerel medya: {{ story.media_path }}</div>{% endif %}
+          {% if story.media_mime %}<div class="meta">Tip: {{ story.media_mime }}</div>{% endif %}
+          {% if story.media_fetched_at %}<div class="meta">İndirildi: {{ story.media_fetched_at }}</div>{% endif %}
+          {% if story.media_checksum %}<div class="meta">Checksum: {{ story.media_checksum }}</div>{% endif %}
           {% if story.updated_at %}<div class="meta">Güncellendi: {{ story.updated_at }}</div>{% endif %}
+          {% if story_link_key %}<div class="meta">Ad/post kaydı: <a href="/ads/{{ story_link_key }}/edit">/ads/{{ story_link_key }}/edit</a></div>{% endif %}
         </div>
       </div>
     </div>
     <div class="card">
       <h3 style="margin:0 0 8px 0;">Mevcut Bağlantı</h3>
-      <div class="meta">SKU: {{ mapping.sku or '-' }} · Product ID: {{ mapping.product_id or '-' }}</div>
+      <div class="meta">
+        SKU: {{ mapping.sku or '-' }} · Product ID: {{ mapping.product_id or '-' }}
+      </div>
+      <div class="meta">
+        Kaynağı: {{ mapping.auto_linked and 'AI' or 'Manuel' }}
+        {% if mapping.confidence %}· Güven: {{ '%.2f'|format(mapping.confidence) }}{% endif %}
+      </div>
+      {% if mapping.ai_result_json %}
+      <details style="margin-top:6px;">
+        <summary>AI sonucu</summary>
+        <pre style="white-space:pre-wrap;font-size:12px;">{{ mapping.ai_result_json }}</pre>
+      </details>
+      {% endif %}
     </div>
     <form method="post" action="/stories/{{ story.story_id or '' }}/save" style="margin-top:12px;">
       <div style="display:grid; gap:12px; max-width:420px;">

@@ -391,6 +391,11 @@ def init_db() -> None:
                         CREATE TABLE IF NOT EXISTS stories (
                             story_id VARCHAR(128) PRIMARY KEY,
                             url TEXT NULL,
+                            media_path TEXT NULL,
+                            media_thumb_path TEXT NULL,
+                            media_mime VARCHAR(64) NULL,
+                            media_checksum VARCHAR(128) NULL,
+                            media_fetched_at DATETIME NULL,
                             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                         )
                         """
@@ -404,12 +409,53 @@ def init_db() -> None:
                             story_id VARCHAR(128) PRIMARY KEY,
                             product_id INTEGER NULL,
                             sku VARCHAR(128) NULL,
+                            auto_linked TINYINT(1) NOT NULL DEFAULT 0,
+                            confidence FLOAT NULL,
+                            ai_result_json LONGTEXT NULL,
                             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                             INDEX idx_stories_products_product (product_id),
                             INDEX idx_stories_products_sku (sku)
                         )
                         """
                     )
+                except Exception:
+                    pass
+                # Add media metadata columns on stories table if missing
+                try:
+                    rows = conn.exec_driver_sql(
+                        """
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stories'
+                        """
+                    ).fetchall()
+                    have_cols = {str(r[0]).lower() for r in rows or []}
+                    if 'media_path' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE stories ADD COLUMN media_path TEXT NULL")
+                    if 'media_thumb_path' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE stories ADD COLUMN media_thumb_path TEXT NULL")
+                    if 'media_mime' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE stories ADD COLUMN media_mime VARCHAR(64) NULL")
+                    if 'media_checksum' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE stories ADD COLUMN media_checksum VARCHAR(128) NULL")
+                    if 'media_fetched_at' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE stories ADD COLUMN media_fetched_at DATETIME NULL")
+                except Exception:
+                    pass
+                # Ensure stories_products has AI metadata columns
+                try:
+                    rows = conn.exec_driver_sql(
+                        """
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stories_products'
+                        """
+                    ).fetchall()
+                    have_cols = {str(r[0]).lower() for r in rows or []}
+                    if 'auto_linked' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE stories_products ADD COLUMN auto_linked TINYINT(1) NOT NULL DEFAULT 0")
+                    if 'confidence' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE stories_products ADD COLUMN confidence FLOAT NULL")
+                    if 'ai_result_json' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE stories_products ADD COLUMN ai_result_json LONGTEXT NULL")
                 except Exception:
                     pass
                 # Posts cache and mapping (MySQL)
