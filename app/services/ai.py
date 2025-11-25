@@ -129,14 +129,27 @@ class AIClient:
             response = self._client.chat.completions.create(**completion_kwargs)
         except BadRequestError as exc:
             msg = str(exc).lower()
-            if "max_completion_tokens" in msg and self._token_param == "max_tokens":
-                # Retry once using the new parameter expected by GPT-4.1/5 style models
-                completion_kwargs.pop("max_tokens", None)
-                completion_kwargs["max_completion_tokens"] = max_output_tokens
-                self._token_param = "max_completion_tokens"
-                response = self._client.chat.completions.create(**completion_kwargs)
-            else:
-                raise
+            if "temperature" in msg and "unsupported" in msg and "1" in msg:
+                # Some newer models only accept the default temperature=1.
+                # Remove the parameter and retry once with provider default.
+                if "temperature" in completion_kwargs:
+                    logging.getLogger("ai").warning(
+                        "Model %s rejected temperature=%s; retrying with provider default",
+                        self._model,
+                        completion_kwargs.get("temperature"),
+                    )
+                    completion_kwargs.pop("temperature", None)
+                    response = self._client.chat.completions.create(**completion_kwargs)
+                    msg = None
+            if msg:
+                if "max_completion_tokens" in msg and self._token_param == "max_tokens":
+                    # Retry once using the new parameter expected by GPT-4.1/5 style models
+                    completion_kwargs.pop("max_tokens", None)
+                    completion_kwargs["max_completion_tokens"] = max_output_tokens
+                    self._token_param = "max_completion_tokens"
+                    response = self._client.chat.completions.create(**completion_kwargs)
+                else:
+                    raise
         txt = (response.choices[0].message.content or "").strip()
         try:
             print("[AI DEBUG] in_tokens=", in_tokens, "max_tokens=", max_output_tokens, "raw_len=", len(txt))
