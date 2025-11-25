@@ -3,7 +3,12 @@ Mock conversation tester router for testing AI reply system.
 """
 import datetime as dt
 import json
-from typing import Optional
+from typing import Optional, Union
+
+try:
+	from zoneinfo import ZoneInfo
+except ImportError:  # Python < 3.9 fallback, though project uses 3.11+
+	ZoneInfo = None  # type: ignore
 
 from fastapi import APIRouter, Request, HTTPException, Form
 from fastapi.responses import RedirectResponse, JSONResponse
@@ -19,6 +24,53 @@ from app.services.mock_tester import (
 )
 
 router = APIRouter(prefix="/mock-tester", tags=["mock-tester"])
+
+_UTC = dt.timezone.utc
+if ZoneInfo:
+	_UTC3 = ZoneInfo("Europe/Istanbul")
+else:
+	_UTC3 = dt.timezone(dt.timedelta(hours=3))
+
+
+def _format_utc3(value: Union[dt.datetime, int, float, str, None]) -> Optional[str]:
+	"""Return a human readable UTC+3 string for dt/timestamp inputs."""
+	if value is None:
+		return None
+	dt_value: Optional[dt.datetime] = None
+
+	if isinstance(value, (int, float)):
+		# Assume milliseconds when value is large
+		try:
+			if value > 10_000_000_000:  # looks like ms
+				dt_value = dt.datetime.fromtimestamp(value / 1000, tz=_UTC)
+			else:
+				dt_value = dt.datetime.fromtimestamp(value, tz=_UTC)
+		except Exception:
+			dt_value = None
+	elif isinstance(value, dt.datetime):
+		if value.tzinfo is None:
+			dt_value = value.replace(tzinfo=_UTC)
+		else:
+			dt_value = value.astimezone(_UTC)
+	else:
+		try:
+			parsed = dt.datetime.fromisoformat(str(value))
+			if parsed.tzinfo is None:
+				dt_value = parsed.replace(tzinfo=_UTC)
+			else:
+				dt_value = parsed.astimezone(_UTC)
+		except Exception:
+			return str(value)
+
+	if dt_value is None:
+		return str(value)
+
+	try:
+		local_dt = dt_value.astimezone(_UTC3)
+	except Exception:
+		local_dt = dt_value
+
+	return local_dt.strftime("%Y-%m-%d %H:%M:%S UTC+3")
 
 
 @router.get("")
@@ -51,6 +103,7 @@ async def mock_tester_index(request: Request):
 				name = row.name if hasattr(row, "name") else row[5]
 				link_id = row.last_link_id if hasattr(row, "last_link_id") else row[6]
 				link_type = row.last_link_type if hasattr(row, "last_link_type") else row[7]
+				last_at_display = _format_utc3(last_at)
 				
 				mock_conversations.append({
 					"conversation_id": convo_id,
@@ -58,7 +111,7 @@ async def mock_tester_index(request: Request):
 					"username": username,
 					"name": name,
 					"last_message_text": last_text,
-					"last_message_at": last_at,
+					"last_message_at": last_at_display,
 					"link_id": link_id,
 					"link_type": link_type,
 				})
@@ -194,7 +247,7 @@ async def view_conversation(request: Request, conversation_id: int, limit: int =
 					"confidence": row.confidence,
 					"reason": row.reason,
 					"status": row.status,
-					"created_at": row.created_at,
+					"created_at": _format_utc3(row.created_at),
 					"actions_json": row.actions_json,
 				})
 		except Exception:
@@ -240,7 +293,7 @@ async def view_conversation(request: Request, conversation_id: int, limit: int =
 				shadow_state = {
 					"status": row.status if hasattr(row, "status") else row[0],
 					"last_inbound_ms": row.last_inbound_ms if hasattr(row, "last_inbound_ms") else row[1],
-					"next_attempt_at": row.next_attempt_at if hasattr(row, "next_attempt_at") else row[2],
+					"next_attempt_at": _format_utc3(row.next_attempt_at if hasattr(row, "next_attempt_at") else row[2]),
 					"postpone_count": row.postpone_count if hasattr(row, "postpone_count") else row[3],
 				}
 		except Exception:
