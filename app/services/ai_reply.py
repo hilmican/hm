@@ -520,6 +520,7 @@ def draft_reply(
 		"product_images": product_images,
 	}
 	state_payload = dict(state or {})
+	hail_already_sent = bool(state_payload.get("hail_sent"))
 	user_payload["state"] = state_payload
 	
 	# Add parsed data if available
@@ -618,6 +619,17 @@ def draft_reply(
 			pretext_content = get_global_system_prompt()
 
 	# Build gender detection instructions
+	hail_instructions = f"""
+## Hitap Takibi Durumu
+
+Şu anki state.hail_sent değeri: {"true" if hail_already_sent else "false"}
+
+Kurallar:
+1. Eğer state.hail_sent false ise bu cevabın başında sadece bir kez uygun hitapla (abim/ablam/efendim) selamla ve cevabı üretirken state objesine `{{"hail_sent": true}}` ekle.
+2. Eğer state.hail_sent true ise artık selamlama yapma; doğrudan içeriğe geç ve state.hail_sent değerini true olarak koru.
+3. Selamlama sadece ilk yanıtta yapılır; asla ikinci kez tekrarlama.
+"""
+
 	gender_instructions = f"""
 ## Müşteri Hitap Kuralları
 
@@ -659,6 +671,7 @@ HITAP KURALLARI:
 	if pretext_content:
 		sys_prompt_parts.append(f"=== ÜRÜN ÖZEL TALİMATLARI ===\n{pretext_content}")
 	
+	sys_prompt_parts.append(hail_instructions)
 	sys_prompt_parts.append(gender_instructions)
 	
 	if product_extra_sys:
