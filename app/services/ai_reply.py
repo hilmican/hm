@@ -376,11 +376,12 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 	
 	history_list: [{"dir": "in|out", "text": "str", "timestamp_ms": int}, ...]
 	"""
-	history_all: List[Dict[str, Any]] = []
+	history_from_messages: List[Dict[str, Any]] = []
 	last_customer_message = ""
 	last_customer_idx: Optional[int] = None
 	is_mock_conversation = False
 	shadow_rows: List[AiShadowReply] = []
+	mock_outbound: List[Dict[str, Any]] = []
 	limit_val = max(1, min(limit, 100))
 
 	def _dt_to_ms(value: Any) -> int:
@@ -443,7 +444,7 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 				"text": (m.text or ""),
 				"timestamp_ms": int(m.timestamp_ms or 0),
 			}
-			history_all.append(entry)
+			history_from_messages.append(entry)
 		except Exception:
 			continue
 
@@ -458,24 +459,30 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 					"text": text_val,
 					"timestamp_ms": _dt_to_ms(getattr(reply, "created_at", None)),
 				}
-				history_all.append(entry)
+				mock_outbound.append(entry)
 			except Exception:
 				continue
 
-	if history_all:
-		history_all.sort(key=lambda item: item.get("timestamp_ms") or 0)
+	history_trim_source = list(history_from_messages)
+	if history_trim_source:
+		history_trim_source.sort(key=lambda item: item.get("timestamp_ms") or 0)
 		last_customer_idx = None
 		last_customer_message = ""
-		for idx, entry in enumerate(history_all):
+		for idx, entry in enumerate(history_trim_source):
 			if (entry.get("dir") or "in").lower() == "in" and (entry.get("text") or "").strip():
 				last_customer_idx = idx
 				last_customer_message = entry.get("text") or ""
 	if last_customer_idx is not None:
-		history_trimmed = history_all[: last_customer_idx + 1]
+		history_trimmed = history_trim_source[: last_customer_idx + 1]
 	else:
-		history_trimmed = history_all
+		history_trimmed = history_trim_source
 		if not last_customer_message:
 			last_customer_message = ""
+
+	if mock_outbound:
+		history_trimmed = (history_trimmed or []) + mock_outbound
+		history_trimmed.sort(key=lambda item: item.get("timestamp_ms") or 0)
+
 	return history_trimmed, last_customer_message
 
 
