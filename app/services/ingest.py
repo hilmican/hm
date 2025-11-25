@@ -1223,12 +1223,14 @@ def _auto_link_ad(ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -
 			products = session.exec(select(Product).limit(500)).all()
 			product_list = [{"id": p.id, "name": p.name} for p in products]
 
+		temp_opt_out = False
 		try:
-			from .ai import AIClient, get_ai_model_from_settings
+			from .ai import AIClient, get_ai_model_from_settings, is_shadow_temperature_opt_out
 			from ..services.prompts import AD_PRODUCT_MATCH_SYSTEM_PROMPT
 
 			model = get_ai_model_from_settings()
 			ai = AIClient(model=model)
+			temp_opt_out = is_shadow_temperature_opt_out()
 			if not ai or not getattr(ai, "enabled", False):
 				_log.debug("ingest: AI not available for ad linking")
 				return
@@ -1252,7 +1254,11 @@ def _auto_link_ad(ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -
 			"Tüm alanlar çift tırnaklı olmalı.\nGirdi:\n" + json.dumps(body, ensure_ascii=False)
 		)
 
-		result = ai.generate_json(system_prompt=AD_PRODUCT_MATCH_SYSTEM_PROMPT, user_prompt=user_prompt)
+		result = ai.generate_json(
+			system_prompt=AD_PRODUCT_MATCH_SYSTEM_PROMPT,
+			user_prompt=user_prompt,
+			temperature=None if temp_opt_out else 0.2,
+		)
 
 		product_id = result.get("product_id")
 		product_name = result.get("product_name")
