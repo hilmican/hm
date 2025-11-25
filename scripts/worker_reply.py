@@ -13,6 +13,7 @@ from sqlmodel import select
 
 from app.services.ai_reply import draft_reply
 from app.services.instagram_api import send_message
+from app.services.ai_orders import get_candidate_snapshot
 from app.models import SystemSetting, Product
 
 log = logging.getLogger("worker.reply")
@@ -20,6 +21,14 @@ logging.basicConfig(level=logging.INFO)
 
 # Minimum confidence threshold to auto-send AI replies (0.0-1.0)
 AUTO_SEND_CONFIDENCE_THRESHOLD = float(os.getenv("AI_AUTO_SEND_CONFIDENCE", "0.7"))
+
+ORDER_STATUS_TOOL_NAMES = {
+	"create_ai_order_candidate",
+	"mark_ai_order_not_interested",
+	"mark_ai_order_very_interested",
+	"place_ai_order_candidate",
+}
+CRITICAL_ORDER_STEPS = {"awaiting_payment", "awaiting_address", "confirmed_by_customer", "ready_to_ship"}
 
 
 def _decode_escape_sequences(text: str) -> str:
@@ -379,6 +388,41 @@ def main() -> None:
 				except Exception:
 					pass
 				new_state = _coerce_state(data.get("state"), fallback=current_state)
+				state_last_step = ""
+				asked_payment = False
+				asked_address = False
+				if isinstance(new_state, dict):
+					state_last_step = str(new_state.get("last_step") or "").strip().lower()
+					asked_payment = bool(new_state.get("asked_payment"))
+					asked_address = bool(new_state.get("asked_address"))
+				candidate_tools_called = [
+					cb.get("name")
+					for cb in function_callbacks
+					if isinstance(cb, dict) and cb.get("name") in ORDER_STATUS_TOOL_NAMES
+				]
+				if (
+					not candidate_tools_called
+					and (asked_payment or asked_address or state_last_step in CRITICAL_ORDER_STEPS)
+				):
+					try:
+						candidate_snapshot = get_candidate_snapshot(int(cid))
+					except Exception as snapshot_err:
+						candidate_snapshot = None
+						try:
+							log.warning("ai_shadow: candidate snapshot lookup failed cid=%s err=%s", cid, snapshot_err)
+						except Exception:
+							pass
+					if candidate_snapshot is None:
+						try:
+							log.warning(
+								"ai_shadow: missing order status tool call cid=%s last_step=%s asked_payment=%s asked_address=%s",
+								cid,
+								state_last_step or "unknown",
+								asked_payment,
+								asked_address,
+							)
+						except Exception:
+							pass
 				state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
 				# Block when conversation isn't linked to a product/ad
 				if data.get("missing_product_context"):
