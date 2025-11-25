@@ -714,7 +714,7 @@ def draft_reply(
 	)
 
 	def _handle_measurement_tool(args: Dict[str, Any]) -> str:
-		nonlocal height_cm, weight_kg, size_suggestion, measurements_from_tool
+		nonlocal height_cm, weight_kg, size_suggestion, measurements_from_tool, parsed_data
 		height_val = args.get("height_cm")
 		weight_val = args.get("weight_kg")
 		try:
@@ -754,6 +754,9 @@ def draft_reply(
 		}
 		if size_suggestion:
 			payload["size_suggestion"] = size_suggestion
+		for key, value in payload.items():
+			if value:
+				parsed_data[key] = value
 		return json.dumps(payload, ensure_ascii=False)
 
 	tool_handlers["set_customer_measurements"] = _handle_measurement_tool
@@ -786,6 +789,7 @@ def draft_reply(
 		"- Kullanıcı boy+kilo verdiğinde `set_customer_measurements` fonksiyonunu MUTLAKA çağır.\n"
 		"- Fonksiyon çıktısındaki `size_suggestion` varsa aynen kullan; yoksa beden tablosunu takip et.\n"
 		"- Fonksiyon çağrısı yapmadan yeni ölçü isteme.\n"
+		"- Fonksiyon çağrısı yaptığını veya ölçüleri backend'e ilettiğini kullanıcıya ASLA söyleme; sadece sonuçla devam et.\n"
 	)
 	if function_callbacks:
 		user_prompt += "\n=== FONKSİYON ÇAĞRILARI ===\n"

@@ -14,6 +14,7 @@ DECIMAL_HEIGHT_PATTERN = re.compile(r'(?<!\d)1[\s\.,/-]+([5-9][0-9])(?!\d)', re.
 NUMBER_WORDS = {
 	"sıfır": 0,
 	"bir": 1,
+	"bi": 1,
 	"iki": 2,
 	"üç": 3,
 	"dört": 4,
@@ -43,6 +44,19 @@ NUMBER_WORDS = {
 	"on sekiz": 18,
 	"ondokuz": 19,
 	"on dokuz": 19,
+	"yirmi": 20,
+	"otuz": 30,
+	"kirk": 40,
+	"kırk": 40,
+	"elli": 50,
+	"altmis": 60,
+	"altmış": 60,
+	"atmıs": 60,
+	"atmış": 60,
+	"yetmis": 70,
+	"yetmiş": 70,
+	"seksen": 80,
+	"doksan": 90,
 }
 
 NUMERIC_SIZE_MATRIX: Dict[int, List[tuple[int, str]]] = {

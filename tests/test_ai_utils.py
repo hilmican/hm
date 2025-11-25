@@ -18,3 +18,9 @@ def test_parse_height_weight_accepts_spelled_height():
 	assert result["height_cm"] == 160
 	assert result["weight_kg"] == 78
 
+
+def test_parse_height_weight_accepts_compound_word_height():
+	result = parse_height_weight("kral boyum biratmış kilom 78")
+	assert result["height_cm"] == 160
+	assert result["weight_kg"] == 78
+
