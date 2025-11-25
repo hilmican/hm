@@ -35,6 +35,24 @@ MAX_AI_IMAGES_PER_REPLY = int(os.getenv("AI_MAX_PRODUCT_IMAGES", "3"))
 log = logging.getLogger("ai.reply")
 
 
+def _log_function_callback(
+	conversation_id: int,
+	name: str,
+	arguments: Dict[str, Any],
+	result: Dict[str, Any],
+) -> None:
+	try:
+		log.info(
+			"ai_function_callback conversation_id=%s name=%s arguments=%s result=%s",
+			conversation_id,
+			name,
+			arguments,
+			result,
+		)
+	except Exception:
+		pass
+
+
 def _decode_escape_sequences(text: str) -> str:
 	"""
 	Decode literal escape sequences like \\n, \\t, etc. to actual characters.
@@ -659,6 +677,7 @@ def draft_reply(
 	user_payload["state"] = state_payload
 	if conversation_flags:
 		user_payload["conversation_flags"] = conversation_flags
+	function_callbacks: List[Dict[str, Any]] = []
 	
 	# Add parsed data if available
 	if parsed_data:
@@ -667,6 +686,15 @@ def draft_reply(
 			log.info("draft_reply parsed_payload conversation_id=%s data=%s", conversation_id, parsed_data)
 		except Exception:
 			pass
+		callback_entry: Dict[str, Any] = {
+			"name": "set_customer_measurements",
+			"arguments": {k: v for k, v in parsed_data.items() if k in ("height_cm", "weight_kg") and v},
+			"result": {},
+		}
+		if size_suggestion:
+			callback_entry["result"]["size_suggestion"] = size_suggestion
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, callback_entry["name"], callback_entry["arguments"], callback_entry["result"])
 	# Wrap context JSON in a clear instruction so the model returns our desired schema
 	context_json = json.dumps(user_payload, ensure_ascii=False)
 	user_prompt = (
@@ -851,6 +879,8 @@ HITAP KURALLARI:
 		data = client.generate_json(**_build_gen_kwargs())
 	if not isinstance(data, dict):
 		raise RuntimeError("AI returned non-dict JSON for shadow reply")
+	if function_callbacks:
+		data["function_callbacks"] = function_callbacks
 
 	# Normalize output
 	def _coerce_bool(val: Any, default: bool = True) -> bool:
@@ -890,6 +920,8 @@ HITAP KURALLARI:
 		"notes": notes,
 		"model": client.model,
 	}
+	if function_callbacks:
+		reply["function_callbacks"] = function_callbacks
 	reply["state"] = _normalize_state(data.get("state"), fallback=state_payload)
 	if product_images:
 		reply["product_images"] = product_images

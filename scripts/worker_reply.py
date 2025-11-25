@@ -359,6 +359,16 @@ def main() -> None:
 				except Exception:
 					pass
 				data = draft_reply(int(cid), limit=40, include_meta=True, state=current_state)
+				function_callbacks = data.get("function_callbacks") or []
+				if function_callbacks:
+					try:
+						log.info(
+							"worker_reply: function_callbacks conversation_id=%s callbacks=%s",
+							cid,
+							function_callbacks,
+						)
+					except Exception:
+						pass
 				try:
 					log.info(
 						"worker_reply: draft result conversation_id=%s parsed=%s state_updates=%s",

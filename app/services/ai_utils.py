@@ -10,6 +10,7 @@ from ..db import get_session
 from ..models import Product, Item
 
 size_log = logging.getLogger("ai.size_matrix")
+DECIMAL_HEIGHT_PATTERN = re.compile(r'(?<!\d)1[\s\.,/-]+([5-9][0-9])(?!\d)', re.IGNORECASE)
 
 NUMERIC_SIZE_MATRIX: Dict[int, List[tuple[int, str]]] = {
 	160: [
@@ -157,8 +158,11 @@ def parse_height_weight(message: str) -> Dict[str, Optional[int]]:
 	if not message or not isinstance(message, str):
 		return {"height_cm": None, "weight_kg": None}
 	
-	# Extract all numbers from the message
-	numbers = re.findall(r'\d+', message)
+	# Normalize decimal-like heights (e.g., "1.75", "1 75") into 3-digit cm values
+	normalized_message = DECIMAL_HEIGHT_PATTERN.sub(lambda m: f"1{m.group(1)}", message)
+	
+	# Extract all numbers from the normalized message
+	numbers = re.findall(r'\d+', normalized_message)
 	
 	if len(numbers) < 2:
 		return {"height_cm": None, "weight_kg": None}
