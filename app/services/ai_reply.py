@@ -917,16 +917,16 @@ HITAP KURALLARI:
 	temperature = get_shadow_temperature_setting()
 	temp_opt_out = is_shadow_temperature_opt_out()
 	
-		def _build_gen_kwargs(include_raw: bool = False) -> Dict[str, Any]:
+	def _build_gen_kwargs(include_raw: bool = False) -> Dict[str, Any]:
 		kwargs: Dict[str, Any] = {
 			"system_prompt": sys_prompt,
 			"user_prompt": user_prompt,
 			"temperature": None if temp_opt_out else temperature,
 		}
-			if tools:
-				kwargs["tools"] = tools
-				kwargs["tool_choice"] = "auto"
-				kwargs["tool_handlers"] = tool_handlers
+		if tools:
+			kwargs["tools"] = tools
+			kwargs["tool_choice"] = "auto"
+			kwargs["tool_handlers"] = tool_handlers
 		if include_raw:
 			kwargs["include_raw"] = True
 		return kwargs
@@ -983,19 +983,6 @@ HITAP KURALLARI:
 		reply["parsed"] = parsed_data
 	if function_callbacks:
 		reply["function_callbacks"] = function_callbacks
-	parsed_data: Dict[str, Any] = {}
-	if height_cm:
-		parsed_data["height_cm"] = height_cm
-	if weight_kg:
-		parsed_data["weight_kg"] = weight_kg
-	if size_suggestion:
-		parsed_data["size_suggestion"] = size_suggestion
-	if parsed_data:
-		reply["parsed"] = parsed_data
-		try:
-			log.info("draft_reply parsed_payload conversation_id=%s data=%s", conversation_id, parsed_data)
-		except Exception:
-			pass
 	reply["state"] = _normalize_state(data.get("state"), fallback=state_payload)
 	if product_images:
 		reply["product_images"] = product_images
