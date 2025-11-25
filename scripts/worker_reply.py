@@ -81,7 +81,7 @@ def _decode_escape_sequences(text: str) -> str:
 # Configurable via AI_REPLY_DEBOUNCE_SECONDS env var (default: 5 seconds)
 DEBOUNCE_SECONDS = int(os.getenv("AI_REPLY_DEBOUNCE_SECONDS", "5"))
 POSTPONE_WINDOW_SECONDS = 60  # 1 minute
-POSTPONE_MAX = 3
+POSTPONE_MAX = 5
 # Allow limited automatic retries for paused conversations (defaults to 1 retry)
 AUTO_RETRY_MAX = max(0, int(os.getenv("AI_REPLY_AUTO_RETRY_MAX", "1")))
 
