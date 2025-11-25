@@ -359,6 +359,15 @@ def main() -> None:
 				except Exception:
 					pass
 				data = draft_reply(int(cid), limit=40, include_meta=True, state=current_state)
+				try:
+					log.info(
+						"worker_reply: draft result conversation_id=%s parsed=%s state_updates=%s",
+						cid,
+						data.get("parsed"),
+						data.get("state"),
+					)
+				except Exception:
+					pass
 				new_state = _coerce_state(data.get("state"), fallback=current_state)
 				state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
 				# Block when conversation isn't linked to a product/ad

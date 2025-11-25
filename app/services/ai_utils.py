@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import logging
 from typing import Dict, List, Optional, Any
 
 from sqlmodel import select
@@ -8,6 +9,141 @@ from sqlmodel import select
 from ..db import get_session
 from ..models import Product, Item
 
+size_log = logging.getLogger("ai.size_matrix")
+
+NUMERIC_SIZE_MATRIX: Dict[int, List[tuple[int, str]]] = {
+	160: [
+		(65, "31"),
+		(70, "32"),
+		(75, "32"),
+		(80, "33"),
+		(85, "34"),
+		(90, "36"),
+		(95, "38"),
+		(100, "38"),
+		(105, "40"),
+		(110, "42"),
+		(115, "42"),
+		(120, "42"),
+	],
+	170: [
+		(65, "30"),
+		(70, "31"),
+		(75, "32"),
+		(80, "32"),
+		(85, "33"),
+		(90, "34"),
+		(95, "36"),
+		(100, "38"),
+		(105, "38"),
+		(110, "40"),
+		(115, "40"),
+		(120, "42"),
+	],
+	180: [
+		(65, "30"),
+		(70, "31"),
+		(75, "32"),
+		(80, "32"),
+		(85, "33"),
+		(90, "34"),
+		(95, "36"),
+		(100, "38"),
+		(105, "38"),
+		(110, "40"),
+		(115, "40"),
+		(120, "42"),
+	],
+	190: [
+		(65, "30"),
+		(70, "31"),
+		(75, "31"),
+		(80, "31"),
+		(85, "33"),
+		(90, "34"),
+		(95, "34"),
+		(100, "36"),
+		(105, "38"),
+		(110, "38"),
+		(115, "40"),
+		(120, "40"),
+	],
+}
+
+LETTER_SIZE_MATRIX: Dict[int, List[tuple[int, str]]] = {
+	160: [
+		(50, "S"),
+		(55, "S"),
+		(60, "S"),
+		(65, "S"),
+		(70, "M"),
+		(75, "L"),
+		(80, "L"),
+		(85, "XL"),
+		(90, "XL"),
+	],
+	170: [
+		(50, "S"),
+		(55, "S"),
+		(60, "S"),
+		(65, "S"),
+		(70, "M"),
+		(75, "M"),
+		(80, "L"),
+		(85, "L"),
+		(90, "XL"),
+		(95, "XL"),
+	],
+	180: [
+		(50, "S"),
+		(55, "S"),
+		(60, "S"),
+		(65, "S"),
+		(70, "M"),
+		(75, "M"),
+		(80, "L"),
+		(85, "L"),
+		(90, "XL"),
+		(95, "XL"),
+	],
+	190: [
+		(50, "S"),
+		(55, "S"),
+		(60, "S"),
+		(65, "S"),
+		(70, "M"),
+		(75, "M"),
+		(80, "M"),
+		(85, "L"),
+		(90, "XL"),
+		(95, "XL"),
+	],
+}
+
+
+def _closest_height_row(matrix: Dict[int, List[tuple[int, str]]], height_cm: int) -> Optional[int]:
+	if not matrix:
+		return None
+	return min(matrix.keys(), key=lambda h: abs(h - height_cm))
+
+
+def _lookup_matrix_size(
+	matrix: Dict[int, List[tuple[int, str]]],
+	height_cm: int,
+	weight_kg: int,
+) -> Optional[str]:
+	if not (height_cm and weight_kg):
+		return None
+	row_height = _closest_height_row(matrix, height_cm)
+	if row_height is None:
+		return None
+	columns = sorted(matrix.get(row_height, []), key=lambda entry: entry[0])
+	if not columns:
+		return None
+	for max_weight, size in columns:
+		if weight_kg <= max_weight:
+			return size
+	return None
 
 def parse_height_weight(message: str) -> Dict[str, Optional[int]]:
 	"""
@@ -85,12 +221,7 @@ def calculate_size_suggestion(height_cm: int, weight_kg: int, product_id: int) -
 	"""
 	Calculate size suggestion based on height and weight for a product.
 	
-	This is a basic heuristic implementation. For more accurate sizing,
-	this should be replaced with product-specific size tables stored in the database.
-	
-	For now, uses a simple BMI-based approach for S/M/L/XL/XXL sizes.
-	For numeric sizes (30, 31, 32, etc.), uses a different heuristic.
-	
+	Uses the explicit size matrices provided by the business team.
 	Returns: size string (e.g., "M", "L", "32") or None if cannot determine
 	"""
 	if not height_cm or not weight_kg or not product_id:
@@ -121,73 +252,32 @@ def calculate_size_suggestion(height_cm: int, weight_kg: int, product_id: int) -
 			has_numeric_sizes = any(s.isdigit() for s in available_sizes)
 			
 			if has_letter_sizes:
-				# Use BMI-based heuristic for letter sizes
-				# BMI = weight (kg) / (height (m))^2
-				height_m = height_cm / 100.0
-				bmi = weight_kg / (height_m * height_m)
-				
-				# Simple BMI to size mapping (can be refined with actual size tables)
-				if bmi < 18.5:
-					# Underweight - try S or M
-					if "S" in available_sizes:
-						return "S"
-					elif "M" in available_sizes:
-						return "M"
-				elif bmi < 22:
-					# Normal weight - M or L
-					if "M" in available_sizes:
-						return "M"
-					elif "L" in available_sizes:
-						return "L"
-				elif bmi < 25:
-					# Slightly overweight - L or XL
-					if "L" in available_sizes:
-						return "L"
-					elif "XL" in available_sizes:
-						return "XL"
-				else:
-					# Overweight - XL or XXL
-					if "XL" in available_sizes:
-						return "XL"
-					elif "XXL" in available_sizes:
-						return "XXL"
-					elif "L" in available_sizes:
-						return "L"
-				
-				# Fallback: return first available size
-				sorted_sizes = sorted(available_sizes, key=lambda x: (
-					{"XS": 0, "S": 1, "M": 2, "L": 3, "XL": 4, "XXL": 5, "XXXL": 6, "3XL": 6}.get(x, 99),
-					x
-				))
-				return sorted_sizes[0] if sorted_sizes else None
+				size = _lookup_matrix_size(LETTER_SIZE_MATRIX, height_cm, weight_kg)
+				size_log.info(
+					"size_matrix letter lookup product_id=%s height_cm=%s weight_kg=%s -> %s",
+					product_id,
+					height_cm,
+					weight_kg,
+					size,
+				)
+				if size and size.upper() in available_sizes:
+					return size.upper()
+				return None
 			
-			elif has_numeric_sizes:
-				# For numeric sizes (waist sizes), use a simple height/weight heuristic
-				# This is very approximate and should be replaced with actual size tables
-				# For now, estimate based on BMI
-				height_m = height_cm / 100.0
-				bmi = weight_kg / (height_m * height_m)
-				
-				# Convert numeric sizes to integers for comparison
-				numeric_sizes = sorted([int(s) for s in available_sizes if s.isdigit()])
-				
-				if not numeric_sizes:
-					return None
-				
-				# Rough estimate: lower BMI = smaller waist, higher BMI = larger waist
-				if bmi < 20:
-					# Smaller sizes
-					return str(numeric_sizes[0]) if numeric_sizes else None
-				elif bmi < 23:
-					# Medium sizes
-					mid_idx = len(numeric_sizes) // 2
-					return str(numeric_sizes[mid_idx]) if numeric_sizes else None
-				else:
-					# Larger sizes
-					return str(numeric_sizes[-1]) if numeric_sizes else None
+			if has_numeric_sizes:
+				size = _lookup_matrix_size(NUMERIC_SIZE_MATRIX, height_cm, weight_kg)
+				size_log.info(
+					"size_matrix numeric lookup product_id=%s height_cm=%s weight_kg=%s -> %s",
+					product_id,
+					height_cm,
+					weight_kg,
+					size,
+				)
+				if size and size in available_sizes:
+					return size
+				return None
 			
-			# Unknown size format - return first available
-			return list(available_sizes)[0] if available_sizes else None
+			return None
 			
 		except Exception:
 			return None

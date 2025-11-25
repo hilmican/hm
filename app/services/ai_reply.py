@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
@@ -31,6 +32,7 @@ from .prompts import get_global_system_prompt
 
 
 MAX_AI_IMAGES_PER_REPLY = int(os.getenv("AI_MAX_PRODUCT_IMAGES", "3"))
+log = logging.getLogger("ai.reply")
 
 
 def _decode_escape_sequences(text: str) -> str:
@@ -591,6 +593,16 @@ def draft_reply(
 	parsed_hw = parse_height_weight(last_customer_message)
 	height_cm = parsed_hw.get("height_cm")
 	weight_kg = parsed_hw.get("weight_kg")
+	if height_cm or weight_kg:
+		try:
+			log.info(
+				"draft_reply parsed_hw conversation_id=%s height_cm=%s weight_kg=%s",
+				conversation_id,
+				height_cm,
+				weight_kg,
+			)
+		except Exception:
+			pass
 	
 	# Calculate size suggestion if we have height/weight and product_id
 	size_suggestion: Optional[str] = None
@@ -598,6 +610,14 @@ def draft_reply(
 	if height_cm and weight_kg and product_id_val:
 		try:
 			size_suggestion = calculate_size_suggestion(height_cm, weight_kg, product_id_val)
+			log.info(
+				"draft_reply size_lookup conversation_id=%s product_id=%s height_cm=%s weight_kg=%s suggestion=%s",
+				conversation_id,
+				product_id_val,
+				height_cm,
+				weight_kg,
+				size_suggestion,
+			)
 		except Exception:
 			size_suggestion = None
 	
@@ -643,6 +663,10 @@ def draft_reply(
 	# Add parsed data if available
 	if parsed_data:
 		user_payload["parsed"] = parsed_data
+		try:
+			log.info("draft_reply parsed_payload conversation_id=%s data=%s", conversation_id, parsed_data)
+		except Exception:
+			pass
 	# Wrap context JSON in a clear instruction so the model returns our desired schema
 	context_json = json.dumps(user_payload, ensure_ascii=False)
 	user_prompt = (
