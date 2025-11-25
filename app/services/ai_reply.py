@@ -1090,18 +1090,18 @@ def draft_reply(
 		"- Ürün, müşteri ve adres bilgilerini tam topladıysan `place_ai_order_candidate` fonksiyonunu çağırıp tüm alanları doldur; bu kayıt insan ekip tarafından incelenecek.\n"
 	)
 	if function_callbacks:
-	user_prompt += "\n=== FONKSİYON ÇAĞRILARI ===\n"
-	user_prompt += json.dumps(function_callbacks, ensure_ascii=False)
-	user_prompt += "\nBu kayıtlar backend fonksiyon çağrılarının sonucudur; ölçümleri tekrar isteme.\n"
+		user_prompt += "\n=== FONKSİYON ÇAĞRILARI ===\n"
+		user_prompt += json.dumps(function_callbacks, ensure_ascii=False)
+		user_prompt += "\nBu kayıtlar backend fonksiyon çağrılarının sonucudur; ölçümleri tekrar isteme.\n"
 
-user_prompt += (
-	"\n=== AI SİPARİŞ DURUMU KURALLARI (KRİTİK) ===\n"
-	"- Müşteri selam/fiyat mesajımıza yanıt verdiği anda `create_ai_order_candidate` fonksiyonunu ZORUNLU olarak çağır; asla atlama.\n"
-	"- Müşteri ödeme/beden/adres aşamalarında ilerliyorsa akışı kaydetmek için duruma göre `mark_ai_order_very_interested` çağır ve kısa not bırak.\n"
-	"- Müşteri \"daha sonra yazarım\", \"şimdilik bakıyorum\" gibi satın almayı durdurursa hemen `mark_ai_order_not_interested` çağır (gerekirse kısa sebep notu ekle).\n"
-	"- Bir sipariş adayını oluşturduktan sonra, kullanıcı vazgeçerse veya yeniden ısınırsa ilgili fonksiyonla durumu güncelle; AI asla bu fonksiyonları boş geçemez.\n"
-	"- Fonksiyon çağrısı yapmadan hiçbir durumda sipariş akışını ilerlettiğini varsayma; sipariş board'u bu çağrılara göre çalışıyor.\n"
-)
+	user_prompt += (
+		"\n=== AI SİPARİŞ DURUMU KURALLARI (KRİTİK) ===\n"
+		"- Müşteri selam/fiyat mesajımıza yanıt verdiği anda `create_ai_order_candidate` fonksiyonunu ZORUNLU olarak çağır; asla atlama.\n"
+		"- Müşteri ödeme/beden/adres aşamalarında ilerliyorsa akışı kaydetmek için duruma göre `mark_ai_order_very_interested` çağır ve kısa not bırak.\n"
+		"- Müşteri \"daha sonra yazarım\", \"şimdilik bakıyorum\" gibi satın almayı durdurursa hemen `mark_ai_order_not_interested` çağır (gerekirse kısa sebep notu ekle).\n"
+		"- Bir sipariş adayını oluşturduktan sonra, kullanıcı vazgeçerse veya yeniden ısınırsa ilgili fonksiyonla durumu güncelle; AI asla bu fonksiyonları boş geçemez.\n"
+		"- Fonksiyon çağrısı yapmadan hiçbir durumda sipariş akışını ilerlettiğini varsayma; sipariş board'u bu çağrılara göre çalışıyor.\n"
+	)
 
 	# Load customer info for gender detection
 	customer_info = _load_customer_info(int(conversation_id))
