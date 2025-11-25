@@ -420,7 +420,7 @@ def save_product_ai(
     ai_system_msg: str = Form(default=""),
     ai_prompt_msg: str = Form(default=""),
     pretext_id: str = Form(default=""),
-    ai_reply_sending_enabled: str = Form(default="true"),
+    ai_reply_sending_enabled: Optional[str] = Form(default=None),
 ):
     """
     Persist AI instructions for the focused product.
@@ -454,8 +454,11 @@ def save_product_ai(
             except Exception:
                 pretext_id_val = None
         prod.pretext_id = pretext_id_val
-        # Handle ai_reply_sending_enabled
-        prod.ai_reply_sending_enabled = ai_reply_sending_enabled.lower() in ("true", "1", "yes", "on")
+        # Handle ai_reply_sending_enabled (checkbox is absent when unchecked)
+        enabled = False
+        if isinstance(ai_reply_sending_enabled, str):
+            enabled = ai_reply_sending_enabled.lower() in ("true", "1", "yes", "on")
+        prod.ai_reply_sending_enabled = enabled
         session.add(prod)
     # Redirect back to the edit page for this product
     from fastapi.responses import RedirectResponse
