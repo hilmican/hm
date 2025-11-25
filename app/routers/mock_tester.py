@@ -1,20 +1,22 @@
 """
 Mock conversation tester router for testing AI reply system.
 """
+import datetime as dt
+import json
+from typing import Optional
+
 from fastapi import APIRouter, Request, HTTPException, Form
 from fastapi.responses import RedirectResponse, JSONResponse
+from sqlalchemy import text as _text
+from sqlmodel import select
 from starlette.status import HTTP_303_SEE_OTHER
-from typing import Optional
-import json
 
 from app.db import get_session
-from app.models import Conversation, Message, IGUser
+from app.models import Conversation, Message, IGUser, AiShadowReply
 from app.services.mock_tester import (
 	create_mock_conversation_from_ad,
 	send_mock_message,
 )
-from sqlalchemy import text as _text
-from sqlmodel import select
 
 router = APIRouter(prefix="/mock-tester", tags=["mock-tester"])
 
@@ -148,13 +150,25 @@ async def view_conversation(request: Request, conversation_id: int, limit: int =
 			raise HTTPException(status_code=400, detail="Not a mock conversation")
 		
 		# Load messages
-		msgs = session.exec(
+		limit_val = min(max(limit, 1), 500)
+		msg_rows = session.exec(
 			select(Message)
 			.where(Message.conversation_id == conversation_id)
 			.order_by(Message.timestamp_ms.desc())
-			.limit(min(max(limit, 1), 500))
+			.limit(limit_val)
 		).all()
-		msgs = list(reversed(msgs))  # chronological order
+		msg_rows = list(reversed(msg_rows))  # chronological order
+		messages = []
+		for row in msg_rows:
+			try:
+				messages.append({
+					"direction": row.direction or "in",
+					"text": row.text or "",
+					"timestamp_ms": int(row.timestamp_ms or 0),
+					"ai_status": row.ai_status,
+				})
+			except Exception:
+				continue
 		
 		# Load user info
 		user = session.exec(
@@ -163,30 +177,53 @@ async def view_conversation(request: Request, conversation_id: int, limit: int =
 		
 		# Load shadow replies
 		shadow_replies = []
+		shadow_rows = []
 		try:
-			rows = session.exec(
-				_text("""
-					SELECT id, reply_text, model, confidence, reason, status, created_at, actions_json
-					FROM ai_shadow_reply
-					WHERE conversation_id = :cid
-					ORDER BY created_at DESC
-					LIMIT 10
-				""").params(cid=conversation_id)
+			shadow_rows = session.exec(
+				select(AiShadowReply)
+				.where(AiShadowReply.conversation_id == conversation_id)
+				.order_by(AiShadowReply.created_at.desc())
+				.limit(limit_val)
 			).all()
 			
-			for row in rows:
+			for row in shadow_rows:
 				shadow_replies.append({
-					"id": row.id if hasattr(row, "id") else row[0],
-					"reply_text": row.reply_text if hasattr(row, "reply_text") else row[1],
-					"model": row.model if hasattr(row, "model") else row[2],
-					"confidence": row.confidence if hasattr(row, "confidence") else row[3],
-					"reason": row.reason if hasattr(row, "reason") else row[4],
-					"status": row.status if hasattr(row, "status") else row[5],
-					"created_at": row.created_at if hasattr(row, "created_at") else row[6],
-					"actions_json": row.actions_json if hasattr(row, "actions_json") else row[7],
+					"id": row.id,
+					"reply_text": row.reply_text,
+					"model": row.model,
+					"confidence": row.confidence,
+					"reason": row.reason,
+					"status": row.status,
+					"created_at": row.created_at,
+					"actions_json": row.actions_json,
 				})
 		except Exception:
 			pass
+
+		# Treat allowed shadow replies as outbound messages for mocks
+		if shadow_rows:
+			allowed_status = {"sent", "suggested"}
+			for row in reversed(shadow_rows):
+				text_val = (row.reply_text or "").strip()
+				if not text_val:
+					continue
+				status_val = (row.status or "").lower() if row.status else None
+				if status_val and status_val not in allowed_status:
+					continue
+				ts_ms = 0
+				created_at = getattr(row, "created_at", None)
+				if isinstance(created_at, dt.datetime):
+					try:
+						ts_ms = int(created_at.timestamp() * 1000)
+					except Exception:
+						ts_ms = 0
+				messages.append({
+					"direction": "out",
+					"text": text_val,
+					"timestamp_ms": ts_ms,
+					"ai_status": row.status or "shadow",
+				})
+			messages.sort(key=lambda item: item.get("timestamp_ms") or 0)
 		
 		# Get shadow state
 		shadow_state = None
@@ -216,7 +253,7 @@ async def view_conversation(request: Request, conversation_id: int, limit: int =
 				"request": request,
 				"conversation_id": conversation_id,
 				"conversation": convo,
-				"messages": msgs,
+				"messages": messages,
 				"user": user,
 				"shadow_replies": shadow_replies,
 				"shadow_state": shadow_state,

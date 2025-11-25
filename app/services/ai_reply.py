@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
@@ -7,7 +8,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Message, Product, Item, Conversation, IGUser, AIPretext, ProductImage
+from ..models import (
+	Message,
+	Product,
+	Item,
+	Conversation,
+	IGUser,
+	AIPretext,
+	ProductImage,
+	AiShadowReply,
+)
 from .ai import (
 	AIClient,
 	get_ai_shadow_model_from_settings,
@@ -369,15 +379,63 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 	history_all: List[Dict[str, Any]] = []
 	last_customer_message = ""
 	last_customer_idx: Optional[int] = None
+	is_mock_conversation = False
+	shadow_rows: List[AiShadowReply] = []
+	limit_val = max(1, min(limit, 100))
+
+	def _dt_to_ms(value: Any) -> int:
+		if isinstance(value, (int, float)):
+			return int(value)
+		if isinstance(value, dt.datetime):
+			try:
+				return int(value.timestamp() * 1000)
+			except Exception:
+				return 0
+		return 0
+
 	with get_session() as session:
+		try:
+			conv_row = session.exec(
+				select(Conversation.ig_user_id)
+				.where(Conversation.id == int(conversation_id))
+				.limit(1)
+			).first()
+			if conv_row:
+				ig_user_id = (
+					conv_row.ig_user_id
+					if hasattr(conv_row, "ig_user_id")
+					else (conv_row[0] if len(conv_row) > 0 else None)
+				)
+				if ig_user_id and str(ig_user_id).startswith("mock_"):
+					is_mock_conversation = True
+		except Exception:
+			is_mock_conversation = False
+
 		msgs = (
 			session.exec(
 				select(Message)
 				.where(Message.conversation_id == int(conversation_id))
 				.order_by(Message.timestamp_ms.asc())
-				.limit(max(1, min(limit, 100)))
+				.limit(limit_val)
 			).all()
 		)
+
+		if is_mock_conversation:
+			try:
+				shadow_query = (
+					select(AiShadowReply)
+					.where(AiShadowReply.conversation_id == int(conversation_id))
+					.where(
+						(AiShadowReply.status.is_(None))
+						| (AiShadowReply.status.in_(("sent", "suggested")))
+					)
+					.order_by(AiShadowReply.created_at.asc())
+					.limit(limit_val)
+				)
+				shadow_rows = session.exec(shadow_query).all() or []
+			except Exception:
+				shadow_rows = []
+
 	for m in msgs:
 		try:
 			entry = {
@@ -386,11 +444,32 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 				"timestamp_ms": int(m.timestamp_ms or 0),
 			}
 			history_all.append(entry)
-			if (entry["dir"] or "in").lower() == "in" and (entry["text"] or "").strip():
-				last_customer_message = entry["text"] or ""
-				last_customer_idx = len(history_all) - 1
 		except Exception:
 			continue
+
+	if shadow_rows:
+		for reply in shadow_rows:
+			try:
+				text_val = (reply.reply_text or "").strip()
+				if not text_val:
+					continue
+				entry = {
+					"dir": "out",
+					"text": text_val,
+					"timestamp_ms": _dt_to_ms(getattr(reply, "created_at", None)),
+				}
+				history_all.append(entry)
+			except Exception:
+				continue
+
+	if history_all:
+		history_all.sort(key=lambda item: item.get("timestamp_ms") or 0)
+		last_customer_idx = None
+		last_customer_message = ""
+		for idx, entry in enumerate(history_all):
+			if (entry.get("dir") or "in").lower() == "in" and (entry.get("text") or "").strip():
+				last_customer_idx = idx
+				last_customer_message = entry.get("text") or ""
 	if last_customer_idx is not None:
 		history_trimmed = history_all[: last_customer_idx + 1]
 	else:
