@@ -648,6 +648,14 @@ def draft_reply(
 	double_price: Optional[float] = None
 	# TODO: Add proper double_price detection from product configuration or stock patterns
 	
+	parsed_data: Dict[str, Any] = {}
+	if height_cm:
+		parsed_data["height_cm"] = height_cm
+	if weight_kg:
+		parsed_data["weight_kg"] = weight_kg
+	if size_suggestion:
+		parsed_data["size_suggestion"] = size_suggestion
+	
 	# Build product_focus with additional metadata
 	product_focus_data: Dict[str, Any] = product_info or {"id": None, "name": None, "slug_or_sku": None, "slug": None, "confidence": 0.0}
 	product_focus_data["has_multiple_colors"] = has_multiple_colors
@@ -668,6 +676,12 @@ def draft_reply(
 	user_payload["state"] = state_payload
 	if conversation_flags:
 		user_payload["conversation_flags"] = conversation_flags
+	if parsed_data:
+		user_payload["parsed"] = parsed_data
+		try:
+			log.info("draft_reply parsed_payload conversation_id=%s data=%s", conversation_id, parsed_data)
+		except Exception:
+			pass
 	function_callbacks: List[Dict[str, Any]] = []
 	tools: List[Dict[str, Any]] = []
 	tool_handlers: Dict[str, Callable[[Dict[str, Any]], str]] = {}
