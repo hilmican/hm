@@ -478,6 +478,41 @@ class AiShadowReply(SQLModel, table=True):
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 
 
+class AiOrderCandidate(SQLModel, table=True):
+	"""
+	AI'nin belirlediği potansiyel siparişleri insan onayına sunmak için kullanılan geçici kayıt.
+	Her konuşma için tek bir aktif kayıt tutulur ve durum değişimleri geçmiş olarak saklanır.
+	"""
+
+	__tablename__ = "ai_order_candidates"
+	__table_args__ = (
+		UniqueConstraint("conversation_id", name="uq_ai_order_candidate_conversation"),
+	)
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	conversation_id: int = Field(foreign_key="conversations.id", index=True)
+	status: str = Field(
+		default="interested",
+		index=True,
+		description="interested|very-interested|not-interested|placed",
+	)
+	status_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
+	status_history_json: Optional[str] = Field(
+		default=None,
+		sa_column=Column(Text),
+		description="Durum değişim geçmişi (JSON listesi)",
+	)
+	order_payload_json: Optional[str] = Field(
+		default=None,
+		sa_column=Column(Text),
+		description="AI tarafından toplanan sipariş detayları (JSON)",
+	)
+	last_status_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+	placed_at: Optional[dt.datetime] = Field(default=None, index=True)
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
 class SystemSetting(SQLModel, table=True):
 	__tablename__ = "system_settings"
 	key: str = Field(primary_key=True, description="Setting key")

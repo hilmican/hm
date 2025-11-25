@@ -27,6 +27,13 @@ from .ai import (
 )
 from .ai_context import VariantExclusions, parse_variant_exclusions, variant_is_excluded
 from .ai_ig import _detect_focus_product
+from .ai_orders import (
+	get_candidate_snapshot,
+	mark_candidate_interested,
+	mark_candidate_not_interested,
+	mark_candidate_very_interested,
+	submit_candidate_order,
+)
 from .ai_utils import parse_height_weight, calculate_size_suggestion, detect_color_count
 from .prompts import get_global_system_prompt
 
@@ -674,6 +681,12 @@ def draft_reply(
 	state_payload = dict(state or {})
 	hail_already_sent = bool(state_payload.get("hail_sent"))
 	user_payload["state"] = state_payload
+	try:
+		order_candidate_snapshot = get_candidate_snapshot(int(conversation_id))
+	except Exception:
+		order_candidate_snapshot = None
+	if order_candidate_snapshot:
+		user_payload["ai_order_candidate"] = order_candidate_snapshot
 	if conversation_flags:
 		user_payload["conversation_flags"] = conversation_flags
 	if parsed_data:
@@ -761,6 +774,289 @@ def draft_reply(
 
 	tool_handlers["set_customer_measurements"] = _handle_measurement_tool
 
+	def _clean_tool_str(value: Any) -> Optional[str]:
+		if value is None:
+			return None
+		text = str(value).strip()
+		return text or None
+
+	def _handle_candidate_status_tool(
+		tool_name: str,
+		func: Callable[[int, Optional[str]], Dict[str, Any]],
+		args: Dict[str, Any],
+	) -> str:
+		note_val = _clean_tool_str(args.get("note") or args.get("reason") or args.get("summary"))
+		result = func(int(conversation_id), note=note_val)
+		callback_entry = {
+			"name": tool_name,
+			"arguments": {"note": note_val},
+			"result": {
+				"candidate_id": result.get("id"),
+				"conversation_id": result.get("conversation_id"),
+				"status": result.get("status"),
+			},
+		}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, callback_entry["name"], callback_entry["arguments"], callback_entry["result"])
+		return json.dumps(result, ensure_ascii=False)
+
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "create_ai_order_candidate",
+				"description": "Kullanıcı ilk mesajımıza cevap verip ürüne ilgisini gösterdiğinde bu fonksiyonu çağır ve durumunu 'interested' olarak kaydet.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"note": {
+							"type": "string",
+							"description": "Kısaca kullanıcı neden ilgilendi; örn. 'Fiyat sordu'.",
+						}
+					},
+				},
+			},
+		}
+	)
+
+	def _handle_create_candidate_tool(args: Dict[str, Any]) -> str:
+		return _handle_candidate_status_tool("create_ai_order_candidate", mark_candidate_interested, args)
+
+	tool_handlers["create_ai_order_candidate"] = _handle_create_candidate_tool
+
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "mark_ai_order_not_interested",
+				"description": "Müşteri artık almak istemediğini veya ürüne ilgisinin kalmadığını söylediğinde çağır ve durumu 'not-interested' yap.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"note": {
+							"type": "string",
+							"description": "Gerekirse vazgeçme sebebini yaz; örn. 'Beden yok dedi'.",
+						}
+					},
+				},
+			},
+		}
+	)
+
+	def _handle_not_interested_tool(args: Dict[str, Any]) -> str:
+		return _handle_candidate_status_tool("mark_ai_order_not_interested", mark_candidate_not_interested, args)
+
+	tool_handlers["mark_ai_order_not_interested"] = _handle_not_interested_tool
+
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "mark_ai_order_very_interested",
+				"description": "Müşteri siparişi tamamlama yolundaysa (adres/ödeme gibi detayları topluyorsan) durumu 'very-interested' yap.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"note": {
+							"type": "string",
+							"description": "İlerleme notu; örn. 'Adres yazdırdı, ödeme soruyor'.",
+						}
+					},
+				},
+			},
+		}
+	)
+
+	def _handle_very_interested_tool(args: Dict[str, Any]) -> str:
+		return _handle_candidate_status_tool("mark_ai_order_very_interested", mark_candidate_very_interested, args)
+
+	tool_handlers["mark_ai_order_very_interested"] = _handle_very_interested_tool
+
+	def _drop_none(data: Dict[str, Any]) -> Dict[str, Any]:
+		return {k: v for k, v in data.items() if v is not None}
+
+	def _clean_float(val: Any) -> Optional[float]:
+		try:
+			if val is None or val == "":
+				return None
+			return float(val)
+		except Exception:
+			return None
+
+	def _clean_int(val: Any, default: int = 1) -> int:
+		try:
+			num = int(val)
+			return num if num > 0 else default
+		except Exception:
+			return default
+
+	def _clean_positive_int(val: Any) -> Optional[int]:
+		try:
+			if val is None or val == "":
+				return None
+			num = int(val)
+			return num if num > 0 else None
+		except Exception:
+			return None
+
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "place_ai_order_candidate",
+				"description": "Müşteri siparişi tamamlamak için gerekli tüm bilgileri verdiğinde bu fonksiyonu çağır. Kayıt, insan ekip tarafından incelenip gerçek siparişe dönüştürülecek.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"product": {
+							"type": "object",
+							"description": "Ürün/variant bilgileri",
+							"properties": {
+								"name": {"type": "string", "description": "Ürün adı veya slug"},
+								"sku": {"type": "string"},
+								"color": {"type": "string"},
+								"size": {"type": "string"},
+								"variant": {"type": "string", "description": "Opsiyonel varyant etiketi"},
+								"quantity": {"type": "integer", "minimum": 1, "default": 1},
+								"unit_price": {"type": "number"},
+								"total_price": {"type": "number"},
+							},
+							"required": ["name"],
+						},
+						"customer": {
+							"type": "object",
+							"description": "Müşteri iletişim ve adres bilgileri",
+							"properties": {
+								"name": {"type": "string"},
+								"phone": {"type": "string"},
+								"address": {"type": "string"},
+								"city": {"type": "string"},
+								"notes": {"type": "string"},
+							},
+							"required": ["name", "phone", "address"],
+						},
+						"shipping": {
+							"type": "object",
+							"properties": {
+								"method": {"type": "string", "description": "örn. kapıda ödeme"},
+								"cost": {"type": "number"},
+								"notes": {"type": "string"},
+							},
+						},
+						"payment": {
+							"type": "object",
+							"properties": {
+								"method": {"type": "string", "description": "örn. kapıda nakit"},
+								"status": {"type": "string", "description": "örn. 'beklemede'"},
+								"amount": {"type": "number"},
+							},
+						},
+						"measurements": {
+							"type": "object",
+							"properties": {
+								"height_cm": {"type": "integer"},
+								"weight_kg": {"type": "integer"},
+							},
+						},
+						"notes": {
+							"type": "string",
+							"description": "Müşteri tarafından verilen ekstra talimatlar veya önemli bilgiler.",
+						},
+					},
+					"required": ["product", "customer"],
+				},
+			},
+		}
+	)
+
+	def _handle_place_order_tool(args: Dict[str, Any]) -> str:
+		product_args = args.get("product") or {}
+		customer_args = args.get("customer") or {}
+		product_name = _clean_tool_str(product_args.get("name"))
+		if not product_name:
+			raise ValueError("product.name is required")
+		customer_name = _clean_tool_str(customer_args.get("name"))
+		customer_phone = _clean_tool_str(customer_args.get("phone"))
+		customer_address = _clean_tool_str(customer_args.get("address"))
+		if not (customer_name and customer_phone and customer_address):
+			raise ValueError("customer.name, customer.phone ve customer.address zorunludur")
+		product_payload = _drop_none(
+			{
+				"name": product_name,
+				"sku": _clean_tool_str(product_args.get("sku")),
+				"color": _clean_tool_str(product_args.get("color")),
+				"size": _clean_tool_str(product_args.get("size")),
+				"variant": _clean_tool_str(product_args.get("variant")),
+				"quantity": _clean_int(product_args.get("quantity"), default=1),
+				"unit_price": _clean_float(product_args.get("unit_price")),
+				"total_price": _clean_float(product_args.get("total_price")),
+			}
+		)
+		customer_payload = _drop_none(
+			{
+				"name": customer_name,
+				"phone": customer_phone,
+				"address": customer_address,
+				"city": _clean_tool_str(customer_args.get("city")),
+				"notes": _clean_tool_str(customer_args.get("notes")),
+			}
+		)
+		shipping_args = args.get("shipping") or {}
+		shipping_payload = _drop_none(
+			{
+				"method": _clean_tool_str(shipping_args.get("method")),
+				"cost": _clean_float(shipping_args.get("cost")),
+				"notes": _clean_tool_str(shipping_args.get("notes")),
+			}
+		)
+		payment_args = args.get("payment") or {}
+		payment_payload = _drop_none(
+			{
+				"method": _clean_tool_str(payment_args.get("method")),
+				"status": _clean_tool_str(payment_args.get("status")),
+				"amount": _clean_float(payment_args.get("amount")),
+			}
+		)
+		measurements_args = args.get("measurements") or {}
+		measurements_payload = _drop_none(
+			{
+				"height_cm": _clean_positive_int(measurements_args.get("height_cm")),
+				"weight_kg": _clean_positive_int(measurements_args.get("weight_kg")),
+			}
+		)
+		order_payload: Dict[str, Any] = {
+			"product": product_payload,
+			"customer": customer_payload,
+		}
+		if shipping_payload:
+			order_payload["shipping"] = shipping_payload
+		if payment_payload:
+			order_payload["payment"] = payment_payload
+		if measurements_payload:
+			order_payload["measurements"] = measurements_payload
+		order_notes = _clean_tool_str(args.get("notes"))
+		if order_notes:
+			order_payload["notes"] = order_notes
+		result = submit_candidate_order(int(conversation_id), order_payload, note=order_notes)
+		callback_entry = {
+			"name": "place_ai_order_candidate",
+			"arguments": {
+				"product_name": product_name,
+				"customer_phone": customer_phone,
+				"has_shipping": bool(shipping_payload),
+			},
+			"result": {
+				"candidate_id": result.get("id"),
+				"status": result.get("status"),
+				"order_payload": result.get("order_payload"),
+			},
+		}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, callback_entry["name"], callback_entry["arguments"], callback_entry["result"])
+		return json.dumps(result, ensure_ascii=False)
+
+	tool_handlers["place_ai_order_candidate"] = _handle_place_order_tool
+
 	user_prompt = (
 		"=== KRİTİK TALİMATLAR ===\n"
 		"1. SADECE ve SADECE aşağıdaki JSON şemasına UYGUN bir JSON obje döndür.\n"
@@ -790,6 +1086,8 @@ def draft_reply(
 		"- Fonksiyon çıktısındaki `size_suggestion` varsa aynen kullan; yoksa beden tablosunu takip et.\n"
 		"- Fonksiyon çağrısı yapmadan yeni ölçü isteme.\n"
 		"- Fonksiyon çağrısı yaptığını veya ölçüleri backend'e ilettiğini kullanıcıya ASLA söyleme; sadece sonuçla devam et.\n"
+		"- Müşteri ürüne ilgi gösterdiğinde `create_ai_order_candidate`, vazgeçtiğinde `mark_ai_order_not_interested`, siparişi tamamlamaya çok yakınsa `mark_ai_order_very_interested` fonksiyonlarını uygun şekilde kullan.\n"
+		"- Ürün, müşteri ve adres bilgilerini tam topladıysan `place_ai_order_candidate` fonksiyonunu çağırıp tüm alanları doldur; bu kayıt insan ekip tarafından incelenecek.\n"
 	)
 	if function_callbacks:
 		user_prompt += "\n=== FONKSİYON ÇAĞRILARI ===\n"

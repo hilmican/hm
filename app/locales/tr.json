@@ -35,6 +35,7 @@
     "attachments_json": "Ekler (JSON)",
     "conversations_json": "Sohbetler (JSON)",
     "cache_invalidate": "Cache Temizle",
+    "ai_orders": "AI Sipariş Adayları",
     "legal": "Yasal",
     "privacy": "Gizlilik",
     "terms": "Koşullar",
@@ -151,6 +152,27 @@
       "instructions_html": "<em>@himanistanbul</em> ile mesajlaşmış bir Instagram kullanıcısıysanız ve mesaj verilerinizin sistemlerimizden silinmesini istiyorsanız, konu satırında “Instagram Veri Silme Talebi” ifadesiyle <a href=\"mailto:privacy@himan.com.tr\">privacy@himan.com.tr</a> adresine e‑posta gönderin. Instagram kullanıcı adınızı ve yaklaşık görüşme tarihini ekleyin. Mülkiyeti doğruladıktan sonra, yasal saklama gerekliliklerine tabi olarak kontrolümüzdeki verileri sileceğiz.",
       "direct_delete": "Mesajları Instagram içinde doğrudan da silebilirsiniz; ancak iş kayıtları için gereken sunucu tarafı kopyalar, yukarıdaki talep süreci tamamlanana kadar saklanabilir."
     }
+  },
+  "ai_orders": {
+    "title": "AI Sipariş Adayları",
+    "heading": "AI Sipariş Adayları",
+    "subtitle": "AI tarafından siparişe çok yakın görülen konuşmaları filtrele, durumlarına bak ve gerçek sipariş oluşturmadan önce DM’e atla.",
+    "total_visible": "Gösterilen satır",
+    "search_placeholder": "Kullanıcı adı, telefon veya not ara…",
+    "filter_all_statuses": "Tüm durumlar",
+    "apply_filters": "Uygula",
+    "reset_filters": "Sıfırla",
+    "th_status": "Durum",
+    "th_customer": "Müşteri",
+    "th_product": "Ürün",
+    "th_address": "Adres",
+    "th_notes": "Notlar",
+    "th_updated": "Güncellendi",
+    "view_conversation": "DM'i aç",
+    "empty_state": "Filtrelere uyan AI sipariş adayı bulunamadı.",
+    "measurements": "Ölçüler",
+    "quantity_label": "Adet",
+    "placed_at": "AI Siparişi"
   }
 }
 

@@ -18,6 +18,7 @@ from .routers import stories
 from .routers import posts
 from .routers import noc
 from .routers import costs
+from .routers import ai_orders
 from collections import deque
 import time as _time
 from .routers import admin
@@ -209,6 +210,7 @@ def create_app() -> FastAPI:
 	app.include_router(reports.router, prefix="/reports", tags=["reports"]) 
 	app.include_router(noc.router)
 	app.include_router(costs.router, prefix="/costs", tags=["costs"])
+	app.include_router(ai_orders.router)
 	# i18n endpoints
 	app.include_router(i18n_router.router)
 

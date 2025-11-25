@@ -35,6 +35,7 @@
     "attachments_json": "Attachments (JSON)",
     "conversations_json": "Conversations (JSON)",
     "cache_invalidate": "Invalidate Cache",
+    "ai_orders": "AI Orders",
     "legal": "Legal",
     "privacy": "Privacy",
     "terms": "Terms",
@@ -151,6 +152,27 @@
       "instructions_html": "If you have exchanged messages with <em>@himanistanbul</em> on Instagram and want your message data removed from our systems, email <a href=\"mailto:privacy@himan.com.tr\">privacy@himan.com.tr</a> with the subject “Instagram Data Deletion Request”. Include your Instagram username and approximate conversation date. After verifying ownership, we will delete data under our control subject to legal retention requirements.",
       "direct_delete": "You can delete messages directly in Instagram; however, server-side copies required for business records may be retained until the above request process is completed."
     }
+  },
+  "ai_orders": {
+    "title": "AI Order Candidates",
+    "heading": "AI Order Candidates",
+    "subtitle": "AI flagged these conversations as potential orders. Review, filter and jump into the DM before creating a real order.",
+    "total_visible": "Visible rows",
+    "search_placeholder": "Search by username, phone or note…",
+    "filter_all_statuses": "All statuses",
+    "apply_filters": "Apply",
+    "reset_filters": "Reset",
+    "th_status": "Status",
+    "th_customer": "Customer",
+    "th_product": "Product",
+    "th_address": "Address",
+    "th_notes": "Notes",
+    "th_updated": "Updated",
+    "view_conversation": "Open DM",
+    "empty_state": "No AI order candidates match your filters.",
+    "measurements": "Measurements",
+    "quantity_label": "Qty",
+    "placed_at": "Placed"
   }
 }
 
