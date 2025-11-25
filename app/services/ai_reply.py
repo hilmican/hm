@@ -402,11 +402,14 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 				.limit(1)
 			).first()
 			if conv_row:
-				ig_user_id = (
-					conv_row.ig_user_id
-					if hasattr(conv_row, "ig_user_id")
-					else (conv_row[0] if len(conv_row) > 0 else None)
-				)
+				if isinstance(conv_row, str):
+					ig_user_id = conv_row
+				else:
+					ig_user_id = (
+						conv_row.ig_user_id
+						if hasattr(conv_row, "ig_user_id")
+						else (conv_row[0] if len(conv_row) > 0 else None)
+					)
 				if ig_user_id and str(ig_user_id).startswith("mock_"):
 					is_mock_conversation = True
 		except Exception:
