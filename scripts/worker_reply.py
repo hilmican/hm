@@ -73,6 +73,8 @@ def _decode_escape_sequences(text: str) -> str:
 DEBOUNCE_SECONDS = int(os.getenv("AI_REPLY_DEBOUNCE_SECONDS", "5"))
 POSTPONE_WINDOW_SECONDS = 180  # 3 minutes
 POSTPONE_MAX = 3
+# Allow limited automatic retries for paused conversations (defaults to 1 retry)
+AUTO_RETRY_MAX = max(0, int(os.getenv("AI_REPLY_AUTO_RETRY_MAX", "1")))
 
 
 def _is_ai_reply_sending_enabled(conversation_id: int) -> tuple[bool, bool]:
@@ -182,14 +184,30 @@ def main() -> None:
 				rows = session.exec(
 					_text(
 						"""
-						SELECT conversation_id, last_inbound_ms, postpone_count, ai_images_sent, COALESCE(status,'pending') AS status, state_json
+						SELECT
+							conversation_id,
+							last_inbound_ms,
+							postpone_count,
+							ai_images_sent,
+							COALESCE(status,'pending') AS effective_status,
+							status AS raw_status,
+							state_json
 						FROM ai_shadow_state
-						WHERE (status = 'pending' OR status IS NULL)
-						  AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
+						WHERE (
+								(status = 'pending' OR status IS NULL)
+								AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
+							)
+							OR (
+								status = 'paused'
+								AND postpone_count > 0
+								AND postpone_count <= :auto_retry_max
+								AND next_attempt_at IS NOT NULL
+								AND next_attempt_at <= CURRENT_TIMESTAMP
+							)
 						ORDER BY (next_attempt_at IS NULL) DESC, next_attempt_at ASC
 						LIMIT 20
 						"""
-					)
+					).params(auto_retry_max=AUTO_RETRY_MAX)
 				).all()
 				for r in rows:
 					item = {
@@ -197,8 +215,15 @@ def main() -> None:
 						"last_inbound_ms": int((r.last_inbound_ms if hasattr(r, "last_inbound_ms") else r[1]) or 0),
 						"postpone_count": int((r.postpone_count if hasattr(r, "postpone_count") else r[2]) or 0),
 						"ai_images_sent": bool((r.ai_images_sent if hasattr(r, "ai_images_sent") else (r[3] if len(r) > 3 else 0)) or 0),
-						"status": (r.status if hasattr(r, "status") else (r[4] if len(r) > 4 else None)) or "pending",
-						"state_json": getattr(r, "state_json", None) if hasattr(r, "state_json") else (r[5] if len(r) > 5 else None),
+						"status": (
+							r.effective_status if hasattr(r, "effective_status") else (r[4] if len(r) > 4 else None)
+						) or "pending",
+						"raw_status": (
+							r.raw_status if hasattr(r, "raw_status") else (r[5] if len(r) > 5 else None)
+						),
+						"state_json": getattr(r, "state_json", None)
+						if hasattr(r, "state_json")
+						else (r[6] if len(r) > 6 else None),
 					}
 					due.append(item)
 				
@@ -238,6 +263,21 @@ def main() -> None:
 			time.sleep(0.5)
 			continue
 		
+		# Reactivate paused rows that reached their auto retry window
+		if AUTO_RETRY_MAX > 0:
+			for st in due:
+				if st.get("raw_status") == "paused":
+					try:
+						with get_session() as session:
+							session.exec(
+								_text(
+									"UPDATE ai_shadow_state SET status='pending', next_attempt_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+								).params(cid=int(st.get("conversation_id")))
+							)
+						st["status"] = "pending"
+					except Exception:
+						pass
+
 		log.info("worker_reply: processing %d due conversation(s)", len(due))
 
 		for st in due:
