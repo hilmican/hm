@@ -25,6 +25,25 @@ from starlette.requests import ClientDisconnect
 
 router = APIRouter()
 _log = logging.getLogger("instagram.webhook")
+PAYLOAD_DIR = Path(__file__).resolve().parents[2] / "payload"
+
+
+def _persist_payload_to_disk(payload: Dict[str, Any], raw_body: bytes) -> Optional[Path]:
+	ts = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+	uniq = hashlib.sha256(raw_body or b"").hexdigest()[:12]
+	filename = f"ig_payload_{ts}_{uniq}.json"
+	target = PAYLOAD_DIR / filename
+	try:
+		PAYLOAD_DIR.mkdir(parents=True, exist_ok=True)
+		with target.open("w", encoding="utf-8") as fh:
+			json.dump(payload, fh, ensure_ascii=False, indent=2)
+		return target
+	except Exception as exc:
+		try:
+			_log.warning("IG webhook POST: failed to persist payload: %s", str(exc))
+		except Exception:
+			pass
+		return None
 
 
 def _validate_signature(raw_body: bytes, signature: Optional[str]) -> None:
@@ -98,6 +117,12 @@ async def receive_events(request: Request):
 		except Exception:
 			# Best-effort; never let debug logging break webhook handling
 			pass
+		payload_path = _persist_payload_to_disk(payload, body)
+		if payload_path:
+			try:
+				_log.info("IG webhook POST: payload written to %s", payload_path)
+			except Exception:
+				pass
 	except Exception:
 		try:
 			_log.warning("IG webhook POST: invalid JSON, body_len=%d", len(body or b""))
