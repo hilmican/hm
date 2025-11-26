@@ -58,7 +58,11 @@ def list_scheduled_posts(limit: int = 50) -> List[IGScheduledPost]:
 	with get_session() as session:
 		stmt = (
 			select(IGScheduledPost)
-			.order_by(IGScheduledPost.scheduled_at.asc().nulls_last(), IGScheduledPost.id.asc())
+			.order_by(
+				IGScheduledPost.scheduled_at.is_(None),
+				IGScheduledPost.scheduled_at.asc(),
+				IGScheduledPost.id.asc(),
+			)
 			.limit(limit)
 		)
 		return list(session.exec(stmt))
@@ -76,7 +80,11 @@ def list_due_posts(limit: int = PUBLISH_BATCH_LIMIT) -> List[IGScheduledPost]:
 					IGScheduledPost.scheduled_at <= now,
 				)
 			)
-			.order_by(IGScheduledPost.scheduled_at.asc().nulls_last(), IGScheduledPost.id.asc())
+			.order_by(
+				IGScheduledPost.scheduled_at.is_(None),
+				IGScheduledPost.scheduled_at.asc(),
+				IGScheduledPost.id.asc(),
+			)
 			.limit(limit)
 		)
 		return list(session.exec(stmt))
