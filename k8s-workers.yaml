@@ -211,3 +211,52 @@ spec:
             - name: DATABASE_URL
               value: "mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
           volumeMounts: [ { name: app-root, mountPath: /app } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hm-worker-publish
+  namespace: hm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hm-worker-publish
+  template:
+    metadata:
+      labels:
+        app: hm-worker-publish
+    spec:
+      imagePullSecrets:
+        - name: my-dockerhub-secret
+      volumes:
+        - name: app-root
+          persistentVolumeClaim:
+            claimName: hm-app-root
+      containers:
+        - name: worker
+          image: mediatriple/hm:0.7.6
+          command: ["python","scripts/worker_publish.py"]
+          workingDir: /app
+          env:
+            - name: PYTHONPATH
+              value: /app
+            - name: REDIS_URL
+              value: redis://hm-redis.hm.svc.cluster.local:6379/0
+            - name: MEDIA_ROOT
+              value: /app/data/media
+            - name: THUMBS_ROOT
+              value: /app/data/thumbs
+            - name: IG_PAGE_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_PAGE_ID } }
+            - name: IG_PAGE_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_PAGE_ACCESS_TOKEN } }
+            - name: IG_USER_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_USER_ID } }
+            - name: IG_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
+            - name: IG_GRAPH_API_VERSION
+              value: v21.0
+            - name: DATABASE_URL
+              value: "mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
+          volumeMounts: [ { name: app-root, mountPath: /app } ]
