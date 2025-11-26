@@ -11,12 +11,15 @@ from datetime import datetime as _d
 
 from ..db import get_session
 from ..models import Message, IGAiDebugRun, Conversation
+from sqlalchemy import text as _text
+
 from ..services.instagram_api import sync_latest_conversations, _get_base_token_and_id, GRAPH_VERSION
 from ..services.queue import enqueue
 from ..services.ai_shadow import touch_shadow_state
 from ..services.ai_ig import _detect_focus_product
 from ..services.monitoring import increment_counter
 from ..services.ai_reply import _load_history, _sanitize_reply_text
+from ..services.ingest import _extract_graph_conversation_id_from_message_id
 
 router = APIRouter()
 
@@ -901,6 +904,11 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
         else:
             link_context["needs_link"] = False
 
+        public_conversation_id = (
+            getattr(convo, "graph_conversation_id", None)
+            or (f"dm:{convo.ig_user_id}" if getattr(convo, "ig_user_id", None) else None)
+        )
+
         user_context = {
             "username": other_username,
             "ig_user_id": str(convo.ig_user_id) if getattr(convo, "ig_user_id", None) else None,
@@ -936,6 +944,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 "ai_state": ai_state,
                 "user_context": user_context,
                 "template_cards": template_cards,
+                "public_conversation_id": public_conversation_id,
             },
         )
 
@@ -1539,6 +1548,9 @@ async def send_message(conversation_id: str, body: dict):
     if not text_val or not isinstance(text_val, str) or not text_val.strip():
         raise HTTPException(status_code=400, detail="Message text is required")
     text_val = text_val.strip()
+    import logging
+
+    _log = logging.getLogger("instagram.inbox")
 
     # Optional list of image URLs to send before the text
     image_urls_raw = (body or {}).get("image_urls") or []
@@ -1550,27 +1562,72 @@ async def send_message(conversation_id: str, body: dict):
             if isinstance(u, str) and u.strip():
                 image_urls.append(u.strip())
 
-    # Resolve recipient (other party IG user id)
+    # Resolve recipient (other party IG user id) and canonical conversation identifiers
     other_id: str | None = None
-    if conversation_id.startswith("dm:"):
-        other_id = conversation_id.split(":", 1)[1] or None
-    else:
-        # Fallback: infer from existing messages
-        with get_session() as session:
-            from sqlmodel import select
+    conv_internal_id: int | None = None
+    public_conv_id: str | None = None
+    with get_session() as session:
+        from sqlmodel import select
+
+        convo_row = None
+        try:
+            convo_row = session.get(Conversation, int(conversation_id))
+        except (TypeError, ValueError):
+            convo_row = None
+        if convo_row is None:
+            if conversation_id.startswith("dm:"):
+                suffix = conversation_id.split(":", 1)[1] or None
+                if suffix:
+                    convo_row = (
+                        session.exec(
+                            select(Conversation)
+                            .where(Conversation.ig_user_id == suffix)
+                            .order_by(Conversation.id.desc())
+                        ).first()
+                    )
+                    other_id = suffix
+            else:
+                convo_row = (
+                    session.exec(
+                        select(Conversation)
+                        .where(Conversation.graph_conversation_id == conversation_id)
+                        .order_by(Conversation.id.desc())
+                    ).first()
+                )
+        if convo_row:
+            conv_internal_id = int(convo_row.id)
+            if not other_id and getattr(convo_row, "ig_user_id", None):
+                other_id = str(convo_row.ig_user_id)
+            public_conv_id = (
+                getattr(convo_row, "graph_conversation_id", None)
+                or (f"dm:{convo_row.ig_user_id}" if getattr(convo_row, "ig_user_id", None) else None)
+            )
+        msg_filter_id: int | None = conv_internal_id
+        if msg_filter_id is None:
+            try:
+                msg_filter_id = int(conversation_id)
+            except (TypeError, ValueError):
+                msg_filter_id = None
+        if not other_id and msg_filter_id is not None:
             msgs = session.exec(
-                select(Message).where(Message.conversation_id == conversation_id).order_by(Message.timestamp_ms.desc()).limit(50)
+                select(Message)
+                .where(Message.conversation_id == msg_filter_id)
+                .order_by(Message.timestamp_ms.desc())
+                .limit(50)
             ).all()
             for m in msgs:
-                # other party is sender on inbound, recipient on outbound
                 if (m.direction or "in") == "in" and m.ig_sender_id:
                     other_id = str(m.ig_sender_id)
                     break
                 if (m.direction or "in") == "out" and m.ig_recipient_id:
                     other_id = str(m.ig_recipient_id)
                     break
+    if not public_conv_id and other_id:
+        public_conv_id = f"dm:{other_id}"
     if not other_id:
         raise HTTPException(status_code=400, detail="Could not resolve recipient for this conversation")
+    if conv_internal_id is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
     # Send via Messenger API for Instagram (requires Page token)
     token, entity_id, is_page = _get_base_token_and_id()
@@ -1639,19 +1696,27 @@ async def send_message(conversation_id: str, body: dict):
     # Persist locally
     mid = str((resp or {}).get("message_id") or "")
     now_ms = int(time.time() * 1000)
-    conv_id = conversation_id if conversation_id.startswith("dm:") else f"dm:{other_id}"
+    if not public_conv_id:
+        public_conv_id = conversation_id if conversation_id.startswith("dm:") else f"dm:{other_id}"
+
     with get_session() as session:
         # Idempotency: avoid duplicate insert when the same message_id was already saved
         if mid:
             try:
                 exists = session.exec(select(Message).where(Message.ig_message_id == mid)).first()
                 if exists:
-                    # still bump last_message_at for the conversation to reflect the send time
+                    # still bump last_message fields for the conversation to reflect the send time
                     try:
                         from datetime import datetime as _dt
-                        ts_iso = _dt.utcfromtimestamp(int(now_ms/1000)).strftime('%Y-%m-%d %H:%M:%S')
-                        from sqlalchemy import text as _text
-                        session.exec(_text("UPDATE conversations SET last_message_at=:ts WHERE convo_id=:cid").params(ts=ts_iso, cid=conv_id))
+                        convo = session.get(Conversation, int(conv_internal_id))
+                        if convo:
+                            convo.last_message_at = _dt.utcfromtimestamp(int(now_ms / 1000))
+                            convo.last_message_timestamp_ms = now_ms
+                            convo.last_message_text = text_val
+                            convo.last_message_direction = "out"
+                            convo.ig_sender_id = str(entity_id)
+                            convo.ig_recipient_id = str(other_id)
+                            session.add(convo)
                     except Exception:
                         pass
                     return {"status": "ok", "message_id": mid}
@@ -1666,22 +1731,37 @@ async def send_message(conversation_id: str, body: dict):
             attachments_json=None,
             timestamp_ms=now_ms,
             raw_json=json.dumps({"send_response": resp}, ensure_ascii=False),
-            conversation_id=conv_id,
+            conversation_id=int(conv_internal_id),
             direction="out",
         )
         session.add(row)
-        # update conversations.last_message_at using this timestamp
         try:
             from datetime import datetime as _dt
-            ts_iso = _dt.utcfromtimestamp(int(now_ms/1000)).strftime('%Y-%m-%d %H:%M:%S')
-            from sqlalchemy import text as _text
-            session.exec(_text("UPDATE conversations SET last_message_at=:ts WHERE convo_id=:cid").params(ts=ts_iso, cid=conv_id))
+            session.flush()
+            convo = session.get(Conversation, int(conv_internal_id))
+            if convo:
+                if row.id:
+                    convo.last_message_id = int(row.id)
+                convo.last_message_at = _dt.utcfromtimestamp(int(now_ms / 1000))
+                convo.last_message_timestamp_ms = now_ms
+                convo.last_message_text = text_val
+                convo.last_message_direction = "out"
+                convo.ig_sender_id = str(entity_id)
+                convo.ig_recipient_id = str(other_id)
+                session.add(convo)
         except Exception:
             pass
     try:
         increment_counter("sent_messages", 1)
         from .websocket_handlers import notify_new_message
-        await notify_new_message({"type": "ig_message", "conversation_id": conv_id, "text": text_val, "timestamp_ms": now_ms})
+        notify_id = public_conv_id or (f"dm:{other_id}" if other_id else str(conv_internal_id))
+        await notify_new_message({
+            "type": "ig_message",
+            "conversation_id": notify_id,
+            "conversation_pk": int(conv_internal_id),
+            "text": text_val,
+            "timestamp_ms": now_ms,
+        })
     except Exception:
         pass
     return {"status": "ok", "message_id": mid or None}

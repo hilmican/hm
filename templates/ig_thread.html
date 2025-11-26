@@ -431,6 +431,7 @@
     </div>
     <script>
       const conversationId = {{ conversation_id | tojson }};
+      const publicConversationId = {{ (public_conversation_id or "") | tojson }};
       function fmtTs(){
         const nodes = document.querySelectorAll('.ts');
         for(const el of nodes){
@@ -590,8 +591,12 @@
           ws.onmessage = (ev) => {
             try {
               const data = JSON.parse(ev.data);
-              if (data && data.type === 'ig_message' && data.conversation_id === 'dm:{{ conversation_id }}') {
-                location.reload();
+              if (data && data.type === 'ig_message') {
+                const matchesPk = typeof data.conversation_pk !== 'undefined' && Number(data.conversation_pk) === Number(conversationId);
+                const matchesPublic = publicConversationId && data.conversation_id === publicConversationId;
+                if (matchesPk || matchesPublic) {
+                  location.reload();
+                }
               }
             } catch {}
           };
