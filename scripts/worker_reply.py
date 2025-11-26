@@ -519,16 +519,7 @@ def main() -> None:
 									"UPDATE ai_shadow_state SET status='paused', state_json=:state, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
 								).params(state=state_json_dump, cid=int(cid))
 							)
-							# Mark conversation as unread since AI didn't reply (conversation is stuck)
-							session.exec(
-								_text(
-									"UPDATE conversations SET unread_count=GREATEST(1, unread_count) WHERE id=:cid"
-								).params(cid=int(cid))
-							)
-							try:
-								log.info("ai_shadow: marked conversation_id=%s as unread (AI decided not to reply)", cid)
-							except Exception:
-								pass
+							# Don't change read status for shadow replies - only for actual sent messages
 					except Exception as pe:
 						try:
 							log.warning("persist no-reply decision error cid=%s err=%s", cid, pe)
@@ -737,31 +728,68 @@ def main() -> None:
 								).params(cid=int(cid))
 							)
 						
-						# Update unread_count based on AI confidence
-						# If AI confidently replies (confidence >= threshold), mark conversation as read (unread_count = 0)
-						# If AI is not confident (confidence < threshold), mark conversation as unread (unread_count = 1)
-						if confidence >= AUTO_SEND_CONFIDENCE_THRESHOLD:
-							# Confident reply: mark as read
-							session.exec(
-								_text(
-									"UPDATE conversations SET unread_count=0 WHERE id=:cid"
-								).params(cid=int(cid))
-							)
-							try:
-								log.info("ai_shadow: marked conversation_id=%s as read (confidence=%.2f >= threshold=%.2f)", cid, confidence, AUTO_SEND_CONFIDENCE_THRESHOLD)
-							except Exception:
-								pass
-						else:
-							# Low confidence: mark as unread
-							session.exec(
-								_text(
-									"UPDATE conversations SET unread_count=GREATEST(1, unread_count) WHERE id=:cid"
-								).params(cid=int(cid))
-							)
-							try:
-								log.info("ai_shadow: marked conversation_id=%s as unread (confidence=%.2f < threshold=%.2f)", cid, confidence, AUTO_SEND_CONFIDENCE_THRESHOLD)
-							except Exception:
-								pass
+						# Process admin notifications ONLY for actual sent messages (not shadow replies)
+						# Check if yoneticiye_bildirim_gonder was called and message was actually sent
+						if status_to_set == "sent" and should_auto_send:
+							# Process admin notification if it was requested
+							notification_callbacks = [cb for cb in function_callbacks if cb.get("name") == "yoneticiye_bildirim_gonder"]
+							for notif_cb in notification_callbacks:
+								try:
+									notif_args = notif_cb.get("arguments", {})
+									mesaj = str(notif_args.get("mesaj") or "").strip()
+									mesaj_tipi = str(notif_args.get("mesaj_tipi") or "info").strip()
+									if mesaj and mesaj_tipi in ["info", "warning", "urgent"]:
+										from app.models import AdminMessage
+										admin_msg = AdminMessage(
+											conversation_id=int(cid),
+											message=mesaj,
+											message_type=mesaj_tipi,
+											is_read=False,
+											metadata_json=json.dumps({
+												"conversation_id": cid,
+												"created_by_ai": True,
+												"sent_with_message": True,
+											}, ensure_ascii=False),
+										)
+										session.add(admin_msg)
+										session.commit()
+										try:
+											log.info("ai_shadow: created admin notification for conversation_id=%s (message was sent)", cid)
+										except Exception:
+											pass
+								except Exception as notif_err:
+									try:
+										log.warning("admin_notification creation error cid=%s err=%s", cid, notif_err)
+									except Exception:
+										pass
+						
+						# Update unread_count ONLY for actual sent messages (not shadow replies)
+						# Shadow replies (suggested status) should not change read status
+						# Only when message is actually sent (status='sent' and should_auto_send=True)
+						if status_to_set == "sent" and should_auto_send:
+							if confidence >= AUTO_SEND_CONFIDENCE_THRESHOLD:
+								# Confident reply that was actually sent: mark as read
+								session.exec(
+									_text(
+										"UPDATE conversations SET unread_count=0 WHERE id=:cid"
+									).params(cid=int(cid))
+								)
+								try:
+									log.info("ai_shadow: marked conversation_id=%s as read (sent message, confidence=%.2f >= threshold=%.2f)", cid, confidence, AUTO_SEND_CONFIDENCE_THRESHOLD)
+								except Exception:
+									pass
+							else:
+								# Low confidence but still sent: mark as unread (needs human review)
+								session.exec(
+									_text(
+										"UPDATE conversations SET unread_count=GREATEST(1, unread_count) WHERE id=:cid"
+									).params(cid=int(cid))
+								)
+								try:
+									log.info("ai_shadow: marked conversation_id=%s as unread (sent message, confidence=%.2f < threshold=%.2f)", cid, confidence, AUTO_SEND_CONFIDENCE_THRESHOLD)
+								except Exception:
+									pass
+						# For shadow replies (suggested status), don't change read status
 				except Exception as pe:
 					try:
 						log.warning("persist draft error cid=%s err=%s", cid, pe)

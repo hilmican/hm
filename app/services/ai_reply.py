@@ -1126,7 +1126,7 @@ def draft_reply(
 	)
 
 	def _handle_admin_notification_tool(args: Dict[str, Any]) -> str:
-		"""Yöneticiye bildirim gönderme handler'ı"""
+		"""Yöneticiye bildirim gönderme handler'ı - sadece bilgi toplar, gerçek gönderim worker'da yapılır"""
 		mesaj = str(args.get("mesaj") or "").strip()
 		mesaj_tipi = str(args.get("mesaj_tipi") or "info").strip()
 		
@@ -1136,51 +1136,24 @@ def draft_reply(
 		if mesaj_tipi not in ["info", "warning", "urgent"]:
 			mesaj_tipi = "info"
 		
-		try:
-			with get_session() as session:
-				# Konuşma bilgisini al
-				conv = session.exec(
-					select(Conversation).where(Conversation.id == conversation_id)
-				).first()
-				
-				# Admin mesajı oluştur
-				admin_msg = AdminMessage(
-					conversation_id=int(conversation_id),
-					message=mesaj,
-					message_type=mesaj_tipi,
-					is_read=False,
-					metadata_json=json.dumps({
-						"conversation_id": conversation_id,
-						"created_by_ai": True,
-					}, ensure_ascii=False),
-				)
-				session.add(admin_msg)
-				session.commit()
-				
-				result = {
-					"id": admin_msg.id,
-					"conversation_id": conversation_id,
-					"message": mesaj,
-					"message_type": mesaj_tipi,
-					"status": "sent",
-				}
-				
-				callback_entry = {
-					"name": "yoneticiye_bildirim_gonder",
-					"arguments": args,
-					"result": result,
-				}
-				function_callbacks.append(callback_entry)
-				_log_function_callback(conversation_id, callback_entry["name"], callback_entry["arguments"], callback_entry["result"])
-				
-				return json.dumps(result, ensure_ascii=False)
-		except Exception as e:
-			error_msg = f"Bildirim gönderilirken hata: {str(e)}"
-			try:
-				log.warning("admin_notification error cid=%s err=%s", conversation_id, e)
-			except Exception:
-				pass
-			return json.dumps({"error": error_msg}, ensure_ascii=False)
+		# Don't create admin message here - just store the intent
+		# The actual notification will be created in worker_reply.py when message is actually sent
+		result = {
+			"conversation_id": conversation_id,
+			"message": mesaj,
+			"message_type": mesaj_tipi,
+			"status": "pending",  # Will be created when message is actually sent
+		}
+		
+		callback_entry = {
+			"name": "yoneticiye_bildirim_gonder",
+			"arguments": args,
+			"result": result,
+		}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, callback_entry["name"], callback_entry["arguments"], callback_entry["result"])
+		
+		return json.dumps(result, ensure_ascii=False)
 
 	tool_handlers["yoneticiye_bildirim_gonder"] = _handle_admin_notification_tool
 
