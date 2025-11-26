@@ -119,6 +119,52 @@ def _resolve_graph_conversation_id_for_hydrate(conversation_identifier: str) -> 
                     info["graph_id"] = str(derived)
                     return str(derived), info
 
+            # If we have igba_id and ig_user_id but no graph_conversation_id, try fetching from Graph API
+            if conv_pk is not None:
+                # Get igba_id and ig_user_id for this conversation
+                conv_row = session.exec(
+                    _text("SELECT igba_id, ig_user_id FROM conversations WHERE id=:cid LIMIT 1").params(cid=int(conv_pk))
+                ).first()
+                if conv_row:
+                    igba_id = getattr(conv_row, "igba_id", None) or (conv_row[0] if len(conv_row) > 0 else None)
+                    ig_user_id = getattr(conv_row, "ig_user_id", None) or (conv_row[1] if len(conv_row) > 1 else None)
+                    
+                    if igba_id and ig_user_id:
+                        # Try to fetch from Graph API conversations endpoint
+                        try:
+                            import asyncio as _aio
+                            try:
+                                loop = _aio.get_event_loop()
+                            except RuntimeError:
+                                loop = _aio.new_event_loop()
+                                _aio.set_event_loop(loop)
+                            from ..services.instagram_api import fetch_conversations as _fc
+                            # Fetch conversations and match by participants
+                            all_convs = loop.run_until_complete(_fc(limit=100))
+                            for conv in (all_convs or []):
+                                conv_id = conv.get("id")
+                                participants = conv.get("participants", {}).get("data", [])
+                                participant_ids = [p.get("id") for p in participants if p.get("id")]
+                                # Check if this conversation includes our ig_user_id
+                                if str(ig_user_id) in [str(p) for p in participant_ids] and conv_id:
+                                    # Found it! Store and return
+                                    try:
+                                        session.exec(
+                                            _text(
+                                                "UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)"
+                                            ).params(gc=str(conv_id), cid=int(conv_pk))
+                                        )
+                                    except Exception:
+                                        pass
+                                    info["status"] = "fetched_from_graph_api"
+                                    info["conversation_pk"] = int(conv_pk)
+                                    info["graph_id"] = str(conv_id)
+                                    return str(conv_id), info
+                            info["graph_api_no_match"] = True
+                            info["conversations_checked"] = len(all_convs or [])
+                        except Exception as e:
+                            info["graph_api_fetch_error"] = str(e)[:160]
+        
         # As a final heuristic, treat alphanumeric identifiers as Graph IDs
         if any(ch.isalpha() for ch in cid_str):
             info["status"] = "assumed_graph"
@@ -1734,6 +1780,57 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
             except Exception as e:
                 try:
                     _log.warning("hydrate.resolve_graph: resolution failed err=%s", str(e)[:200])
+                except Exception:
+                    pass
+        
+        # If we have igba_id and ig_user_id but no graph_conversation_id, try fetching from Graph API
+        if not graph_conversation_id and igba_id and other_id:
+            try:
+                try:
+                    _log.info("hydrate.fetch_graph_cid: fetching from Graph API for igba_id=%s ig_user_id=%s", igba_id, other_id)
+                except Exception:
+                    pass
+                import asyncio as _aio
+                try:
+                    loop = _aio.get_event_loop()
+                except RuntimeError:
+                    loop = _aio.new_event_loop()
+                    _aio.set_event_loop(loop)
+                from ..services.instagram_api import fetch_conversations as _fc
+                all_convs = loop.run_until_complete(_fc(limit=100))
+                for conv in (all_convs or []):
+                    conv_id = conv.get("id")
+                    participants = conv.get("participants", {})
+                    participant_list = participants.get("data", []) if isinstance(participants, dict) else (participants if isinstance(participants, list) else [])
+                    participant_ids = [str(p.get("id")) for p in participant_list if p and p.get("id")]
+                    # Check if this conversation includes our user
+                    if str(other_id) in participant_ids and conv_id:
+                        graph_conversation_id = str(conv_id)
+                        # Store it for future use
+                        try:
+                            from sqlalchemy import text as _t
+                            if is_db_id:
+                                session.exec(
+                                    _t("UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)")
+                                ).params(gc=str(graph_conversation_id), cid=int(conversation_id))
+                            else:
+                                session.exec(
+                                    _t("UPDATE conversations SET graph_conversation_id=:gc WHERE igba_id=:g AND ig_user_id=:u AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)")
+                                ).params(gc=str(graph_conversation_id), g=str(igba_id), u=str(other_id))
+                            try:
+                                _log.info("hydrate.fetch_graph_cid: found and stored graph_cid=%s", 
+                                         (graph_conversation_id[:40] + "..." if len(graph_conversation_id) > 40 else graph_conversation_id))
+                            except Exception:
+                                pass
+                        except Exception as e:
+                            try:
+                                _log.warning("hydrate.fetch_graph_cid: failed to store err=%s", str(e)[:200])
+                            except Exception:
+                                pass
+                        break
+            except Exception as e:
+                try:
+                    _log.warning("hydrate.fetch_graph_cid: fetch failed err=%s", str(e)[:200])
                 except Exception:
                     pass
         
