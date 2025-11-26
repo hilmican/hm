@@ -1051,6 +1051,31 @@ def init_db() -> None:
                     )
                     """
                 )
+                # Admin mesajları tablosu
+                try:
+                    conn.exec_driver_sql(
+                        """
+                        CREATE TABLE IF NOT EXISTS admin_messages (
+                            id INT PRIMARY KEY AUTO_INCREMENT,
+                            conversation_id INT NOT NULL,
+                            message TEXT NOT NULL,
+                            message_type VARCHAR(16) NOT NULL DEFAULT 'info',
+                            is_read BOOLEAN NOT NULL DEFAULT FALSE,
+                            read_by_user_id INT NULL,
+                            read_at DATETIME NULL,
+                            metadata_json LONGTEXT NULL,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            INDEX idx_admin_msg_conversation (conversation_id),
+                            INDEX idx_admin_msg_type (message_type),
+                            INDEX idx_admin_msg_read (is_read),
+                            INDEX idx_admin_msg_created (created_at),
+                            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+                            FOREIGN KEY (read_by_user_id) REFERENCES user(id) ON DELETE SET NULL
+                        )
+                        """
+                    )
+                except Exception:
+                    pass
 
                 return
         except Exception as e:

@@ -47,6 +47,28 @@
         <button type="submit" class="meta" style="background:#fff;color:#2563eb;border:1px solid #2563eb;">(Form ile gönder)</button>
       </form>
     </div>
+    {% if admin_messages %}
+    <div style="margin-bottom: 24px; border: 2px solid #f59e0b; border-radius: 8px; padding: 16px; background: #fffbeb;">
+      <h2 style="margin-top: 0; color: #92400e; font-size: 18px;">📢 Admin Mesajları ({{ admin_messages|length }})</h2>
+      {% for msg in admin_messages %}
+        <div style="border: 1px solid #fbbf24; border-radius: 6px; padding: 12px; margin-bottom: 8px; background: #fff; {% if msg.message_type == 'urgent' %}border-color: #ef4444; background: #fef2f2;{% elif msg.message_type == 'warning' %}border-color: #f59e0b; background: #fffbeb;{% endif %}">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+            <div style="flex: 1;">
+              <div style="font-weight: 600; color: #111827; margin-bottom: 4px;">
+                {% if msg.message_type == 'urgent' %}🔴 Acil: {% elif msg.message_type == 'warning' %}⚠️ Uyarı: {% else %}ℹ️ Bilgi: {% endif %}
+                <a href="/ig/inbox/{{ msg.conversation_id }}" style="color: #2563eb; text-decoration: none;">Konuşma #{{ msg.conversation_id }}</a>
+              </div>
+              <div style="color: #374151; white-space: pre-wrap;">{{ msg.message }}</div>
+            </div>
+            <button onclick="markAdminMessageRead({{ msg.id }})" style="background: #10b981; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px; margin-left: 12px;">Okundu</button>
+          </div>
+          <div style="font-size: 12px; color: #6b7280;">
+            {{ msg.created_at.strftime('%Y-%m-%d %H:%M:%S') if msg.created_at else '' }}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    {% endif %}
     <div id="list">
       {% for m in conversations %}
         <div class="conv">
@@ -222,6 +244,24 @@
         } catch { wsConnected = false; }
       };
       startWS();
+      
+      // Admin mesajlarını okundu olarak işaretle
+      async function markAdminMessageRead(msgId) {
+        try {
+          const r = await fetch(`/ig/inbox/admin/messages/${msgId}/read`, { method: 'POST' });
+          if (!r.ok) throw new Error('okundu işaretleme başarısız');
+          const js = await r.json();
+          if (js.status === 'ok') {
+            location.reload();
+          } else {
+            alert('Hata: ' + (js.error || 'Bilinmeyen hata'));
+          }
+        } catch (e) {
+          alert('Okundu işaretleme hatası: ' + e.message);
+        }
+      }
+      window.markAdminMessageRead = markAdminMessageRead;
+      
       // Poll fallback every 15s if sockets fail
       setInterval(async () => {
         if (wsConnected) return;

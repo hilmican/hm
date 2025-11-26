@@ -4,6 +4,9 @@ from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel
 
 from ..services import ig_inbox, ig_profile
+from ..db import get_session
+from ..models import AdminMessage
+from sqlmodel import select
 
 router = APIRouter(prefix="/inbox", tags=["instagram-inbox"])
 
@@ -82,4 +85,23 @@ def save_order_draft(conversation_id: int, payload: OrderDraftPayload = Body(...
 		return ig_inbox.save_order_draft(conversation_id, data, actor_user_id=None)
 	except Exception as exc:
 		raise HTTPException(status_code=400, detail=f"draft_error: {exc}")
+
+
+@router.post("/admin/messages/{message_id}/read")
+def mark_admin_message_read(message_id: int):
+	"""Admin mesajını okundu olarak işaretle"""
+	try:
+		with get_session() as session:
+			msg = session.get(AdminMessage, message_id)
+			if not msg:
+				raise HTTPException(status_code=404, detail="message_not_found")
+			msg.is_read = True
+			# TODO: read_by_user_id ve read_at'i de set et (şimdilik None bırakıyoruz)
+			session.add(msg)
+			session.commit()
+			return {"status": "ok", "message_id": message_id}
+	except HTTPException:
+		raise
+	except Exception as exc:
+		raise HTTPException(status_code=400, detail=f"mark_read_error: {exc}")
 

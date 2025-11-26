@@ -689,3 +689,22 @@ class IGDMOrderDraft(SQLModel, table=True):
 	created_by_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class AdminMessage(SQLModel, table=True):
+	"""
+	Admin mesajları - AI tarafından yöneticilere gönderilen bildirimler.
+	Inbox'ta gösterilir.
+	"""
+
+	__tablename__ = "admin_messages"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	conversation_id: int = Field(foreign_key="conversations.id", index=True, description="İlgili konuşma")
+	message: str = Field(sa_column=Column(Text), description="Bildirim mesajı")
+	message_type: str = Field(default="info", index=True, description="info|warning|urgent")
+	is_read: bool = Field(default=False, index=True, description="Okundu mu?")
+	read_by_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True, description="Okuyan kullanıcı")
+	read_at: Optional[dt.datetime] = Field(default=None, index=True)
+	metadata_json: Optional[str] = Field(default=None, sa_column=Column(Text), description="Ek metadata (JSON)")
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)

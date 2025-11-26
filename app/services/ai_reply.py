@@ -19,6 +19,7 @@ from ..models import (
 	AIPretext,
 	ProductImage,
 	AiShadowReply,
+	AdminMessage,
 )
 from .ai import (
 	AIClient,
@@ -1097,6 +1098,92 @@ def draft_reply(
 
 	tool_handlers["place_ai_order_candidate"] = _handle_place_order_tool
 
+	# Yöneticiye bildirim gönderme fonksiyonu
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "yoneticiye_bildirim_gonder",
+				"description": "Müşteri ofise gelmek istediğinde veya yönetici müdahalesi gereken durumlarda bu fonksiyonu çağır. Örn: Müşteri 'ofisiniz nerede' diye sorup 'gelip orada deneyebilir miyiz' dediğinde bu fonksiyonu çağır.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"mesaj": {
+							"type": "string",
+							"description": "Yöneticiye gönderilecek bildirim mesajı. Konuşma bağlamını ve müşterinin isteğini açıkça belirt.",
+						},
+						"mesaj_tipi": {
+							"type": "string",
+							"enum": ["info", "warning", "urgent"],
+							"description": "Bildirim tipi: 'info' (bilgi), 'warning' (uyarı), 'urgent' (acil)",
+							"default": "info",
+						}
+					},
+					"required": ["mesaj"],
+				},
+			},
+		}
+	)
+
+	def _handle_admin_notification_tool(args: Dict[str, Any]) -> str:
+		"""Yöneticiye bildirim gönderme handler'ı"""
+		mesaj = str(args.get("mesaj") or "").strip()
+		mesaj_tipi = str(args.get("mesaj_tipi") or "info").strip()
+		
+		if not mesaj:
+			return json.dumps({"error": "Mesaj boş olamaz"}, ensure_ascii=False)
+		
+		if mesaj_tipi not in ["info", "warning", "urgent"]:
+			mesaj_tipi = "info"
+		
+		try:
+			with get_session() as session:
+				# Konuşma bilgisini al
+				conv = session.exec(
+					select(Conversation).where(Conversation.id == conversation_id)
+				).first()
+				
+				# Admin mesajı oluştur
+				admin_msg = AdminMessage(
+					conversation_id=int(conversation_id),
+					message=mesaj,
+					message_type=mesaj_tipi,
+					is_read=False,
+					metadata_json=json.dumps({
+						"conversation_id": conversation_id,
+						"created_by_ai": True,
+					}, ensure_ascii=False),
+				)
+				session.add(admin_msg)
+				session.commit()
+				
+				result = {
+					"id": admin_msg.id,
+					"conversation_id": conversation_id,
+					"message": mesaj,
+					"message_type": mesaj_tipi,
+					"status": "sent",
+				}
+				
+				callback_entry = {
+					"name": "yoneticiye_bildirim_gonder",
+					"arguments": args,
+					"result": result,
+				}
+				function_callbacks.append(callback_entry)
+				_log_function_callback(conversation_id, callback_entry["name"], callback_entry["arguments"], callback_entry["result"])
+				
+				return json.dumps(result, ensure_ascii=False)
+		except Exception as e:
+			error_msg = f"Bildirim gönderilirken hata: {str(e)}"
+			try:
+				log.warning("admin_notification error cid=%s err=%s", conversation_id, e)
+			except Exception:
+				pass
+			return json.dumps({"error": error_msg}, ensure_ascii=False)
+
+	tool_handlers["yoneticiye_bildirim_gonder"] = _handle_admin_notification_tool
+
 	# Build confidence instruction for first messages
 	confidence_instruction = ""
 	if is_first_message:
@@ -1141,6 +1228,7 @@ def draft_reply(
 		"- Fonksiyon çağrısı yaptığını veya ölçüleri backend'e ilettiğini kullanıcıya ASLA söyleme; sadece sonuçla devam et.\n"
 		"- Müşteri ürüne ilgi gösterdiğinde `create_ai_order_candidate`, vazgeçtiğinde `mark_ai_order_not_interested`, siparişi tamamlamaya çok yakınsa `mark_ai_order_very_interested` fonksiyonlarını uygun şekilde kullan.\n"
 		"- Ürün, müşteri ve adres bilgilerini tam topladıysan `place_ai_order_candidate` fonksiyonunu çağırıp tüm alanları doldur; bu kayıt insan ekip tarafından incelenecek.\n"
+		"- Müşteri ofise gelmek istediğinde (örn: 'ofisiniz nerede' diye sorup 'gelip orada deneyebilir miyiz' dediğinde) `yoneticiye_bildirim_gonder` fonksiyonunu çağır. Mesajda konuşma bağlamını ve müşterinin isteğini açıkça belirt.\n"
 	)
 	if function_callbacks:
 		user_prompt += "\n=== FONKSİYON ÇAĞRILARI ===\n"

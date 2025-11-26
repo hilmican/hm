@@ -2,6 +2,8 @@ from fastapi import APIRouter, Request
 
 from ..db import get_session
 from ..services.queue import enqueue, _get_redis
+from ..models import AdminMessage
+from sqlmodel import select
 
 router = APIRouter()
 
@@ -327,8 +329,37 @@ async def inbox(
                 pass
         # For backward compatibility, set labels to display_names
         labels = display_names
+        
+        # Fetch unread admin messages
+        admin_messages = []
+        try:
+            admin_msgs = session.exec(
+                select(AdminMessage)
+                .where(AdminMessage.is_read == False)
+                .order_by(AdminMessage.created_at.desc())
+                .limit(50)
+            ).all()
+            for msg in admin_msgs:
+                admin_messages.append({
+                    "id": msg.id,
+                    "conversation_id": msg.conversation_id,
+                    "message": msg.message,
+                    "message_type": msg.message_type,
+                    "created_at": msg.created_at,
+                })
+        except Exception:
+            admin_messages = []
+        
         templates = request.app.state.templates
-        return templates.TemplateResponse("ig_inbox.html", {"request": request, "conversations": conversations, "labels": labels, "names": names, "ad_map": ad_map, "q": (q or "")})
+        return templates.TemplateResponse("ig_inbox.html", {
+            "request": request,
+            "conversations": conversations,
+            "labels": labels,
+            "names": names,
+            "ad_map": ad_map,
+            "q": (q or ""),
+            "admin_messages": admin_messages,
+        })
 
 
 @router.post("/inbox/refresh")
