@@ -52,8 +52,8 @@ def _resolve_graph_conversation_id_for_hydrate(conversation_identifier: str) -> 
         if conv_pk is None:
             try:
                 row = session.exec(
-                    _text("SELECT id, graph_conversation_id FROM conversations WHERE convo_id=:cid LIMIT 1")
-                ).params(cid=cid_str).first()
+                    _text("SELECT id, graph_conversation_id FROM conversations WHERE convo_id=:cid LIMIT 1").params(cid=cid_str)
+                ).first()
             except Exception as exc:
                 info["convo_lookup_error"] = str(exc)[:160]
                 row = None
@@ -77,8 +77,8 @@ def _resolve_graph_conversation_id_for_hydrate(conversation_identifier: str) -> 
         if conv_pk is not None:
             # Direct lookup on conversations.id
             row = session.exec(
-                _text("SELECT graph_conversation_id FROM conversations WHERE id=:cid LIMIT 1")
-            ).params(cid=int(conv_pk)).first()
+                _text("SELECT graph_conversation_id FROM conversations WHERE id=:cid LIMIT 1").params(cid=int(conv_pk))
+            ).first()
             graph_cid = (
                 getattr(row, "graph_conversation_id", None)
                 if row is not None and hasattr(row, "graph_conversation_id")
@@ -96,8 +96,8 @@ def _resolve_graph_conversation_id_for_hydrate(conversation_identifier: str) -> 
             row_msg = session.exec(
                 _text(
                     "SELECT ig_message_id FROM message WHERE conversation_id=:cid AND ig_message_id IS NOT NULL ORDER BY timestamp_ms DESC, id DESC LIMIT 1"
-                )
-            ).params(cid=int(conv_pk)).first()
+                ).params(cid=int(conv_pk))
+            ).first()
             ig_mid = (
                 getattr(row_msg, "ig_message_id", None)
                 if row_msg and hasattr(row_msg, "ig_message_id")
