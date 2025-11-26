@@ -23,6 +23,20 @@
       .template-card-buttons { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
       .template-card-buttons a { background:#2563eb; color:#fff; padding:4px 10px; border-radius:999px; font-size:12px; text-decoration:none; }
       .template-card-buttons span { background:#e5e7eb; color:#374151; padding:4px 10px; border-radius:999px; font-size:12px; }
+      .inline-grid-2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+      .brand-card, .assignment-card { border:1px solid #e5e7eb; border-radius:12px; padding:14px; background:#fff; }
+      .brand-card img { width:56px; height:56px; border-radius:999px; object-fit:cover; border:1px solid #e5e7eb; }
+      .brand-stats { display:flex; gap:16px; margin-top:10px; font-size:13px; color:#4b5563; }
+      .brand-stat-label { display:block; font-weight:600; color:#111827; font-size:14px; }
+      .assignment-card label { font-size:13px; color:#4b5563; display:block; margin-bottom:4px; }
+      .assignment-card select, .assignment-card textarea, .assignment-card input { width:100%; border:1px solid #d1d5db; border-radius:8px; padding:8px; font-size:14px; }
+      .assignment-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+      .pill-button { background:#f3f4f6; border:1px solid #d1d5db; border-radius:999px; padding:4px 10px; font-size:12px; cursor:pointer; }
+      .pill-button.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+      .modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,0.55); display:none; align-items:center; justify-content:center; z-index:50; }
+      .modal { background:#fff; border-radius:12px; padding:20px; width:min(500px,90vw); max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(15,23,42,0.2); }
+      .modal h3 { margin-top:0; color:#111827; }
+      .hidden { display:none !important; }
     </style>
   </head>
   <body>
@@ -82,6 +96,12 @@
             <div class="meta" style="color:#b91c1c;">Önce ilgili reklamı/postu ürüne bağlayın.</div>
           {% endif %}
         {% endif %}
+      </div>
+      <div class="inline-grid-2">
+        {% if brand_profile %}
+          {% include "components/ig_brand_snapshot.html" %}
+        {% endif %}
+        {% include "components/ig_assignment_panel.html" %}
       </div>
     </div>
     {% if shadow and shadow.text and not inline_drafts %}
@@ -429,6 +449,32 @@
         <button id="sendBtn" type="submit" style="background:#2563eb;color:#fff;border:none;border-radius:8px;padding:10px 14px;cursor:pointer">Send</button>
       </form>
     </div>
+    <div id="orderWizardBackdrop" class="modal-backdrop hidden">
+      <div class="modal">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3>DM → Sipariş Taslağı</h3>
+          <button id="orderWizardClose" class="pill-button" type="button">Kapat</button>
+        </div>
+        <form id="orderWizardForm" style="display:flex; flex-direction:column; gap:10px;">
+          <label>İsim
+            <input type="text" name="customer_name" placeholder="Müşteri adı" />
+          </label>
+          <label>Telefon
+            <input type="text" name="phone" placeholder="+90..." />
+          </label>
+          <label>Adres
+            <textarea name="address" rows="2" placeholder="Teslimat adresi"></textarea>
+          </label>
+          <label>Notlar
+            <textarea name="notes" rows="3" placeholder="Örn: Beden S, renk siyah"></textarea>
+          </label>
+          <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button id="orderWizardSubmit" class="action" type="submit">Taslağı Kaydet</button>
+          </div>
+        </form>
+        <div id="orderWizardStatus" class="meta" style="margin-top:8px;"></div>
+      </div>
+    </div>
     <script>
       const conversationId = {{ conversation_id | tojson }};
       const publicConversationId = {{ (public_conversation_id or "") | tojson }};
@@ -442,6 +488,134 @@
         }
       }
       fmtTs();
+
+      const brandSnapshotCard = document.getElementById('brandSnapshotCard');
+      async function refreshBrandProfile(force = false){
+        if (!brandSnapshotCard) return;
+        const btn = document.getElementById('brandRefreshBtn');
+        try {
+          if (btn) { btn.disabled = true; btn.textContent = 'Yükleniyor...'; }
+          const res = await fetch(`/ig/inbox/brand-profile${force ? '?force=1' : ''}`);
+          if (!res.ok) throw new Error('fetch_failed');
+          const data = await res.json();
+          const updated = new Date(data.refreshed_at || Date.now()).toLocaleString();
+          const statNodes = brandSnapshotCard.querySelectorAll('.brand-stat-label');
+          if (statNodes.length >= 3) {
+            statNodes[0].textContent = data.followers_count ?? 0;
+            statNodes[1].textContent = data.follows_count ?? 0;
+            statNodes[2].textContent = data.media_count ?? 0;
+          }
+          const updatedEl = document.getElementById('brandSnapshotUpdated');
+          if (updatedEl) updatedEl.textContent = updated;
+        } catch (e) {
+          alert('Profil yenileme başarısız: ' + (e?.message || e));
+        } finally {
+          if (btn) { btn.disabled = false; btn.textContent = 'Yenile'; }
+        }
+      }
+      document.getElementById('brandRefreshBtn')?.addEventListener('click', () => refreshBrandProfile(true));
+
+      const assigneeSelect = document.getElementById('assigneeSelect');
+      const assigneeNote = document.getElementById('assigneeNote');
+      const assignmentMeta = document.getElementById('assignmentMeta');
+      document.getElementById('assignmentSaveBtn')?.addEventListener('click', async () => {
+        try {
+          const payload = {
+            user_id: assigneeSelect?.value ? Number(assigneeSelect.value) : null,
+            note: assigneeNote?.value || null,
+          };
+          const res = await fetch(`/ig/inbox/${conversationId}/assign`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(()=> ({}));
+          if (!res.ok) throw new Error(data.detail || 'assign_failed');
+          if (assignmentMeta) assignmentMeta.textContent = 'Güncellendi: ' + (data.updated_at || '');
+        } catch (e) {
+          alert('Atama kaydedilemedi: ' + (e?.message || e));
+        }
+      });
+
+      const cannedList = document.getElementById('cannedResponseList');
+      async function loadCannedResponses(){
+        if (!cannedList) return;
+        cannedList.innerHTML = '<div class="meta">Yükleniyor...</div>';
+        try {
+          const res = await fetch('/ig/inbox/canned-responses');
+          const data = await res.json();
+          cannedList.innerHTML = '';
+          (data.items || []).forEach(item => {
+            const row = document.createElement('div');
+            row.style.border = '1px solid #e5e7eb';
+            row.style.borderRadius = '10px';
+            row.style.padding = '10px';
+            row.innerHTML = `<div style="font-weight:600;color:#111827;">${item.title}</div>
+              <div class="meta" style="white-space:pre-wrap;margin-top:4px;">${item.body}</div>`;
+            const btn = document.createElement('button');
+            btn.className = 'pill-button primary';
+            btn.textContent = 'Metni kullan';
+            btn.style.marginTop = '8px';
+            btn.addEventListener('click', () => {
+              const existing = replyInput?.value || '';
+              replyInput.value = existing ? `${existing}\n${item.body}` : item.body;
+              replyInput.focus();
+            });
+            row.appendChild(btn);
+            cannedList.appendChild(row);
+          });
+          if (!data.items || !data.items.length) {
+            cannedList.innerHTML = '<div class="meta">Henüz hazır yanıt yok.</div>';
+          }
+        } catch (e) {
+          cannedList.innerHTML = '<div class="meta" style="color:#b91c1c;">Yüklenemedi.</div>';
+        }
+      }
+      loadCannedResponses();
+      document.getElementById('cannedReloadBtn')?.addEventListener('click', () => loadCannedResponses());
+
+      const wizardBackdrop = document.getElementById('orderWizardBackdrop');
+      const wizardForm = document.getElementById('orderWizardForm');
+      const wizardStatus = document.getElementById('orderWizardStatus');
+      async function openWizard(){
+        wizardBackdrop?.classList.remove('hidden');
+        if (!wizardForm) return;
+        try {
+          const res = await fetch(`/ig/inbox/${conversationId}/order-prefill`);
+          const data = await res.json();
+          wizardForm.customer_name.value = data.contact_name || '';
+          wizardForm.phone.value = data.contact_phone || '';
+          wizardForm.address.value = data.contact_address || '';
+          wizardForm.notes.value = data.notes || '';
+        } catch {}
+      }
+      document.getElementById('dmOrderWizardBtn')?.addEventListener('click', openWizard);
+      document.getElementById('orderWizardClose')?.addEventListener('click', () => wizardBackdrop?.classList.add('hidden'));
+      wizardBackdrop?.addEventListener('click', (ev) => {
+        if (ev.target === wizardBackdrop) wizardBackdrop.classList.add('hidden');
+      });
+      wizardForm?.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        try {
+          const payload = {
+            customer_name: wizardForm.customer_name.value || null,
+            phone: wizardForm.phone.value || null,
+            address: wizardForm.address.value || null,
+            notes: wizardForm.notes.value || null,
+            items: [],
+          };
+          const res = await fetch(`/ig/inbox/${conversationId}/order-drafts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(()=> ({}));
+          if (!res.ok) throw new Error(data.detail || 'draft_failed');
+          wizardStatus.textContent = `Taslak oluşturuldu (#${data.id})`;
+        } catch (e) {
+          wizardStatus.textContent = 'Hata: ' + (e?.message || e);
+        }
+      });
 
       // Toggle AI Instructions visibility
       const toggleAiInstructions = document.getElementById('toggleAiInstructions');
@@ -610,8 +784,8 @@
       }, 15000);
 
       // Send reply
-      const form = document.getElementById('replyForm');
-      const input = document.getElementById('replyInput');
+      const replyForm = document.getElementById('replyForm');
+      const replyInput = document.getElementById('replyInput');
       const useShadow = document.getElementById('useShadow');
       const dismissShadow = document.getElementById('dismissShadow');
       const sendDraft = document.getElementById('sendDraft');
@@ -620,7 +794,7 @@
       useShadow?.addEventListener('click', () => {
         try {
           const txt = {{ (shadow.text if shadow and shadow.text else "") | tojson | safe }};
-          if (input && txt) input.value = txt;
+          if (replyInput && txt) replyInput.value = txt;
         } catch {}
       });
       dismissShadow?.addEventListener('click', async () => {
@@ -654,7 +828,7 @@
       editDraft?.addEventListener('click', () => {
         try {
           const txt = {{ (shadow.text if shadow and shadow.text else "") | tojson | safe }};
-          if (input && txt) { input.value = txt; input.focus(); }
+          if (replyInput && txt) { replyInput.value = txt; replyInput.focus(); }
         } catch {}
       });
       dismissDraft?.addEventListener('click', async () => {
@@ -669,9 +843,9 @@
           dismissDraft.disabled = false;
         }
       });
-      form?.addEventListener('submit', async (e) => {
+      replyForm?.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const text = (input?.value || '').trim();
+        const text = (replyInput?.value || '').trim();
         if (!text) return;
         try {
           const r = await fetch(location.pathname + '/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });

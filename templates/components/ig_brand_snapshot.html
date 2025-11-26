@@ -1,0 +1,29 @@
+<div class="brand-card" id="brandSnapshotCard" data-refreshed="{{ brand_profile.refreshed_at or '' }}">
+  <div style="display:flex; gap:12px; align-items:center;">
+    {% if brand_profile.profile_picture_url %}
+      <img src="{{ brand_profile.profile_picture_url }}" alt="Profile" />
+    {% else %}
+      <div style="width:56px;height:56px;border-radius:999px;background:#e5e7eb;display:flex;align-items:center;justify-content:center;color:#374151;font-weight:600;">
+        {{ (brand_profile.username or '?')[0]|upper }}
+      </div>
+    {% endif %}
+    <div>
+      <div style="font-weight:600; color:#111827;">@{{ brand_profile.username or '-' }}</div>
+      <div class="meta">{{ brand_profile.name or '—' }}</div>
+      {% if brand_profile.website %}
+        <div class="meta"><a href="{{ brand_profile.website }}" target="_blank" rel="noopener">{{ brand_profile.website }}</a></div>
+      {% endif %}
+    </div>
+    <button id="brandRefreshBtn" class="action" type="button" style="margin-left:auto;">Yenile</button>
+  </div>
+  <div class="brand-stats">
+    <div><span class="brand-stat-label">{{ brand_profile.followers_count or 0 }}</span>Takipçi</div>
+    <div><span class="brand-stat-label">{{ brand_profile.follows_count or 0 }}</span>Takip edilen</div>
+    <div><span class="brand-stat-label">{{ brand_profile.media_count or 0 }}</span>İçerik</div>
+  </div>
+  {% if brand_profile.biography %}
+    <div style="margin-top:10px; font-size:13px; color:#111827; white-space:pre-wrap;">{{ brand_profile.biography }}</div>
+  {% endif %}
+  <div class="meta" style="margin-top:8px;">Son güncelleme: <span id="brandSnapshotUpdated">{{ brand_profile.refreshed_at or '-' }}</span></div>
+</div>
+

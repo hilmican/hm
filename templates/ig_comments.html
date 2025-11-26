@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Instagram Yorum Moderasyonu</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:24px; background:#f8fafc; color:#0f172a; }
+      h1 { margin-bottom:16px; }
+      .card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px; box-shadow:0 10px 40px rgba(15,23,42,0.05); margin-bottom:16px; }
+      label { font-size:13px; color:#475569; display:block; margin-bottom:4px; }
+      input { width:100%; border:1px solid #cbd5f5; border-radius:8px; padding:8px; font-size:14px; }
+      button { border:none; border-radius:8px; padding:8px 12px; cursor:pointer; font-weight:600; }
+      .primary { background:#2563eb; color:#fff; }
+      .comment-list { display:flex; flex-direction:column; gap:12px; margin-top:12px; }
+      .comment-card { border:1px solid #e2e8f0; border-radius:12px; padding:12px; background:#fff; }
+      .comment-meta { font-size:12px; color:#475569; margin-bottom:4px; }
+      .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+      .actions button { background:#e2e8f0; color:#0f172a; border-radius:999px; padding:6px 12px; font-size:12px; }
+      .actions button.primary { background:#2563eb; color:#fff; }
+      table { width:100%; border-collapse:collapse; font-size:13px; margin-top:12px; }
+      th, td { padding:8px; border-bottom:1px solid #e2e8f0; text-align:left; }
+      th { text-transform:uppercase; letter-spacing:0.05em; color:#475569; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>Instagram Yorum Moderasyonu</h1>
+    <div class="card">
+      <label for="mediaInput">İçerik (media_id)</label>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <input id="mediaInput" type="text" placeholder="1784..." />
+        <button id="loadComments" class="primary" type="button">Yorumları Yükle</button>
+      </div>
+      <div class="comment-list" id="commentList">
+        <div class="comment-meta">Henüz yorum yüklenmedi.</div>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2 style="margin:0;">Audit Log</h2>
+        <button id="auditReload" class="primary" type="button" style="padding:6px 10px;">Yenile</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Comment</th>
+            <th>Aksiyon</th>
+            <th>Zaman</th>
+          </tr>
+        </thead>
+        <tbody id="auditTable">
+          <tr><td colspan="4">Kayıt yok.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <script>
+      const commentList = document.getElementById('commentList');
+      async function loadComments(){
+        const mediaId = document.getElementById('mediaInput').value.trim();
+        if (!mediaId) {
+          alert('Lütfen media_id girin');
+          return;
+        }
+        commentList.innerHTML = '<div class="comment-meta">Yükleniyor...</div>';
+        try {
+          const res = await fetch(`/ig/comments/stream?media_id=${encodeURIComponent(mediaId)}`);
+          const data = await res.json();
+          const items = (data.data || []);
+          if (!items.length) {
+            commentList.innerHTML = '<div class="comment-meta">Yorum bulunamadı.</div>';
+            return;
+          }
+          commentList.innerHTML = '';
+          items.forEach(item => {
+            const card = document.createElement('div');
+            card.className = 'comment-card';
+            card.dataset.commentId = item.id;
+            card.innerHTML = `
+              <div class="comment-meta">@${item.username || 'kullanıcı'} · ${new Date(item.timestamp || Date.now()).toLocaleString()}</div>
+              <div style="font-size:15px; color:#0f172a;">${item.text || ''}</div>
+              <div class="actions">
+                <button class="primary" data-action="reply">Yanıtla</button>
+                <button data-action="${item.hidden ? 'unhide' : 'hide'}">${item.hidden ? 'Göster' : 'Gizle'}</button>
+                <button data-action="dm">DM'e Dönüştür</button>
+                <button data-action="delete" style="background:#fee2e2;color:#b91c1c;">Sil</button>
+              </div>
+            `;
+            commentList.appendChild(card);
+          });
+        } catch (e) {
+          commentList.innerHTML = '<div class="comment-meta" style="color:#b91c1c;">Yüklenemedi.</div>';
+        }
+      }
+      document.getElementById('loadComments')?.addEventListener('click', loadComments);
+      commentList?.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('button[data-action]');
+        if (!btn) return;
+        const card = btn.closest('.comment-card');
+        const commentId = card?.dataset.commentId;
+        if (!commentId) return;
+        const action = btn.getAttribute('data-action');
+        try {
+          if (action === 'reply') {
+            const message = prompt('Yanıt metni:');
+            if (!message) return;
+            await fetch(`/ig/comments/${commentId}/reply`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ message }) });
+          } else if (action === 'hide') {
+            await fetch(`/ig/comments/${commentId}/hide`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ hide: true }) });
+            btn.textContent = 'Göster'; btn.setAttribute('data-action', 'unhide');
+          } else if (action === 'unhide') {
+            await fetch(`/ig/comments/${commentId}/hide`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ hide: false }) });
+            btn.textContent = 'Gizle'; btn.setAttribute('data-action', 'hide');
+          } else if (action === 'dm') {
+            await fetch(`/ig/comments/${commentId}/convert`, { method:'POST' });
+          } else if (action === 'delete') {
+            if (!confirm('Yorumu kalıcı olarak silmek istediğinize emin misiniz?')) return;
+            await fetch(`/ig/comments/${commentId}`, { method:'DELETE' });
+            card.remove();
+          }
+          loadAudit();
+        } catch (e) {
+          alert('İşlem hatası: ' + (e?.message || e));
+        }
+      });
+
+      const auditTable = document.getElementById('auditTable');
+      async function loadAudit(){
+        if (!auditTable) return;
+        try {
+          const res = await fetch('/ig/comments/audit');
+          const data = await res.json();
+          const items = data.items || [];
+          auditTable.innerHTML = '';
+          if (!items.length) {
+            auditTable.innerHTML = '<tr><td colspan="4">Kayıt yok.</td></tr>';
+            return;
+          }
+          items.forEach(entry => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>#${entry.id}</td>
+              <td>${entry.comment_id}</td>
+              <td>${entry.action}</td>
+              <td>${entry.created_at || '-'}</td>
+            `;
+            auditTable.appendChild(tr);
+          });
+        } catch (e) {
+          auditTable.innerHTML = '<tr><td colspan="4" style="color:#b91c1c;">Yüklenemedi.</td></tr>';
+        }
+      }
+      document.getElementById('auditReload')?.addEventListener('click', loadAudit);
+      loadAudit();
+    </script>
+  </body>
+</html>
+

@@ -1,0 +1,37 @@
+<div class="assignment-card">
+  <h3 style="margin:0 0 8px 0; color:#111827;">Sorumlu Kişi</h3>
+  <label for="assigneeSelect">Takım üyesi</label>
+  <select id="assigneeSelect">
+    <option value="">Atanmadı</option>
+    {% for user in assignable_users %}
+      {% set selected = '' %}
+      {% if current_assignment and current_assignment.user and current_assignment.user.id == user.id %}
+        {% set selected = 'selected' %}
+      {% endif %}
+      <option value="{{ user.id }}" {{ selected }}>{{ user.username }}</option>
+    {% endfor %}
+  </select>
+  <label for="assigneeNote" style="margin-top:12px;">Not</label>
+  <textarea id="assigneeNote" rows="3" placeholder="Örn: Teslimat için müşteriyi arayacak">{{ (current_assignment.note if current_assignment) or '' }}</textarea>
+  <div class="assignment-actions">
+    <button id="assignmentSaveBtn" class="action" type="button">Kaydet</button>
+    <button id="dmOrderWizardBtn" class="pill-button" type="button">DM'den Sipariş Oluştur</button>
+  </div>
+  <div class="meta" id="assignmentMeta" style="margin-top:6px;">
+    {% if current_assignment and current_assignment.updated_at %}
+      Güncellendi: {{ current_assignment.updated_at }}
+    {% else %}
+      Henüz atama yapılmadı.
+    {% endif %}
+  </div>
+</div>
+<div class="assignment-card">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h3 style="margin:0; color:#111827;">Hazır Yanıtlar</h3>
+    <button id="cannedReloadBtn" class="pill-button" type="button">Yenile</button>
+  </div>
+  <div id="cannedResponseList" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
+    <div class="meta">Yükleniyor...</div>
+  </div>
+</div>
+

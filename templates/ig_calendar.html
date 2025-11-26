@@ -1,0 +1,183 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Instagram İçerik Takvimi</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:24px; background:#f8fafc; color:#0f172a; }
+      h1 { margin-bottom:16px; }
+      .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px; }
+      .card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px; box-shadow:0 8px 32px rgba(15,23,42,0.05); }
+      label { display:block; font-size:13px; color:#475569; margin-bottom:4px; }
+      input, textarea, select { width:100%; border:1px solid #cbd5f5; border-radius:8px; padding:8px; font-size:14px; }
+      textarea { resize:vertical; }
+      button { border:none; border-radius:8px; padding:10px 14px; font-weight:600; cursor:pointer; }
+      .primary { background:#2563eb; color:#fff; }
+      .pill-button { border:none; border-radius:999px; padding:6px 12px; font-size:12px; cursor:pointer; background:#e2e8f0; color:#0f172a; }
+      .pill-button.primary { background:#2563eb; color:#fff; }
+      table { width:100%; border-collapse:collapse; margin-top:12px; font-size:14px; }
+      th, td { padding:8px; border-bottom:1px solid #e2e8f0; text-align:left; }
+      th { font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:#475569; }
+      .status-pill { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:12px; text-transform:uppercase; }
+      .status-pill.published { background:#dcfce7; color:#166534; }
+      .status-pill.scheduled { background:#dbeafe; color:#1d4ed8; }
+      .status-pill.failed { background:#fee2e2; color:#b91c1c; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>Instagram İçerik Takvimi</h1>
+    <div class="grid">
+      <div class="card">
+        <h2 style="margin-top:0;">Yeni Taslak</h2>
+        <form id="draftForm" style="display:flex; flex-direction:column; gap:10px;">
+          <div>
+            <label>İçerik türü</label>
+            <select name="media_type">
+              <option value="PHOTO">Fotoğraf</option>
+              <option value="REEL">Reel / Video</option>
+            </select>
+          </div>
+          <div>
+            <label>Görsel URL (veya Video URL)</label>
+            <input type="url" name="media_url" placeholder="https://cdn..." required />
+          </div>
+          <div>
+            <label>Başlık / Açıklama</label>
+            <textarea name="caption" rows="4" placeholder="Takipçilere söylemek istediğiniz şey..."></textarea>
+          </div>
+          <div>
+            <label>Yayın zamanı (boş bırakırsanız taslak kalır)</label>
+            <input type="datetime-local" name="scheduled_at" />
+          </div>
+          <div style="display:flex; justify-content:flex-end;">
+            <button class="primary" type="submit">Taslağı Kaydet</button>
+          </div>
+          <div id="draftStatus" class="meta"></div>
+        </form>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0;">Planlanan Paylaşımlar</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="meta">Son güncelleme: <span id="queueUpdated">-</span></div>
+          <button id="queueReload" class="primary" type="button" style="padding:6px 10px;">Yenile</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Tür</th>
+              <th>Zaman</th>
+              <th>Durum</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="calendarQueue">
+            {% for post in scheduled_posts %}
+              <tr>
+                <td>#{{ post.id }}</td>
+                <td>{{ post.media_type }}</td>
+                <td>{{ post.scheduled_at or "-" }}</td>
+                <td><span class="status-pill {{ post.status }}">{{ post.status }}</span></td>
+                <td><button class="pill-button primary" data-post="{{ post.id }}" data-action="publish">Şimdi Yayınla</button></td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5" style="text-align:center;">Henüz taslak yok.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <script>
+      const draftForm = document.getElementById('draftForm');
+      const draftStatus = document.getElementById('draftStatus');
+      const calendarQueue = document.getElementById('calendarQueue');
+      const queueUpdated = document.getElementById('queueUpdated');
+
+      async function loadQueue(){
+        if (!calendarQueue) return;
+        calendarQueue.innerHTML = '<tr><td colspan="5">Yükleniyor...</td></tr>';
+        try {
+          const res = await fetch('/ig/content/queue');
+          const data = await res.json();
+          calendarQueue.innerHTML = '';
+          (data.items || []).forEach(item => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>#${item.id}</td>
+              <td>${item.media_type}</td>
+              <td>${item.scheduled_at || '-'}</td>
+              <td><span class="status-pill ${item.status}">${item.status}</span></td>
+              <td><button class="pill-button primary" data-post="${item.id}" data-action="publish">Şimdi Yayınla</button></td>
+            `;
+            calendarQueue.appendChild(tr);
+          });
+          if (!data.items || !data.items.length) {
+            calendarQueue.innerHTML = '<tr><td colspan="5" style="text-align:center;">Henüz taslak yok.</td></tr>';
+          }
+          if (queueUpdated) queueUpdated.textContent = new Date().toLocaleString();
+        } catch (e) {
+          calendarQueue.innerHTML = '<tr><td colspan="5" style="color:#b91c1c;text-align:center;">Yüklenemedi.</td></tr>';
+        }
+      }
+
+      draftForm?.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const form = new FormData(draftForm);
+        const payload = {
+          media_type: form.get('media_type') || 'PHOTO',
+          caption: form.get('caption') || null,
+          scheduled_at: form.get('scheduled_at') || null,
+        };
+        const mediaUrl = (form.get('media_url') || '').trim();
+        if (!mediaUrl) {
+          alert('Medya URL gerekli');
+          return;
+        }
+        if (payload.media_type === 'REEL') {
+          payload.video_url = mediaUrl;
+        } else {
+          payload.image_url = mediaUrl;
+        }
+        try {
+          draftStatus.textContent = 'Kaydediliyor...';
+          const res = await fetch('/ig/content/drafts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(()=> ({}));
+          if (!res.ok) throw new Error(data.detail || 'draft_failed');
+          draftStatus.textContent = `Taslak oluşturuldu (#${data.id})`;
+          draftForm.reset();
+          loadQueue();
+        } catch (e) {
+          draftStatus.textContent = 'Hata: ' + (e?.message || e);
+        }
+      });
+
+      calendarQueue?.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('button[data-action="publish"]');
+        if (!btn) return;
+        const postId = btn.getAttribute('data-post');
+        btn.disabled = true;
+        btn.textContent = 'Yayınlanıyor...';
+        try {
+          const res = await fetch(`/ig/content/${postId}/publish-now`, { method: 'POST' });
+          if (!res.ok) throw new Error('publish_failed');
+          await loadQueue();
+        } catch (e) {
+          alert('Yayınlama hatası: ' + (e?.message || e));
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Şimdi Yayınla';
+        }
+      });
+
+      document.getElementById('queueReload')?.addEventListener('click', loadQueue);
+      loadQueue();
+    </script>
+  </body>
+</html>
+

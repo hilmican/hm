@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Instagram Insights</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:24px; background:#f8fafc; color:#0f172a; }
+      h1 { margin-bottom:16px; }
+      .kpi-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:16px; margin-bottom:24px; }
+      .kpi-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px; box-shadow:0 10px 40px rgba(15,23,42,0.06); }
+      .kpi-label { color:#64748b; font-size:13px; text-transform:uppercase; letter-spacing:0.08em; }
+      .kpi-value { font-size:32px; font-weight:600; margin-top:6px; }
+      .kpi-delta { font-size:13px; color:#16a34a; margin-top:4px; }
+      .panel { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px; box-shadow:0 10px 40px rgba(15,23,42,0.05); }
+      canvas { max-width:100%; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>Instagram Insights</h1>
+    <div class="kpi-grid">
+      <div class="kpi-card" data-metric="impressions">
+        <div class="kpi-label">İzlenme</div>
+        <div class="kpi-value">-</div>
+        <div class="kpi-delta">Güncelleniyor...</div>
+      </div>
+      <div class="kpi-card" data-metric="reach">
+        <div class="kpi-label">Erişim</div>
+        <div class="kpi-value">-</div>
+        <div class="kpi-delta">Güncelleniyor...</div>
+      </div>
+      <div class="kpi-card" data-metric="profile_views">
+        <div class="kpi-label">Profil Görüntülenme</div>
+        <div class="kpi-value">-</div>
+        <div class="kpi-delta">Güncelleniyor...</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h2 style="margin:0;">Performans Trendleri</h2>
+        <button id="insightsReload" style="border:none; background:#2563eb; color:#fff; border-radius:8px; padding:8px 12px; cursor:pointer;">Yenile</button>
+      </div>
+      <canvas id="insightsChart" height="140"></canvas>
+    </div>
+    <script>
+      const ctx = document.getElementById('insightsChart');
+      let chart;
+      function updateChart(series){
+        if (!ctx) return;
+        const labels = series.map(item => new Date(item.end_time || Date.now()).toLocaleDateString());
+        const data = series.map(item => item.value || 0);
+        if (chart) chart.destroy();
+        chart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Etkileşim',
+              data,
+              fill: false,
+              borderColor: '#2563eb',
+              tension: 0.3,
+            }],
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+          },
+        });
+      }
+
+      async function refreshInsights(){
+        try {
+          const res = await fetch('/ig/insights/overview');
+          const data = await res.json();
+          (data.data || []).forEach(metric => {
+            const card = document.querySelector(`.kpi-card[data-metric="${metric.name}"]`);
+            if (!card) return;
+            const latest = metric.values?.[metric.values.length - 1];
+            const prev = metric.values?.[metric.values.length - 2];
+            const valueEl = card.querySelector('.kpi-value');
+            const deltaEl = card.querySelector('.kpi-delta');
+            if (valueEl) valueEl.textContent = latest?.value ?? '-';
+            if (deltaEl && latest && prev) {
+              const diff = Number(latest.value) - Number(prev.value);
+              const direction = diff >= 0 ? '↑' : '↓';
+              deltaEl.textContent = `${direction} ${diff}`;
+              deltaEl.style.color = diff >= 0 ? '#16a34a' : '#dc2626';
+            }
+          });
+          const engagementRes = await fetch('/ig/insights/engagement');
+          const engagement = await engagementRes.json();
+          updateChart(engagement.series || []);
+        } catch (e) {
+          alert('Insights verisi alınamadı: ' + (e?.message || e));
+        }
+      }
+      document.getElementById('insightsReload')?.addEventListener('click', refreshInsights);
+      refreshInsights();
+    </script>
+  </body>
+</html>
+

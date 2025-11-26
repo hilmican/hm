@@ -549,3 +549,143 @@ class AIPretext(SQLModel, table=True):
 	is_default: bool = Field(default=False, index=True, description="Default pretext (used when product has no pretext_id)")
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
+class IGProfileSnapshot(SQLModel, table=True):
+	"""
+	Cached Instagram business profile metadata (username, follower counts, etc.).
+
+	We keep a short history so we can display deltas on the dashboard while still
+	guaranteeing a single \"latest\" row per business account.
+	"""
+
+	__tablename__ = "ig_profile_snapshot"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	igba_id: str = Field(index=True, description="Instagram business account/page id")
+	username: Optional[str] = Field(default=None, index=True)
+	name: Optional[str] = None
+	profile_picture_url: Optional[str] = None
+	biography: Optional[str] = Field(default=None, sa_column=Column(Text))
+	followers_count: Optional[int] = Field(default=None)
+	follows_count: Optional[int] = Field(default=None)
+	media_count: Optional[int] = Field(default=None)
+	website: Optional[str] = None
+	refreshed_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+	expires_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class IGInsightsSnapshot(SQLModel, table=True):
+	"""
+	Cached insights payloads keyed by subject (account/media) + metric set.
+	"""
+
+	__tablename__ = "ig_insights_snapshot"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	scope: str = Field(index=True, description="account|media")
+	subject_id: str = Field(index=True)
+	cache_key: str = Field(index=True, description="Hash of metric+window parameters")
+	payload_json: str = Field(sa_column=Column(Text))
+	captured_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+	expires_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class IGScheduledPost(SQLModel, table=True):
+	"""
+	Drafts/scheduled Instagram posts or reels managed by the content calendar.
+	"""
+
+	__tablename__ = "ig_scheduled_post"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	media_type: str = Field(default="PHOTO", description="PHOTO|VIDEO|REEL", index=True)
+	caption: Optional[str] = Field(default=None, sa_column=Column(Text))
+	media_payload_json: Optional[str] = Field(default=None, sa_column=Column(Text), description="JSON describing media: urls, product refs, etc.")
+	scheduled_at: Optional[dt.datetime] = Field(default=None, index=True)
+	status: str = Field(default="draft", index=True, description="draft|scheduled|publishing|published|failed|cancelled")
+	error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
+	ig_container_id: Optional[str] = Field(default=None, index=True)
+	ig_media_id: Optional[str] = Field(default=None, index=True)
+	created_by_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class IGPublishingAudit(SQLModel, table=True):
+	"""
+	Fine-grained audit log for publish attempts (container creation, publish, failures).
+	"""
+
+	__tablename__ = "ig_publishing_audit"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	scheduled_post_id: int = Field(foreign_key="ig_scheduled_post.id", index=True)
+	action: str = Field(index=True, description="create_container|publish|status_update")
+	status: str = Field(index=True, description="ok|error")
+	payload_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class IGCommentActionLog(SQLModel, table=True):
+	"""
+	Audit log capturing moderation actions taken on Instagram comments.
+	"""
+
+	__tablename__ = "ig_comment_action"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	media_id: Optional[str] = Field(default=None, index=True)
+	comment_id: str = Field(index=True)
+	action: str = Field(index=True, description="reply|hide|unhide|delete|convert_dm")
+	actor_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
+	payload_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class ConversationAssignment(SQLModel, table=True):
+	"""
+	Keeps track of which teammate owns a given conversation.
+	"""
+
+	__tablename__ = "conversation_assignment"
+
+	conversation_id: int = Field(primary_key=True, foreign_key="conversations.id")
+	assignee_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
+	note: Optional[str] = Field(default=None, sa_column=Column(Text))
+	updated_by_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class IGCannedResponse(SQLModel, table=True):
+	"""
+	Reusable canned replies surfaced inside the inbox for quick responses.
+	"""
+
+	__tablename__ = "ig_canned_response"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	title: str = Field(index=True)
+	body: str = Field(sa_column=Column(Text))
+	tags: Optional[str] = Field(default=None, description="Comma separated tags for filtering")
+	language: Optional[str] = Field(default=None, index=True)
+	is_active: bool = Field(default=True, index=True)
+	created_by_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class IGDMOrderDraft(SQLModel, table=True):
+	"""
+	Stores drafts created via the DM→Order wizard before they become real orders.
+	"""
+
+	__tablename__ = "ig_dm_order_draft"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	conversation_id: int = Field(foreign_key="conversations.id", index=True)
+	status: str = Field(default="draft", index=True, description="draft|submitted|converted")
+	payload_json: str = Field(sa_column=Column(Text))
+	created_by_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)

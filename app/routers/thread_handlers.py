@@ -1023,6 +1023,37 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
             "linked_order_id": linked_order_id,
         }
 
+        # Brand snapshot + assignment helpers (lazy imports to avoid heavy modules at top-level)
+        brand_profile = None
+        try:
+            from ..services.ig_profile import ensure_profile_snapshot as _ensure_profile_snapshot
+
+            snap = _ensure_profile_snapshot()
+            brand_profile = {
+                "username": snap.username,
+                "name": snap.name,
+                "profile_picture_url": snap.profile_picture_url,
+                "biography": snap.biography,
+                "followers_count": snap.followers_count,
+                "follows_count": snap.follows_count,
+                "media_count": snap.media_count,
+                "website": snap.website,
+                "refreshed_at": snap.refreshed_at.isoformat() if snap.refreshed_at else None,
+            }
+        except Exception:
+            brand_profile = None
+
+        assignable_users = []
+        current_assignment = None
+        try:
+            from ..services import ig_inbox as _ig_inbox
+
+            assignable_users = _ig_inbox.list_assignable_users()
+            current_assignment = _ig_inbox.get_assignment(int(conversation_id))
+        except Exception:
+            assignable_users = []
+            current_assignment = None
+
         return templates.TemplateResponse(
             "ig_thread.html",
             {
@@ -1050,6 +1081,9 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 "user_context": user_context,
                 "template_cards": template_cards,
                 "public_conversation_id": public_conversation_id,
+                "brand_profile": brand_profile,
+                "assignable_users": assignable_users,
+                "current_assignment": current_assignment,
             },
         )
 
