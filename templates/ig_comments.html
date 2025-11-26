@@ -26,10 +26,19 @@
     {% include "_nav.html" %}
     <h1>Instagram Yorum Moderasyonu</h1>
     <div class="card">
-      <label for="mediaInput">İçerik (media_id)</label>
-      <div style="display:flex; gap:10px; margin-top:6px;">
-        <input id="mediaInput" type="text" placeholder="1784..." />
-        <button id="loadComments" class="primary" type="button">Yorumları Yükle</button>
+      <label for="mediaSelect">İçerik Seçimi</label>
+      <div style="display:flex; gap:10px; margin-top:6px; flex-wrap:wrap;">
+        <select id="mediaSelect" style="flex:1; min-width:220px; border:1px solid #cbd5f5; border-radius:8px; padding:8px;">
+          <option value="">İçerikler yükleniyor...</option>
+        </select>
+        <button id="refreshMedia" type="button" style="background:#e2e8f0; color:#0f172a;">Listeyi Yenile</button>
+      </div>
+      <div style="margin-top:10px;">
+        <label for="mediaInput" style="margin-bottom:2px;">Veya media_id gir</label>
+        <div style="display:flex; gap:10px; margin-top:4px;">
+          <input id="mediaInput" type="text" placeholder="1784..." />
+          <button id="loadComments" class="primary" type="button">Yorumları Yükle</button>
+        </div>
       </div>
       <div class="comment-list" id="commentList">
         <div class="comment-meta">Henüz yorum yüklenmedi.</div>
@@ -57,8 +66,44 @@
 
     <script>
       const commentList = document.getElementById('commentList');
+      const mediaSelect = document.getElementById('mediaSelect');
+      const mediaInput = document.getElementById('mediaInput');
+
+      async function loadMediaList(){
+        if (!mediaSelect) return;
+        mediaSelect.innerHTML = '<option value="">Yükleniyor...</option>';
+        try {
+          const res = await fetch('/ig/comments/media?limit=25');
+          const data = await res.json();
+          const items = data.items || [];
+          if (!items.length) {
+            mediaSelect.innerHTML = '<option value="">İçerik bulunamadı</option>';
+            return;
+          }
+          mediaSelect.innerHTML = '<option value="">İçerik seçin</option>';
+          items.forEach(item => {
+            const labelParts = [];
+            if (item.media_type) labelParts.push(item.media_type);
+            if (item.media_product_type) labelParts.push(item.media_product_type);
+            const ts = item.timestamp ? new Date(item.timestamp).toLocaleString() : '';
+            const caption = (item.caption || '').trim();
+            const option = document.createElement('option');
+            option.value = item.id;
+            option.textContent = `${labelParts.join(' · ') || 'Gönderi'} · ${ts || 'bilinmiyor'}${caption ? ' · ' + caption.slice(0, 40) : ''}`;
+            option.title = caption || '';
+            mediaSelect.appendChild(option);
+          });
+        } catch (e) {
+          mediaSelect.innerHTML = '<option value="">Liste yüklenemedi</option>';
+        }
+      }
+
+      document.getElementById('refreshMedia')?.addEventListener('click', loadMediaList);
+
       async function loadComments(){
-        const mediaId = document.getElementById('mediaInput').value.trim();
+        const manualId = mediaInput?.value.trim();
+        const selectedId = mediaSelect?.value || '';
+        const mediaId = manualId || selectedId;
         if (!mediaId) {
           alert('Lütfen media_id girin');
           return;
@@ -94,6 +139,11 @@
         }
       }
       document.getElementById('loadComments')?.addEventListener('click', loadComments);
+      mediaSelect?.addEventListener('change', () => {
+        if (mediaSelect.value) {
+          loadComments();
+        }
+      });
       commentList?.addEventListener('click', async (ev) => {
         const btn = ev.target.closest('button[data-action]');
         if (!btn) return;
@@ -152,6 +202,7 @@
         }
       }
       document.getElementById('auditReload')?.addEventListener('click', loadAudit);
+      loadMediaList();
       loadAudit();
     </script>
   </body>

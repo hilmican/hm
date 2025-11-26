@@ -26,6 +26,15 @@ def comment_stream(media_id: str = Query(..., description="Instagram media ID"),
 		raise HTTPException(status_code=502, detail=f"comment_fetch_failed: {exc}")
 
 
+@router.get("/media")
+def list_media(limit: int = Query(default=25, ge=1, le=100)):
+	try:
+		items = ig_comments.list_recent_media(limit=limit)
+		return {"items": items}
+	except Exception as exc:
+		raise HTTPException(status_code=502, detail=f"media_list_failed: {exc}")
+
+
 @router.post("/{comment_id}/reply")
 def reply(comment_id: str, body: dict = Body(...)):
 	message = body.get("message")

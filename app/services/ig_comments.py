@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Optional
+import os
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -48,6 +49,26 @@ def fetch_comments(media_id: str, limit: int = 50, after: Optional[str] = None) 
 		resp = client.get(url, params=params)
 		resp.raise_for_status()
 		return resp.json()
+
+
+def list_recent_media(limit: int = 25) -> List[Dict[str, Any]]:
+	token, entity_id, is_page = _get_base_token_and_id()
+	ig_user_id = os.getenv("IG_USER_ID")
+	if not ig_user_id and not is_page:
+		ig_user_id = entity_id
+	if not ig_user_id:
+		raise RuntimeError("IG_USER_ID is required to list media")
+	params = {
+		"access_token": token,
+		"limit": max(1, min(limit, 100)),
+		"fields": "id,caption,media_type,media_product_type,permalink,timestamp,comments_count",
+	}
+	url = _build_url(f"/{ig_user_id}/media")
+	with httpx.Client(timeout=20) as client:
+		resp = client.get(url, params=params)
+		resp.raise_for_status()
+		data = resp.json()
+		return data.get("data", []) or []
 
 
 def reply_to_comment(comment_id: str, message: str, actor_user_id: Optional[int] = None) -> Dict[str, Any]:
