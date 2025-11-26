@@ -1497,37 +1497,72 @@ def enqueue_enrich(conversation_id: str):
 @router.post("/inbox/{conversation_id}/hydrate")
 def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
     # Enqueue hydrate_conversation for this thread (igba_id + ig_user_id)
+    # conversation_id can be:
+    # - Database primary key (numeric: conversations.id)
+    # - Graph conversation ID (base64 string: graph_conversation_id)
+    # - convo_id format (string like "page_id:user_id")
     other_id: str | None = None
     igba_id: str | None = None
+    graph_conversation_id: str | None = None
+    
     try:
         import logging
         _log = logging.getLogger("instagram.inbox")
         _log.info("hydrate.begin cid=%s", str(conversation_id))
     except Exception:
         pass
+    
     with get_session() as session:
+        # First, check if conversation_id is a numeric database ID
+        is_db_id = False
         try:
-            from sqlalchemy import text as _text
-            row = session.exec(
-                _text("SELECT igba_id, ig_user_id FROM conversations WHERE convo_id=:cid LIMIT 1")
-            ).params(cid=str(conversation_id)).first()
-            if row:
-                igba_id = str(getattr(row, "igba_id", None) or (row[0] if len(row) > 0 else "") or "")
-                other_id = str(getattr(row, "ig_user_id", None) or (row[1] if len(row) > 1 else "") or "")
-        except Exception:
+            int(conversation_id)
+            is_db_id = True
+        except (ValueError, TypeError):
             pass
-        # Resolve via Graph conversation id mapping if convo_id row missing
-        if not other_id:
+        
+        if is_db_id:
+            # Look up by database primary key (conversations.id)
             try:
                 from sqlalchemy import text as _text
-                rowg = session.exec(
-                    _text("SELECT igba_id, ig_user_id FROM conversations WHERE graph_conversation_id=:gc LIMIT 1")
-                ).params(gc=str(conversation_id)).first()
-                if rowg:
-                    igba_id = str(getattr(rowg, "igba_id", None) or (rowg[0] if len(rowg) > 0 else "") or "")
-                    other_id = str(getattr(rowg, "ig_user_id", None) or (rowg[1] if len(rowg) > 1 else "") or "")
+                row = session.exec(
+                    _text("SELECT id, igba_id, ig_user_id, graph_conversation_id FROM conversations WHERE id=:cid LIMIT 1")
+                ).params(cid=int(conversation_id)).first()
+                if row:
+                    igba_id = str(getattr(row, "igba_id", None) or (row[1] if len(row) > 1 else "") or "")
+                    other_id = str(getattr(row, "ig_user_id", None) or (row[2] if len(row) > 2 else "") or "")
+                    graph_conversation_id = str(getattr(row, "graph_conversation_id", None) or (row[3] if len(row) > 3 else None) or "") or None
             except Exception:
                 pass
+        else:
+            # Try looking up by convo_id (format: "page_id:user_id")
+            try:
+                from sqlalchemy import text as _text
+                row = session.exec(
+                    _text("SELECT igba_id, ig_user_id, graph_conversation_id FROM conversations WHERE convo_id=:cid LIMIT 1")
+                ).params(cid=str(conversation_id)).first()
+                if row:
+                    igba_id = str(getattr(row, "igba_id", None) or (row[0] if len(row) > 0 else "") or "")
+                    other_id = str(getattr(row, "ig_user_id", None) or (row[1] if len(row) > 1 else "") or "")
+                    graph_conversation_id = str(getattr(row, "graph_conversation_id", None) or (row[2] if len(row) > 2 else None) or "") or None
+            except Exception:
+                pass
+            
+            # Also try looking up by Graph conversation ID
+            if not other_id:
+                try:
+                    from sqlalchemy import text as _text
+                    rowg = session.exec(
+                        _text("SELECT igba_id, ig_user_id, graph_conversation_id FROM conversations WHERE graph_conversation_id=:gc LIMIT 1")
+                    ).params(gc=str(conversation_id)).first()
+                    if rowg:
+                        igba_id = str(getattr(rowg, "igba_id", None) or (rowg[0] if len(rowg) > 0 else "") or "")
+                        other_id = str(getattr(rowg, "ig_user_id", None) or (rowg[1] if len(rowg) > 1 else "") or "")
+                        graph_conversation_id = str(getattr(rowg, "graph_conversation_id", None) or (rowg[2] if len(rowg) > 2 else None) or "") or None
+                        if not graph_conversation_id:
+                            graph_conversation_id = str(conversation_id)  # Use the input if it matched graph_conversation_id
+                except Exception:
+                    pass
         if not other_id and conversation_id.startswith("dm:"):
             try:
                 other_id = conversation_id.split(":", 1)[1] or None
@@ -1580,61 +1615,71 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
             except Exception:
                 pass
         # Final fallback: derive by fetching recent messages from Graph for this conversation id
-        # Only attempt if conversation_id is already a Graph conversation ID (not a database ID)
-        if not other_id:
-            # Skip if conversation_id looks like a database ID (numeric) - we need Graph conversation ID from webhook/callback
-            is_db_id = False
+        # Only attempt if we have a Graph conversation ID (not a database ID)
+        if not other_id and graph_conversation_id and not conversation_id.startswith("dm:"):
+            # Use the resolved Graph conversation ID to fetch messages
             try:
-                int(conversation_id)
-                is_db_id = True
-            except (ValueError, TypeError):
-                pass
-            
-            if not is_db_id and not conversation_id.startswith("dm:"):
-                # Not numeric - might be a Graph conversation ID, try fetching
+                import asyncio as _aio
                 try:
-                    import asyncio as _aio
+                    loop = _aio.get_event_loop()
+                except RuntimeError:
+                    loop = _aio.new_event_loop()
+                    _aio.set_event_loop(loop)
+                from ..services.instagram_api import fetch_messages as _fm, _get_base_token_and_id as _gb
+                _, owner_id, _ = _gb()
+                msgs = loop.run_until_complete(_fm(str(graph_conversation_id), limit=10))
+                uid: str | None = None
+                for m in (msgs or []):
                     try:
-                        loop = _aio.get_event_loop()
-                    except RuntimeError:
-                        loop = _aio.new_event_loop()
-                        _aio.set_event_loop(loop)
-                    from ..services.instagram_api import fetch_messages as _fm, _get_base_token_and_id as _gb
-                    _, owner_id, _ = _gb()
-                    msgs = loop.run_until_complete(_fm(str(conversation_id), limit=10))
-                    uid: str | None = None
-                    for m in (msgs or []):
-                        try:
-                            frm = (m.get("from") or {}).get("id")
-                            if frm and str(frm) != str(owner_id):
-                                uid = str(frm)
+                        frm = (m.get("from") or {}).get("id")
+                        if frm and str(frm) != str(owner_id):
+                            uid = str(frm)
+                            break
+                        to = (((m.get("to") or {}) or {}).get("data") or [])
+                        for t in to:
+                            tid = t.get("id")
+                            if tid and str(tid) != str(owner_id):
+                                uid = str(tid)
                                 break
-                            to = (((m.get("to") or {}) or {}).get("data") or [])
-                            for t in to:
-                                tid = t.get("id")
-                                if tid and str(tid) != str(owner_id):
-                                    uid = str(tid)
-                                    break
-                            if uid:
-                                break
-                        except Exception:
-                            continue
-                    if uid:
-                        other_id = uid
-                except Exception:
-                    pass
+                        if uid:
+                            break
+                    except Exception:
+                        continue
+                if uid:
+                    other_id = uid
+            except Exception:
+                pass
+        # If we have a database ID but no graph_conversation_id stored yet, try to resolve it
+        if not graph_conversation_id and is_db_id:
+            try:
+                graph_cid, lookup_info = _resolve_graph_conversation_id_for_hydrate(str(conversation_id))
+                if graph_cid:
+                    graph_conversation_id = graph_cid
+                    # Store it for future use
+                    try:
+                        from sqlalchemy import text as _t
+                        session.exec(
+                            _t("UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)")
+                        ).params(gc=str(graph_conversation_id), cid=int(conversation_id))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        
         if not igba_id:
             try:
                 _, entity_id, _ = _get_base_token_and_id()
                 igba_id = str(entity_id)
             except Exception:
                 igba_id = None
+    
     try:
         import logging
         _log = logging.getLogger("instagram.inbox")
-        _log.info("hydrate.resolve.final cid=%s igba_id=%s other_id=%s", str(conversation_id), str(igba_id), str(other_id))
+        _log.info("hydrate.resolve.final cid=%s igba_id=%s other_id=%s graph_cid=%s", str(conversation_id), str(igba_id), str(other_id), str(graph_conversation_id))
     except Exception:
         pass
+    
     if not (igba_id and other_id):
         # If we at least have a Graph conversation id, enqueue a GCID-based hydrate as a fallback
         fallback_enqueued = False
@@ -1645,22 +1690,22 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
             debug["owner_id"] = str(ident)
         except Exception as e:
             debug["env_resolve_error"] = str(e)
-        debug["cid_kind"] = ("dm" if conversation_id.startswith("dm:") else "graph")
+        debug["cid_kind"] = ("dm" if conversation_id.startswith("dm:") else ("db_id" if is_db_id else "graph"))
         debug["igba_id"] = (str(igba_id) if igba_id else None)
         debug["other_id"] = (str(other_id) if other_id else None)
-        if not other_id and not conversation_id.startswith("dm:"):
-            graph_cid, lookup_info = _resolve_graph_conversation_id_for_hydrate(str(conversation_id))
-            debug["graph_lookup"] = lookup_info
-            if graph_cid:
-                try:
-                    enqueue(
-                        "hydrate_by_conversation_id",
-                        key=str(graph_cid),
-                        payload={"conversation_id": str(graph_cid), "max_messages": int(max_messages)},
-                    )
-                    fallback_enqueued = True
-                except Exception:
-                    fallback_enqueued = False
+        debug["graph_conversation_id"] = (str(graph_conversation_id) if graph_conversation_id else None)
+        
+        # If we have a Graph conversation ID but missing igba_id/other_id, use Graph API to hydrate
+        if graph_conversation_id and not (igba_id and other_id) and not conversation_id.startswith("dm:"):
+            try:
+                enqueue(
+                    "hydrate_by_conversation_id",
+                    key=str(graph_conversation_id),
+                    payload={"conversation_id": str(graph_conversation_id), "max_messages": int(max_messages)},
+                )
+                fallback_enqueued = True
+            except Exception:
+                fallback_enqueued = False
         if fallback_enqueued:
             return {"status": "ok", "queued": True, "fallback": "hydrate_by_conversation_id", "conversation_id": conversation_id, "debug": debug}
         raise HTTPException(
