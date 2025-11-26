@@ -200,12 +200,14 @@ def main() -> None:
 				if not conversation_id:
 					delete_job(jid)
 					continue
+				# conversation_id here IS the Graph conversation ID (base64 encoded thread ID)
+				graph_conversation_id = str(conversation_id)
 				msgs = []
 				try:
 					loop = _get_or_create_loop()
-					msgs = loop.run_until_complete(fetch_messages(conversation_id, limit=limit))
+					msgs = loop.run_until_complete(fetch_messages(graph_conversation_id, limit=limit))
 				except Exception as e:
-					log.warning("hydrate by cid fetch fail jid=%s cid=%s err=%s", jid, conversation_id, e)
+					log.warning("hydrate by cid fetch fail jid=%s cid=%s err=%s", jid, graph_conversation_id, e)
 					increment_attempts(jid)
 					time.sleep(1)
 					continue
@@ -220,7 +222,7 @@ def main() -> None:
 					for ev in (msgs or []):
 						try:
 							if isinstance(ev, dict):
-								ev["__graph_conversation_id"] = str(conversation_id)
+								ev["__graph_conversation_id"] = str(graph_conversation_id)
 							mid = upsert_message_from_ig_event(session, ev, "")
 							if mid:
 								inserted += 1
@@ -229,19 +231,44 @@ def main() -> None:
 								ev_id = ev.get("id") if hasattr(ev, "get") else (ev if isinstance(ev, str) else None)
 							except Exception:
 								ev_id = None
-							log.warning("hydrate by cid upsert err cid=%s ev=%s ev_type=%s err=%s", conversation_id, ev_id, type(ev).__name__, e)
+							log.warning("hydrate by cid upsert err cid=%s ev=%s ev_type=%s err=%s", graph_conversation_id, ev_id, type(ev).__name__, e)
+					
+					# Store graph_conversation_id on conversations that match the messages we just fetched
+					# Collect unique conversation IDs from the messages we just inserted
+					conversation_pks = set()
+					from sqlalchemy import text as _t
+					for ev in (msgs or []):
+						if isinstance(ev, dict) and ev.get("id"):
+							# Check if message was inserted and get its conversation_id
+							msg_row = session.exec(_t("SELECT conversation_id FROM message WHERE ig_message_id=:mid LIMIT 1").params(mid=str(ev.get("id")))).first()
+							if msg_row:
+								conv_pk = getattr(msg_row, "conversation_id", None) or (msg_row[0] if len(msg_row) > 0 else None)
+								if conv_pk:
+									conversation_pks.add(int(conv_pk))
+					
+					# Update conversations table with graph_conversation_id for all affected conversations
+					if conversation_pks:
+						try:
+							for conv_pk in conversation_pks:
+								session.exec(
+									_t("UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)")
+								).params(gc=str(graph_conversation_id), cid=int(conv_pk))
+							log.info("hydrate by cid: updated %d conversations with graph_cid=%s", len(conversation_pks), graph_conversation_id[:40])
+						except Exception as e:
+							log.warning("hydrate by cid: failed to update conversations graph_cid err=%s", str(e)[:200])
+					
 					try:
 						from sqlalchemy import text as _t
-						session.exec(_t("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
+						session.exec(_t("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(graph_conversation_id))
 					except Exception:
 						try:
 							from sqlalchemy import text as _t
-							session.exec(_t("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(conversation_id))
+							session.exec(_t("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(graph_conversation_id))
 						except Exception:
 							pass
 					try:
 						from sqlalchemy import text as _t
-						session.exec(_t("UPDATE ai_conversations SET hydrated_at=CURRENT_TIMESTAMP WHERE convo_id=:cid")).params(cid=str(conversation_id))
+						session.exec(_t("UPDATE ai_conversations SET hydrated_at=CURRENT_TIMESTAMP WHERE convo_id=:cid")).params(cid=str(graph_conversation_id))
 					except Exception:
 						pass
 				log.info("hydrate by cid ok jid=%s cid=%s msgs=%s", jid, conversation_id, inserted)
