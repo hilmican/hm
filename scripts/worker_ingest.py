@@ -247,13 +247,13 @@ def main() -> None:
 									conversation_pks.add(int(conv_pk))
 					
 					# Update conversations table with graph_conversation_id for all affected conversations
-					if conversation_pks:
+					if conversation_pks and graph_conversation_id:
 						try:
 							for conv_pk in conversation_pks:
 								session.exec(
-									_t("UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)")
-								).params(gc=str(graph_conversation_id), cid=int(conv_pk))
-							log.info("hydrate by cid: updated %d conversations with graph_cid=%s", len(conversation_pks), graph_conversation_id[:40])
+									_t("UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)").params(gc=str(graph_conversation_id), cid=int(conv_pk))
+								)
+							log.info("hydrate by cid: updated %d conversations with graph_cid=%s", len(conversation_pks), graph_conversation_id[:40] if graph_conversation_id else "None")
 						except Exception as e:
 							log.warning("hydrate by cid: failed to update conversations graph_cid err=%s", str(e)[:200])
 					
