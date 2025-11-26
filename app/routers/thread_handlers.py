@@ -1518,8 +1518,15 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
         try:
             int(conversation_id)
             is_db_id = True
+            try:
+                _log.info("hydrate.lookup: cid=%s is database ID", str(conversation_id))
+            except Exception:
+                pass
         except (ValueError, TypeError):
-            pass
+            try:
+                _log.info("hydrate.lookup: cid=%s is NOT database ID (treating as Graph/convo_id)", str(conversation_id))
+            except Exception:
+                pass
         
         if is_db_id:
             # Look up by database primary key (conversations.id)
@@ -1529,11 +1536,29 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
                     _text("SELECT id, igba_id, ig_user_id, graph_conversation_id FROM conversations WHERE id=:cid LIMIT 1")
                 ).params(cid=int(conversation_id)).first()
                 if row:
-                    igba_id = str(getattr(row, "igba_id", None) or (row[1] if len(row) > 1 else "") or "")
-                    other_id = str(getattr(row, "ig_user_id", None) or (row[2] if len(row) > 2 else "") or "")
-                    graph_conversation_id = str(getattr(row, "graph_conversation_id", None) or (row[3] if len(row) > 3 else None) or "") or None
-            except Exception:
-                pass
+                    igba_id_raw = getattr(row, "igba_id", None) or (row[1] if len(row) > 1 else None)
+                    other_id_raw = getattr(row, "ig_user_id", None) or (row[2] if len(row) > 2 else None)
+                    graph_conversation_id_raw = getattr(row, "graph_conversation_id", None) or (row[3] if len(row) > 3 else None)
+                    
+                    igba_id = str(igba_id_raw) if igba_id_raw else None
+                    other_id = str(other_id_raw) if other_id_raw else None
+                    graph_conversation_id = str(graph_conversation_id_raw) if graph_conversation_id_raw else None
+                    
+                    try:
+                        _log.info("hydrate.lookup.db_id: found row id=%s igba_id=%s ig_user_id=%s graph_cid=%s", 
+                                 int(conversation_id), igba_id, other_id, (graph_conversation_id[:40] + "..." if graph_conversation_id and len(graph_conversation_id) > 40 else graph_conversation_id))
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        _log.warning("hydrate.lookup.db_id: no row found for id=%s", int(conversation_id))
+                    except Exception:
+                        pass
+            except Exception as e:
+                try:
+                    _log.warning("hydrate.lookup.db_id: error looking up id=%s err=%s", int(conversation_id), str(e)[:200])
+                except Exception:
+                    pass
         else:
             # Try looking up by convo_id (format: "page_id:user_id")
             try:
@@ -1568,13 +1593,15 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
                 other_id = conversation_id.split(":", 1)[1] or None
             except Exception:
                 other_id = None
-        # Last-resort: infer other_id from latest messages when viewing by Graph CID
+        # Last-resort: infer other_id from latest messages when viewing by Graph CID or database ID
         if not other_id:
             try:
                 from sqlalchemy import text as _text
+                # Use database ID if numeric, otherwise try conversation_id as string
+                lookup_cid = int(conversation_id) if is_db_id else str(conversation_id)
                 rmsg = session.exec(
                     _text("SELECT ig_sender_id, ig_recipient_id FROM message WHERE conversation_id=:cid ORDER BY timestamp_ms DESC, id DESC LIMIT 1")
-                ).params(cid=str(conversation_id)).first()
+                ).params(cid=lookup_cid).first()
                 if rmsg:
                     sid = getattr(rmsg, "ig_sender_id", None) if hasattr(rmsg, "ig_sender_id") else (rmsg[0] if len(rmsg) > 0 else None)
                     rid = getattr(rmsg, "ig_recipient_id", None) if hasattr(rmsg, "ig_recipient_id") else (rmsg[1] if len(rmsg) > 1 else None)
@@ -1584,10 +1611,32 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
                             other_id = str(rid) if rid else None
                         else:
                             other_id = str(sid) if sid else None
+                        try:
+                            _log.info("hydrate.infer_message: cid=%s sid=%s rid=%s owner=%s inferred_other_id=%s", 
+                                     str(conversation_id), str(sid), str(rid), str(owner_id), str(other_id))
+                        except Exception:
+                            pass
                     except Exception:
                         other_id = str(sid) if sid else (str(rid) if rid else None)
-            except Exception:
-                pass
+                else:
+                    try:
+                        _log.info("hydrate.infer_message: no messages found with conversation_id=%s (lookup_cid=%s, is_db_id=%s)", 
+                                 str(conversation_id), lookup_cid, is_db_id)
+                        # Also log how many messages exist for this conversation_id
+                        msg_count = session.exec(
+                            _text("SELECT COUNT(*) FROM message WHERE conversation_id=:cid")
+                        ).params(cid=lookup_cid).first()
+                        if msg_count:
+                            count = getattr(msg_count, "COUNT(*)", None) or (msg_count[0] if len(msg_count) > 0 else None) or 0
+                            _log.info("hydrate.infer_message: message count for conversation_id=%s is %s", lookup_cid, count)
+                    except Exception:
+                        pass
+            except Exception as e:
+                try:
+                    _log.warning("hydrate.infer_message: error looking up messages cid=%s lookup_cid=%s err=%s", 
+                                str(conversation_id), lookup_cid if 'lookup_cid' in locals() else 'N/A', str(e)[:200])
+                except Exception:
+                    pass
         # Additional fallback: infer from ai_conversations (last known sender/recipient)
         if not other_id:
             try:
@@ -1652,7 +1701,17 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
         # If we have a database ID but no graph_conversation_id stored yet, try to resolve it
         if not graph_conversation_id and is_db_id:
             try:
+                try:
+                    _log.info("hydrate.resolve_graph: attempting to resolve graph_cid for db_id=%s", int(conversation_id))
+                except Exception:
+                    pass
                 graph_cid, lookup_info = _resolve_graph_conversation_id_for_hydrate(str(conversation_id))
+                try:
+                    _log.info("hydrate.resolve_graph: result graph_cid=%s lookup_info=%s", 
+                             (graph_cid[:40] + "..." if graph_cid and len(graph_cid) > 40 else graph_cid) if graph_cid else None,
+                             str(lookup_info)[:200] if lookup_info else None)
+                except Exception:
+                    pass
                 if graph_cid:
                     graph_conversation_id = graph_cid
                     # Store it for future use
@@ -1661,10 +1720,22 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
                         session.exec(
                             _t("UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)")
                         ).params(gc=str(graph_conversation_id), cid=int(conversation_id))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                        try:
+                            _log.info("hydrate.resolve_graph: stored graph_cid=%s for db_id=%s", 
+                                     (graph_conversation_id[:40] + "..." if len(graph_conversation_id) > 40 else graph_conversation_id),
+                                     int(conversation_id))
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        try:
+                            _log.warning("hydrate.resolve_graph: failed to store graph_cid err=%s", str(e)[:200])
+                        except Exception:
+                            pass
+            except Exception as e:
+                try:
+                    _log.warning("hydrate.resolve_graph: resolution failed err=%s", str(e)[:200])
+                except Exception:
+                    pass
         
         if not igba_id:
             try:
@@ -1676,7 +1747,10 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
     try:
         import logging
         _log = logging.getLogger("instagram.inbox")
-        _log.info("hydrate.resolve.final cid=%s igba_id=%s other_id=%s graph_cid=%s", str(conversation_id), str(igba_id), str(other_id), str(graph_conversation_id))
+        _log.info("hydrate.resolve.final cid=%s igba_id=%s other_id=%s graph_cid=%s is_db_id=%s", 
+                 str(conversation_id), str(igba_id), str(other_id), 
+                 (graph_conversation_id[:40] + "..." if graph_conversation_id and len(graph_conversation_id) > 40 else graph_conversation_id),
+                 is_db_id)
     except Exception:
         pass
     
@@ -1698,16 +1772,36 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
         # If we have a Graph conversation ID but missing igba_id/other_id, use Graph API to hydrate
         if graph_conversation_id and not (igba_id and other_id) and not conversation_id.startswith("dm:"):
             try:
+                try:
+                    _log.info("hydrate.fallback: enqueuing hydrate_by_conversation_id with graph_cid=%s", 
+                             (graph_conversation_id[:40] + "..." if len(graph_conversation_id) > 40 else graph_conversation_id))
+                except Exception:
+                    pass
                 enqueue(
                     "hydrate_by_conversation_id",
                     key=str(graph_conversation_id),
                     payload={"conversation_id": str(graph_conversation_id), "max_messages": int(max_messages)},
                 )
                 fallback_enqueued = True
-            except Exception:
+            except Exception as e:
+                try:
+                    _log.warning("hydrate.fallback: failed to enqueue hydrate_by_conversation_id err=%s", str(e)[:200])
+                except Exception:
+                    pass
                 fallback_enqueued = False
         if fallback_enqueued:
+            try:
+                _log.info("hydrate.fallback: successfully enqueued hydrate_by_conversation_id")
+            except Exception:
+                pass
             return {"status": "ok", "queued": True, "fallback": "hydrate_by_conversation_id", "conversation_id": conversation_id, "debug": debug}
+        try:
+            _log.error("hydrate.failed: cannot resolve identifiers cid=%s igba_id=%s other_id=%s graph_cid=%s debug=%s", 
+                      str(conversation_id), str(igba_id), str(other_id), 
+                      (graph_conversation_id[:40] + "..." if graph_conversation_id and len(graph_conversation_id) > 40 else graph_conversation_id),
+                      str(debug)[:500])
+        except Exception:
+            pass
         raise HTTPException(
             status_code=400,
             detail=f"Could not resolve identifiers to hydrate; cid={conversation_id} igba_id={igba_id} other_id={other_id}; debug={debug}"
