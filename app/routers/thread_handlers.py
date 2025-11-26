@@ -1005,6 +1005,14 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 msgs.sort(key=lambda m: (getattr(m, "timestamp_ms", None) if hasattr(m, "timestamp_ms") else (m.get("timestamp_ms") if isinstance(m, dict) else 0)) or 0)
             except Exception:
                 pass
+        # Determine last message direction (for AI retry button) - check after inline drafts merge
+        last_message_direction = None
+        if msgs:
+            last_msg = msgs[-1]
+            if hasattr(last_msg, "direction"):
+                last_message_direction = last_msg.direction
+            elif isinstance(last_msg, dict):
+                last_message_direction = last_msg.get("direction")
         # AI shadow state indicators
         ai_state = None
         try:
@@ -1130,6 +1138,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 "brand_profile": brand_profile,
                 "assignable_users": assignable_users,
                 "current_assignment": current_assignment,
+                "last_message_direction": last_message_direction,
             },
         )
 

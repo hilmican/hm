@@ -96,6 +96,9 @@
             <div class="meta" style="color:#b91c1c;">Önce ilgili reklamı/postu ürüne bağlayın.</div>
           {% endif %}
         {% endif %}
+        {% if last_message_direction == 'in' and lc.product_slug %}
+          <button id="triggerAiFromLastMessages" class="action" style="margin-top:8px; font-size:13px; background:#10b981; border-color:#10b981;">Son Mesajlara Göre AI Mesajını Yeniden Tetikle</button>
+        {% endif %}
       </div>
       <div class="inline-grid-2">
         {% if brand_profile %}
@@ -653,6 +656,24 @@
         } finally {
           aiRetryBtn.disabled = false;
           aiRetryBtn.textContent = prev;
+        }
+      });
+      const triggerAiFromLastMessages = document.getElementById('triggerAiFromLastMessages');
+      triggerAiFromLastMessages?.addEventListener('click', async () => {
+        if (!confirm('Son mesajlara göre AI mesajını yeniden tetiklemek istiyor musunuz?')) return;
+        triggerAiFromLastMessages.disabled = true; const prev = triggerAiFromLastMessages.textContent;
+        triggerAiFromLastMessages.textContent = 'Tetikleniyor...';
+        try {
+          const r = await fetch(`/ig/inbox/${conversationId}/ai/retry`, { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (!r.ok || js.status !== 'ok') throw new Error(js.error || 'retry_failed');
+          alert('AI mesajı tetiklendi. Birkaç saniye içinde durum güncellenecek.');
+          location.reload();
+        } catch (e) {
+          alert('AI mesajı tetikleme başarısız: ' + (e?.message || e));
+        } finally {
+          triggerAiFromLastMessages.disabled = false;
+          triggerAiFromLastMessages.textContent = prev;
         }
       });
       // Manual enrich enqueue
