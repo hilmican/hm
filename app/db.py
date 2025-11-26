@@ -64,6 +64,12 @@ def init_db() -> None:
             SQLModel.metadata.create_all(engine)
             # MySQL-only migrations
             with engine.begin() as conn:
+                def _exec_ddl(sql: str) -> None:
+                    try:
+                        conn.exec_driver_sql(sql)
+                    except Exception:
+                        pass
+
                 # Ensure client.merged_into_client_id exists
                 try:
                     row = conn.exec_driver_sql(
@@ -899,19 +905,153 @@ def init_db() -> None:
                 except Exception:
                     pass
                 # Create system_settings table
-                try:
-                    conn.exec_driver_sql(
-                        """
-                        CREATE TABLE IF NOT EXISTS system_settings (
-                            `key` VARCHAR(128) PRIMARY KEY,
-                            value TEXT NOT NULL,
-                            description TEXT NULL,
-                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                        )
-                        """
+                _exec_ddl(
+                    """
+                    CREATE TABLE IF NOT EXISTS system_settings (
+                        `key` VARCHAR(128) PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        description TEXT NULL,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                     )
-                except Exception:
-                    pass
+                    """
+                )
+
+                # New Instagram permission tables
+                _exec_ddl(
+                    """
+                    CREATE TABLE IF NOT EXISTS ig_profile_snapshot (
+                        id INT PRIMARY KEY AUTO_INCREMENT,
+                        igba_id VARCHAR(64) NOT NULL,
+                        username VARCHAR(255) NULL,
+                        name VARCHAR(255) NULL,
+                        profile_picture_url TEXT NULL,
+                        biography LONGTEXT NULL,
+                        followers_count INT NULL,
+                        follows_count INT NULL,
+                        media_count INT NULL,
+                        website VARCHAR(512) NULL,
+                        refreshed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        expires_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_ig_profile_snapshot_igba (igba_id),
+                        INDEX idx_ig_profile_snapshot_refreshed (refreshed_at),
+                        INDEX idx_ig_profile_snapshot_expires (expires_at)
+                    )
+                    """
+                )
+                _exec_ddl(
+                    """
+                    CREATE TABLE IF NOT EXISTS ig_insights_snapshot (
+                        id INT PRIMARY KEY AUTO_INCREMENT,
+                        scope VARCHAR(32) NOT NULL,
+                        subject_id VARCHAR(128) NOT NULL,
+                        cache_key VARCHAR(191) NOT NULL,
+                        payload_json LONGTEXT NOT NULL,
+                        captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        expires_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_ig_insights_scope_subject (scope, subject_id),
+                        INDEX idx_ig_insights_cache_key (cache_key),
+                        INDEX idx_ig_insights_expires (expires_at)
+                    )
+                    """
+                )
+                _exec_ddl(
+                    """
+                    CREATE TABLE IF NOT EXISTS ig_scheduled_post (
+                        id INT PRIMARY KEY AUTO_INCREMENT,
+                        media_type VARCHAR(16) NOT NULL DEFAULT 'PHOTO',
+                        caption LONGTEXT NULL,
+                        media_payload_json LONGTEXT NULL,
+                        scheduled_at DATETIME NULL,
+                        status VARCHAR(32) NOT NULL DEFAULT 'draft',
+                        error_message LONGTEXT NULL,
+                        ig_container_id VARCHAR(255) NULL,
+                        ig_media_id VARCHAR(255) NULL,
+                        created_by_user_id INT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        INDEX idx_ig_scheduled_post_status (status),
+                        INDEX idx_ig_scheduled_post_sched (scheduled_at),
+                        INDEX idx_ig_scheduled_post_creator (created_by_user_id)
+                    )
+                    """
+                )
+                _exec_ddl(
+                    """
+                    CREATE TABLE IF NOT EXISTS ig_publishing_audit (
+                        id INT PRIMARY KEY AUTO_INCREMENT,
+                        scheduled_post_id INT NOT NULL,
+                        action VARCHAR(32) NOT NULL,
+                        status VARCHAR(16) NOT NULL,
+                        payload_json LONGTEXT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_ig_publishing_audit_post (scheduled_post_id),
+                        INDEX idx_ig_publishing_audit_action (action),
+                        INDEX idx_ig_publishing_audit_status (status)
+                    )
+                    """
+                )
+                _exec_ddl(
+                    """
+                    CREATE TABLE IF NOT EXISTS ig_comment_action (
+                        id INT PRIMARY KEY AUTO_INCREMENT,
+                        media_id VARCHAR(128) NULL,
+                        comment_id VARCHAR(128) NOT NULL,
+                        action VARCHAR(32) NOT NULL,
+                        actor_user_id INT NULL,
+                        payload_json LONGTEXT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_ig_comment_action_media (media_id),
+                        INDEX idx_ig_comment_action_comment (comment_id),
+                        INDEX idx_ig_comment_action_action (action),
+                        INDEX idx_ig_comment_action_created (created_at)
+                    )
+                    """
+                )
+                _exec_ddl(
+                    """
+                    CREATE TABLE IF NOT EXISTS conversation_assignment (
+                        conversation_id INT PRIMARY KEY,
+                        assignee_user_id INT NULL,
+                        note LONGTEXT NULL,
+                        updated_by_user_id INT NULL,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        INDEX idx_conversation_assignment_assignee (assignee_user_id)
+                    )
+                    """
+                )
+                _exec_ddl(
+                    """
+                    CREATE TABLE IF NOT EXISTS ig_canned_response (
+                        id INT PRIMARY KEY AUTO_INCREMENT,
+                        title VARCHAR(255) NOT NULL,
+                        body LONGTEXT NOT NULL,
+                        tags VARCHAR(255) NULL,
+                        language VARCHAR(16) NULL,
+                        is_active TINYINT(1) NOT NULL DEFAULT 1,
+                        created_by_user_id INT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        INDEX idx_ig_canned_response_title (title),
+                        INDEX idx_ig_canned_response_active (is_active)
+                    )
+                    """
+                )
+                _exec_ddl(
+                    """
+                    CREATE TABLE IF NOT EXISTS ig_dm_order_draft (
+                        id INT PRIMARY KEY AUTO_INCREMENT,
+                        conversation_id INT NOT NULL,
+                        status VARCHAR(32) NOT NULL DEFAULT 'draft',
+                        payload_json LONGTEXT NOT NULL,
+                        created_by_user_id INT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        INDEX idx_ig_dm_order_conversation (conversation_id),
+                        INDEX idx_ig_dm_order_status (status)
+                    )
+                    """
+                )
+
                 return
         except Exception as e:
             last_err = e
