@@ -210,6 +210,8 @@ spec:
               value: "0.59"
             - name: DATABASE_URL
               value: "mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
+            - name: IMAGE_CDN_BASE_URL
+              value: "https://hma.cdn.com.tr"
           volumeMounts: [ { name: app-root, mountPath: /app } ]
 ---
 apiVersion: apps/v1
