@@ -718,6 +718,8 @@ def draft_reply(
 	}
 	state_payload = dict(state or {})
 	hail_already_sent = bool(state_payload.get("hail_sent"))
+	# Detect if this is a first message (no previous AI replies in history)
+	is_first_message = not hail_already_sent and len([h for h in history if h.get("dir") == "out"]) == 0
 	user_payload["state"] = state_payload
 	try:
 		order_candidate_snapshot = get_candidate_snapshot(int(conversation_id))
@@ -1095,6 +1097,18 @@ def draft_reply(
 
 	tool_handlers["place_ai_order_candidate"] = _handle_place_order_tool
 
+	# Build confidence instruction for first messages
+	confidence_instruction = ""
+	if is_first_message:
+		confidence_instruction = (
+			"=== CONFIDENCE KURALI (İLK MESAJ) ===\n"
+			"Bu konuşmanın İLK AI mesajı olduğu için:\n"
+			"- Standart selamlama + fiyat + ürün özeti + beden sorusu gibi rutin ilk mesajlar için confidence değerini 0.7 veya üzeri kullan.\n"
+			"- İlk mesajlar genellikle yüksek güvenilirlik gerektirir çünkü standart bir akıştır.\n"
+			"- Sadece belirsiz veya karmaşık durumlarda confidence'i 0.7'in altına düşür.\n"
+			"- Örnek: Standart \"Merhabalar abim, Adet 1599₺, ürün özeti, beden sorusu\" mesajı için confidence: 0.75-0.85 arası uygundur.\n\n"
+		)
+	
 	user_prompt = (
 		"=== KRİTİK TALİMATLAR ===\n"
 		"1. SADECE ve SADECE aşağıdaki JSON şemasına UYGUN bir JSON obje döndür.\n"
@@ -1115,6 +1129,7 @@ def draft_reply(
 		"- should_reply boolean olmalı (true/false), string değil.\n"
 		"- confidence sayı olmalı (0.0-1.0), string değil.\n"
 		"- JSON dışında hiçbir metin, açıklama veya yorum ekleme.\n\n"
+		+ confidence_instruction +
 		"=== BAĞLAM VERİSİ (SADECE BİLGİ İÇİN) ===\n"
 		"CONTEXT_JSON_START\n"
 		f"{context_json}\n"
