@@ -1580,38 +1580,49 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
             except Exception:
                 pass
         # Final fallback: derive by fetching recent messages from Graph for this conversation id
+        # Only attempt if conversation_id is already a Graph conversation ID (not a database ID)
         if not other_id:
+            # Skip if conversation_id looks like a database ID (numeric) - we need Graph conversation ID from webhook/callback
+            is_db_id = False
             try:
-                import asyncio as _aio
-                try:
-                    loop = _aio.get_event_loop()
-                except RuntimeError:
-                    loop = _aio.new_event_loop()
-                    _aio.set_event_loop(loop)
-                from ..services.instagram_api import fetch_messages as _fm, _get_base_token_and_id as _gb
-                _, owner_id, _ = _gb()
-                msgs = loop.run_until_complete(_fm(str(conversation_id), limit=10))
-                uid: str | None = None
-                for m in (msgs or []):
-                    try:
-                        frm = (m.get("from") or {}).get("id")
-                        if frm and str(frm) != str(owner_id):
-                            uid = str(frm)
-                            break
-                        to = (((m.get("to") or {}) or {}).get("data") or [])
-                        for t in to:
-                            tid = t.get("id")
-                            if tid and str(tid) != str(owner_id):
-                                uid = str(tid)
-                                break
-                        if uid:
-                            break
-                    except Exception:
-                        continue
-                if uid:
-                    other_id = uid
-            except Exception:
+                int(conversation_id)
+                is_db_id = True
+            except (ValueError, TypeError):
                 pass
+            
+            if not is_db_id and not conversation_id.startswith("dm:"):
+                # Not numeric - might be a Graph conversation ID, try fetching
+                try:
+                    import asyncio as _aio
+                    try:
+                        loop = _aio.get_event_loop()
+                    except RuntimeError:
+                        loop = _aio.new_event_loop()
+                        _aio.set_event_loop(loop)
+                    from ..services.instagram_api import fetch_messages as _fm, _get_base_token_and_id as _gb
+                    _, owner_id, _ = _gb()
+                    msgs = loop.run_until_complete(_fm(str(conversation_id), limit=10))
+                    uid: str | None = None
+                    for m in (msgs or []):
+                        try:
+                            frm = (m.get("from") or {}).get("id")
+                            if frm and str(frm) != str(owner_id):
+                                uid = str(frm)
+                                break
+                            to = (((m.get("to") or {}) or {}).get("data") or [])
+                            for t in to:
+                                tid = t.get("id")
+                                if tid and str(tid) != str(owner_id):
+                                    uid = str(tid)
+                                    break
+                            if uid:
+                                break
+                        except Exception:
+                            continue
+                    if uid:
+                        other_id = uid
+                except Exception:
+                    pass
         if not igba_id:
             try:
                 _, entity_id, _ = _get_base_token_and_id()

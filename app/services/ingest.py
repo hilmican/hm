@@ -743,21 +743,33 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 	# Resolve or create canonical Conversation row (internal integer id)
 	conversation_pk = _get_or_create_conversation_id(session, page_id, user_id)
 	
-	# Extract Graph conversation ID from message ID for hydration
+	# Extract Graph conversation ID for hydration
+	# First, check if webhook payload contains conversation/thread ID directly
 	graph_conversation_id = None
-	if conversation_pk is not None and mid:
+	if event:
+		# Check for conversation field in event (webhook may provide this directly)
+		conversation_obj = event.get("conversation") or {}
+		if isinstance(conversation_obj, dict):
+			graph_conversation_id = conversation_obj.get("id") or conversation_obj.get("thread_id")
+		# Also check top-level thread_id or conversation_id fields
+		if not graph_conversation_id:
+			graph_conversation_id = event.get("thread_id") or event.get("conversation_id")
+	
+	# Fallback: extract from message ID if not found in webhook payload
+	if not graph_conversation_id and conversation_pk is not None and mid:
 		graph_conversation_id = _extract_graph_conversation_id_from_message_id(str(mid), page_id)
-		# Store Graph conversation ID on the conversation row if we extracted it
-		if graph_conversation_id:
-			try:
-				from sqlalchemy import text as _t
-				session.exec(
-					_t(
-						"UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)"
-					).params(gc=str(graph_conversation_id), cid=int(conversation_pk))
-				)
-			except Exception:
-				pass
+	
+	# Store Graph conversation ID on the conversation row if we found it
+	if graph_conversation_id and conversation_pk is not None:
+		try:
+			from sqlalchemy import text as _t
+			session.exec(
+				_t(
+					"UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)"
+				).params(gc=str(graph_conversation_id), cid=int(conversation_pk))
+			)
+		except Exception:
+			pass
 	
 	text_val = message_obj.get("text")
 	attachments = _maybe_expand_attachments(str(mid), message_obj.get("attachments"))
