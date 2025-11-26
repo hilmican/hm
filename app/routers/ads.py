@@ -179,6 +179,25 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 	if not ((sku and sku.strip()) or product_id):
 		raise HTTPException(status_code=400, detail="SKU veya Product ID giriniz")
 	with get_session() as session:
+		# Determine link_type from ad_id or ads table
+		# If ad_id starts with "story:", it's a story; otherwise check ads table
+		is_story = ad_id.startswith("story:")
+		link_type_val: Optional[str] = None
+		if is_story:
+			link_type_val = "story"
+		else:
+			# Check ads table for link_type
+			try:
+				stmt_link_type = _text("SELECT link_type FROM ads WHERE ad_id=:id LIMIT 1").bindparams(id=str(ad_id))
+				link_type_row = session.exec(stmt_link_type).first()
+				if link_type_row:
+					link_type_val = link_type_row[0] if isinstance(link_type_row, (list, tuple)) else getattr(link_type_row, 'link_type', None)
+			except Exception:
+				pass
+		# Default to 'ad' if not determined
+		if not link_type_val:
+			link_type_val = "ad"
+		
 		# Manual save should clear auto_linked flag (user is correcting/confirming)
 		# Resolve product_id from sku if needed (best-effort)
 		pid: Optional[int] = int(product_id) if product_id is not None else None
@@ -192,12 +211,13 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 					pid = int(val) if val is not None else None
 			except Exception:
 				pid = None
-		# Upsert mapping (manual save clears auto_linked flag)
+		# Upsert mapping (manual save clears auto_linked flag, sets link_type correctly)
 		try:
 			stmt_upsert_sqlite = _text(
-				"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 0)"
+				"INSERT OR REPLACE INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, :lt, :pid, :sku, 0)"
 			).bindparams(
 				id=str(ad_id),
+				lt=str(link_type_val),
 				pid=(int(pid) if pid is not None else None),
 				sku=(sku_clean or None),
 			)
@@ -206,10 +226,11 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 			# Fallback for MySQL: emulate replace with insert/update
 			try:
 				stmt_upsert_mysql = _text(
-					"INSERT INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 0) "
-					"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku), auto_linked=0"
+					"INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, :lt, :pid, :sku, 0) "
+					"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku), link_type=VALUES(link_type), auto_linked=0"
 				).bindparams(
 					id=str(ad_id),
+					lt=str(link_type_val),
 					pid=(int(pid) if pid is not None else None),
 					sku=(sku_clean or None),
 				)
@@ -220,22 +241,94 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 				rowm = session.exec(stmt_sel).first()
 				if rowm:
 					stmt_update = _text(
-						"UPDATE ads_products SET product_id=:pid, sku=:sku, auto_linked=0 WHERE ad_id=:id"
+						"UPDATE ads_products SET product_id=:pid, sku=:sku, link_type=:lt, auto_linked=0 WHERE ad_id=:id"
 					).bindparams(
 						id=str(ad_id),
+						lt=str(link_type_val),
 						pid=(int(pid) if pid is not None else None),
 						sku=(sku_clean or None),
 					)
 					session.exec(stmt_update)
 				else:
 					stmt_insert = _text(
-						"INSERT INTO ads_products(ad_id, product_id, sku, auto_linked) VALUES(:id, :pid, :sku, 0)"
+						"INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, :lt, :pid, :sku, 0)"
 					).bindparams(
 						id=str(ad_id),
+						lt=str(link_type_val),
 						pid=(int(pid) if pid is not None else None),
 						sku=(sku_clean or None),
 					)
 					session.exec(stmt_insert)
+		
+		# If this is a story ad (ad_id starts with "story:"), also sync stories_products table
+		if ad_id.startswith("story:") and pid is not None:
+			story_id = ad_id[6:] if ad_id.startswith("story:") else ad_id  # Remove "story:" prefix
+			try:
+				# Ensure story exists in stories table
+				session.exec(
+					_text("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES(:id, NULL, CURRENT_TIMESTAMP)")
+				).bindparams(id=str(story_id))
+			except Exception:
+				try:
+					session.exec(
+						_text("INSERT OR IGNORE INTO stories(story_id, url, updated_at) VALUES(:id, NULL, CURRENT_TIMESTAMP)")
+					).bindparams(id=str(story_id))
+				except Exception:
+					pass  # Story might already exist, continue anyway
+			
+			# Sync stories_products entry
+			try:
+				stmt_sp_sqlite = _text(
+					"INSERT OR REPLACE INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json) VALUES(:sid, :pid, :sku, 0, NULL, NULL)"
+				).bindparams(
+					sid=str(story_id),
+					pid=int(pid),
+					sku=(sku_clean or None),
+				)
+				session.exec(stmt_sp_sqlite)
+			except Exception:
+				# MySQL fallback
+				try:
+					stmt_sp_mysql = _text(
+						"""
+						INSERT INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json)
+						VALUES(:sid, :pid, :sku, 0, NULL, NULL)
+						ON DUPLICATE KEY UPDATE
+							product_id=VALUES(product_id),
+							sku=VALUES(sku),
+							auto_linked=0,
+							confidence=NULL,
+							ai_result_json=NULL
+						"""
+					).bindparams(
+						sid=str(story_id),
+						pid=int(pid),
+						sku=(sku_clean or None),
+					)
+					session.exec(stmt_sp_mysql)
+				except Exception:
+					# Last resort: update/insert
+					stmt_sp_sel = _text("SELECT story_id FROM stories_products WHERE story_id=:sid").bindparams(sid=str(story_id))
+					sp_row = session.exec(stmt_sp_sel).first()
+					if sp_row:
+						stmt_sp_update = _text(
+							"UPDATE stories_products SET product_id=:pid, sku=:sku, auto_linked=0, confidence=NULL, ai_result_json=NULL WHERE story_id=:sid"
+						).bindparams(
+							sid=str(story_id),
+							pid=int(pid),
+							sku=(sku_clean or None),
+						)
+						session.exec(stmt_sp_update)
+					else:
+						stmt_sp_insert = _text(
+							"INSERT INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json) VALUES(:sid, :pid, :sku, 0, NULL, NULL)"
+						).bindparams(
+							sid=str(story_id),
+							pid=int(pid),
+							sku=(sku_clean or None),
+						)
+						session.exec(stmt_sp_insert)
+		session.commit()
 	# Redirect back to edit page
 	return RedirectResponse(url=f"/ads/{ad_id}/edit", status_code=HTTP_303_SEE_OTHER)
 
