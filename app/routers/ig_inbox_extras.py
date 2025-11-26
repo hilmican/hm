@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from ..services import ig_inbox, ig_profile
 
-router = APIRouter(prefix="/ig/inbox", tags=["instagram-inbox"])
+router = APIRouter(prefix="/inbox", tags=["instagram-inbox"])
 
 
 class AssignmentPayload(BaseModel):

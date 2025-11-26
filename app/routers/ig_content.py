@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from ..services import content_publish
 
-router = APIRouter(prefix="/ig/content", tags=["instagram-content"])
+router = APIRouter(prefix="/content", tags=["instagram-content"])
 
 
 class DraftPayload(BaseModel):

@@ -6,7 +6,7 @@ from ..db import get_session
 from ..models import IGCommentActionLog
 from ..services import ig_comments
 
-router = APIRouter(prefix="/ig/comments", tags=["instagram-comments"])
+router = APIRouter(prefix="/comments", tags=["instagram-comments"])
 
 
 @router.get("/moderation")

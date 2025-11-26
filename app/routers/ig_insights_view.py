@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..services import ig_insights
 
-router = APIRouter(prefix="/ig/insights", tags=["instagram-insights"])
+router = APIRouter(prefix="/insights", tags=["instagram-insights"])
 
 
 @router.get("/dashboard")
