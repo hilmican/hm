@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import time
 import logging
-from typing import Optional
+import asyncio
 
 from app.services.queue import dequeue, delete_job, increment_attempts
 from app.services.ingest import handle as handle_ingest
@@ -18,6 +18,17 @@ from pymysql.err import OperationalError
 
 log = logging.getLogger("worker.ingest")
 logging.basicConfig(level=logging.INFO)
+
+
+def _get_or_create_loop() -> asyncio.AbstractEventLoop:
+	try:
+		loop = asyncio.get_event_loop()
+		if loop.is_closed():
+			raise RuntimeError("event loop is closed")
+	except RuntimeError:
+		loop = asyncio.new_event_loop()
+		asyncio.set_event_loop(loop)
+	return loop
 
 
 def main() -> None:
@@ -83,7 +94,8 @@ def main() -> None:
 				# Use graph_conversation_id if provided (saves API calls - only 1 request instead of discovery)
 				msgs = []
 				try:
-					msgs = __import__("asyncio").get_event_loop().run_until_complete(
+					loop = _get_or_create_loop()
+					msgs = loop.run_until_complete(
 						fetch_thread_messages(igba_id, ig_user_id, limit=limit, graph_conversation_id=graph_conversation_id)
 					)
 				except Exception as e:
@@ -107,8 +119,7 @@ def main() -> None:
 					if isinstance(msgs, list) and any(not isinstance(m, dict) for m in msgs):
 						cnt = len([m for m in msgs if not isinstance(m, dict)])
 						log.info("hydrate: normalizing %s non-dict messages via detail fetch", cnt)
-						import asyncio as _aio
-						loop = _aio.get_event_loop()
+						loop = _get_or_create_loop()
 						norm_msgs = []
 						for m in msgs:
 							if isinstance(m, dict):
@@ -191,7 +202,8 @@ def main() -> None:
 					continue
 				msgs = []
 				try:
-					msgs = __import__("asyncio").get_event_loop().run_until_complete(fetch_messages(conversation_id, limit=limit))
+					loop = _get_or_create_loop()
+					msgs = loop.run_until_complete(fetch_messages(conversation_id, limit=limit))
 				except Exception as e:
 					log.warning("hydrate by cid fetch fail jid=%s cid=%s err=%s", jid, conversation_id, e)
 					increment_attempts(jid)
