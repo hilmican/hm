@@ -41,6 +41,16 @@ def _build_cache_key(scope: str, subject_id: str, metrics: Iterable[str], params
 	return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def _resolve_subject_id(scope: str, subject_id: Optional[str], default_entity_id: str) -> str:
+	if subject_id:
+		return str(subject_id)
+	if scope == "account":
+		ig_user_id = os.getenv("IG_USER_ID")
+		if ig_user_id:
+			return str(ig_user_id)
+	return str(default_entity_id)
+
+
 def _cache_insights(scope: str, subject_id: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> IGInsightsSnapshot:
 	expires_at = _now() + dt.timedelta(seconds=ttl_seconds)
 	snapshot = IGInsightsSnapshot(
@@ -79,7 +89,7 @@ def fetch_insights(scope: str, subject_id: Optional[str], metrics: Iterable[str]
 	if not metric_list:
 		raise ValueError("metrics must not be empty")
 	token, entity_id, _ = _get_base_token_and_id()
-	target_id = subject_id or entity_id
+	target_id = _resolve_subject_id(scope, subject_id, entity_id)
 	url = f"https://graph.facebook.com/{GRAPH_VERSION}/{target_id}/insights"
 	query = {
 		"access_token": token,
@@ -109,7 +119,7 @@ def ensure_insights(scope: str, subject_id: Optional[str], metrics: Iterable[str
 	if not metric_list:
 		raise ValueError("metrics must not be empty")
 	_, entity_id, _ = _get_base_token_and_id()
-	target_id = subject_id or entity_id
+	target_id = _resolve_subject_id(scope, subject_id, entity_id)
 	cache_key = _build_cache_key(scope, str(target_id), metric_list, params)
 	cached = get_cached_insights(scope, str(target_id), cache_key)
 	if cached and cached.expires_at > _now():
