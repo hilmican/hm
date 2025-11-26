@@ -4,6 +4,7 @@ import datetime as dt
 import logging
 import json
 import os
+import unicodedata
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlmodel import select
@@ -36,6 +37,7 @@ from .ai_orders import (
 )
 from .ai_utils import parse_height_weight, calculate_size_suggestion, detect_color_count
 from .prompts import get_global_system_prompt
+from ..utils.normalize import TURKISH_MAP
 
 
 MAX_AI_IMAGES_PER_REPLY = int(os.getenv("AI_MAX_PRODUCT_IMAGES", "3"))
@@ -108,6 +110,42 @@ def _decode_escape_sequences(text: str) -> str:
 			return result
 		except Exception:
 			return text
+
+
+def _sanitize_reply_text(text: str) -> str:
+	"""
+	Remove control characters and normalize Unicode so that replies stay readable
+	even if the model emitted invalid escape sequences.
+
+	Strategy:
+	- Drop ASCII control chars (except tabs/newlines) that break rendering
+	- Normalize to NFKC to collapse oddities
+	- Transliterate well-known Turkish letters via TURKISH_MAP
+	- Strip combining marks to fall back to ASCII when needed
+	"""
+	if not isinstance(text, str):
+		return ""
+	# Remove problematic control chars but preserve newlines/tabs
+	filtered_chars: list[str] = []
+	for ch in text:
+		code = ord(ch)
+		if ch in ("\n", "\t"):
+			filtered_chars.append(ch)
+		elif code >= 32:
+			filtered_chars.append(ch)
+	cleaned = "".join(filtered_chars)
+	if not cleaned:
+		return ""
+	# Normalize and transliterate Turkish-specific letters
+	cleaned = unicodedata.normalize("NFKC", cleaned)
+	cleaned = cleaned.translate(TURKISH_MAP)
+	cleaned = unicodedata.normalize("NFKD", cleaned)
+	# Drop combining marks (accents) to fall back to ASCII
+	cleaned = "".join(ch for ch in cleaned if not unicodedata.combining(ch))
+	# Collapse Windows-style newlines and excess whitespace
+	cleaned = cleaned.replace("\r\n", "\n").replace("\r", "\n")
+	lines = [" ".join(part for part in line.split() if part) for line in cleaned.split("\n")]
+	return "\n".join(line for line in lines if line).strip()
 
 
 def _format_transcript(messages: List[Dict[str, Any]], max_chars: int = 16000) -> str:
@@ -1288,6 +1326,7 @@ HITAP KURALLARI:
 	reply_text_raw = (data.get("reply_text") or "").strip()
 	# Decode any literal escape sequences (e.g., \\n -> actual newline)
 	reply_text = _decode_escape_sequences(reply_text_raw)
+	reply_text = _sanitize_reply_text(reply_text)
 	try:
 		conf_raw = float(data.get("confidence") if data.get("confidence") is not None else 0.6)
 	except Exception:

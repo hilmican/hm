@@ -11,7 +11,7 @@ from app.db import get_session
 from sqlalchemy import text as _text
 from sqlmodel import select
 
-from app.services.ai_reply import draft_reply
+from app.services.ai_reply import draft_reply, _sanitize_reply_text
 from app.services.instagram_api import send_message
 from app.services.ai_orders import get_candidate_snapshot
 from app.models import SystemSetting, Product
@@ -461,6 +461,7 @@ def main() -> None:
 				reply_text_raw = (data.get("reply_text") or "").strip()
 				# Decode any literal escape sequences (e.g., \\n -> actual newline)
 				reply_text = _decode_escape_sequences(reply_text_raw)
+				reply_text = _sanitize_reply_text(reply_text)
 				product_images = data.get("product_images") or []
 				try:
 					# Log raw data (truncated) for debugging model behavior
