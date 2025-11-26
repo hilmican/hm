@@ -1364,9 +1364,29 @@ def _auto_link_story_reply(message_id: int, story_id: Optional[str], story_url: 
 	image_sources: List[str] = []
 	final_url = story_meta.get("url")
 	if final_url:
-		image_sources.append(str(final_url))
+		# Ensure final_url is a string, not a list or other type
+		if isinstance(final_url, str) and final_url.strip():
+			image_sources.append(final_url.strip())
+		elif isinstance(final_url, (list, tuple)) and len(final_url) > 0:
+			# If it's a list, take the first string element
+			for item in final_url:
+				if isinstance(item, str) and item.strip():
+					image_sources.append(item.strip())
+					break
+		else:
+			url_str = str(final_url).strip() if final_url else ""
+			if url_str:
+				image_sources.append(url_str)
 	if media_result and media_result.data_url:
-		image_sources.append(media_result.data_url)
+		data_url = media_result.data_url
+		if isinstance(data_url, str) and data_url.strip():
+			image_sources.append(data_url.strip())
+		else:
+			data_url_str = str(data_url).strip() if data_url else ""
+			if data_url_str:
+				image_sources.append(data_url_str)
+	# Filter to ensure all are valid non-empty strings
+	image_sources = [url for url in image_sources if isinstance(url, str) and url.strip()]
 	if not image_sources:
 		return
 	body = {
