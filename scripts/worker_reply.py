@@ -519,6 +519,16 @@ def main() -> None:
 									"UPDATE ai_shadow_state SET status='paused', state_json=:state, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
 								).params(state=state_json_dump, cid=int(cid))
 							)
+							# Mark conversation as unread since AI didn't reply (conversation is stuck)
+							session.exec(
+								_text(
+									"UPDATE conversations SET unread_count=GREATEST(1, unread_count) WHERE id=:cid"
+								).params(cid=int(cid))
+							)
+							try:
+								log.info("ai_shadow: marked conversation_id=%s as unread (AI decided not to reply)", cid)
+							except Exception:
+								pass
 					except Exception as pe:
 						try:
 							log.warning("persist no-reply decision error cid=%s err=%s", cid, pe)
@@ -726,6 +736,32 @@ def main() -> None:
 									"UPDATE ai_shadow_state SET ai_images_sent=1 WHERE conversation_id=:cid"
 								).params(cid=int(cid))
 							)
+						
+						# Update unread_count based on AI confidence
+						# If AI confidently replies (confidence >= threshold), mark conversation as read (unread_count = 0)
+						# If AI is not confident (confidence < threshold), mark conversation as unread (unread_count = 1)
+						if confidence >= AUTO_SEND_CONFIDENCE_THRESHOLD:
+							# Confident reply: mark as read
+							session.exec(
+								_text(
+									"UPDATE conversations SET unread_count=0 WHERE id=:cid"
+								).params(cid=int(cid))
+							)
+							try:
+								log.info("ai_shadow: marked conversation_id=%s as read (confidence=%.2f >= threshold=%.2f)", cid, confidence, AUTO_SEND_CONFIDENCE_THRESHOLD)
+							except Exception:
+								pass
+						else:
+							# Low confidence: mark as unread
+							session.exec(
+								_text(
+									"UPDATE conversations SET unread_count=GREATEST(1, unread_count) WHERE id=:cid"
+								).params(cid=int(cid))
+							)
+							try:
+								log.info("ai_shadow: marked conversation_id=%s as unread (confidence=%.2f < threshold=%.2f)", cid, confidence, AUTO_SEND_CONFIDENCE_THRESHOLD)
+							except Exception:
+								pass
 				except Exception as pe:
 					try:
 						log.warning("persist draft error cid=%s err=%s", cid, pe)
