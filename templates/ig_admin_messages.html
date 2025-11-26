@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Admin Mesajları</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .toolbar { display:flex; gap:8px; margin-bottom:12px; align-items:center; }
+      .msg-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 12px; background: #fff; }
+      .msg-card.urgent { border-color: #ef4444; background: #fef2f2; }
+      .msg-card.warning { border-color: #f59e0b; background: #fffbeb; }
+      .msg-card.info { border-color: #3b82f6; background: #eff6ff; }
+      .msg-card.read { opacity: 0.6; }
+      .msg-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px; }
+      .msg-title { font-weight: 600; color: #111827; margin-bottom: 4px; }
+      .msg-body { color: #374151; white-space: pre-wrap; margin-bottom: 8px; }
+      .msg-meta { font-size: 12px; color: #6b7280; }
+      button { background: #10b981; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px; }
+      button:hover { background: #059669; }
+      button:disabled { background: #9ca3af; cursor: not-allowed; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 8px; }
+      .badge.urgent { background: #ef4444; color: #fff; }
+      .badge.warning { background: #f59e0b; color: #fff; }
+      .badge.info { background: #3b82f6; color: #fff; }
+      .badge.unread { background: #ef4444; color: #fff; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>📢 Admin Mesajları</h1>
+    <div class="toolbar">
+      <a href="/ig/inbox/admin-messages" style="padding: 6px 12px; border: 1px solid #e5e7eb; border-radius: 6px; background: {% if not unread_only %}#2563eb; color: #fff;{% else %}#fff; color: #2563eb;{% endif %}">Tümü</a>
+      <a href="/ig/inbox/admin-messages?unread_only=true" style="padding: 6px 12px; border: 1px solid #e5e7eb; border-radius: 6px; background: {% if unread_only %}#2563eb; color: #fff;{% else %}#fff; color: #2563eb;{% endif %}">
+        Okunmamış
+        {% if unread_count > 0 %}
+          <span class="badge unread">{{ unread_count }}</span>
+        {% endif %}
+      </a>
+      <a href="/ig/inbox" style="padding: 6px 12px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; color: #2563eb;">← Inbox'a Dön</a>
+    </div>
+    <div id="messages">
+      {% for msg in messages %}
+        <div class="msg-card {{ msg.message_type }} {% if msg.is_read %}read{% endif %}">
+          <div class="msg-header">
+            <div style="flex: 1;">
+              <div class="msg-title">
+                {% if msg.message_type == 'urgent' %}🔴 Acil{% elif msg.message_type == 'warning' %}⚠️ Uyarı{% else %}ℹ️ Bilgi{% endif %}
+                <span class="badge {{ msg.message_type }}">{{ msg.message_type }}</span>
+                {% if not msg.is_read %}<span class="badge unread">Yeni</span>{% endif %}
+              </div>
+              <div class="msg-body">{{ msg.message }}</div>
+              <div class="msg-meta">
+                <a href="/ig/inbox/{{ msg.conversation_id }}">Konuşma #{{ msg.conversation_id }}</a>
+                · {{ msg.created_at.strftime('%Y-%m-%d %H:%M:%S') if msg.created_at else '' }}
+              </div>
+            </div>
+            {% if not msg.is_read %}
+              <button onclick="markRead({{ msg.id }})">Okundu İşaretle</button>
+            {% else %}
+              <button disabled>Okundu</button>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+      {% if not messages %}
+        <div style="text-align: center; padding: 40px; color: #6b7280;">
+          {% if unread_only %}
+            Okunmamış admin mesajı yok.
+          {% else %}
+            Henüz admin mesajı yok.
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+    <script>
+      async function markRead(msgId) {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'İşleniyor...';
+        try {
+          const r = await fetch(`/ig/inbox/admin/messages/${msgId}/read`, { method: 'POST' });
+          if (!r.ok) throw new Error('okundu işaretleme başarısız');
+          const js = await r.json();
+          if (js.status === 'ok') {
+            location.reload();
+          } else {
+            alert('Hata: ' + (js.error || 'Bilinmeyen hata'));
+            btn.disabled = false;
+            btn.textContent = 'Okundu İşaretle';
+          }
+        } catch (e) {
+          alert('Okundu işaretleme hatası: ' + e.message);
+          btn.disabled = false;
+          btn.textContent = 'Okundu İşaretle';
+        }
+      }
+    </script>
+  </body>
+</html>
+

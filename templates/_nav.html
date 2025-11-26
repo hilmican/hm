@@ -45,18 +45,14 @@
       </div>
       <div class="menu-item has-sub">
         <a href="#">{{ t(request, 'nav.instagram') }}</a>
-        <div class="submenu">
+        <div class="submenu" style="min-width: 240px;">
+          <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 4px;">Inbox</div>
           <a href="/ig/inbox">{{ t(request, 'nav.inbox') }}</a>
+          <a href="/ig/inbox/admin-messages">📢 Admin Mesajları</a>
           <a href="/ig/inbox?has_ad=yes">Inbox · Reklamlı</a>
           <a href="/ig/inbox?has_ad=unlinked">Inbox · Reklamı Ürüne Bağla</a>
-          <a href="/ig/content/calendar">📅 İçerik Takvimi</a>
-          <a href="/ig/insights/dashboard">📊 Insights Panel</a>
-          <a href="/ig/comments/moderation">💬 Yorum Moderasyonu</a>
           <a href="/ig/inbox/ai-replied">🤖 AI Cevaplanan Mesajlar</a>
-          <a href="/ig/mock-tester">🧪 Mock Conversation Tester</a>
-          <a href="/posts/unlinked">Gönderileri Ürüne Bağla</a>
-          <a href="/ads/auto-linked">🤖 Otomatik Bağlanan Reklamlar</a>
-          <a href="/posts/auto-linked">🤖 Otomatik Bağlanan Gönderiler</a>
+          <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin: 8px 0 4px 0;">AI & Otomasyon</div>
           <a href="/ig/ai/process">{{ t(request, 'nav.ai_processing') }}</a>
           <a href="/ig/ai/shadow/monitor">{{ t(request, 'nav.ai_shadow_monitor') }}</a>
           <a href="/ig/ai/settings">⚙️ AI Cevap Ayarları</a>
@@ -65,6 +61,16 @@
           <a href="/ig/ai/products/reviews">📊 Ürün AI İncelemeleri</a>
           <a href="/ig/ai/unlinked">{{ t(request, 'nav.unlinked_purchases') }}</a>
           <a href="/ig/ai/link-suggest">{{ t(request, 'nav.link_conversation') }}</a>
+          <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin: 8px 0 4px 0;">İçerik & Analiz</div>
+          <a href="/ig/content/calendar">📅 İçerik Takvimi</a>
+          <a href="/ig/insights/dashboard">📊 Insights Panel</a>
+          <a href="/ig/comments/moderation">💬 Yorum Moderasyonu</a>
+          <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin: 8px 0 4px 0;">Bağlantılar</div>
+          <a href="/posts/unlinked">Gönderileri Ürüne Bağla</a>
+          <a href="/ads/auto-linked">🤖 Otomatik Bağlanan Reklamlar</a>
+          <a href="/posts/auto-linked">🤖 Otomatik Bağlanan Gönderiler</a>
+          <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin: 8px 0 4px 0;">Test & Debug</div>
+          <a href="/ig/mock-tester">🧪 Mock Conversation Tester</a>
         </div>
       </div>
       <div class="menu-item has-sub">

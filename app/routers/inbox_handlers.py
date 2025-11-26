@@ -452,6 +452,43 @@ async def ai_replied_messages(
         )
 
 
+@router.get("/inbox/admin-messages")
+async def admin_messages_page(request: Request, limit: int = 50, unread_only: bool = False):
+	"""Admin mesajları sayfası"""
+	with get_session() as session:
+		query = select(AdminMessage)
+		if unread_only:
+			query = query.where(AdminMessage.is_read == False)
+		query = query.order_by(AdminMessage.created_at.desc()).limit(limit)
+		
+		messages = session.exec(query).all()
+		
+		admin_msgs = []
+		for msg in messages:
+			admin_msgs.append({
+				"id": msg.id,
+				"conversation_id": msg.conversation_id,
+				"message": msg.message,
+				"message_type": msg.message_type,
+				"is_read": msg.is_read,
+				"created_at": msg.created_at,
+			})
+		
+		# Okunmamış mesaj sayısı
+		unread_count = session.exec(
+			select(AdminMessage).where(AdminMessage.is_read == False)
+		).all()
+		unread_count = len(unread_count)
+		
+		templates = request.app.state.templates
+		return templates.TemplateResponse("ig_admin_messages.html", {
+			"request": request,
+			"messages": admin_msgs,
+			"unread_count": unread_count,
+			"unread_only": unread_only,
+		})
+
+
 @router.post("/inbox/clear-enrich")
 def clear_enrich_queues():
     # Purge Redis lists for enrich jobs and delete queued rows from jobs table
