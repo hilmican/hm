@@ -1247,7 +1247,7 @@ def _auto_link_story_reply(message_id: int, story_id: Optional[str], story_url: 
 	media_result: Optional[_StoryMediaResult] = None
 	with get_session() as session:
 		existing = session.exec(
-			_sql_text("SELECT story_id, product_id FROM stories_products WHERE story_id=:sid LIMIT 1").bindparams(
+			_sql_text("SELECT story_id, product_id, sku FROM stories_products WHERE story_id=:sid LIMIT 1").bindparams(
 				sid=str(story_id)
 			)
 		).first()
@@ -1255,7 +1255,84 @@ def _auto_link_story_reply(message_id: int, story_id: Optional[str], story_url: 
 			existing_pid = getattr(existing, "product_id", None) if hasattr(existing, "product_id") else (
 				existing[1] if isinstance(existing, (list, tuple)) and len(existing) > 1 else None
 			)
+			existing_sku = getattr(existing, "sku", None) if hasattr(existing, "sku") else (
+				existing[2] if isinstance(existing, (list, tuple)) and len(existing) > 2 else None
+			)
 			if existing_pid:
+				# Story already linked to product - but ensure ads_products entry exists
+				# This fixes cases where story was linked manually but ads_products entry is missing
+				try:
+					ad_product_check = session.exec(
+						_sql_text("SELECT product_id FROM ads_products WHERE ad_id=:aid AND link_type='story' LIMIT 1").bindparams(
+							aid=str(story_key)
+						)
+					).first()
+					if not ad_product_check:
+						# ads_products entry missing - create it
+						try:
+							session.exec(
+								_sql_text(
+									"""
+									INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked)
+									VALUES(:aid, 'story', :pid, :sku, 0)
+									ON DUPLICATE KEY UPDATE
+										product_id=VALUES(product_id),
+										link_type='story',
+										sku=VALUES(sku)
+									"""
+								).bindparams(aid=str(story_key), pid=int(existing_pid), sku=(existing_sku or None))
+							)
+							session.commit()
+							try:
+								_log.info(
+									"ingest: synced ads_products entry for story %s (product_id=%s) - was missing",
+									str(story_id),
+									existing_pid,
+								)
+							except Exception:
+								pass
+						except Exception:
+							try:
+								session.exec(
+									_sql_text(
+										"INSERT OR REPLACE INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:aid, 'story', :pid, :sku, 0)"
+									).bindparams(aid=str(story_key), pid=int(existing_pid), sku=(existing_sku or None))
+								)
+								session.commit()
+							except Exception:
+								try:
+									session.exec(
+										_sql_text(
+											"UPDATE ads_products SET product_id=:pid, link_type='story', sku=:sku WHERE ad_id=:aid"
+										).bindparams(aid=str(story_key), pid=int(existing_pid), sku=(existing_sku or None))
+									)
+									session.commit()
+								except Exception:
+									session.rollback()
+					else:
+						# Entry exists - ensure product_id matches (in case story was relinked)
+						ad_pid = ad_product_check[0] if isinstance(ad_product_check, (list, tuple)) else getattr(ad_product_check, 'product_id', None)
+						if ad_pid != existing_pid:
+							try:
+								session.exec(
+									_sql_text(
+										"UPDATE ads_products SET product_id=:pid, sku=:sku WHERE ad_id=:aid AND link_type='story'"
+									).bindparams(aid=str(story_key), pid=int(existing_pid), sku=(existing_sku or None))
+								)
+								session.commit()
+							except Exception:
+								session.rollback()
+				except Exception:
+					# If check fails, continue anyway - we'll try to create during normal flow
+					pass
+				# Ensure story is cached in ads table
+				story_row = session.exec(
+					_sql_text("SELECT story_id, url FROM stories WHERE story_id=:sid LIMIT 1").bindparams(
+						sid=str(story_id)
+					)
+				).first()
+				story_url_cached = _row_value(story_row, "url", 1) if story_row else story_url
+				_ensure_story_cached_in_ads(session, str(story_id), story_url_cached)
 				return
 		story_row = session.exec(
 			_sql_text("SELECT story_id, url, media_path, media_thumb_path, media_mime FROM stories WHERE story_id=:sid LIMIT 1").bindparams(
