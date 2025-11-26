@@ -508,7 +508,7 @@ async def upload_product_images(
                 ProductImage.product_id == prod.id
             )
         ).first()
-        base_pos = int(max_pos_row[0] or 0) if max_pos_row else 0
+        base_pos = int(max_pos_row) if max_pos_row is not None else 0
 
         root = Path(os.getenv("IMAGE_UPLOAD_ROOT", "static")).resolve()
         product_dir = root / "products" / folder

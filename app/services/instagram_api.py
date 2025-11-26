@@ -509,6 +509,44 @@ async def sync_latest_conversations(limit: int = 25) -> int:
     return saved
 
 
+def _make_absolute_url(url: str) -> str:
+    """
+    Convert a relative URL to an absolute URL for Facebook Graph API.
+    
+    Facebook requires absolute URLs that are publicly accessible.
+    Uses IMAGE_CDN_BASE_URL if set, otherwise constructs from APP_URL or BASE_URL.
+    """
+    if not url:
+        return url
+    
+    # If already absolute (starts with http:// or https://), return as-is
+    if url.startswith(("http://", "https://")):
+        return url
+    
+    # Try IMAGE_CDN_BASE_URL first (preferred for CDN-hosted images)
+    cdn_base = (os.getenv("IMAGE_CDN_BASE_URL", "") or "").strip().rstrip("/")
+    if cdn_base:
+        # Remove leading slash from relative URL if present
+        relative_path = url.lstrip("/")
+        return f"{cdn_base}/{relative_path}"
+    
+    # Fallback to APP_URL or BASE_URL
+    app_url = (os.getenv("APP_URL", "") or os.getenv("BASE_URL", "") or "").strip().rstrip("/")
+    if app_url:
+        # Remove leading slash from relative URL if present
+        relative_path = url.lstrip("/")
+        return f"{app_url}/{relative_path}"
+    
+    # Last resort: if no base URL is configured, log a warning and return as-is
+    # This will likely fail, but at least we tried
+    try:
+        _log.warning("No IMAGE_CDN_BASE_URL or APP_URL configured, cannot convert relative URL to absolute: %s", url[:100])
+    except Exception:
+        pass
+    
+    return url
+
+
 async def send_message(conversation_id: str, text: str, image_urls: Optional[List[str]] = None) -> Dict[str, Any]:
     """
     Send a message to an Instagram conversation via Graph API.
@@ -550,11 +588,13 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
     url = base + "/me/messages"
     
     image_urls = image_urls or []
+    # Convert relative URLs to absolute URLs for Facebook
+    absolute_image_urls = [_make_absolute_url(img_url) for img_url in image_urls]
     results: Dict[str, Any] = {"message_ids": [], "status": "ok"}
     
     async with httpx.AsyncClient() as client:
         # 1) Send image messages first (if any)
-        for img_url in image_urls:
+        for img_url in absolute_image_urls:
             img_payload = {
                 "recipient": {"id": recipient_id},
                 "messaging_type": "RESPONSE",
