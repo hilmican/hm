@@ -1343,9 +1343,9 @@ HITAP KURALLARI:
 	reply_text = _decode_escape_sequences(reply_text_raw)
 	reply_text = _sanitize_reply_text(reply_text)
 	try:
-		conf_raw = float(data.get("confidence") if data.get("confidence") is not None else 0.6)
+		conf_raw = float(data.get("confidence") if data.get("confidence") is not None else 0.59)
 	except Exception:
-		conf_raw = 0.6
+		conf_raw = 0.59
 	confidence = max(0.0, min(1.0, conf_raw))
 	reason = (data.get("reason") or "auto")
 	notes = (data.get("notes") or None)
