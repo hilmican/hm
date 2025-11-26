@@ -24,6 +24,111 @@ from ..services.ingest import _extract_graph_conversation_id_from_message_id
 router = APIRouter()
 
 
+def _resolve_graph_conversation_id_for_hydrate(conversation_identifier: str) -> tuple[str | None, dict[str, Any]]:
+    """
+    Best-effort lookup/derivation of the Graph conversation ID used by Meta APIs.
+    Returns (graph_id or None, debug_info dict for logging/UX).
+    """
+    info: dict[str, Any] = {"input": str(conversation_identifier)}
+    cid_str = str(conversation_identifier or "").strip()
+    if not cid_str:
+        info["status"] = "missing_identifier"
+        return None, info
+    if cid_str.startswith("dm:"):
+        info["status"] = "dm_identifier"
+        return None, info
+
+    with get_session() as session:
+        conv_pk: int | None = None
+        graph_cid: str | None = None
+
+        # If identifier is numeric, treat it as conversations.id
+        try:
+            conv_pk = int(cid_str)
+        except (TypeError, ValueError):
+            conv_pk = None
+
+        # If identifier isn't a numeric PK, try resolving via convo_id
+        if conv_pk is None:
+            try:
+                row = session.exec(
+                    _text("SELECT id, graph_conversation_id FROM conversations WHERE convo_id=:cid LIMIT 1")
+                ).params(cid=cid_str).first()
+            except Exception as exc:
+                info["convo_lookup_error"] = str(exc)[:160]
+                row = None
+            if row:
+                conv_pk = (
+                    getattr(row, "id", None)
+                    if hasattr(row, "id")
+                    else (row[0] if isinstance(row, (list, tuple)) and len(row) > 0 else None)
+                )
+                graph_cid = (
+                    getattr(row, "graph_conversation_id", None)
+                    if hasattr(row, "graph_conversation_id")
+                    else (row[1] if isinstance(row, (list, tuple)) and len(row) > 1 else None)
+                )
+                if graph_cid:
+                    info["status"] = "resolved_from_convo_id"
+                    info["conversation_pk"] = int(conv_pk) if conv_pk is not None else None
+                    info["graph_id"] = str(graph_cid)
+                    return str(graph_cid), info
+
+        if conv_pk is not None:
+            # Direct lookup on conversations.id
+            row = session.exec(
+                _text("SELECT graph_conversation_id FROM conversations WHERE id=:cid LIMIT 1")
+            ).params(cid=int(conv_pk)).first()
+            graph_cid = (
+                getattr(row, "graph_conversation_id", None)
+                if row is not None and hasattr(row, "graph_conversation_id")
+                else (row[0] if isinstance(row, (list, tuple)) and len(row) > 0 else None)
+                if row
+                else None
+            )
+            if graph_cid:
+                info["status"] = "resolved_from_pk"
+                info["conversation_pk"] = int(conv_pk)
+                info["graph_id"] = str(graph_cid)
+                return str(graph_cid), info
+
+            # Derive from the latest ig_message_id if Graph ID is missing
+            row_msg = session.exec(
+                _text(
+                    "SELECT ig_message_id FROM message WHERE conversation_id=:cid AND ig_message_id IS NOT NULL ORDER BY timestamp_ms DESC, id DESC LIMIT 1"
+                )
+            ).params(cid=int(conv_pk)).first()
+            ig_mid = (
+                getattr(row_msg, "ig_message_id", None)
+                if row_msg and hasattr(row_msg, "ig_message_id")
+                else (row_msg[0] if isinstance(row_msg, (list, tuple)) and len(row_msg) > 0 else None)
+            )
+            if ig_mid:
+                derived = _extract_graph_conversation_id_from_message_id(str(ig_mid))
+                if derived:
+                    try:
+                        session.exec(
+                            _text(
+                                "UPDATE conversations SET graph_conversation_id=:gc WHERE id=:cid AND (graph_conversation_id IS NULL OR graph_conversation_id=:gc)"
+                            ).params(gc=str(derived), cid=int(conv_pk))
+                        )
+                    except Exception as exc:
+                        info["persist_error"] = str(exc)[:160]
+                    info["status"] = "derived_from_message"
+                    info["conversation_pk"] = int(conv_pk)
+                    info["graph_id"] = str(derived)
+                    return str(derived), info
+
+        # As a final heuristic, treat alphanumeric identifiers as Graph IDs
+        if any(ch.isalpha() for ch in cid_str):
+            info["status"] = "assumed_graph"
+            info["graph_id"] = cid_str
+            return cid_str, info
+
+    info["status"] = "not_resolved"
+    return None, info
+
+
 @router.get("/inbox/{conversation_id}/debug")
 def debug_conversation(request: Request, conversation_id: int, limit: int = 25):
     templates = request.app.state.templates
@@ -1320,9 +1425,15 @@ def enqueue_enrich(conversation_id: str):
         debug["igba_id"] = (str(igba_id) if igba_id else None)
         # enqueue hydrate_by_conversation_id for Graph CIDs
         fallback_enqueued = False
-        if not conversation_id.startswith("dm:"):
+        graph_cid, lookup_info = _resolve_graph_conversation_id_for_hydrate(str(conversation_id))
+        debug["graph_lookup"] = lookup_info
+        if graph_cid:
             try:
-                enqueue("hydrate_by_conversation_id", key=str(conversation_id), payload={"conversation_id": str(conversation_id), "max_messages": 50})
+                enqueue(
+                    "hydrate_by_conversation_id",
+                    key=str(graph_cid),
+                    payload={"conversation_id": str(graph_cid), "max_messages": 50},
+                )
                 fallback_enqueued = True
             except Exception:
                 fallback_enqueued = False
@@ -1493,11 +1604,18 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
         debug["igba_id"] = (str(igba_id) if igba_id else None)
         debug["other_id"] = (str(other_id) if other_id else None)
         if not other_id and not conversation_id.startswith("dm:"):
-            try:
-                enqueue("hydrate_by_conversation_id", key=str(conversation_id), payload={"conversation_id": str(conversation_id), "max_messages": int(max_messages)})
-                fallback_enqueued = True
-            except Exception:
-                fallback_enqueued = False
+            graph_cid, lookup_info = _resolve_graph_conversation_id_for_hydrate(str(conversation_id))
+            debug["graph_lookup"] = lookup_info
+            if graph_cid:
+                try:
+                    enqueue(
+                        "hydrate_by_conversation_id",
+                        key=str(graph_cid),
+                        payload={"conversation_id": str(graph_cid), "max_messages": int(max_messages)},
+                    )
+                    fallback_enqueued = True
+                except Exception:
+                    fallback_enqueued = False
         if fallback_enqueued:
             return {"status": "ok", "queued": True, "fallback": "hydrate_by_conversation_id", "conversation_id": conversation_id, "debug": debug}
         raise HTTPException(
