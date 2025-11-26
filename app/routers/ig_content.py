@@ -9,7 +9,7 @@ router = APIRouter(prefix="/ig/content", tags=["instagram-content"])
 
 
 class DraftPayload(BaseModel):
-	media_type: str = Field(default="PHOTO", regex="^(PHOTO|VIDEO|REEL)$")
+	media_type: str = Field(default="PHOTO", pattern="^(PHOTO|VIDEO|REEL)$")
 	caption: str | None = None
 	image_url: str | None = None
 	video_url: str | None = None
