@@ -1104,18 +1104,18 @@ def draft_reply(
 			"type": "function",
 			"function": {
 				"name": "yoneticiye_bildirim_gonder",
-				"description": "Müşteri ofise gelmek istediğinde veya yönetici müdahalesi gereken durumlarda bu fonksiyonu çağır. Örn: Müşteri 'ofisiniz nerede' diye sorup 'gelip orada deneyebilir miyiz' dediğinde bu fonksiyonu çağır.",
+				"description": "Yönetici müdahalesi gereken durumlarda BU FONKSİYONU ÇAĞIR. Sadece mesajda 'eskale ediyorum' demek YETERLİ DEĞİL - mutlaka bu fonksiyonu çağır. Aşağıdaki durumlardan herhangi biri gerçekleştiğinde bu fonksiyonu çağır: 1) Satış akışı dışında bir konu sorulduğunda, 2) Değişim/iade doğrudan talep edildiğinde, 3) Müşteri yanlış cevap verildiğini ima ettiğinde, 4) Aynı cevabı birden çok kez vermek zorunda kalındığında, 5) Birden fazla ürün alternatifi (renk/beden dışında) istendiğinde, 6) Müşteri ofise gelmek istediğinde.",
 				"parameters": {
 					"type": "object",
 					"properties": {
 						"mesaj": {
 							"type": "string",
-							"description": "Yöneticiye gönderilecek bildirim mesajı. Konuşma bağlamını ve müşterinin isteğini açıkça belirt.",
+							"description": "Yöneticiye gönderilecek bildirim mesajı. Konuşma bağlamını ve müşterinin isteğini açıkça belirt. Örn: 'Müşteri değişim talep etti: [detaylar]' veya 'Satış akışı dışında soru: [soru]'",
 						},
 						"mesaj_tipi": {
 							"type": "string",
 							"enum": ["info", "warning", "urgent"],
-							"description": "Bildirim tipi: 'info' (bilgi), 'warning' (uyarı), 'urgent' (acil)",
+							"description": "Bildirim tipi: 'info' (bilgi), 'warning' (uyarı), 'urgent' (acil). Değişim/iade veya müşteri şikayeti için 'urgent' kullan.",
 							"default": "info",
 						}
 					},
@@ -1201,7 +1201,6 @@ def draft_reply(
 		"- Fonksiyon çağrısı yaptığını veya ölçüleri backend'e ilettiğini kullanıcıya ASLA söyleme; sadece sonuçla devam et.\n"
 		"- Müşteri ürüne ilgi gösterdiğinde `create_ai_order_candidate`, vazgeçtiğinde `mark_ai_order_not_interested`, siparişi tamamlamaya çok yakınsa `mark_ai_order_very_interested` fonksiyonlarını uygun şekilde kullan.\n"
 		"- Ürün, müşteri ve adres bilgilerini tam topladıysan `place_ai_order_candidate` fonksiyonunu çağırıp tüm alanları doldur; bu kayıt insan ekip tarafından incelenecek.\n"
-		"- Müşteri ofise gelmek istediğinde (örn: 'ofisiniz nerede' diye sorup 'gelip orada deneyebilir miyiz' dediğinde) `yoneticiye_bildirim_gonder` fonksiyonunu çağır. Mesajda konuşma bağlamını ve müşterinin isteğini açıkça belirt.\n"
 	)
 	if function_callbacks:
 		user_prompt += "\n=== FONKSİYON ÇAĞRILARI ===\n"
@@ -1215,6 +1214,40 @@ def draft_reply(
 		"- Müşteri \"daha sonra yazarım\", \"şimdilik bakıyorum\" gibi satın almayı durdurursa hemen `mark_ai_order_not_interested` çağır (gerekirse kısa sebep notu ekle).\n"
 		"- Bir sipariş adayını oluşturduktan sonra, kullanıcı vazgeçerse veya yeniden ısınırsa ilgili fonksiyonla durumu güncelle; AI asla bu fonksiyonları boş geçemez.\n"
 		"- Fonksiyon çağrısı yapmadan hiçbir durumda sipariş akışını ilerlettiğini varsayma; sipariş board'u bu çağrılara göre çalışıyor.\n"
+		"\n"
+		"=== YÖNETİCİYE ESKALASYON KURALLARI (ÇOK ÖNEMLİ) ===\n"
+		"Aşağıdaki durumlardan HERHANGİ BİRİ gerçekleştiğinde MUTLAKA `yoneticiye_bildirim_gonder` fonksiyonunu çağır:\n"
+		"\n"
+		"1. SATIŞ AKIŞI DIŞINDAKİ KONULAR:\n"
+		"   - Müşteri, sana verilen kurallar ve yönlendirmelerde belirtilmeyen bir konu sorduğunda\n"
+		"   - Örnek: Şirket politikası, genel işletme soruları, senin bilgi sahibi olmadığın konular\n"
+		"\n"
+		"2. DEĞİŞİM/İADE TALEPLERİ:\n"
+		"   - Kullanıcı değişim hakkında soru sormak yerine DOĞRUDAN değişim talep ettiğinde\n"
+		"   - Kullanıcı iade talep ettiğinde\n"
+		"   - NOT: Sadece bilgi sormakla talep etmek farklıdır. Talep edildiğinde eskale et.\n"
+		"\n"
+		"3. MÜŞTERİ ŞİKAYETLERİ:\n"
+		"   - Müşteri 'kafan mı karıştı', 'beni anlamadın mı' veya buna benzer yanlış cevap verildiğini ima ettiğinde\n"
+		"   - Müşteri hizmet kalitesinden memnun olmadığını belirttiğinde\n"
+		"\n"
+		"4. TEKRARLANAN CEVAPLAR:\n"
+		"   - Aynı cevabı birden çok kez vermek zorunda kalırsan (iyi akşamlar mesajı, ürün tanıtım mesajı dahil)\n"
+		"   - Bu durumda mesaj yazmak yerine `yoneticiye_bildirim_gonder` fonksiyonunu çağır\n"
+		"\n"
+		"5. BİRDEN FAZLA ÜRÜN İSTEĞİ:\n"
+		"   - Müşteri aynı ürünün renk ve beden alternatifleri dışında başka ürün alternatifleri isterse\n"
+		"   - Örnek: 'Bu ürün yerine başka bir şey var mı?' (aynı ürünün farklı rengi/beden değil)\n"
+		"\n"
+		"6. OFİS ZİYARETİ:\n"
+		"   - Müşteri ofise gelmek istediğinde (örn: 'ofisiniz nerede' diye sorup 'gelip orada deneyebilir miyiz' dediğinde)\n"
+		"\n"
+		"=== ESKALASYON YAPARKEN ÖNEMLİ KURALLAR ===\n"
+		"- Sadece mesajda 'yöneticiye iletiyorum' veya 'eskale ediyorum' demek YETERLİ DEĞİLDİR.\n"
+		"- MUTLAKA `yoneticiye_bildirim_gonder` fonksiyonunu çağır.\n"
+		"- Fonksiyonu çağırdıktan sonra, müşteriye kısa bir bilgilendirme mesajı yazabilirsin ama asla sadece mesaj yazmayla yetinme.\n"
+		"- Eskalasyon yaptığında `should_reply: false` yap ve `reply_text` içinde müşteriye kısa bilgi ver (örn: 'Bu konuyu yöneticimize iletiyorum, en kısa sürede dönüş yapacaklar').\n"
+		"- Fonksiyonu çağırdıktan sonra otomatik cevap verme - yönetici manuel müdahale edecek.\n"
 	)
 
 	# Load customer info for gender detection
