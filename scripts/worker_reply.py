@@ -79,7 +79,7 @@ def _decode_escape_sequences(text: str) -> str:
 
 # Debounce delay: wait this long after last message before generating reply
 # Configurable via AI_REPLY_DEBOUNCE_SECONDS env var (default: 5 seconds)
-DEBOUNCE_SECONDS = int(os.getenv("AI_REPLY_DEBOUNCE_SECONDS", "5"))
+DEBOUNCE_SECONDS = int(os.getenv("AI_REPLY_DEBOUNCE_SECONDS", "15"))
 POSTPONE_WINDOW_SECONDS = 60  # 1 minute
 POSTPONE_MAX = 5
 # Allow limited automatic retries for paused conversations (defaults to 1 retry)
