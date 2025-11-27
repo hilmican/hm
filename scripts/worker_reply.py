@@ -609,6 +609,14 @@ def main() -> None:
 						if notes_text:
 							decision_text += f"\n\nNot: {notes_text}"
 						actions_json = None
+						# Build json_meta with debug_meta and function_callbacks
+						json_meta_no_reply = {}
+						if data.get("debug_meta"):
+							json_meta_no_reply.update(data.get("debug_meta"))
+						if function_callbacks:
+							json_meta_no_reply["function_callbacks"] = function_callbacks
+						json_meta_no_reply_str = json.dumps(json_meta_no_reply, ensure_ascii=False) if json_meta_no_reply else None
+						
 						with get_session() as session:
 							session.exec(
 								_text(
@@ -622,7 +630,7 @@ def main() -> None:
 									model=str(data.get("model") or ""),
 									conf=(float(data.get("confidence") or 0.6)),
 									reason=reason_text,
-									meta=json.dumps(data.get("debug_meta"), ensure_ascii=False) if data.get("debug_meta") else None,
+									meta=json_meta_no_reply_str,
 									actions=actions_json,
 									state=state_json_dump,
 									att=int(postpones or 0),
@@ -846,6 +854,14 @@ def main() -> None:
 						should_auto_send = False
 				
 				try:
+					# Build json_meta with debug_meta and function_callbacks
+					json_meta_dict = {}
+					if data.get("debug_meta"):
+						json_meta_dict.update(data.get("debug_meta"))
+					if function_callbacks:
+						json_meta_dict["function_callbacks"] = function_callbacks
+					json_meta_str = json.dumps(json_meta_dict, ensure_ascii=False) if json_meta_dict else None
+					
 					with get_session() as session:
 						session.exec(
 							_text(
@@ -859,7 +875,7 @@ def main() -> None:
 								model=str(data.get("model") or ""),
 								conf=confidence,
 								reason=(data.get("reason") or "auto"),
-								meta=json.dumps(data.get("debug_meta"), ensure_ascii=False) if data.get("debug_meta") else None,
+								meta=json_meta_str,
 								actions=actions_json,
 								state=state_json_dump,
 								att=int(postpones or 0),

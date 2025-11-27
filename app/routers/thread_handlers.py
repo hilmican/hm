@@ -899,7 +899,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
             from sqlalchemy import text as _text
             rows_shadow = session.exec(
                 _text(
-                    "SELECT id, reply_text, model, confidence, reason, created_at, status, actions_json, state_json FROM ai_shadow_reply WHERE conversation_id=:cid ORDER BY created_at ASC LIMIT 200"
+                    "SELECT id, reply_text, model, confidence, reason, created_at, status, actions_json, state_json, json_meta FROM ai_shadow_reply WHERE conversation_id=:cid ORDER BY created_at ASC LIMIT 200"
                 ).params(cid=int(conversation_id))
             ).all()
             # Represent the last one (if any) in 'shadow' for legacy panel rendering
@@ -916,6 +916,28 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 except Exception:
                     pass
                 return []
+            
+            def _parse_function_callbacks(raw_val: Any) -> list[dict[str, Any]]:
+                """Parse function_callbacks from json_meta."""
+                if not raw_val:
+                    return []
+                try:
+                    if isinstance(raw_val, str):
+                        parsed = json.loads(raw_val)
+                    else:
+                        parsed = raw_val
+                    if isinstance(parsed, dict):
+                        # json_meta is a dict, look for function_callbacks inside it
+                        callbacks = parsed.get("function_callbacks", [])
+                        if isinstance(callbacks, list):
+                            return callbacks  # type: ignore[return-value]
+                    elif isinstance(parsed, list):
+                        # json_meta might be a list directly (unlikely but handle it)
+                        return parsed  # type: ignore[return-value]
+                except Exception:
+                    pass
+                return []
+            
             if rows_shadow:
                 rlast = rows_shadow[-1]
                 reply_text_raw = getattr(rlast, "reply_text", None) if hasattr(rlast, "reply_text") else (rlast[1] if len(rlast) > 1 else None)
@@ -948,6 +970,9 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                         return {}
                     return {}
 
+                json_meta_raw = getattr(rlast, "json_meta", None) if hasattr(rlast, "json_meta") else (rlast[9] if len(rlast) > 9 else None)
+                function_callbacks_list = _parse_function_callbacks(json_meta_raw)
+
                 shadow = {
                     "id": getattr(rlast, "id", None) if hasattr(rlast, "id") else (rlast[0] if len(rlast) > 0 else None),
                     "text": reply_text_raw,
@@ -959,6 +984,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     "status": getattr(rlast, "status", None) if hasattr(rlast, "status") else (rlast[6] if len(rlast) > 6 else None),
                     "actions": _parse_actions(getattr(rlast, "actions_json", None) if hasattr(rlast, "actions_json") else (rlast[7] if len(rlast) > 7 else None)),
                     "state": _parse_state(getattr(rlast, "state_json", None) if hasattr(rlast, "state_json") else (rlast[8] if len(rlast) > 8 else None)),
+                    "function_callbacks": function_callbacks_list,
                 }
                 try:
                     ca = shadow.get("created_at")
@@ -988,9 +1014,11 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     status = getattr(rr, "status", None) if hasattr(rr, "status") else (rr[6] if len(rr) > 6 else None)
                     actions_val = getattr(rr, "actions_json", None) if hasattr(rr, "actions_json") else (rr[7] if len(rr) > 7 else None)
                     state_val = getattr(rr, "state_json", None) if hasattr(rr, "state_json") else (rr[8] if len(rr) > 8 else None)
+                    json_meta_val = getattr(rr, "json_meta", None) if hasattr(rr, "json_meta") else (rr[9] if len(rr) > 9 else None)
                     confidence_val = getattr(rr, "confidence", None) if hasattr(rr, "confidence") else (rr[3] if len(rr) > 3 else None)
                     state_dict = _parse_state(state_val)
                     actions_list = _parse_actions(actions_val)
+                    function_callbacks_vm = _parse_function_callbacks(json_meta_val)
                     # Include all records, even if empty text (for no_reply decisions)
                     if not txt:
                         txt = ""  # Will be handled in template
@@ -1043,6 +1071,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                             "product_slug": focus_slug or None,
                             "ai_actions": actions_list if line_idx == 0 else [],  # Only show actions on first message
                             "ai_state": state_dict if state_dict else None,
+                            "ai_function_callbacks": function_callbacks_vm if line_idx == 0 else [],  # Only show function_callbacks on first message
                         }
                         vms.append(vm)
                 except Exception:

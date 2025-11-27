@@ -196,6 +196,26 @@
             {% endfor %}
           </div>
         {% endif %}
+        {% if shadow.function_callbacks %}
+          <div style="margin-top:8px;">
+            <div class="meta" style="font-weight:600; color:#1f2937;">🔧 Çağrılan Fonksiyonlar</div>
+            {% for callback in shadow.function_callbacks %}
+              <div style="margin-top:6px; padding:8px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:6px;">
+                <div class="meta" style="font-weight:600; color:#111827;">{{ callback.name or callback.get('name') or 'bilinmeyen' }}</div>
+                {% if callback.arguments or callback.get('arguments') %}
+                  <div class="meta" style="margin-top:4px; font-family:monospace; font-size:11px; white-space:pre-wrap; color:#374151;">
+                    Parametreler: {{ (callback.arguments | tojson if callback.arguments else callback.get('arguments') | tojson) | safe }}
+                  </div>
+                {% endif %}
+                {% if callback.result is defined or callback.get('result') %}
+                  <div class="meta" style="margin-top:4px; font-family:monospace; font-size:11px; white-space:pre-wrap; color:#059669;">
+                    Sonuç: {{ (callback.result | tojson if callback.result is defined else callback.get('result') | tojson) | safe }}
+                  </div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
         {% if shadow.state %}
         <div class="meta" style="margin-top:8px; white-space:pre-wrap;">📌 Durum: {{ shadow.state }}</div>
         {% endif %}
@@ -354,6 +374,26 @@
                           {% endfor %}
                         </div>
                       {% endif %}
+                    {% endfor %}
+                  </div>
+                {% endif %}
+                {% if m.ai_function_callbacks %}
+                  <div style="margin-top:8px;">
+                    <div class="meta" style="font-weight:600; color:#1f2937;">🔧 Çağrılan Fonksiyonlar</div>
+                    {% for callback in m.ai_function_callbacks %}
+                      <div style="margin-top:6px; padding:8px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:6px;">
+                        <div class="meta" style="font-weight:600; color:#111827;">{{ callback.name or callback.get('name') or 'bilinmeyen' }}</div>
+                        {% if callback.arguments or callback.get('arguments') %}
+                          <div class="meta" style="margin-top:4px; font-family:monospace; font-size:11px; white-space:pre-wrap; color:#374151;">
+                            Parametreler: {{ (callback.arguments | tojson if callback.arguments else callback.get('arguments') | tojson) | safe }}
+                          </div>
+                        {% endif %}
+                        {% if callback.result is defined or callback.get('result') %}
+                          <div class="meta" style="margin-top:4px; font-family:monospace; font-size:11px; white-space:pre-wrap; color:#059669;">
+                            Sonuç: {{ (callback.result | tojson if callback.result is defined else callback.get('result') | tojson) | safe }}
+                          </div>
+                        {% endif %}
+                      </div>
                     {% endfor %}
                   </div>
                 {% endif %}
