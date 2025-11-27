@@ -20,7 +20,7 @@ log = logging.getLogger("worker.reply")
 logging.basicConfig(level=logging.INFO)
 
 # Minimum confidence threshold to auto-send AI replies (0.0-1.0)
-AUTO_SEND_CONFIDENCE_THRESHOLD = float(os.getenv("AI_AUTO_SEND_CONFIDENCE", "0.59"))
+AUTO_SEND_CONFIDENCE_THRESHOLD = float(os.getenv("AI_AUTO_SEND_CONFIDENCE", "0.49"))
 
 ORDER_STATUS_TOOL_NAMES = {
 	"create_ai_order_candidate",

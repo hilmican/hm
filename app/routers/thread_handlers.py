@@ -943,6 +943,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     status = getattr(rr, "status", None) if hasattr(rr, "status") else (rr[6] if len(rr) > 6 else None)
                     actions_val = getattr(rr, "actions_json", None) if hasattr(rr, "actions_json") else (rr[7] if len(rr) > 7 else None)
                     state_val = getattr(rr, "state_json", None) if hasattr(rr, "state_json") else (rr[8] if len(rr) > 8 else None)
+                    confidence_val = getattr(rr, "confidence", None) if hasattr(rr, "confidence") else (rr[3] if len(rr) > 3 else None)
                     state_dict = _parse_state(state_val)
                     actions_list = _parse_actions(actions_val)
                     # Include all records, even if empty text (for no_reply decisions)
@@ -993,6 +994,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                             "draft_id": int(did) if did is not None else None,
                             "ai_model": getattr(rr, "model", None) if hasattr(rr, "model") else (rr[2] if len(rr) > 2 else None),
                             "ai_reason": getattr(rr, "reason", None) if hasattr(rr, "reason") else (rr[4] if len(rr) > 4 else None),
+                            "ai_confidence": confidence_val,
                             "product_slug": focus_slug or None,
                             "ai_actions": actions_list if line_idx == 0 else [],  # Only show actions on first message
                             "ai_state": state_dict if state_dict else None,
