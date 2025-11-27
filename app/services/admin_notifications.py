@@ -126,14 +126,41 @@ def _build_conversation_url(conversation_id: int) -> Optional[str]:
 	return f"{base}/ig/inbox/{conversation_id}"
 
 
+def _compose_notification_body(alert_payload: Dict[str, Any], url: Optional[str]) -> str:
+	message = (alert_payload.get("message") or "").strip()
+	metadata = alert_payload.get("metadata") or {}
+
+	user_bits: list[str] = []
+	name = str(metadata.get("name") or "").strip()
+	username = str(metadata.get("username") or "").strip()
+	ig_user_id = str(metadata.get("ig_user_id") or "").strip()
+
+	if name:
+		user_bits.append(name)
+	if username:
+		user_bits.append(f"@{username}")
+	if ig_user_id:
+		user_bits.append(f"IG:{ig_user_id}")
+
+	lines: list[str] = []
+	if user_bits:
+		lines.append(f"👤 {' · '.join(user_bits)}")
+	if message:
+		lines.append(message)
+	if url:
+		conv_id = alert_payload.get("conversation_id")
+		if conv_id:
+			lines.append(f"🔗 Konuşma #{conv_id}: {url}")
+		else:
+			lines.append(f"🔗 {url}")
+	return "\n".join(lines) if lines else message
+
+
 def _broadcast_pushover(alert_payload: Dict[str, Any]) -> None:
 	if not pushover_configured():
 		return
 	recipients = _load_active_recipients()
 	if not recipients:
-		return
-	message = alert_payload.get("message") or ""
-	if not message:
 		return
 	conversation_id = alert_payload.get("conversation_id")
 	message_type = alert_payload.get("message_type", "info")
@@ -141,6 +168,9 @@ def _broadcast_pushover(alert_payload: Dict[str, Any]) -> None:
 	url = _build_conversation_url(conversation_id) if conversation_id else None
 	url_title = f"Konuşma #{conversation_id}" if conversation_id else None
 	priority = 1 if message_type == "urgent" else None
+	body = _compose_notification_body(alert_payload, url)
+	if not body:
+		return
 
 	for rec in recipients:
 		user_key = rec.get("user_key")
@@ -148,7 +178,7 @@ def _broadcast_pushover(alert_payload: Dict[str, Any]) -> None:
 			continue
 		ok = send_pushover_message(
 			user_key=user_key,
-			message=message,
+			message=body,
 			title=title,
 			url=url,
 			url_title=url_title,
