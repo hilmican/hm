@@ -80,6 +80,7 @@ def touch_shadow_state(
 					UPDATE ai_shadow_state
 					SET last_inbound_ms=:ms,
 					    next_attempt_at=:na,
+					    postpone_count=0,
 					    status=CASE
 					        WHEN status='running' THEN status
 					        WHEN :keep = 1 AND status='needs_link' THEN status
