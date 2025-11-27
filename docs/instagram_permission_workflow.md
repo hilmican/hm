@@ -11,6 +11,7 @@ This document captures the current Instagram integration status for the HimanIst
 - **Inbox router/UI** – `app/routers/thread_handlers.py` renders `ig_thread.html`, merges Graph conversation IDs with internal conversation rows, exposes AI suggestions, and links customer context (orders, inventory, shipping). The inbox already displays Instagram conversations inside the app.
 - **AI reply worker** – `scripts/worker_reply.py` pulls `ai_shadow_state`, drafts replies via `app/services/ai_reply.py`, and sends outbound DMs with `instagram_api.send_message`. It enforces debounce windows, product-level toggles, and audit logging.
 - **Ingestion service** – `app/services/ingest.py` upserts conversations/messages coming from webhooks or manual sync, links attachments, and auto-detects product mentions. Functions like `_auto_link_instagram_post` tie DMs back to catalog items for fulfillment.
+- **Manual AI disengage marker** – The same ingestion flow now watches outbound agent messages for a `...` marker (or ellipsis). When present, it creates an admin escalation, pauses `ai_shadow_state`, and ensures automation stays disabled until re-enabled inside the UI. This keeps Meta reviewers confident that humans can instantly override AI even when replying directly from the Instagram app.
 
 These components prove we already have working infrastructure for `instagram_business_manage_messages`. However, additional scopes require new flows (content calendar, insights, comment moderation, basic profile surfacing) that are not yet implemented.
 

@@ -19,6 +19,7 @@ _log_up = _lg.getLogger("ingest.upsert")
 from .queue import enqueue
 from sqlalchemy import text as _sql_text
 import httpx
+from ..services.admin_notifications import create_admin_notification
 
 try:
 	from PIL import Image as _PILImage
@@ -53,6 +54,96 @@ class _StoryMediaResult:
 	thumb_path: Optional[Path]
 	mime: str
 	data_url: Optional[str]
+
+
+_MANUAL_ESCALATION_MARKERS = ("...", "…")
+
+
+def _contains_manual_escalation_marker(text_val: Optional[str]) -> bool:
+	if not text_val:
+		return False
+	try:
+		candidate = str(text_val)
+	except Exception:
+		return False
+	for marker in _MANUAL_ESCALATION_MARKERS:
+		if marker and marker in candidate:
+			return True
+	return False
+
+
+def _auto_escalate_conversation_from_agent(
+	conversation_id: Optional[int],
+	message_id: Optional[int],
+	message_text: Optional[str],
+	timestamp_ms: Optional[int],
+) -> None:
+	if not conversation_id or not message_text:
+		return
+	snippet = str(message_text).strip()
+	alert_lines = [
+		"Ajan manuel yanıtında '...' sinyali kullandı. AI devre dışı bırakıldı ve konuşma yöneticilere aktarıldı."
+	]
+	if snippet:
+		preview = snippet if len(snippet) <= 500 else (snippet[:497] + "...")
+		alert_lines.append(f"Mesaj: {preview}")
+	alert_message = "\n\n".join(alert_lines)
+	metadata = {
+		"manual_escalation": True,
+		"auto_blocked": True,
+		"source": "agent_manual_message",
+		"disengaged_via_marker": True,
+	}
+	if message_id:
+		metadata["trigger_message_id"] = int(message_id)
+	if snippet:
+		metadata["trigger_message_text"] = snippet
+	if timestamp_ms:
+		try:
+			metadata["trigger_message_ts"] = int(timestamp_ms)
+		except Exception:
+			pass
+	try:
+		create_admin_notification(
+			int(conversation_id),
+			alert_message,
+			message_type="warning",
+			metadata=metadata,
+		)
+	except Exception as exc:
+		_log.warning("ingest: auto escalation admin notify failed cid=%s err=%s", conversation_id, exc)
+	state_snapshot = {
+		"needs_admin": True,
+		"manual_escalation": True,
+		"manual_reason": "Agent disabled AI via '...' marker",
+		"disengaged_via_marker": True,
+	}
+	state_json = json.dumps(state_snapshot, ensure_ascii=False)
+	with get_session() as session:
+		try:
+			res = session.exec(
+				_sql_text(
+					"""
+					UPDATE ai_shadow_state
+					SET status='needs_admin',
+					    state_json=:state,
+					    updated_at=CURRENT_TIMESTAMP
+					WHERE conversation_id=:cid
+					"""
+				).params(cid=int(conversation_id), state=state_json)
+			)
+			rowcount = getattr(res, "rowcount", None)
+			if not rowcount:
+				session.exec(
+					_sql_text(
+						"""
+						INSERT INTO ai_shadow_state(conversation_id, status, state_json, postpone_count, last_inbound_ms, ai_images_sent, updated_at)
+						VALUES (:cid, 'needs_admin', :state, 0, 0, 0, CURRENT_TIMESTAMP)
+						"""
+					).params(cid=int(conversation_id), state=state_json)
+				)
+		except Exception as exc:
+			_log.warning("ingest: auto escalation state update failed cid=%s err=%s", conversation_id, exc)
 
 
 def _story_link_key(story_id: Optional[str]) -> Optional[str]:
@@ -2314,6 +2405,25 @@ def handle(raw_event_id: int) -> int:
 
 			# Run slow/remote follow-ups outside the DB transaction
 			if insert_result:
+				try:
+					dir_norm = (insert_result.direction or "").lower()
+					if (
+						insert_result.conversation_id
+						and dir_norm == "out"
+						and _contains_manual_escalation_marker(insert_result.message_text)
+					):
+						_auto_escalate_conversation_from_agent(
+							int(insert_result.conversation_id),
+							insert_result.message_id,
+							insert_result.message_text,
+							insert_result.timestamp_ms,
+						)
+				except Exception as exc:
+					_log.warning(
+						"ingest: auto escalation marker handling failed mid=%s err=%s",
+						str(mid),
+						exc,
+					)
 				try:
 					if (insert_result.direction or "in") == "in" and insert_result.conversation_id:
 						from .ai_shadow import touch_shadow_state
