@@ -575,6 +575,33 @@ def main() -> None:
 					if not product_enabled:
 						log.info("ai_shadow: auto-send disabled for product in conversation_id=%s", cid)
 				
+				# Determine whether this thread has ever had an outbound message
+				is_first_outbound = False
+				try:
+					with get_session() as session:
+						row_first = session.exec(
+							_text(
+								"SELECT 1 FROM message WHERE conversation_id=:cid AND direction='out' LIMIT 1"
+							).params(cid=int(cid))
+						).first()
+						is_first_outbound = row_first is None
+				except Exception:
+					is_first_outbound = False
+				
+				first_message_override = False
+				if is_first_outbound and global_enabled and product_enabled and not should_auto_send:
+					first_message_override = True
+					should_auto_send = True
+					try:
+						log.info(
+							"ai_shadow: first-message auto-send override conversation_id=%s confidence=%.2f threshold=%.2f",
+							cid,
+							confidence,
+							AUTO_SEND_CONFIDENCE_THRESHOLD,
+						)
+					except Exception:
+						pass
+				
 				status_to_set = "sent" if should_auto_send else "suggested"
 				
 				# Get conversation graph_id or construct dm: format for sending
