@@ -14,7 +14,7 @@ from sqlmodel import select
 from app.services.ai_reply import draft_reply, _sanitize_reply_text
 from app.services.instagram_api import send_message
 from app.services.ai_orders import get_candidate_snapshot
-from app.models import SystemSetting, Product
+from app.models import SystemSetting, Product, AdminMessage
 
 log = logging.getLogger("worker.reply")
 logging.basicConfig(level=logging.INFO)
@@ -602,6 +602,14 @@ def main() -> None:
 					except Exception:
 						pass
 				
+				low_confidence_block = (
+					(not should_auto_send)
+					and (not first_message_override)
+					and global_enabled
+					and product_enabled
+					and (confidence < AUTO_SEND_CONFIDENCE_THRESHOLD)
+				)
+				
 				status_to_set = "sent" if should_auto_send else "suggested"
 				
 				# Get conversation graph_id or construct dm: format for sending
@@ -754,6 +762,34 @@ def main() -> None:
 									"UPDATE ai_shadow_state SET ai_images_sent=1 WHERE conversation_id=:cid"
 								).params(cid=int(cid))
 							)
+						if low_confidence_block:
+							try:
+								alert_text = (
+									f"AI otomatik gönderemedi (güven {confidence:.2f} < {AUTO_SEND_CONFIDENCE_THRESHOLD:.2f}). "
+									"Lütfen konuşmayı kontrol et."
+								)
+								alert_meta = json.dumps(
+									{
+										"conversation_id": int(cid),
+										"kind": "low_confidence_shadow",
+										"confidence": confidence,
+										"threshold": AUTO_SEND_CONFIDENCE_THRESHOLD,
+										"state": new_state,
+									},
+									ensure_ascii=False,
+								)
+								admin_msg = AdminMessage(
+									conversation_id=int(cid),
+									message=alert_text,
+									message_type="warning",
+									metadata_json=alert_meta,
+								)
+								session.add(admin_msg)
+							except Exception:
+								try:
+									log.warning("admin_notification low confidence creation error cid=%s", cid)
+								except Exception:
+									pass
 						
 						# Process admin notifications ONLY for actual sent messages (not shadow replies)
 						# Check if yoneticiye_bildirim_gonder was called and message was actually sent

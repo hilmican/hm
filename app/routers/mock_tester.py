@@ -17,7 +17,7 @@ from sqlmodel import select
 from starlette.status import HTTP_303_SEE_OTHER
 
 from app.db import get_session
-from app.models import Conversation, Message, IGUser, AiShadowReply
+from app.models import Conversation, Message, IGUser, AiShadowReply, AdminMessage
 from app.services.mock_tester import (
 	create_mock_conversation_from_ad,
 	send_mock_message,
@@ -219,6 +219,8 @@ async def view_conversation(request: Request, conversation_id: int, limit: int =
 					"text": row.text or "",
 					"timestamp_ms": int(row.timestamp_ms or 0),
 					"ai_status": row.ai_status,
+					"ai_confidence": None,
+					"ai_reason": None,
 				})
 			except Exception:
 				continue
@@ -275,6 +277,8 @@ async def view_conversation(request: Request, conversation_id: int, limit: int =
 					"text": text_val,
 					"timestamp_ms": ts_ms,
 					"ai_status": row.status or "shadow",
+					"ai_confidence": row.confidence,
+					"ai_reason": row.reason,
 				})
 			messages.sort(key=lambda item: item.get("timestamp_ms") or 0)
 		
@@ -299,6 +303,26 @@ async def view_conversation(request: Request, conversation_id: int, limit: int =
 		except Exception:
 			pass
 		
+		# Load admin messages
+		admin_messages = []
+		try:
+			admin_rows = session.exec(
+				select(AdminMessage)
+				.where(AdminMessage.conversation_id == conversation_id)
+				.order_by(AdminMessage.created_at.desc())
+				.limit(50)
+			).all()
+			for row in admin_rows:
+				admin_messages.append({
+					"id": row.id,
+					"message": row.message,
+					"message_type": row.message_type,
+					"is_read": row.is_read,
+					"created_at": _format_utc3(row.created_at),
+				})
+		except Exception:
+			admin_messages = []
+		
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"ig_mock_tester.html",
@@ -310,6 +334,7 @@ async def view_conversation(request: Request, conversation_id: int, limit: int =
 				"user": user,
 				"shadow_replies": shadow_replies,
 				"shadow_state": shadow_state,
+				"admin_messages": admin_messages,
 			},
 		)
 

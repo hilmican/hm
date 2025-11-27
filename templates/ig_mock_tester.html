@@ -48,6 +48,9 @@
       .status-suggested { background:#dbeafe; color:#1e40af; }
       .status-sent { background:#d1fae5; color:#059669; }
       .status-error { background:#fee2e2; color:#dc2626; }
+      .status-info { background:#e0f2fe; color:#0369a1; }
+      .status-warning { background:#fef3c7; color:#d97706; }
+      .status-urgent { background:#fee2e2; color:#b91c1c; }
     </style>
   </head>
   <body>
@@ -91,6 +94,25 @@
             {% if shadow_state.postpone_count %}
             · Postponed: {{ shadow_state.postpone_count }} times
             {% endif %}
+          </div>
+        </div>
+        {% endif %}
+        {% if admin_messages %}
+        <div class="card">
+          <h3>Admin Bildirimleri</h3>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            {% for admin in admin_messages %}
+            <div style="padding:8px; border:1px solid #e5e7eb; border-radius:8px; background:#f8fafc;">
+              <div class="meta" style="display:flex; justify-content:space-between; align-items:center;">
+                <span class="status-badge status-{{ admin.message_type or 'info' }}">{{ (admin.message_type or 'info')|title }}</span>
+                <span>{{ admin.created_at or '-' }}</span>
+              </div>
+              <div style="margin-top:6px; color:#0f172a;">{{ admin.message }}</div>
+              {% if admin.is_read %}
+              <div class="meta" style="margin-top:4px;">(okundu)</div>
+              {% endif %}
+            </div>
+            {% endfor %}
           </div>
         </div>
         {% endif %}
@@ -140,6 +162,12 @@
                   {% endif %}
                   {% if msg.ai_status %}
                   · AI: {{ msg.ai_status }}
+                  {% endif %}
+                  {% if msg.ai_confidence is not none %}
+                  · güven: {{ '%.2f' % msg.ai_confidence }}
+                  {% endif %}
+                  {% if msg.ai_reason %}
+                  · sebep: {{ msg.ai_reason }}
                   {% endif %}
                 </div>
               </div>
