@@ -39,4 +39,8 @@ data/debug_pkg2.db
 data/debug_pkg.db
 data/app.db-wal
 data/app.db-shm
-app/routers/__pycache__/*
+app/routers/__pycache__
+.venv/*
+.venv*/
+app/routers/__pycache__/dashboard.cpython-311.pyc
+app/routers/__pycache__/importer.cpython-311.pyc
