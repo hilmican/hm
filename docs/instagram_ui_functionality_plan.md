@@ -35,7 +35,7 @@ This document extends the previously captured workflow summary by focusing speci
   - Agent assignment pill + dropdown.  
   - Canned response sidebar with searchable templates.  
   - DM→Order wizard (modal) that pre-fills customer info and product suggestions before pushing into existing order creation flow.  
-  - Message action tray (mark resolved, escalate, mute).
+  - Message action tray (mark resolved, escalate, mute) including a one-click "Yöneticiye Eskale Et" button that posts to `/ig/inbox/{conversation_id}/escalate` to pause AI and alert human admins.
 - **Evidence:** Shows deeper operational tooling around messages rather than raw API access.
 
 ### `instagram_business_content_publish`
@@ -91,6 +91,7 @@ This document extends the previously captured workflow summary by focusing speci
 | --- | --- | --- |
 | Brand Snapshot | `GET /ig/profile/basic` queuing `instagram_api.fetch_user_username` + `/me` fields; background cron updates cache. | Stores in `system_settings`. |
 | Messaging Enhancements | `POST /ig/inbox/{id}/assign`, `GET/POST /ig/templates`, `POST /orders/from-dm`. | Reuse `thread_handlers` router; ensure audit logging. |
+| Admin Escalations | `POST /ig/inbox/{conversation_id}/escalate` creates `admin_messages`, halts AI automation, and surfaces alerts in inbox lists. | Shares persistence + notification helpers with AI worker to keep parity between manual and automatic escalations. |
 | Content Calendar | `POST /ig/content/drafts`, `GET /ig/content/schedule`, worker `scripts/worker_publish.py` calling Graph publish endpoints. | Draft media stored in S3/local, scheduler updates statuses. |
 | Insights Dashboard | `GET /ig/insights/overview`, `/content`, `/audience`; background job caches metrics (Redis/DB). | TTL 24h, manual refresh triggers Graph call. |
 | Comment Moderation | `GET /ig/comments`, `POST /ig/comments/{id}/reply`, `/hide`, `/delete`, `/convert-to-dm`. | Requires new service functions + audit trail table. |

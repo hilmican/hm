@@ -101,6 +101,18 @@
           <div class="meta" style="color:#b45309;">AI bu konuşmayı yöneticilere eskale etti. Manuel onay olmadan otomatik mesaj gönderilmeyecek.</div>
           <button id="aiResumeBtn" class="action" style="margin-top:8px; font-size:13px; background:#f97316; border-color:#f97316;">Yönetici çözdü, AI'yi yeniden sıraya al</button>
         {% endif %}
+        {% set escalate_label = 'Yöneticiye Eskale Et' %}
+        {% if ai_state and ai_state.needs_admin %}
+          {% set escalate_label = 'Yöneticilere Hatırlat' %}
+        {% endif %}
+        <button
+          id="manualEscalateBtn"
+          class="action"
+          data-default-note="AI yanlış yanıt verdi, manuel destek gerekiyor."
+          style="margin-top:8px; font-size:13px; background:#dc2626; border-color:#dc2626; color:#fff;"
+        >
+          {{ escalate_label }}
+        </button>
         {% if last_message_direction == 'in' and lc.product_slug %}
           <button id="triggerAiFromLastMessages" class="action" style="margin-top:8px; font-size:13px; background:#10b981; border-color:#10b981;">Son Mesajlara Göre AI Mesajını Yeniden Tetikle</button>
         {% endif %}
@@ -775,6 +787,35 @@
         } finally {
           triggerAiFromLastMessages.disabled = false;
           triggerAiFromLastMessages.textContent = prev;
+        }
+      });
+      const manualEscalateBtn = document.getElementById('manualEscalateBtn');
+      manualEscalateBtn?.addEventListener('click', async () => {
+        const defaultNote = manualEscalateBtn.dataset.defaultNote || 'AI yanlış yanıt verdi, manuel destek gerekiyor.';
+        const userNote = prompt('Yöneticiye iletilecek mesajı yazın:', defaultNote);
+        if (userNote === null) return;
+        const trimmed = (userNote || '').trim();
+        if (!trimmed) {
+          alert('Mesaj boş olamaz.');
+          return;
+        }
+        manualEscalateBtn.disabled = true; const prev = manualEscalateBtn.textContent;
+        manualEscalateBtn.textContent = 'Eskale ediliyor...';
+        try {
+          const res = await fetch(`/ig/inbox/${conversationId}/escalate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: trimmed, message_type: 'warning', auto_block: true, pause_ai: true })
+          });
+          const data = await res.json().catch(()=> ({}));
+          if (!res.ok || data.status !== 'ok') throw new Error(data.detail || data.error || 'escalate_failed');
+          alert('Yönetici bildirimi oluşturuldu. Konuşma manuel müdahale bekliyor.');
+          location.reload();
+        } catch (e) {
+          alert('Eskale etme başarısız: ' + (e?.message || e));
+        } finally {
+          manualEscalateBtn.disabled = false;
+          manualEscalateBtn.textContent = prev;
         }
       });
       // Manual enrich enqueue

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException, Form
+from fastapi import APIRouter, Request, HTTPException, Form, Body
 from fastapi.responses import FileResponse, RedirectResponse
 from starlette.status import HTTP_303_SEE_OTHER
 from pathlib import Path
@@ -20,6 +20,7 @@ from ..services.ai_ig import _detect_focus_product
 from ..services.monitoring import increment_counter
 from ..services.ai_reply import _load_history, _sanitize_reply_text
 from ..services.ingest import _extract_graph_conversation_id_from_message_id
+from ..services.admin_notifications import create_admin_notification
 
 router = APIRouter()
 
@@ -1282,6 +1283,114 @@ def retry_ai_for_thread(conversation_id: int):
     except Exception:
         pass
     return {"status": "ok"}
+
+
+def _fetch_last_inbound_message_for_escalation(conversation_id: int) -> dict[str, Any] | None:
+    with get_session() as session:
+        try:
+            row = session.exec(
+                _text(
+                    """
+                    SELECT id, text, timestamp_ms
+                    FROM message
+                    WHERE conversation_id=:cid AND direction='in'
+                    ORDER BY timestamp_ms DESC
+                    LIMIT 1
+                    """
+                ).params(cid=int(conversation_id))
+            ).first()
+        except Exception:
+            return None
+        if not row:
+            return None
+        try:
+            return {
+                "id": getattr(row, "id", None) if hasattr(row, "id") else (row[0] if len(row) > 0 else None),
+                "text": getattr(row, "text", None) if hasattr(row, "text") else (row[1] if len(row) > 1 else None),
+                "timestamp_ms": getattr(row, "timestamp_ms", None)
+                if hasattr(row, "timestamp_ms")
+                else (row[2] if len(row) > 2 else None),
+            }
+        except Exception:
+            return None
+
+
+@router.post("/inbox/{conversation_id}/escalate")
+def escalate_conversation(conversation_id: str, body: dict | None = Body(default=None)):
+    payload = body or {}
+    message_text = str(payload.get("message") or "").strip()
+    if not message_text:
+        raise HTTPException(status_code=400, detail="message_required")
+    message_type = str(payload.get("message_type") or "warning").strip().lower()
+    if message_type not in ("info", "warning", "urgent"):
+        message_type = "warning"
+    auto_block = bool(payload.get("auto_block", True))
+    pause_ai = bool(payload.get("pause_ai", True))
+    manual_reason = str(payload.get("reason") or "").strip() or message_text
+
+    try:
+        conv_id_int = int(conversation_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="invalid_conversation_id")
+
+    trigger_info = _fetch_last_inbound_message_for_escalation(conv_id_int)
+
+    metadata = {
+        "manual_escalation": True,
+        "auto_blocked": auto_block,
+        "source": "manual_ui",
+    }
+    if manual_reason:
+        metadata["manual_reason"] = manual_reason
+    if trigger_info:
+        metadata["trigger_message_id"] = trigger_info.get("id")
+        metadata["trigger_message_text"] = trigger_info.get("text")
+        metadata["trigger_message_ts"] = trigger_info.get("timestamp_ms")
+
+    admin_msg_id = create_admin_notification(
+        conv_id_int,
+        message_text,
+        message_type=message_type,
+        metadata=metadata,
+    )
+
+    ai_paused = False
+    if pause_ai:
+        ai_paused = True
+        state_snapshot = {
+            "needs_admin": True,
+            "manual_escalation": True,
+            "manual_reason": manual_reason,
+        }
+        state_json = json.dumps(state_snapshot, ensure_ascii=False)
+        with get_session() as session:
+            res = session.exec(
+                _text(
+                    """
+                    UPDATE ai_shadow_state
+                    SET status='needs_admin',
+                        state_json=:state,
+                        updated_at=CURRENT_TIMESTAMP
+                    WHERE conversation_id=:cid
+                    """
+                ).params(cid=conv_id_int, state=state_json)
+            )
+            rowcount = getattr(res, "rowcount", None)
+            if not rowcount:
+                session.exec(
+                    _text(
+                        """
+                        INSERT INTO ai_shadow_state(conversation_id, status, state_json, postpone_count, last_inbound_ms, ai_images_sent, updated_at)
+                        VALUES(:cid, 'needs_admin', :state, 0, 0, 0, CURRENT_TIMESTAMP)
+                        """
+                    ).params(cid=conv_id_int, state=state_json)
+                )
+
+    return {
+        "status": "ok",
+        "admin_message_id": admin_msg_id,
+        "ai_paused": ai_paused,
+    }
 
 
 @router.post("/inbox/{conversation_id}/shadow/dismiss")
