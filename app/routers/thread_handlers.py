@@ -1315,6 +1315,156 @@ def _fetch_last_inbound_message_for_escalation(conversation_id: int) -> dict[str
             return None
 
 
+@router.get("/inbox/{conversation_id}/ads")
+def list_available_ads_for_conversation(conversation_id: int, limit: int = 100):
+	"""List ads that can be assigned to this conversation, including their linked products."""
+	ads: list[dict[str, Any]] = []
+	with get_session() as session:
+		try:
+			rows = session.exec(
+				_text(
+					"""
+					SELECT a.ad_id, a.name, a.image_url, a.link, a.link_type,
+					       MAX(ap.product_id) AS product_id, 
+					       MAX(p.name) AS product_name, 
+					       MAX(p.slug) AS product_slug
+					FROM ads a
+					LEFT JOIN ads_products ap ON a.ad_id = ap.ad_id
+					LEFT JOIN product p ON ap.product_id = p.id
+					GROUP BY a.ad_id, a.name, a.image_url, a.link, a.link_type
+					ORDER BY a.updated_at DESC
+					LIMIT :lim
+					"""
+				).params(lim=int(limit))
+			).all()
+		except Exception:
+			rows = []
+		
+		for r in rows:
+			try:
+				ad_id = getattr(r, "ad_id", None) if hasattr(r, "ad_id") else (r[0] if len(r) > 0 else None)
+				ad_name = getattr(r, "name", None) if hasattr(r, "name") else (r[1] if len(r) > 1 else None)
+				image_url = getattr(r, "image_url", None) if hasattr(r, "image_url") else (r[2] if len(r) > 2 else None)
+				link = getattr(r, "link", None) if hasattr(r, "link") else (r[3] if len(r) > 3 else None)
+				link_type = getattr(r, "link_type", None) if hasattr(r, "link_type") else (r[4] if len(r) > 4 else None)
+				product_id = getattr(r, "product_id", None) if hasattr(r, "product_id") else (r[5] if len(r) > 5 else None)
+				product_name = getattr(r, "product_name", None) if hasattr(r, "product_name") else (r[6] if len(r) > 6 else None)
+				product_slug = getattr(r, "product_slug", None) if hasattr(r, "product_slug") else (r[7] if len(r) > 7 else None)
+				
+				if ad_id:
+					ads.append({
+						"ad_id": str(ad_id),
+						"name": ad_name or str(ad_id),
+						"image_url": image_url,
+						"link": link,
+						"link_type": link_type or "ad",
+						"product_id": int(product_id) if product_id is not None else None,
+						"product_name": product_name,
+						"product_slug": product_slug,
+					})
+			except Exception:
+				continue
+	
+	return {"status": "ok", "ads": ads}
+
+
+@router.post("/inbox/{conversation_id}/assign-ad")
+def assign_ad_to_conversation(conversation_id: int, body: dict | None = Body(default=None)):
+	"""Manually assign an ad to a conversation so AI can use product context."""
+	payload = body or {}
+	ad_id = str(payload.get("ad_id") or "").strip()
+	if not ad_id:
+		raise HTTPException(status_code=400, detail="ad_id_required")
+	
+	try:
+		conv_id_int = int(conversation_id)
+	except (TypeError, ValueError):
+		raise HTTPException(status_code=400, detail="invalid_conversation_id")
+	
+	with get_session() as session:
+		# Verify conversation exists
+		convo = session.get(Conversation, conv_id_int)
+		if not convo:
+			raise HTTPException(status_code=404, detail="conversation_not_found")
+		
+		# Fetch ad details
+		row_ad = session.exec(
+			_text(
+				"""
+				SELECT ad_id, name, link, link_type
+				FROM ads
+				WHERE ad_id = :aid
+				LIMIT 1
+				"""
+			).params(aid=str(ad_id))
+		).first()
+		
+		if not row_ad:
+			raise HTTPException(status_code=404, detail="ad_not_found")
+		
+		ad_name = getattr(row_ad, "name", None) if hasattr(row_ad, "name") else (row_ad[1] if len(row_ad) > 1 else None)
+		ad_link = getattr(row_ad, "link", None) if hasattr(row_ad, "link") else (row_ad[2] if len(row_ad) > 2 else None)
+		link_type = getattr(row_ad, "link_type", None) if hasattr(row_ad, "link_type") else (row_ad[3] if len(row_ad) > 3 else None)
+		
+		# Update conversation with ad assignment
+		session.exec(
+			_text(
+				"""
+				UPDATE conversations
+				SET last_ad_id = :aid,
+				    last_link_id = :aid,
+				    last_link_type = :lt,
+				    last_ad_link = :link,
+				    last_ad_title = :title
+				WHERE id = :cid
+				"""
+			).params(
+				cid=conv_id_int,
+				aid=str(ad_id),
+				lt=(link_type or "ad"),
+				link=ad_link,
+				title=ad_name,
+			)
+		)
+		
+		# Check if ad has a linked product
+		row_product = session.exec(
+			_text(
+				"""
+				SELECT ap.product_id, p.name AS product_name, p.slug
+				FROM ads_products ap
+				LEFT JOIN product p ON ap.product_id = p.id
+				WHERE ap.ad_id = :aid
+				LIMIT 1
+				"""
+			).params(aid=str(ad_id))
+		).first()
+		
+		product_id = None
+		product_name = None
+		product_slug = None
+		if row_product:
+			product_id = getattr(row_product, "product_id", None) if hasattr(row_product, "product_id") else (row_product[0] if len(row_product) > 0 else None)
+			product_name = getattr(row_product, "product_name", None) if hasattr(row_product, "product_name") else (row_product[1] if len(row_product) > 1 else None)
+			product_slug = getattr(row_product, "slug", None) if hasattr(row_product, "slug") else (row_product[2] if len(row_product) > 2 else None)
+		
+		# If ad has a product, also trigger AI shadow state update to allow AI to work
+		if product_id:
+			try:
+				from ..services.ai_shadow import touch_shadow_state
+				touch_shadow_state(conv_id_int, None, debounce_seconds=0)
+			except Exception:
+				pass
+	
+	return {
+		"status": "ok",
+		"ad_id": ad_id,
+		"product_id": product_id,
+		"product_name": product_name,
+		"product_slug": product_slug,
+	}
+
+
 @router.post("/inbox/{conversation_id}/escalate")
 def escalate_conversation(conversation_id: str, body: dict | None = Body(default=None)):
     payload = body or {}

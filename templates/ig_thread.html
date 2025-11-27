@@ -106,6 +106,16 @@
           </div>
         {% else %}
           <div class="meta" style="color:#b91c1c;">Henüz reklama/ürüne bağlanmadı.</div>
+          <div style="margin-top:8px; padding:8px; background:#fef3c7; border:1px solid #fbbf24; border-radius:8px;">
+            <div style="font-size:12px; color:#92400e; margin-bottom:6px;">Manuel Reklam Ataması</div>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <select id="adSelector" style="flex:1; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
+                <option value="">Reklam seçin...</option>
+              </select>
+              <button id="assignAdBtn" class="action" style="font-size:12px; padding:6px 12px; white-space:nowrap;" disabled>Reklamı Ata</button>
+            </div>
+            <div id="assignAdStatus" style="font-size:11px; color:#6b7280; margin-top:4px; min-height:16px;"></div>
+          </div>
         {% endif %}
         {% if ai_state.label %}
           <div class="meta">AI Durumu: {{ ai_state.label }}{% if ai_state.description %} — {{ ai_state.description }}{% endif %}</div>
@@ -612,6 +622,88 @@
     <script>
       const conversationId = {{ conversation_id | tojson }};
       const publicConversationId = {{ (public_conversation_id or "") | tojson }};
+      
+      // Load available ads for manual assignment
+      const adSelector = document.getElementById('adSelector');
+      const assignAdBtn = document.getElementById('assignAdBtn');
+      const assignAdStatus = document.getElementById('assignAdStatus');
+      if (adSelector && assignAdBtn) {
+        (async () => {
+          try {
+            const res = await fetch(`/ig/inbox/${conversationId}/ads`);
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.ads && Array.isArray(data.ads)) {
+              data.ads.forEach(ad => {
+                const opt = document.createElement('option');
+                opt.value = ad.ad_id;
+                const label = ad.product_name 
+                  ? `${ad.name || ad.ad_id} → ${ad.product_name}`
+                  : (ad.name || ad.ad_id);
+                opt.textContent = label;
+                opt.dataset.productId = ad.product_id || '';
+                opt.dataset.productSlug = ad.product_slug || '';
+                adSelector.appendChild(opt);
+              });
+              if (data.ads.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'Reklam bulunamadı';
+                opt.disabled = true;
+                adSelector.appendChild(opt);
+              }
+            }
+          } catch (e) {
+            if (assignAdStatus) assignAdStatus.textContent = 'Reklamlar yüklenemedi';
+          }
+        })();
+        
+        adSelector.addEventListener('change', () => {
+          if (assignAdBtn) {
+            assignAdBtn.disabled = !adSelector.value;
+          }
+        });
+        
+        assignAdBtn.addEventListener('click', async () => {
+          const selectedAdId = adSelector.value;
+          if (!selectedAdId) return;
+          
+          if (!confirm('Bu konuşmayı seçili reklama atamak istediğinizden emin misiniz?')) return;
+          
+          assignAdBtn.disabled = true;
+          const prev = assignAdBtn.textContent;
+          assignAdBtn.textContent = 'Atanıyor...';
+          if (assignAdStatus) assignAdStatus.textContent = '';
+          
+          try {
+            const res = await fetch(`/ig/inbox/${conversationId}/assign-ad`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ad_id: selectedAdId })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data.status !== 'ok') {
+              throw new Error(data.detail || data.error || 'assignment_failed');
+            }
+            if (assignAdStatus) {
+              const msg = data.product_name 
+                ? `Reklam atandı. Ürün: ${data.product_name}`
+                : 'Reklam atandı (ürün bağlantısı yok)';
+              assignAdStatus.textContent = msg;
+              assignAdStatus.style.color = '#059669';
+            }
+            setTimeout(() => {
+              location.reload();
+            }, 1500);
+          } catch (e) {
+            if (assignAdStatus) {
+              assignAdStatus.textContent = 'Atama başarısız: ' + (e?.message || e);
+              assignAdStatus.style.color = '#dc2626';
+            }
+            assignAdBtn.disabled = false;
+            assignAdBtn.textContent = prev;
+          }
+        });
+      }
       function fmtTs(){
         const nodes = document.querySelectorAll('.ts');
         for(const el of nodes){
