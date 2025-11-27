@@ -740,16 +740,58 @@ def main() -> None:
 				conversation_id_for_send: Optional[str] = None
 				graph_conversation_id: Optional[str] = None
 				ig_user_id: Optional[str] = None
+				conversation_username: Optional[str] = None
+				conversation_name: Optional[str] = None
+				conversation_last_message: Optional[str] = None
+				conversation_ig_user_id: Optional[str] = None
 				try:
 					with get_session() as session:
 						row_conv = session.exec(
 							_text(
-								"SELECT graph_conversation_id, ig_user_id FROM conversations WHERE id=:cid LIMIT 1"
+								"""
+								SELECT
+									c.graph_conversation_id,
+									c.ig_user_id,
+									c.last_sender_username,
+									c.last_message_text,
+									u.username AS ig_username,
+									u.name AS ig_name
+								FROM conversations c
+								LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id
+								WHERE c.id=:cid
+								LIMIT 1
+								"""
 							).params(cid=int(cid))
 						).first()
 						if row_conv:
 							graph_conversation_id = (row_conv.graph_conversation_id if hasattr(row_conv, "graph_conversation_id") else (row_conv[0] if len(row_conv) > 0 else None)) or None
 							ig_user_id = (row_conv.ig_user_id if hasattr(row_conv, "ig_user_id") else (row_conv[1] if len(row_conv) > 1 else None)) or None
+							last_sender_username = (row_conv.last_sender_username if hasattr(row_conv, "last_sender_username") else (row_conv[2] if len(row_conv) > 2 else None)) or None
+							last_message_text = (row_conv.last_message_text if hasattr(row_conv, "last_message_text") else (row_conv[3] if len(row_conv) > 3 else None)) or None
+							ig_username = None
+							ig_name = None
+							try:
+								ig_username = (
+									row_conv.ig_username
+									if hasattr(row_conv, "ig_username")
+									else (row_conv[4] if len(row_conv) > 4 else None)
+								)
+							except Exception:
+								ig_username = None
+							try:
+								ig_name = (
+									row_conv.ig_name
+									if hasattr(row_conv, "ig_name")
+									else (row_conv[5] if len(row_conv) > 5 else None)
+								)
+							except Exception:
+								ig_name = None
+							conversation_username = str(ig_username or last_sender_username or "").strip() or None
+							conversation_name = str(ig_name or "").strip() or None
+							conversation_last_message = (
+								str(last_message_text).strip() if isinstance(last_message_text, str) else None
+							)
+							conversation_ig_user_id = str(ig_user_id) if ig_user_id else None
 						if graph_conversation_id:
 							conversation_id_for_send = str(graph_conversation_id)
 						elif ig_user_id:
@@ -896,8 +938,19 @@ def main() -> None:
 							)
 						if low_confidence_block:
 							try:
+								user_label_parts = []
+								if conversation_username:
+									user_label_parts.append(conversation_username)
+								elif conversation_name:
+									user_label_parts.append(conversation_name)
+								elif conversation_ig_user_id:
+									user_label_parts.append(f"ig:{conversation_ig_user_id}")
+								thread_label = f"Konuşma #{cid}"
+								if user_label_parts:
+									thread_label = f"{' '.join(user_label_parts)} · {thread_label}"
 								alert_text = (
-									f"AI otomatik gönderemedi (güven {confidence:.2f} < {AUTO_SEND_CONFIDENCE_THRESHOLD:.2f}). "
+									f"{thread_label}: AI otomatik gönderemedi "
+									f"(güven {confidence:.2f} < {AUTO_SEND_CONFIDENCE_THRESHOLD:.2f}). "
 									"Lütfen konuşmayı kontrol et."
 								)
 								create_admin_notification(
@@ -910,6 +963,10 @@ def main() -> None:
 										"confidence": confidence,
 										"threshold": AUTO_SEND_CONFIDENCE_THRESHOLD,
 										"state": new_state,
+										"username": conversation_username,
+										"user_name": conversation_name,
+										"ig_user_id": conversation_ig_user_id,
+										"last_message_text": conversation_last_message,
 									},
 								)
 							except Exception:
