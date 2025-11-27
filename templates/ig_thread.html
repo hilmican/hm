@@ -37,6 +37,25 @@
       .modal { background:#fff; border-radius:12px; padding:20px; width:min(500px,90vw); max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(15,23,42,0.2); }
       .modal h3 { margin-top:0; color:#111827; }
       .hidden { display:none !important; }
+      .reply-form-wrapper { margin-top:16px; border:1px solid #e5e7eb; border-radius:12px; padding:12px; background:#f9fafb; }
+      .reply-form { display:flex; gap:12px; align-items:flex-end; }
+      .reply-input { flex:1; min-height:80px; border:1px solid #d1d5db; border-radius:10px; padding:12px; font-size:15px; resize:vertical; font-family:inherit; }
+      .reply-actions { display:flex; flex-direction:column; gap:6px; align-items:flex-end; min-width:160px; }
+      .reply-btn { width:100%; padding:12px 18px; font-size:15px; font-weight:600; border:none; border-radius:10px; background:#2563eb; color:#fff; cursor:pointer; transition:transform 0.15s ease; }
+      .reply-btn:disabled { opacity:0.7; cursor:not-allowed; }
+      .reply-btn.loading { position:relative; }
+      .reply-btn.loading::after { content:''; position:absolute; inset:auto 12px auto auto; width:16px; height:16px; border:2px solid rgba(255,255,255,0.6); border-top-color:#fff; border-radius:50%; animation:spin 0.8s linear infinite; }
+      @keyframes spin { to { transform:rotate(360deg); } }
+      .reply-status { font-size:12px; color:#1f2937; min-height:18px; text-align:right; }
+      @media (max-width: 640px) {
+        body { margin:16px; }
+        .toolbar { flex-wrap:wrap; }
+        .reply-form { flex-direction:column; align-items:stretch; }
+        .reply-actions { width:100%; align-items:stretch; }
+        .reply-btn { width:100%; font-size:16px; }
+        .reply-status { text-align:left; }
+        .reply-input { min-height:100px; font-size:16px; }
+      }
     </style>
   </head>
   <body>
@@ -555,10 +574,13 @@
         <div class="meta">No messages cached yet.</div>
       {% endif %}
     </div>
-    <div style="margin-top:16px">
-      <form id="replyForm" style="display:flex;gap:8px">
-        <input id="replyInput" type="text" placeholder="Type a reply..." style="flex:1;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px" />
-        <button id="sendBtn" type="submit" style="background:#2563eb;color:#fff;border:none;border-radius:8px;padding:10px 14px;cursor:pointer">Send</button>
+    <div class="reply-form-wrapper">
+      <form id="replyForm" class="reply-form">
+        <textarea id="replyInput" class="reply-input" rows="3" placeholder="Yanıt yaz..." aria-label="Yanıt metni"></textarea>
+        <div class="reply-actions">
+          <button id="sendBtn" class="reply-btn" type="submit">Mesajı Gönder</button>
+          <div id="replyStatus" class="reply-status" aria-live="polite"></div>
+        </div>
       </form>
     </div>
     <div id="orderWizardBackdrop" class="modal-backdrop hidden">
@@ -949,6 +971,8 @@
       // Send reply
       const replyForm = document.getElementById('replyForm');
       const replyInput = document.getElementById('replyInput');
+      const sendBtn = document.getElementById('sendBtn');
+      const replyStatus = document.getElementById('replyStatus');
       const useShadow = document.getElementById('useShadow');
       const dismissShadow = document.getElementById('dismissShadow');
       const sendDraft = document.getElementById('sendDraft');
@@ -1009,18 +1033,49 @@
       replyForm?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = (replyInput?.value || '').trim();
-        if (!text) return;
+        if (!text) {
+          if (replyStatus) replyStatus.textContent = 'Mesaj boş olamaz.';
+          return;
+        }
+        const resetButton = () => {
+          if (!sendBtn) return;
+          const prev = sendBtn.getAttribute('data-prev-label') || 'Mesajı Gönder';
+          sendBtn.textContent = prev;
+          sendBtn.removeAttribute('data-prev-label');
+          sendBtn.disabled = false;
+          sendBtn.classList.remove('loading');
+        };
         try {
-          const r = await fetch(location.pathname + '/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+          if (sendBtn) {
+            sendBtn.setAttribute('data-prev-label', sendBtn.textContent || 'Mesajı Gönder');
+            sendBtn.textContent = 'Gönderiliyor...';
+            sendBtn.disabled = true;
+            sendBtn.classList.add('loading');
+          }
+          if (replyStatus) replyStatus.textContent = 'Mesaj gönderiliyor...';
+          const r = await fetch(location.pathname + '/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+          });
           if (!r.ok) {
             const t = await r.text();
-            alert('Send failed: ' + t);
+            if (replyStatus) replyStatus.textContent = 'Gönderilemedi: ' + t;
+            resetButton();
             return;
           }
-          input.value = '';
+          if (replyInput) replyInput.value = '';
+          if (replyStatus) replyStatus.textContent = 'Mesaj gönderildi ✓';
+          resetButton();
+          setTimeout(() => {
+            if (replyStatus && replyStatus.textContent.startsWith('Mesaj gönderildi')) {
+              replyStatus.textContent = '';
+            }
+          }, 2500);
           location.reload();
-        } catch (e) {
-          alert('Send error');
+        } catch (err) {
+          if (replyStatus) replyStatus.textContent = 'Gönderme hatası: ' + (err?.message || err);
+          resetButton();
         }
       });
     </script>
