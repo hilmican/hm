@@ -117,7 +117,18 @@
                     {% if alert.message_type == 'urgent' %}🔴{% elif alert.message_type == 'warning' %}⚠️{% else %}ℹ️{% endif %}
                     {{ alert.message_type|upper }}
                   </div>
-                  <div style="color:#111827; font-size:13px; white-space:pre-wrap;">{{ alert.message }}</div>
+                  {% if alert.metadata and (alert.metadata.username or alert.metadata.name) %}
+                    <div class="meta" style="margin-top:2px; color:#2563eb; font-weight:600;">
+                      👤 
+                      {% if alert.metadata.username %}@{{ alert.metadata.username }}{% endif %}
+                      {% if alert.metadata.name and alert.metadata.username %} · {% elif alert.metadata.name %}{% endif %}
+                      {% if alert.metadata.name %}{{ alert.metadata.name }}{% endif %}
+                      {% if alert.metadata.ig_user_id %}
+                        <a href="/ig/inbox?q={{ alert.metadata.ig_user_id }}" style="color:#2563eb; margin-left:4px;" title="Kullanıcı konuşmalarını gör">→</a>
+                      {% endif %}
+                    </div>
+                  {% endif %}
+                  <div style="color:#111827; font-size:13px; white-space:pre-wrap; margin-top:4px;">{{ alert.message }}</div>
                 </div>
                 {% if alert.timestamp_ms %}
                   <div class="meta"><span class="ts" data-ts="{{ alert.timestamp_ms }}">{{ alert.created_at }}</span></div>

@@ -93,6 +93,17 @@
                 <span class="badge {{ msg.message_type }}">{{ msg.message_type }}</span>
                 {% if not msg.is_read %}<span class="badge unread">Yeni</span>{% endif %}
               </div>
+              {% if msg.metadata and (msg.metadata.username or msg.metadata.name) %}
+                <div class="msg-meta" style="margin-bottom:4px; color:#2563eb; font-weight:600;">
+                  👤 
+                  {% if msg.metadata.username %}@{{ msg.metadata.username }}{% endif %}
+                  {% if msg.metadata.name and msg.metadata.username %} · {% elif msg.metadata.name %}{% endif %}
+                  {% if msg.metadata.name %}{{ msg.metadata.name }}{% endif %}
+                  {% if msg.metadata.ig_user_id %}
+                    <a href="/ig/inbox?q={{ msg.metadata.ig_user_id }}" style="color:#2563eb; margin-left:4px;" title="Kullanıcı konuşmalarını gör">→</a>
+                  {% endif %}
+                </div>
+              {% endif %}
               <div class="msg-body">{{ msg.message }}</div>
               <div class="msg-meta">
                 <a href="/ig/inbox/{{ msg.conversation_id }}">Konuşma #{{ msg.conversation_id }}</a>

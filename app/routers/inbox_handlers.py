@@ -389,12 +389,21 @@ async def inbox(
                 .limit(50)
             ).all()
             for msg in admin_msgs:
+                # Parse metadata to get user info
+                metadata = {}
+                if getattr(msg, "metadata_json", None):
+                    try:
+                        metadata = json.loads(msg.metadata_json)
+                    except Exception:
+                        metadata = {}
+                
                 admin_messages.append({
                     "id": msg.id,
                     "conversation_id": msg.conversation_id,
                     "message": msg.message,
                     "message_type": msg.message_type,
                     "created_at": msg.created_at,
+                    "metadata": metadata,
                 })
         except Exception:
             admin_messages = []
@@ -515,6 +524,14 @@ async def admin_messages_page(request: Request, limit: int = 50, unread_only: bo
 		
 		admin_msgs = []
 		for msg in messages:
+			# Parse metadata to get user info
+			metadata = {}
+			if getattr(msg, "metadata_json", None):
+				try:
+					metadata = json.loads(msg.metadata_json)
+				except Exception:
+					metadata = {}
+			
 			admin_msgs.append({
 				"id": msg.id,
 				"conversation_id": msg.conversation_id,
@@ -522,6 +539,7 @@ async def admin_messages_page(request: Request, limit: int = 50, unread_only: bo
 				"message_type": msg.message_type,
 				"is_read": msg.is_read,
 				"created_at": msg.created_at,
+				"metadata": metadata,
 			})
 		
 		# Okunmamış mesaj sayısı

@@ -30,6 +30,39 @@ def create_admin_notification(
 	message_type = message_type.lower().strip()
 	if message_type not in VALID_TYPES:
 		message_type = "info"
+	
+	# Fetch user info (username, name) from conversation
+	user_info: Dict[str, Any] = {}
+	try:
+		with get_session() as session:
+			from sqlalchemy import text as _text
+			# Get ig_user_id from conversations table
+			conv_row = session.exec(
+				_text("SELECT ig_user_id FROM conversations WHERE id=:cid LIMIT 1").params(cid=int(conversation_id))
+			).first()
+			if conv_row:
+				ig_user_id = getattr(conv_row, "ig_user_id", None) if hasattr(conv_row, "ig_user_id") else (conv_row[0] if len(conv_row) > 0 else None)
+				if ig_user_id:
+					# Get username and name from ig_users table
+					user_row = session.exec(
+						_text("SELECT username, name FROM ig_users WHERE ig_user_id=:uid LIMIT 1").params(uid=str(ig_user_id))
+					).first()
+					if user_row:
+						username = getattr(user_row, "username", None) if hasattr(user_row, "username") else (user_row[0] if len(user_row) > 0 else None)
+						name = getattr(user_row, "name", None) if hasattr(user_row, "name") else (user_row[1] if len(user_row) > 1 else None)
+						if username:
+							user_info["username"] = str(username)
+						if name:
+							user_info["name"] = str(name)
+						if ig_user_id:
+							user_info["ig_user_id"] = str(ig_user_id)
+	except Exception as e:
+		log.warning("Failed to fetch user info for admin notification conversation_id=%s err=%s", conversation_id, e)
+	
+	# Merge user_info into metadata
+	if metadata is None:
+		metadata = {}
+	metadata = {**metadata, **user_info}
 	metadata_json = json.dumps(metadata, ensure_ascii=False) if metadata else None
 
 	admin_msg_id: Optional[int] = None

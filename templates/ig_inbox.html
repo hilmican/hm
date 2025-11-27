@@ -65,6 +65,14 @@
                 {% if msg.message_type == 'urgent' %}🔴{% elif msg.message_type == 'warning' %}⚠️{% else %}ℹ️{% endif %}
                 <a href="/ig/inbox/{{ msg.conversation_id }}" style="color: #2563eb; text-decoration: none; margin-left: 4px;">#{{ msg.conversation_id }}</a>
               </div>
+              {% if msg.metadata and (msg.metadata.username or msg.metadata.name) %}
+                <div style="font-size: 11px; color: #2563eb; font-weight: 600; margin-bottom: 2px;">
+                  👤 
+                  {% if msg.metadata.username %}@{{ msg.metadata.username }}{% endif %}
+                  {% if msg.metadata.name and msg.metadata.username %} · {% elif msg.metadata.name %}{% endif %}
+                  {% if msg.metadata.name %}{{ msg.metadata.name }}{% endif %}
+                </div>
+              {% endif %}
               <div style="color: #374151; font-size: 12px; white-space: pre-wrap; overflow: hidden; text-overflow: ellipsis; max-height: 40px;">{{ msg.message[:100] }}{% if msg.message|length > 100 %}...{% endif %}</div>
             </div>
             <button onclick="markAdminMessageRead({{ msg.id }})" style="background: #10b981; color: #fff; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; margin-left: 8px; white-space: nowrap;">Okundu</button>
