@@ -120,7 +120,12 @@ def _load_active_recipients() -> list[Dict[str, Any]]:
 
 
 def _build_conversation_url(conversation_id: int) -> Optional[str]:
-	base = (os.getenv("APP_URL") or os.getenv("BASE_URL") or "").strip().rstrip("/")
+	base = (
+		os.getenv("APP_URL")
+		or os.getenv("PUBLIC_APP_URL")
+		or os.getenv("BASE_URL")
+		or "https://hma.cdn.com.tr"
+	).strip().rstrip("/")
 	if not base:
 		return None
 	return f"{base}/ig/inbox/{conversation_id}"
