@@ -14,7 +14,8 @@ from sqlmodel import select
 from app.services.ai_reply import draft_reply, _sanitize_reply_text
 from app.services.instagram_api import send_message
 from app.services.ai_orders import get_candidate_snapshot
-from app.models import SystemSetting, Product, AdminMessage
+from app.models import SystemSetting, Product
+from app.services.admin_notifications import create_admin_notification
 
 log = logging.getLogger("worker.reply")
 logging.basicConfig(level=logging.INFO)
@@ -70,36 +71,39 @@ def _persist_admin_notifications(
 	if not callbacks:
 		return
 	trigger_info = _fetch_last_inbound_message(conversation_id)
-	with get_session() as session:
-		for cb in callbacks:
-			if not isinstance(cb, dict):
-				continue
-			args = cb.get("arguments") or {}
-			message_text = str(args.get("mesaj") or "").strip()
-			if not message_text:
-				continue
-			message_type = str(args.get("mesaj_tipi") or "info").strip().lower()
-			if message_type not in ("info", "warning", "urgent"):
-				message_type = "info"
-			meta = {
-				"conversation_id": int(conversation_id),
-				"created_by_ai": True,
-				"source": "ai_shadow",
-				"auto_blocked": True,
-				"trigger_message_id": trigger_info.get("id") if trigger_info else None,
-				"trigger_message_text": trigger_info.get("text") if trigger_info else None,
-				"trigger_message_ts": trigger_info.get("timestamp_ms") if trigger_info else None,
-			}
-			if state_snapshot:
-				meta["state_snapshot"] = state_snapshot
-			admin_msg = AdminMessage(
-				conversation_id=int(conversation_id),
-				message=message_text,
+	for cb in callbacks:
+		if not isinstance(cb, dict):
+			continue
+		args = cb.get("arguments") or {}
+		message_text = str(args.get("mesaj") or "").strip()
+		if not message_text:
+			continue
+		message_type = str(args.get("mesaj_tipi") or "info").strip().lower()
+		if message_type not in ("info", "warning", "urgent"):
+			message_type = "info"
+		meta = {
+			"conversation_id": int(conversation_id),
+			"created_by_ai": True,
+			"source": "ai_shadow",
+			"auto_blocked": True,
+			"trigger_message_id": trigger_info.get("id") if trigger_info else None,
+			"trigger_message_text": trigger_info.get("text") if trigger_info else None,
+			"trigger_message_ts": trigger_info.get("timestamp_ms") if trigger_info else None,
+		}
+		if state_snapshot:
+			meta["state_snapshot"] = state_snapshot
+		try:
+			create_admin_notification(
+				int(conversation_id),
+				message_text,
 				message_type=message_type,
-				is_read=False,
-				metadata_json=json.dumps(meta, ensure_ascii=False),
+				metadata=meta,
 			)
-			session.add(admin_msg)
+		except Exception as exc:
+			try:
+				log.warning("admin_notification persist error cid=%s err=%s", conversation_id, exc)
+			except Exception:
+				pass
 
 
 def _decode_escape_sequences(text: str) -> str:
@@ -880,23 +884,18 @@ def main() -> None:
 									f"AI otomatik gönderemedi (güven {confidence:.2f} < {AUTO_SEND_CONFIDENCE_THRESHOLD:.2f}). "
 									"Lütfen konuşmayı kontrol et."
 								)
-								alert_meta = json.dumps(
-									{
+								create_admin_notification(
+									int(cid),
+									alert_text,
+									message_type="warning",
+									metadata={
 										"conversation_id": int(cid),
 										"kind": "low_confidence_shadow",
 										"confidence": confidence,
 										"threshold": AUTO_SEND_CONFIDENCE_THRESHOLD,
 										"state": new_state,
 									},
-									ensure_ascii=False,
 								)
-								admin_msg = AdminMessage(
-									conversation_id=int(cid),
-									message=alert_text,
-									message_type="warning",
-									metadata_json=alert_meta,
-								)
-								session.add(admin_msg)
 							except Exception:
 								try:
 									log.warning("admin_notification low confidence creation error cid=%s", cid)
@@ -906,7 +905,6 @@ def main() -> None:
 						# Process admin notifications ONLY for actual sent messages (not shadow replies)
 						# Check if yoneticiye_bildirim_gonder was called and message was actually sent
 						if status_to_set == "sent" and should_auto_send:
-							# Process admin notification if it was requested
 							notification_callbacks = [cb for cb in function_callbacks if cb.get("name") == "yoneticiye_bildirim_gonder"]
 							for notif_cb in notification_callbacks:
 								try:
@@ -914,20 +912,16 @@ def main() -> None:
 									mesaj = str(notif_args.get("mesaj") or "").strip()
 									mesaj_tipi = str(notif_args.get("mesaj_tipi") or "info").strip()
 									if mesaj and mesaj_tipi in ["info", "warning", "urgent"]:
-										from app.models import AdminMessage
-										admin_msg = AdminMessage(
-											conversation_id=int(cid),
-											message=mesaj,
+										create_admin_notification(
+											int(cid),
+											mesaj,
 											message_type=mesaj_tipi,
-											is_read=False,
-											metadata_json=json.dumps({
+											metadata={
 												"conversation_id": cid,
 												"created_by_ai": True,
 												"sent_with_message": True,
-											}, ensure_ascii=False),
+											},
 										)
-										session.add(admin_msg)
-										session.commit()
 										try:
 											log.info("ai_shadow: created admin notification for conversation_id=%s (message was sent)", cid)
 										except Exception:

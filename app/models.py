@@ -2,7 +2,7 @@ import datetime as dt
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
-from sqlalchemy import UniqueConstraint, Text, Column, BigInteger
+from sqlalchemy import UniqueConstraint, Text, Column, BigInteger, String
 
 
 class Client(SQLModel, table=True):
@@ -707,4 +707,18 @@ class AdminMessage(SQLModel, table=True):
 	read_by_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True, description="Okuyan kullanıcı")
 	read_at: Optional[dt.datetime] = Field(default=None, index=True)
 	metadata_json: Optional[str] = Field(default=None, sa_column=Column(Text), description="Ek metadata (JSON)")
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class AdminPushoverRecipient(SQLModel, table=True):
+	"""
+	Yöneticilere Pushover üzerinden bildirim göndermek için kayıtlı alıcılar.
+	"""
+
+	__tablename__ = "admin_pushover_recipient"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	label: str = Field(index=True, description="Alıcı adı veya açıklaması")
+	user_key: str = Field(sa_column=Column(String(191)), description="Pushover user key")
+	is_active: bool = Field(default=True, index=True)
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)

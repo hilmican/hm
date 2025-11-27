@@ -25,6 +25,18 @@
       .badge.unread { background: #ef4444; color: #fff; }
       a { color: #2563eb; text-decoration: none; }
       a:hover { text-decoration: underline; }
+      .settings-card { border:1px solid #e5e7eb; border-radius:10px; padding:16px; margin-bottom:16px; background:#f9fafb; }
+      .settings-card h2 { margin:0 0 8px 0; font-size:18px; color:#111827; }
+      .settings-card p { margin:0 0 12px 0; color:#4b5563; font-size:13px; }
+      .target-row { display:flex; justify-content:space-between; align-items:center; border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; margin-bottom:8px; background:#fff; }
+      .target-label { font-weight:600; color:#111827; }
+      .target-meta { font-size:12px; color:#6b7280; margin-top:2px; }
+      .danger { background:#ef4444; }
+      .danger:hover { background:#dc2626; }
+      .target-form { display:flex; flex-wrap:wrap; gap:8px; }
+      .target-form input { flex:1; min-width:220px; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; }
+      .target-form button { padding:8px 14px; font-size:13px; background:#2563eb; }
+      .alert { padding:8px 12px; border-radius:8px; border:1px solid #f97316; background:#fff7ed; color:#9a3412; font-size:13px; margin-bottom:12px; }
     </style>
   </head>
   <body>
@@ -39,6 +51,37 @@
         {% endif %}
       </a>
       <a href="/ig/inbox" style="padding: 6px 12px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; color: #2563eb;">← Inbox'a Dön</a>
+    </div>
+    <div class="settings-card">
+      <h2>📲 Pushover Bildirim Alıcıları</h2>
+      <p>Buraya eklediğiniz Pushover user key'lerine yeni admin mesajlarını aynı anda iletiriz.</p>
+      {% if not pushover_ready %}
+        <div class="alert">PUSHOVER_APP_TOKEN ortam değişkeni tanımlı değil. Sunucu yapılandırılana kadar Pushover bildirimi gönderilemez.</div>
+      {% endif %}
+      <div style="margin-bottom:10px;">
+        {% if pushover_targets %}
+          {% for target in pushover_targets %}
+            <div class="target-row">
+              <div>
+                <div class="target-label">{{ target.label }}</div>
+                <div class="target-meta">
+                  {{ target.user_key[:4] }}{% if target.user_key|length > 8 %}***{{ target.user_key[-4:] }}{% endif %}
+                </div>
+              </div>
+              <form method="post" action="/ig/inbox/admin/pushover-targets/{{ target.id }}/delete" onsubmit="return confirm('Bu alıcıyı silmek istediğinize emin misiniz?');">
+                <button type="submit" class="danger">Sil</button>
+              </form>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="target-meta">Henüz kayıtlı alıcı yok.</div>
+        {% endif %}
+      </div>
+      <form method="post" action="/ig/inbox/admin/pushover-targets" class="target-form">
+        <input type="text" name="label" placeholder="Alıcı adı (örn. Nöbetçi Ekip)" required />
+        <input type="text" name="user_key" placeholder="Pushover User Key" required />
+        <button type="submit">Alıcı Ekle</button>
+      </form>
     </div>
     <div id="messages">
       {% for msg in messages %}

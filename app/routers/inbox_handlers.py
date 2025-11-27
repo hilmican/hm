@@ -1,9 +1,13 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Form, HTTPException
 import json
+import os
+
+from fastapi.responses import RedirectResponse
+from starlette.status import HTTP_303_SEE_OTHER
 
 from ..db import get_session
 from ..services.queue import enqueue, _get_redis
-from ..models import AdminMessage
+from ..models import AdminMessage, AdminPushoverRecipient
 from sqlmodel import select
 
 router = APIRouter()
@@ -526,13 +530,42 @@ async def admin_messages_page(request: Request, limit: int = 50, unread_only: bo
 		).all()
 		unread_count = len(unread_count)
 		
+		pushover_targets = session.exec(
+			select(AdminPushoverRecipient)
+			.order_by(AdminPushoverRecipient.created_at.desc())
+		).all()
+		
 		templates = request.app.state.templates
 		return templates.TemplateResponse("ig_admin_messages.html", {
 			"request": request,
 			"messages": admin_msgs,
 			"unread_count": unread_count,
 			"unread_only": unread_only,
+			"pushover_targets": pushover_targets,
+			"pushover_ready": bool(os.getenv("PUSHOVER_APP_TOKEN") or os.getenv("PUSHOVER_API_TOKEN") or os.getenv("PUSHOVER_TOKEN")),
 		})
+
+
+@router.post("/inbox/admin/pushover-targets")
+async def add_pushover_target(label: str = Form(...), user_key: str = Form(...)):
+	label = (label or "").strip()
+	user_key = (user_key or "").strip()
+	if not label or not user_key:
+		raise HTTPException(status_code=400, detail="missing_label_or_user_key")
+	with get_session() as session:
+		target = AdminPushoverRecipient(label=label, user_key=user_key, is_active=True)
+		session.add(target)
+	return RedirectResponse("/ig/inbox/admin-messages", status_code=HTTP_303_SEE_OTHER)
+
+
+@router.post("/inbox/admin/pushover-targets/{target_id}/delete")
+async def delete_pushover_target(target_id: int):
+	with get_session() as session:
+		target = session.get(AdminPushoverRecipient, int(target_id))
+		if not target:
+			raise HTTPException(status_code=404, detail="target_not_found")
+		session.delete(target)
+	return RedirectResponse("/ig/inbox/admin-messages", status_code=HTTP_303_SEE_OTHER)
 
 
 @router.post("/inbox/clear-enrich")

@@ -1077,6 +1077,24 @@ def init_db() -> None:
                 except Exception:
                     pass
 
+                # Pushover recipients for admin notifications
+                try:
+                    conn.exec_driver_sql(
+                        """
+                        CREATE TABLE IF NOT EXISTS admin_pushover_recipient (
+                            id INT PRIMARY KEY AUTO_INCREMENT,
+                            label VARCHAR(191) NOT NULL,
+                            user_key VARCHAR(191) NOT NULL,
+                            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            INDEX idx_admin_pushover_label (label),
+                            INDEX idx_admin_pushover_active (is_active)
+                        )
+                        """
+                    )
+                except Exception:
+                    pass
+
                 return
         except Exception as e:
             last_err = e
