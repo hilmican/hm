@@ -31,6 +31,77 @@ ORDER_STATUS_TOOL_NAMES = {
 CRITICAL_ORDER_STEPS = {"awaiting_payment", "awaiting_address", "confirmed_by_customer", "ready_to_ship"}
 
 
+def _fetch_last_inbound_message(conversation_id: int) -> Optional[dict[str, Any]]:
+	with get_session() as session:
+		try:
+			row = session.exec(
+				_text(
+					"""
+					SELECT id, text, timestamp_ms
+					FROM message
+					WHERE conversation_id=:cid AND direction='in'
+					ORDER BY timestamp_ms DESC
+					LIMIT 1
+					"""
+				).params(cid=int(conversation_id))
+			).first()
+		except Exception:
+			return None
+		if not row:
+			return None
+		try:
+			return {
+				"id": getattr(row, "id", None) if hasattr(row, "id") else (row[0] if len(row) > 0 else None),
+				"text": getattr(row, "text", None) if hasattr(row, "text") else (row[1] if len(row) > 1 else None),
+				"timestamp_ms": getattr(row, "timestamp_ms", None)
+				if hasattr(row, "timestamp_ms")
+				else (row[2] if len(row) > 2 else None),
+			}
+		except Exception:
+			return None
+
+
+def _persist_admin_notifications(
+	conversation_id: int,
+	callbacks: list[dict[str, Any]],
+	*,
+	state_snapshot: Optional[dict[str, Any]] = None,
+) -> None:
+	if not callbacks:
+		return
+	trigger_info = _fetch_last_inbound_message(conversation_id)
+	with get_session() as session:
+		for cb in callbacks:
+			if not isinstance(cb, dict):
+				continue
+			args = cb.get("arguments") or {}
+			message_text = str(args.get("mesaj") or "").strip()
+			if not message_text:
+				continue
+			message_type = str(args.get("mesaj_tipi") or "info").strip().lower()
+			if message_type not in ("info", "warning", "urgent"):
+				message_type = "info"
+			meta = {
+				"conversation_id": int(conversation_id),
+				"created_by_ai": True,
+				"source": "ai_shadow",
+				"auto_blocked": True,
+				"trigger_message_id": trigger_info.get("id") if trigger_info else None,
+				"trigger_message_text": trigger_info.get("text") if trigger_info else None,
+				"trigger_message_ts": trigger_info.get("timestamp_ms") if trigger_info else None,
+			}
+			if state_snapshot:
+				meta["state_snapshot"] = state_snapshot
+			admin_msg = AdminMessage(
+				conversation_id=int(conversation_id),
+				message=message_text,
+				message_type=message_type,
+				is_read=False,
+				metadata_json=json.dumps(meta, ensure_ascii=False),
+			)
+			session.add(admin_msg)
+
+
 def _decode_escape_sequences(text: str) -> str:
 	"""
 	Decode literal escape sequences like \\n, \\t, etc. to actual characters.
@@ -381,6 +452,12 @@ def main() -> None:
 						)
 					except Exception:
 						pass
+				admin_notification_callbacks = [
+					cb
+					for cb in function_callbacks
+					if isinstance(cb, dict) and cb.get("name") == "yoneticiye_bildirim_gonder"
+				]
+				admin_escalation_requested = bool(admin_notification_callbacks)
 				try:
 					log.info(
 						"worker_reply: draft result conversation_id=%s parsed=%s state_updates=%s",
@@ -426,6 +503,21 @@ def main() -> None:
 							)
 						except Exception:
 							pass
+				if admin_escalation_requested:
+					if not isinstance(new_state, dict):
+						new_state = {}
+					new_state["needs_admin"] = True
+					try:
+						_persist_admin_notifications(
+							int(cid),
+							admin_notification_callbacks,
+							state_snapshot=new_state,
+						)
+					except Exception as notify_err:
+						try:
+							log.warning("admin_notification persist error cid=%s err=%s", cid, notify_err)
+						except Exception:
+							pass
 				state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
 				# Block when conversation isn't linked to a product/ad
 				if data.get("missing_product_context"):
@@ -461,6 +553,19 @@ def main() -> None:
 					continue
 				# Decide whether we should actually propose a reply
 				should_reply = bool(data.get("should_reply", True))
+				if admin_escalation_requested:
+					should_reply = False
+					if not data.get("reason"):
+						try:
+							data["reason"] = "needs_admin"
+						except Exception:
+							pass
+					try:
+						extra_note = "Yöneticiye eskale edildi; AI cevap vermeyecek."
+						notes_val = str(data.get("notes") or "").strip()
+						data["notes"] = f"{notes_val}\n{extra_note}".strip() if notes_val else extra_note
+					except Exception:
+						pass
 				reply_text_raw = (data.get("reply_text") or "").strip()
 				# Decode any literal escape sequences (e.g., \\n -> actual newline)
 				reply_text = _decode_escape_sequences(reply_text_raw)
@@ -489,10 +594,13 @@ def main() -> None:
 					# Model indicates no need to reply yet or produced empty text -> pause suggestions
 					# BUT: still log the decision for timeline visibility
 					try:
-						reason_text = data.get("reason") or "no_reply_decision"
+						reason_text = data.get("reason") or ("needs_admin" if admin_escalation_requested else "no_reply_decision")
 						notes_text = data.get("notes") or ""
-						decision_text = f"🤖 AI Decision: No reply needed"
-						if reason_text and reason_text != "no_reply_decision":
+						if admin_escalation_requested:
+							decision_text = "⚠️ AI Decision: Konuşma yöneticilere eskale edildi"
+						else:
+							decision_text = "🤖 AI Decision: No reply needed"
+						if reason_text and reason_text not in ("no_reply_decision", "needs_admin"):
 							decision_text += f"\n\nSebep: {reason_text}"
 						if notes_text:
 							decision_text += f"\n\nNot: {notes_text}"
@@ -516,11 +624,12 @@ def main() -> None:
 									att=int(postpones or 0),
 								)
 							)
-							# Mark state as paused
+							# Mark state as paused or needs_admin based on decision
+							next_status = "needs_admin" if admin_escalation_requested else "paused"
 							session.exec(
 								_text(
-									"UPDATE ai_shadow_state SET status='paused', state_json=:state, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
-								).params(state=state_json_dump, cid=int(cid))
+									"UPDATE ai_shadow_state SET status=:status, state_json=:state, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+								).params(status=next_status, state=state_json_dump, cid=int(cid))
 							)
 							# Don't change read status for shadow replies - only for actual sent messages
 					except Exception as pe:
@@ -528,7 +637,7 @@ def main() -> None:
 							log.warning("persist no-reply decision error cid=%s err=%s", cid, pe)
 						except Exception:
 							pass
-					_set_status(cid, "paused", state_json=state_json_dump)
+					_set_status(cid, "needs_admin" if admin_escalation_requested else "paused", state_json=state_json_dump)
 					continue
 				# Persist draft
 				actions: list[dict[str, Any]] = []

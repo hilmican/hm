@@ -16,6 +16,7 @@
   <body>
     {% include "_nav.html" %}
     <h1>{{ title or "Instagram Gelen Kutusu" }}</h1>
+    {% set escalation_map = escalation_map or {} %}
     <div class="toolbar">
       {% if not title or title == "Instagram Gelen Kutusu" %}
       <a href="/ig/inbox/ai-replied" class="meta-link" style="background:#10b981;color:#fff;border-color:#10b981;">AI Cevaplanan Mesajlar</a>
@@ -110,6 +111,12 @@
               {% elif ad.id %}
                 <a class="meta-link" href="/ads/{{ ad.id }}/edit" title="Reklamı ürüne bağla">Reklamı Bağla</a>
               {% endif %}
+            {% endif %}
+            {% if escalation_map and escalation_map.get(m.conversation_id) %}
+              {% set esc = escalation_map.get(m.conversation_id) %}
+              <div class="meta" style="color:#b91c1c; margin-top:4px;">
+                ⚠️ Yönetici Eskalasyonu: {{ (esc.message or '')[:100] }}{% if esc.message and esc.message|length > 100 %}...{% endif %}
+              </div>
             {% endif %}
           </div>
           <div class="meta"><span class="ts" data-ts="{{ m.timestamp_ms or '' }}">{{ m.timestamp_ms }}</span> · {{ (m.text or '')[:120] }}</div>

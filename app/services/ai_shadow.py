@@ -41,12 +41,14 @@ def touch_shadow_state(
 	# Use provided debounce_seconds, or get from env var, or default to 5 seconds
 	if debounce_seconds is None:
 		debounce_seconds = int(os.getenv("AI_REPLY_DEBOUNCE_SECONDS", "5"))
+	force_release = debounce_seconds == 0
 	
 	now = dt.datetime.utcnow()
 	next_at = now + dt.timedelta(seconds=max(1, int(debounce_seconds)))
 
 	with get_session() as session:
 		keep_needs_link = False
+		keep_needs_admin = False
 		try:
 			row_status = session.exec(
 				_text("SELECT status FROM ai_shadow_state WHERE conversation_id=:cid LIMIT 1").params(cid=cid_int)
@@ -61,8 +63,11 @@ def touch_shadow_state(
 							keep_needs_link = False
 					except Exception:
 						pass
+				elif (current_status or "").lower() == "needs_admin" and not force_release:
+					keep_needs_admin = True
 		except Exception:
 			keep_needs_link = False
+			keep_needs_admin = False
 		try:
 			# Try INSERT IGNORE first (creates row if doesn't exist)
 			session.exec(
@@ -83,13 +88,20 @@ def touch_shadow_state(
 					    postpone_count=0,
 					    status=CASE
 					        WHEN status='running' THEN status
-					        WHEN :keep = 1 AND status='needs_link' THEN status
+					        WHEN :keep_link = 1 AND status='needs_link' THEN status
+					        WHEN :keep_admin = 1 AND status='needs_admin' THEN status
 					        ELSE 'pending'
 					    END,
 					    updated_at=CURRENT_TIMESTAMP
 					WHERE conversation_id=:cid
 					"""
-				).params(ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "), cid=cid_int, keep=(1 if keep_needs_link else 0))
+				).params(
+					ms=int(last_inbound_ms or 0),
+					na=next_at.isoformat(" "),
+					cid=cid_int,
+					keep_link=(1 if keep_needs_link else 0),
+					keep_admin=(1 if keep_needs_admin else 0),
+				)
 			)
 		except Exception as e:
 			# Log error but don't crash

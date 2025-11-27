@@ -10,7 +10,7 @@ import os as _os
 from datetime import datetime as _d
 
 from ..db import get_session
-from ..models import Message, IGAiDebugRun, Conversation
+from ..models import Message, IGAiDebugRun, Conversation, AdminMessage
 from sqlalchemy import text as _text
 
 from ..services.instagram_api import sync_latest_conversations, _get_base_token_and_id, GRAPH_VERSION
@@ -429,6 +429,51 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
         ).all()
         # chronological order for display
         msgs = list(reversed(msgs))
+        admin_alerts: list[dict[str, Any]] = []
+        escalation_map: dict[int, list[dict[str, Any]]] = {}
+        try:
+            admin_rows = session.exec(
+                select(AdminMessage)
+                .where(AdminMessage.conversation_id == int(conversation_id))
+                .order_by(AdminMessage.created_at.desc())
+                .limit(50)
+            ).all()
+            for row in admin_rows:
+                try:
+                    meta = json.loads(row.metadata_json) if getattr(row, "metadata_json", None) else {}
+                except Exception:
+                    meta = {}
+                created_at = getattr(row, "created_at", None)
+                try:
+                    ts_ms = int(created_at.timestamp() * 1000) if isinstance(created_at, _d) else None
+                except Exception:
+                    ts_ms = None
+                alert_entry = {
+                    "id": getattr(row, "id", None),
+                    "message": getattr(row, "message", None),
+                    "message_type": getattr(row, "message_type", None),
+                    "is_read": getattr(row, "is_read", False),
+                    "created_at": created_at,
+                    "timestamp_ms": ts_ms,
+                    "metadata": meta,
+                }
+                admin_alerts.append(alert_entry)
+                trigger_id = meta.get("trigger_message_id")
+                if trigger_id:
+                    try:
+                        trigger_key = int(trigger_id)
+                    except (TypeError, ValueError):
+                        continue
+                    escalation_map.setdefault(trigger_key, []).append(
+                        {
+                            "message": getattr(row, "message", None),
+                            "message_type": getattr(row, "message_type", None),
+                            "created_at": getattr(row, "created_at", None),
+                        }
+                    )
+        except Exception:
+            admin_alerts = []
+            escalation_map = {}
         # Determine other party id from messages then resolve username
         other_label = None
         other_username = None
@@ -1040,12 +1085,14 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     "running": "Üretiliyor",
                     "paused": "Beklemede",
                     "needs_link": "Ürün bekleniyor",
+                    "needs_admin": "Yönetici Bekleniyor",
                     "exhausted": "Durdu",
                     "error": "Hata",
                 }
                 status_desc = {
                     "needs_link": "AI çalışmadan önce konuşmayı ilgili reklam/ürüne bağlayın.",
                     "paused": "Kısa süre sonra yeniden denenecek.",
+                    "needs_admin": "AI konuşmayı yöneticilere eskale etti. Manuel yanıt bekleniyor.",
                     "exhausted": "Üst üste denendi, manuel tetiklenmeli.",
                     "error": "AI cevabı üretilirken hata oluştu.",
                 }
@@ -1056,6 +1103,7 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                     "next_attempt_at": next_at,
                     "postpone_count": postpone_val,
                     "needs_link": status == "needs_link",
+                    "needs_admin": status == "needs_admin",
                 }
         except Exception:
             ai_state = None
@@ -1134,6 +1182,8 @@ def thread(request: Request, conversation_id: int, limit: int = 100):
                 "inline_drafts": inline_drafts,
                 "link_context": link_context,
                 "ai_state": ai_state,
+				"admin_alerts": admin_alerts,
+				"escalation_map": escalation_map,
                 "user_context": user_context,
                 "template_cards": template_cards,
                 "public_conversation_id": public_conversation_id,

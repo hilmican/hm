@@ -44,6 +44,8 @@
     {% set lc = link_context or {} %}
     {% set uc = user_context or {} %}
     {% set ai_state = ai_state or {} %}
+    {% set admin_alerts = admin_alerts or [] %}
+    {% set escalation_map = escalation_map or {} %}
     <div class="toolbar">
       <a href="/ig/inbox">← Back to Inbox</a>
       <a class="action" href="/ig/inbox/{{ conversation_id }}/debug" title="AI Debug">AI Debug</a>
@@ -95,11 +97,42 @@
           {% else %}
             <div class="meta" style="color:#b91c1c;">Önce ilgili reklamı/postu ürüne bağlayın.</div>
           {% endif %}
+        {% elif ai_state.needs_admin %}
+          <div class="meta" style="color:#b45309;">AI bu konuşmayı yöneticilere eskale etti. Manuel onay olmadan otomatik mesaj gönderilmeyecek.</div>
+          <button id="aiResumeBtn" class="action" style="margin-top:8px; font-size:13px; background:#f97316; border-color:#f97316;">Yönetici çözdü, AI'yi yeniden sıraya al</button>
         {% endif %}
         {% if last_message_direction == 'in' and lc.product_slug %}
           <button id="triggerAiFromLastMessages" class="action" style="margin-top:8px; font-size:13px; background:#10b981; border-color:#10b981;">Son Mesajlara Göre AI Mesajını Yeniden Tetikle</button>
         {% endif %}
       </div>
+      {% if admin_alerts %}
+      <div style="border:1px solid #f97316; border-radius:10px; padding:12px; background:#fff7ed;">
+        <div style="font-weight:600; color:#9a3412; margin-bottom:6px;">📢 Yönetici Eskalasyonları</div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          {% for alert in admin_alerts %}
+            <div style="border:1px solid #fdba74; border-radius:8px; padding:8px; background:#fff;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                <div style="flex:1; min-width:0;">
+                  <div style="font-size:13px; font-weight:600; color:#9a3412;">
+                    {% if alert.message_type == 'urgent' %}🔴{% elif alert.message_type == 'warning' %}⚠️{% else %}ℹ️{% endif %}
+                    {{ alert.message_type|upper }}
+                  </div>
+                  <div style="color:#111827; font-size:13px; white-space:pre-wrap;">{{ alert.message }}</div>
+                </div>
+                {% if alert.timestamp_ms %}
+                  <div class="meta"><span class="ts" data-ts="{{ alert.timestamp_ms }}">{{ alert.created_at }}</span></div>
+                {% endif %}
+              </div>
+              {% if alert.metadata and alert.metadata.trigger_message_text %}
+                <div class="meta" style="margin-top:4px; color:#9a3412;">
+                  ✉️ Tetikleyen mesaj: {{ alert.metadata.trigger_message_text[:160] }}{% if alert.metadata.trigger_message_text|length > 160 %}...{% endif %}
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
       <div class="inline-grid-2">
         {% if brand_profile %}
           {% include "components/ig_brand_snapshot.html" %}
@@ -398,6 +431,13 @@
                   </div>
                 {% endif %}
               {% endif %}
+              {% if escalation_map and m.id and escalation_map.get(m.id) %}
+                <div class="meta" style="color:#b91c1c; margin-top:6px;">
+                  {% for esc in escalation_map.get(m.id) %}
+                    ⚠️ Yönetici Eskalasyonu: {{ esc.message }}{% if not loop.last %}<br/>{% endif %}
+                  {% endfor %}
+                </div>
+              {% endif %}
             </div>
           </div>
         </div>
@@ -646,11 +686,11 @@
           location.reload();
         } catch (e) { alert('Refresh error'); }
       });
-      const aiRetryBtn = document.getElementById('aiRetryBtn');
-      aiRetryBtn?.addEventListener('click', async () => {
-        if (!confirm('Konuşmayı tekrar AI kuyruğuna almak istiyor musunuz?')) return;
-        aiRetryBtn.disabled = true; const prev = aiRetryBtn.textContent;
-        aiRetryBtn.textContent = 'Sıraya alınıyor...';
+      async function enqueueAiRetry(btn, confirmMessage){
+        if (!btn) return;
+        if (!confirm(confirmMessage || 'Konuşmayı tekrar AI kuyruğuna almak istiyor musunuz?')) return;
+        btn.disabled = true; const prev = btn.textContent;
+        btn.textContent = 'Sıraya alınıyor...';
         try {
           const r = await fetch(`/ig/inbox/${conversationId}/ai/retry`, { method: 'POST' });
           const js = await r.json().catch(()=>({}));
@@ -660,10 +700,14 @@
         } catch (e) {
           alert('AI kuyruğuna alma başarısız: ' + (e?.message || e));
         } finally {
-          aiRetryBtn.disabled = false;
-          aiRetryBtn.textContent = prev;
+          btn.disabled = false;
+          btn.textContent = prev;
         }
-      });
+      }
+      const aiRetryBtn = document.getElementById('aiRetryBtn');
+      aiRetryBtn?.addEventListener('click', () => enqueueAiRetry(aiRetryBtn, 'Konuşmayı tekrar AI kuyruğuna almak istiyor musunuz?'));
+      const aiResumeBtn = document.getElementById('aiResumeBtn');
+      aiResumeBtn?.addEventListener('click', () => enqueueAiRetry(aiResumeBtn, 'Yönetici müdahalesi tamamlandıysa AI yeniden devreye alınsın mı?'));
       const triggerAiFromLastMessages = document.getElementById('triggerAiFromLastMessages');
       triggerAiFromLastMessages?.addEventListener('click', async () => {
         if (!confirm('Son mesajlara göre AI mesajını yeniden tetiklemek istiyor musunuz?')) return;

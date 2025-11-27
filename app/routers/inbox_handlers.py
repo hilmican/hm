@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request
+import json
 
 from ..db import get_session
 from ..services.queue import enqueue, _get_redis
@@ -330,6 +331,50 @@ async def inbox(
         # For backward compatibility, set labels to display_names
         labels = display_names
         
+        # Map conversations with unresolved admin escalations (auto_blocked)
+        escalation_map: dict[int, dict[str, object]] = {}
+        convo_ids = [conv.get("conversation_id") for conv in conversations if conv.get("conversation_id")]
+        if convo_ids:
+            try:
+                placeholders = ",".join([":esc" + str(i) for i in range(len(convo_ids))])
+                params = {("esc" + str(i)): convo_ids[i] for i in range(len(convo_ids))}
+                rows_escalation = session.exec(
+                    _text(
+                        f"""
+                        SELECT conversation_id, message, message_type, metadata_json, created_at
+                        FROM admin_messages
+                        WHERE conversation_id IN ({placeholders})
+                        ORDER BY created_at DESC
+                        """
+                    ).params(**params)
+                ).all()
+            except Exception:
+                rows_escalation = []
+            for row in rows_escalation:
+                cid_val = getattr(row, "conversation_id", None) if hasattr(row, "conversation_id") else (row[0] if len(row) > 0 else None)
+                if not cid_val:
+                    continue
+                try:
+                    cid_int = int(cid_val)
+                except (TypeError, ValueError):
+                    continue
+                if cid_int in escalation_map:
+                    continue
+                meta_raw = getattr(row, "metadata_json", None) if hasattr(row, "metadata_json") else (row[3] if len(row) > 3 else None)
+                try:
+                    meta = json.loads(meta_raw) if meta_raw else {}
+                except Exception:
+                    meta = {}
+                if not meta.get("auto_blocked"):
+                    continue
+                escalation_map[cid_int] = {
+                    "message": getattr(row, "message", None) if hasattr(row, "message") else (row[1] if len(row) > 1 else None),
+                    "message_type": getattr(row, "message_type", None) if hasattr(row, "message_type") else (row[2] if len(row) > 2 else None),
+                    "created_at": getattr(row, "created_at", None) if hasattr(row, "created_at") else (row[4] if len(row) > 4 else None),
+                }
+        else:
+            escalation_map = {}
+        
         # Fetch unread admin messages
         admin_messages = []
         try:
@@ -357,6 +402,7 @@ async def inbox(
             "labels": labels,
             "names": names,
             "ad_map": ad_map,
+            "escalation_map": escalation_map,
             "q": (q or ""),
             "admin_messages": admin_messages,
         })
