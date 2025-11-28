@@ -1518,7 +1518,7 @@ HITAP KURALLARI:
 	temperature = get_shadow_temperature_setting()
 	temp_opt_out = is_shadow_temperature_opt_out()
 	
-	def _build_gen_kwargs(include_raw: bool = False) -> Dict[str, Any]:
+	def _build_gen_kwargs(include_raw: bool = False, include_request_payload: bool = False) -> Dict[str, Any]:
 		kwargs: Dict[str, Any] = {
 			"system_prompt": sys_prompt,
 			"user_prompt": user_prompt,
@@ -1530,11 +1530,27 @@ HITAP KURALLARI:
 			kwargs["tool_handlers"] = tool_handlers
 		if include_raw:
 			kwargs["include_raw"] = True
+		if include_request_payload:
+			kwargs["include_request_payload"] = True
 		return kwargs
 	
 	raw_response: Any = None
+	api_request_payload: Any = None
 	if include_meta:
-		data, raw_response = client.generate_json(**_build_gen_kwargs(include_raw=True))
+		result = client.generate_json(**_build_gen_kwargs(include_raw=True, include_request_payload=True))
+		if isinstance(result, tuple):
+			if len(result) == 3:
+				data, raw_response, api_request_payload = result
+			elif len(result) == 2:
+				# Could be (data, raw_response) or (data, api_request_payload)
+				if isinstance(result[1], str):
+					data, raw_response = result
+				else:
+					data, api_request_payload = result
+			else:
+				data = result[0]
+		else:
+			data = result
 	else:
 		data = client.generate_json(**_build_gen_kwargs())
 	if not isinstance(data, dict):
@@ -1593,11 +1609,14 @@ HITAP KURALLARI:
 		# user_payload is a dict; system prompt and raw_response may be large, so consumers
 		# can choose to truncate when displaying.
 		try:
-			reply["debug_meta"] = {
+			debug_meta = {
 				"system_prompt": sys_prompt,
 				"user_payload": user_payload,
 				"raw_response": raw_response,
 			}
+			if api_request_payload:
+				debug_meta["api_request_payload"] = api_request_payload
+			reply["debug_meta"] = debug_meta
 		except Exception:
 			# best-effort; never break reply normalization
 			pass

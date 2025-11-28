@@ -72,11 +72,12 @@ class AIClient:
         max_output_tokens: int | None = None,
         extra_messages: Optional[list[dict[str, Any]]] = None,
         include_raw: bool = False,
+        include_request_payload: bool = False,
         image_urls: Optional[List[str]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
         tool_handlers: Optional[Dict[str, Callable[[Dict[str, Any]], str]]] = None,
-    ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], str]]:
+    ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], str], Tuple[Dict[str, Any], Dict[str, Any]], Tuple[Dict[str, Any], str, Dict[str, Any]]]:
         if not self._enabled or not self._client:
             raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")
 
@@ -222,6 +223,11 @@ class AIClient:
                     }
                 )
             response = _run_completion(messages)
+        
+        # Capture final request payload if requested
+        final_request_payload = None
+        if include_request_payload:
+            final_request_payload = _build_kwargs(messages)
 
         txt = (response.choices[0].message.content or "").strip()
         try:
@@ -245,6 +251,11 @@ class AIClient:
                     # Remove trailing commas before } or ]
                     segment = _re.sub(r",\s*([}\]])", r"\1", segment)
                     data = json.loads(segment)
+                    if include_request_payload and final_request_payload:
+                        if include_raw:
+                            return data, txt, final_request_payload
+                        else:
+                            return data, final_request_payload
                     if include_raw:
                         return data, txt
                     return data
@@ -261,9 +272,19 @@ class AIClient:
                     f"AI raw: {raw_full}"
                 ],
             }
+            if include_request_payload and final_request_payload:
+                if include_raw:
+                    return data, txt, final_request_payload
+                else:
+                    return data, final_request_payload
             if include_raw:
                 return data, txt
             return data
+        if include_request_payload and final_request_payload:
+            if include_raw:
+                return data, txt, final_request_payload
+            else:
+                return data, final_request_payload
         if include_raw:
             return data, txt
         return data

@@ -317,6 +317,12 @@ def shadow_debug(request: Request, draft_id: int):
                         debug_meta["raw_response_pretty"] = _json.dumps(raw_resp, ensure_ascii=False, indent=2) if not isinstance(raw_resp, str) else raw_resp
                 except Exception:
                     debug_meta["raw_response_pretty"] = None
+                try:
+                    api_req = debug_meta.get("api_request_payload")
+                    if api_req is not None:
+                        debug_meta["api_request_payload_pretty"] = _json.dumps(api_req, ensure_ascii=False, indent=2)
+                except Exception:
+                    debug_meta["api_request_payload_pretty"] = None
         except Exception:
             debug_meta = None
     draft = {

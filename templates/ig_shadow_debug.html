@@ -109,6 +109,16 @@
         Bu Q&A'lar AI'ya context olarak verilir ve müşteri sorusuna uygun cevap oluşturmasında kullanılır.
       </div>
     </div>
+    {% elif debug_meta and debug_meta.user_payload %}
+    <div class="section" style="border-color: #e5e7eb; background: #f9fafb;">
+      <h3>🔍 Eşleşen Q&A'lar (Embeddings)</h3>
+      <div class="meta">
+        Bu shadow draft için embedding araması yapılmadı veya eşleşen Q&A bulunamadı.
+        {% if debug_meta.user_payload.matching_qas is defined and debug_meta.user_payload.matching_qas|length == 0 %}
+          <br>Eşleşen Q&A listesi boş.
+        {% endif %}
+      </div>
+    </div>
     {% endif %}
 
     <div class="section">
@@ -140,6 +150,18 @@
         <pre>{{ debug_meta.raw_response_pretty }}</pre>
       {% else %}
         <div class="meta">raw_response kaydı yok.</div>
+      {% endif %}
+    </div>
+
+    <div class="section" style="border-color: #3b82f6; background: #eff6ff;">
+      <h3>📡 OpenAI API İsteği (api_request_payload)</h3>
+      {% if debug_meta and debug_meta.api_request_payload %}
+        <div class="meta" style="margin-bottom: 12px;">
+          Bu, OpenAI API'ye gönderilen tam istek payload'ıdır. Model, mesajlar, parametreler ve diğer ayarları içerir.
+        </div>
+        <pre style="max-height: 600px;">{{ debug_meta.api_request_payload_pretty }}</pre>
+      {% else %}
+        <div class="meta">API request payload kaydı yok. (Eski shadow draft'lerde bu bilgi bulunmayabilir)</div>
       {% endif %}
     </div>
   </body>
