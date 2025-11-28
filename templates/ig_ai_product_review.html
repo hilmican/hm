@@ -44,6 +44,13 @@
       .badge-yellow { background: #fef3c7; color: #92400e; }
       .badge-gray { background: #f3f4f6; color: #374151; }
       .empty-state { text-align: center; padding: 40px; color: #6b7280; }
+      .pagination { background: white; padding: 16px; border-radius: 10px; margin: 20px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+      .pagination-info { color: #6b7280; font-size: 14px; }
+      .pagination-controls { display: flex; gap: 8px; align-items: center; }
+      .pagination button { background: #2563eb; color: white; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-weight: 500; }
+      .pagination button:disabled { background: #e5e7eb; color: #9ca3af; cursor: not-allowed; }
+      .pagination button:hover:not(:disabled) { background: #1d4ed8; }
+      .pagination input { padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 6px; width: 80px; text-align: center; }
     </style>
   </head>
   <body>
@@ -61,20 +68,45 @@
         <div class="stat-card">
           <h3>Toplam Konuşma</h3>
           <div class="value">{{ total_conversations }}</div>
+          {% if offset > 0 or current_page_count < total_conversations %}
+          <div class="meta" style="margin-top: 4px; font-size: 12px;">
+            Gösterilen: {{ offset + 1 }}-{{ offset + current_page_count }} / {{ total_conversations }}
+          </div>
+          {% endif %}
         </div>
         <div class="stat-card">
           <h3>Müşteri Soruları</h3>
           <div class="value">{{ total_questions }}</div>
+          <div class="meta" style="margin-top: 4px; font-size: 12px;">Bu sayfada</div>
         </div>
         <div class="stat-card">
           <h3>Gölge Cevaplar</h3>
           <div class="value">{{ total_shadow_replies }}</div>
+          <div class="meta" style="margin-top: 4px; font-size: 12px;">Bu sayfada</div>
         </div>
         <div class="stat-card">
           <h3>Gerçek Cevaplar</h3>
           <div class="value">{{ total_actual_replies }}</div>
+          <div class="meta" style="margin-top: 4px; font-size: 12px;">Bu sayfada</div>
         </div>
       </div>
+
+      {% if total_conversations > limit %}
+      <div class="pagination">
+        <div class="pagination-info">
+          Sayfa {{ ((offset // limit) + 1) }} - 
+          Gösterilen: <strong>{{ offset + 1 }}-{{ offset + current_page_count }}</strong> / <strong>{{ total_conversations }}</strong>
+        </div>
+        <div class="pagination-controls">
+          <button onclick="goToPage(0)" {% if not has_prev %}disabled{% endif %}>İlk</button>
+          <button onclick="goToPage({{ prev_offset }})" {% if not has_prev %}disabled{% endif %}>Önceki</button>
+          <input type="number" id="pageInput" value="{{ (offset // limit) + 1 }}" min="1" max="{{ ((total_conversations - 1) // limit) + 1 }}" style="width: 60px;" onchange="goToPageNumber(this.value)" />
+          <span style="color: #6b7280; font-size: 14px;">/ {{ ((total_conversations - 1) // limit) + 1 }}</span>
+          <button onclick="goToPage({{ next_offset }})" {% if not has_next %}disabled{% endif %}>Sonraki</button>
+          <button onclick="goToPage({{ ((total_conversations - 1) // limit) * limit }})" {% if not has_next %}disabled{% endif %}>Son</button>
+        </div>
+      </div>
+      {% endif %}
 
       <div class="product-info">
         <h2>Ürün Bilgileri ve Prompt'lar</h2>
@@ -97,8 +129,12 @@
       <div class="export-form">
         <form method="get" action="/ig/ai/products/{{ product.slug }}/export">
           <div>
-            <label>Konuşma Sayısı</label>
-            <input type="number" name="conversation_limit" value="{{ total_conversations }}" min="1" max="1000" />
+            <label>Konuşma Sayısı (Limit)</label>
+            <input type="number" name="conversation_limit" value="50" min="1" max="1000" />
+          </div>
+          <div>
+            <label>Başlangıç (Offset)</label>
+            <input type="number" name="conversation_offset" value="{{ offset }}" min="0" />
           </div>
           <div>
             <label>Format</label>
@@ -112,7 +148,11 @@
           </div>
         </form>
         <div class="meta" style="margin-top: 8px;">
-          Konuşmaları, gölge cevapları ve gerçek cevapları dışa aktar.
+          Konuşmaları, gölge cevapları ve gerçek cevapları dışa aktar. Offset ve limit ile pagination destekler.
+          {% if total_conversations > 50 %}
+          <br/>
+          <strong>İpucu:</strong> Tüm {{ total_conversations }} konuşmayı export etmek için offset'i 50'şer artırarak tekrarlayın.
+          {% endif %}
         </div>
       </div>
 
@@ -231,6 +271,22 @@
           });
         }
       });
+
+      // Pagination functions
+      function goToPage(offset) {
+        const url = new URL(window.location);
+        url.searchParams.set('offset', offset);
+        url.searchParams.set('limit', {{ limit }});
+        window.location.href = url.toString();
+      }
+
+      function goToPageNumber(pageNum) {
+        const page = parseInt(pageNum);
+        if (isNaN(page) || page < 1) return;
+        const limit = {{ limit }};
+        const offset = (page - 1) * limit;
+        goToPage(offset);
+      }
     </script>
   </body>
 </html>

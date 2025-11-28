@@ -623,7 +623,7 @@ async def save_product_images(request: Request):
 
 
 @router.get("/products/{product_slug}/review")
-def product_review_page(request: Request, product_slug: str, limit: int = 100):
+def product_review_page(request: Request, product_slug: str, limit: int = Query(default=50, ge=1, le=500), offset: int = Query(default=0, ge=0, description="Offset for pagination")):
     """
     Review page for a product showing:
     - Product data and prompts
@@ -657,6 +657,7 @@ def product_review_page(request: Request, product_slug: str, limit: int = 100):
         
         # Find conversations that have messages with these ad_ids
         conversations = []
+        total_count = 0
         if ad_ids:
             # Build parameter list for IN clause
             params = {}
@@ -666,8 +667,23 @@ def product_review_page(request: Request, product_slug: str, limit: int = 100):
                 placeholders.append(f":{param_name}")
                 params[param_name] = str(aid)
             params["lim"] = limit
+            params["off"] = offset
             
             placeholders_str = ",".join(placeholders)
+            
+            # Get total count for pagination info
+            count_params = {k: v for k, v in params.items() if k != "lim" and k != "off"}
+            total_count_row = session.exec(
+                text(
+                    f"""
+                    SELECT COUNT(DISTINCT c.id)
+                    FROM conversations c
+                    INNER JOIN message m ON m.conversation_id = c.id
+                    WHERE m.ad_id IN ({placeholders_str})
+                    """
+                ).params(**count_params)
+            ).first()
+            total_count = total_count_row[0] if isinstance(total_count_row, tuple) else (total_count_row if total_count_row is not None else 0)
             
             convo_rows = session.exec(
                 text(
@@ -680,7 +696,7 @@ def product_review_page(request: Request, product_slug: str, limit: int = 100):
                     INNER JOIN message m ON m.conversation_id = c.id
                     WHERE m.ad_id IN ({placeholders_str})
                     ORDER BY c.last_message_at DESC
-                    LIMIT :lim
+                    LIMIT :lim OFFSET :off
                     """
                 ).params(**params)
             ).all()
@@ -777,6 +793,12 @@ def product_review_page(request: Request, product_slug: str, limit: int = 100):
             from ..models import AIPretext
             pretext = session.get(AIPretext, product.pretext_id)
         
+        # Calculate pagination info
+        has_prev = offset > 0
+        has_next = offset + len(conversation_data) < total_count
+        prev_offset = max(0, offset - limit)
+        next_offset = offset + limit
+        
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "ig_ai_product_review.html",
@@ -785,10 +807,17 @@ def product_review_page(request: Request, product_slug: str, limit: int = 100):
                 "product": product,
                 "pretext": pretext,
                 "conversations": conversation_data,
-                "total_conversations": len(conversation_data),
+                "total_conversations": total_count,
+                "current_page_count": len(conversation_data),
                 "total_questions": sum(c["question_count"] for c in conversation_data),
                 "total_shadow_replies": sum(c["shadow_reply_count"] for c in conversation_data),
                 "total_actual_replies": sum(c["actual_reply_count"] for c in conversation_data),
+                "limit": limit,
+                "offset": offset,
+                "has_prev": has_prev,
+                "has_next": has_next,
+                "prev_offset": prev_offset,
+                "next_offset": next_offset,
             },
         )
 
@@ -799,9 +828,15 @@ def export_product_data(
     product_slug: str,
     format: str = "json",
     conversation_limit: int = 100,
+    conversation_offset: int = Query(default=0, ge=0, description="Offset for pagination"),
 ):
     """
     Export product data including conversations, shadow replies, and actual replies.
+    
+    Supports pagination via conversation_offset parameter:
+    - offset=0, limit=50  → conversations 0-49
+    - offset=50, limit=50 → conversations 50-99
+    - offset=100, limit=50 → conversations 100-149
     """
     from ..models import Product, Conversation, Message, AiShadowReply
     from fastapi.responses import JSONResponse, Response
@@ -837,6 +872,7 @@ def export_product_data(
                 placeholders.append(f":{param_name}")
                 params[param_name] = str(aid)
             params["lim"] = conversation_limit
+            params["off"] = conversation_offset
             
             placeholders_str = ",".join(placeholders)
             
@@ -850,7 +886,7 @@ def export_product_data(
                     INNER JOIN message m ON m.conversation_id = c.id
                     WHERE m.ad_id IN ({placeholders_str})
                     ORDER BY c.last_message_at DESC
-                    LIMIT :lim
+                    LIMIT :lim OFFSET :off
                     """
                 ).params(**params)
             ).all()
@@ -867,6 +903,9 @@ def export_product_data(
                 "ai_prompt_msg": product.ai_prompt_msg,
             },
             "conversation_count": len(convo_rows),
+            "conversation_offset": conversation_offset,
+            "conversation_limit": conversation_limit,
+            "has_more": len(convo_rows) == conversation_limit,  # Indicates if there might be more
             "exported_at": dt.datetime.utcnow().isoformat(),
             "conversations": [],
         }
