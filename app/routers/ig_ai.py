@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Optional, Any, Dict, List
 
-from fastapi import APIRouter, Request, HTTPException, Form, UploadFile, File, Body
+from fastapi import APIRouter, Request, HTTPException, Form, UploadFile, File, Body, Query
 from sqlalchemy import text, func as _func
 from sqlmodel import select
 import datetime as dt
