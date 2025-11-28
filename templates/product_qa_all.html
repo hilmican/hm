@@ -1,0 +1,184 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Product Q&A Management - All Products</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        h1 { margin-bottom: 12px; }
+        h2 { margin-top: 24px; margin-bottom: 12px; font-size: 18px; }
+        .toolbar { margin: 12px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+        th { background: #fafafa; position: sticky; top: 0; font-weight: 600; }
+        input, textarea, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-family: inherit; }
+        textarea { resize: vertical; min-height: 60px; width: 100%; }
+        a { color: #2563eb; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; display: inline-block; }
+        button { padding: 6px 10px; border-radius: 6px; border: 1px solid #ddd; background: #f9fafb; cursor: pointer; font-family: inherit; }
+        button:hover { background: #f3f4f6; }
+        button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+        button.primary:hover { background: #1d4ed8; }
+        button.danger { background: #ef4444; color: #fff; border-color: #ef4444; }
+        button.danger:hover { background: #dc2626; }
+        button.success { background: #10b981; color: #fff; border-color: #10b981; }
+        button.success:hover { background: #059669; }
+        .card { padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 14px; background: #fafafa; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-weight: 500; margin-bottom: 4px; font-size: 13px; }
+        .badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #e5e7eb; color: #374151; }
+        .badge.active { background: #d1fae5; color: #065f46; }
+        .badge.inactive { background: #fee2e2; color: #991b1b; }
+        .badge.no-embedding { background: #fef3c7; color: #92400e; }
+        .similarity-score { font-weight: 600; color: #059669; }
+        .search-results { margin-top: 16px; }
+        .search-result-item { padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px; background: #fff; }
+        .search-result-item .question { font-weight: 600; margin-bottom: 4px; }
+        .search-result-item .answer { color: #4b5563; margin-top: 8px; white-space: pre-wrap; }
+        .search-result-item .product-name { color: #2563eb; font-size: 13px; margin-bottom: 6px; }
+        .meta { color: #6b7280; font-size: 12px; }
+        .question-col { max-width: 300px; }
+        .answer-col { max-width: 400px; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <div class="toolbar">
+        <a href="/products/table">← Ürünlere Dön</a>
+        <span class="pill">{{ qas|length }} Q&A</span>
+        <select id="filterActive" style="margin-left: auto;">
+            <option value="">Tümü</option>
+            <option value="true" {% if is_active == True %}selected{% endif %}>Sadece Aktifler</option>
+            <option value="false" {% if is_active == False %}selected{% endif %}>Sadece Pasifler</option>
+        </select>
+    </div>
+    
+    <h1>Product Q&A Management - Tüm Ürünler</h1>
+    <p class="meta">Tüm ürünler için Q&A'ları görüntüleyin ve yönetin. Embeddings ile semantik arama yapabilirsiniz.</p>
+    
+    <div class="card">
+        <h2 style="margin-top: 0;">🔍 Global Q&A Arama (Embeddings)</h2>
+        <div class="form-group">
+            <label for="searchQuery">Arama Metni (tüm ürünlerde ara)</label>
+            <input type="text" id="searchQuery" placeholder="Örn: Bedenler neler? Kargo ücreti nedir?" style="width: 100%; max-width: 500px;" />
+        </div>
+        <button onclick="searchAllQAs()" class="primary">Semantik Ara</button>
+        <div id="searchResults" class="search-results" style="display: none;"></div>
+    </div>
+    
+    <h2>Tüm Q&As</h2>
+    {% if qas %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Ürün</th>
+                <th class="question-col">Soru</th>
+                <th class="answer-col">Cevap</th>
+                <th>Durum</th>
+                <th>Embedding</th>
+                <th>İşlemler</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for qa in qas %}
+            <tr data-id="{{ qa.id }}">
+                <td>{{ qa.id }}</td>
+                <td>
+                    {% if products.get(qa.product_id) %}
+                        <a href="/products/{{ qa.product_id }}/qas/table">{{ products[qa.product_id].name }}</a>
+                        <div class="meta">ID: {{ qa.product_id }}</div>
+                    {% else %}
+                        <span class="meta">Product {{ qa.product_id }}</span>
+                    {% endif %}
+                </td>
+                <td class="question-col">{{ qa.question }}</td>
+                <td class="answer-col" style="white-space: pre-wrap;">{{ qa.answer }}</td>
+                <td>
+                    {% if qa.is_active %}
+                        <span class="badge active">Aktif</span>
+                    {% else %}
+                        <span class="badge inactive">Pasif</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if qa.embedding_json %}
+                        <span class="badge active">✓ Var</span>
+                    {% else %}
+                        <span class="badge no-embedding">✗ Yok</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="/products/{{ qa.product_id }}/qas/table" class="primary" style="padding: 4px 8px; font-size: 12px; border-radius: 6px; background: #2563eb; color: #fff; text-decoration: none;">Yönet</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="meta">Henüz Q&A eklenmemiş. <a href="/products/table">Ürünler</a> sayfasından bir ürün seçip Q&A ekleyebilirsiniz.</p>
+    {% endif %}
+</body>
+<script>
+// Filter by active status
+document.getElementById('filterActive').addEventListener('change', function() {
+    const val = this.value;
+    const url = new URL(window.location);
+    if (val) {
+        url.searchParams.set('is_active', val);
+    } else {
+        url.searchParams.delete('is_active');
+    }
+    window.location.href = url.toString();
+});
+
+// Search across all products
+async function searchAllQAs() {
+    const query = document.getElementById('searchQuery').value.trim();
+    if (!query) {
+        alert('Lütfen arama metni girin.');
+        return;
+    }
+    
+    const resultsDiv = document.getElementById('searchResults');
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = '<p class="meta">Aranıyor...</p>';
+    
+    try {
+        const r = await fetch(`/products/qas/search/all?query=${encodeURIComponent(query)}&limit=10&min_similarity=0.7`);
+        if (!r.ok) {
+            const err = await r.text();
+            throw new Error(err);
+        }
+        const data = await r.json();
+        
+        if (data.matches && data.matches.length > 0) {
+            let html = `<h3 style="margin-bottom: 12px;">${data.matches.length} sonuç bulundu (tüm ürünlerde):</h3>`;
+            for (const match of data.matches) {
+                html += `
+                    <div class="search-result-item">
+                        <div class="product-name">📦 Ürün: <a href="/products/${match.product_id}/qas/table">${escapeHtml(match.product_name)}</a> (ID: ${match.product_id})</div>
+                        <div class="question">S: ${escapeHtml(match.question)}</div>
+                        <div class="meta">Benzerlik: <span class="similarity-score">${(match.similarity * 100).toFixed(1)}%</span></div>
+                        <div class="answer">C: ${escapeHtml(match.answer)}</div>
+                    </div>
+                `;
+            }
+            resultsDiv.innerHTML = html;
+        } else {
+            resultsDiv.innerHTML = '<p class="meta">Sonuç bulunamadı (min. benzerlik: 0.7).</p>';
+        }
+    } catch (e) {
+        resultsDiv.innerHTML = '<p style="color: #ef4444;">Arama başarısız: ' + escapeHtml(e.message) + '</p>';
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+</html>
+

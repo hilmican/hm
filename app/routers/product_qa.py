@@ -18,6 +18,103 @@ from ..services.embeddings import (
 router = APIRouter(prefix="/products", tags=["product_qa"])
 
 
+@router.get("/qas/all")
+def list_all_qas(is_active: Optional[bool] = Query(None), limit: int = Query(default=500, ge=1, le=5000)):
+	"""List all Q&As across all products."""
+	with get_session() as session:
+		stmt = select(ProductQA)
+		if is_active is not None:
+			stmt = stmt.where(ProductQA.is_active == is_active)  # noqa: E712
+		stmt = stmt.order_by(ProductQA.created_at.desc()).limit(limit)
+		
+		qas = session.exec(stmt).all()
+		
+		# Load product names for display
+		product_ids = {qa.product_id for qa in qas}
+		products = {}
+		if product_ids:
+			products_list = session.exec(select(Product).where(Product.id.in_(product_ids))).all()  # type: ignore
+			products = {p.id: p for p in products_list}
+		
+		return {
+			"qas": [
+				{
+					"id": qa.id,
+					"product_id": qa.product_id,
+					"product_name": products.get(qa.product_id).name if products.get(qa.product_id) else f"Product {qa.product_id}",
+					"question": qa.question,
+					"answer": qa.answer,
+					"is_active": qa.is_active,
+					"has_embedding": bool(qa.embedding_json),
+					"created_at": qa.created_at.isoformat() if qa.created_at else None,
+					"updated_at": qa.updated_at.isoformat() if qa.updated_at else None,
+				}
+				for qa in qas
+			],
+		}
+
+
+@router.post("/qas/search/all")
+def search_all_qas_endpoint(
+	query: str,
+	limit: int = Query(default=10, ge=1, le=50),
+	min_similarity: float = Query(default=0.7, ge=0.0, le=1.0),
+):
+	"""Search Q&As across all products using semantic similarity."""
+	if not query or not query.strip():
+		raise HTTPException(status_code=400, detail="query is required")
+	
+	results = search_all_product_qas(query, limit=limit, min_similarity=min_similarity)
+	
+	# Load product names for display
+	product_ids = {qa.product_id for qa, _ in results}
+	products = {}
+	if product_ids:
+		with get_session() as session:
+			products_list = session.exec(select(Product).where(Product.id.in_(product_ids))).all()  # type: ignore
+			products = {p.id: p for p in products_list}
+	
+	return {
+		"query": query,
+		"matches": [
+			{
+				"id": qa.id,
+				"product_id": qa.product_id,
+				"product_name": products.get(qa.product_id).name if products.get(qa.product_id) else f"Product {qa.product_id}",
+				"question": qa.question,
+				"answer": qa.answer,
+				"similarity": round(similarity, 4),
+			}
+			for qa, similarity in results
+		],
+	}
+
+
+@router.get("/qas/table")
+def all_qas_table(request: Request, is_active: Optional[bool] = None):
+	"""Render Q&A overview/management UI for all products."""
+	with get_session() as session:
+		stmt = select(ProductQA)
+		if is_active is not None:
+			stmt = stmt.where(ProductQA.is_active == is_active)  # noqa: E712
+		stmt = stmt.order_by(ProductQA.created_at.desc()).limit(500)
+		
+		qas = session.exec(stmt).all()
+		
+		# Load product names
+		product_ids = {qa.product_id for qa in qas}
+		products = {}
+		if product_ids:
+			products_list = session.exec(select(Product).where(Product.id.in_(product_ids))).all()  # type: ignore
+			products = {p.id: p for p in products_list}
+		
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"product_qa_all.html",
+			{"request": request, "qas": qas, "products": products},
+		)
+
+
 @router.get("/{product_id}/qas")
 def list_product_qas(product_id: int, is_active: Optional[bool] = Query(None)):
 	"""List all Q&As for a product."""
