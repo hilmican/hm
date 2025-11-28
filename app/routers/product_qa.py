@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, Form
@@ -152,45 +153,86 @@ def list_product_qas(product_id: int, is_active: Optional[bool] = Query(None)):
 @router.post("/{product_id}/qas")
 def create_product_qa(
 	product_id: int,
-	question: str = Form(...),
+	question: Optional[str] = Form(None),
+	questions: Optional[str] = Form(None),  # JSON array of questions
 	answer: str = Form(...),
 	is_active: bool = Form(True),
 ):
-	"""Create a new Q&A for a product. Automatically generates embedding."""
+	"""Create one or more Q&As for a product. Automatically generates embeddings.
+	
+	If 'questions' (JSON array) is provided, creates multiple Q&A entries with the same answer.
+	Otherwise, uses 'question' for backward compatibility (single Q&A).
+	"""
 	with get_session() as session:
 		# Verify product exists
 		product = session.exec(select(Product).where(Product.id == product_id)).first()
 		if not product:
 			raise HTTPException(status_code=404, detail="Product not found")
 		
-		if not question or not question.strip():
-			raise HTTPException(status_code=400, detail="question is required")
 		if not answer or not answer.strip():
 			raise HTTPException(status_code=400, detail="answer is required")
 		
-		# Generate embedding from question
-		# We use question for embedding since that's what we'll match against
-		embedding = generate_embedding(question.strip())
-		embedding_json = embedding_to_json(embedding)
+		# Determine which questions to use
+		question_list: List[str] = []
+		if questions:
+			# Parse JSON array of questions
+			try:
+				question_list = json.loads(questions)
+				if not isinstance(question_list, list):
+					raise HTTPException(status_code=400, detail="questions must be a JSON array")
+				# Filter out empty questions
+				question_list = [q.strip() for q in question_list if q and q.strip()]
+			except json.JSONDecodeError:
+				raise HTTPException(status_code=400, detail="Invalid JSON in questions field")
+		elif question:
+			# Single question for backward compatibility
+			if not question.strip():
+				raise HTTPException(status_code=400, detail="question is required")
+			question_list = [question.strip()]
+		else:
+			raise HTTPException(status_code=400, detail="Either 'question' or 'questions' is required")
 		
-		qa = ProductQA(
-			product_id=product_id,
-			question=question.strip(),
-			answer=answer.strip(),
-			embedding_json=embedding_json,
-			is_active=is_active,
-		)
+		if not question_list:
+			raise HTTPException(status_code=400, detail="At least one non-empty question is required")
 		
-		session.add(qa)
-		session.flush()
+		# Create Q&A entries for each question
+		created_qas = []
+		answer_text = answer.strip()
 		
+		for q_text in question_list:
+			# Generate embedding from question
+			# We use question for embedding since that's what we'll match against
+			embedding = generate_embedding(q_text)
+			embedding_json = embedding_to_json(embedding)
+			
+			qa = ProductQA(
+				product_id=product_id,
+				question=q_text,
+				answer=answer_text,
+				embedding_json=embedding_json,
+				is_active=is_active,
+			)
+			
+			session.add(qa)
+			session.flush()
+			
+			created_qas.append({
+				"id": qa.id,
+				"product_id": qa.product_id,
+				"question": qa.question,
+				"answer": qa.answer,
+				"is_active": qa.is_active,
+				"has_embedding": bool(qa.embedding_json),
+			})
+		
+		# Return single Q&A for backward compatibility if only one was created
+		if len(created_qas) == 1:
+			return created_qas[0]
+		
+		# Return list of created Q&As
 		return {
-			"id": qa.id,
-			"product_id": qa.product_id,
-			"question": qa.question,
-			"answer": qa.answer,
-			"is_active": qa.is_active,
-			"has_embedding": bool(qa.embedding_json),
+			"created": created_qas,
+			"count": len(created_qas),
 		}
 
 

@@ -59,11 +59,12 @@
         <form id="createForm" onsubmit="return false;">
             <div class="form-row">
                 <div class="form-group">
-                    <label for="newQuestion">Soru *</label>
-                    <textarea id="newQuestion" name="question" required placeholder="Örn: Bu ürün hangi bedenlerde var?"></textarea>
+                    <label for="newQuestion">Sorular * (Her satıra bir soru yazın - aynı cevap için birden fazla soru ekleyebilirsiniz)</label>
+                    <textarea id="newQuestion" name="question" required placeholder="Örn: Bu ürün hangi bedenlerde var?&#10;Hangi bedenler mevcut?&#10;Bedeni nedir?"></textarea>
+                    <div class="meta" style="margin-top: 4px; font-size: 11px;">Her satır ayrı bir soru olarak işlenecek ve aynı cevap ile eşleştirilecektir. Bu, embedding'ler için daha iyi sonuçlar verecektir.</div>
                 </div>
                 <div class="form-group">
-                    <label for="newAnswer">Cevap *</label>
+                    <label for="newAnswer">Cevap * (Tüm sorular için ortak cevap)</label>
                     <textarea id="newAnswer" name="answer" required placeholder="Örn: Ürünümüz S, M, L ve XL bedenlerinde mevcuttur."></textarea>
                 </div>
             </div>
@@ -163,8 +164,33 @@ const productId = {{ product.id }};
 // Create Q&A
 document.getElementById('createForm').addEventListener('submit', async () => {
     const form = document.getElementById('createForm');
-    const data = new FormData(form);
+    const questionText = document.getElementById('newQuestion').value.trim();
+    const answerText = document.getElementById('newAnswer').value.trim();
+    const isActive = form.querySelector('[name="is_active"]').checked;
+    
+    if (!questionText || !answerText) {
+        alert('Lütfen en az bir soru ve bir cevap girin.');
+        return;
+    }
+    
+    // Split questions by newlines and filter out empty lines
+    const questions = questionText.split('\n')
+        .map(q => q.trim())
+        .filter(q => q.length > 0);
+    
+    if (questions.length === 0) {
+        alert('Lütfen en az bir soru girin.');
+        return;
+    }
+    
     try {
+        // Create FormData with multiple questions
+        const data = new FormData();
+        // Send questions as a JSON array
+        data.append('questions', JSON.stringify(questions));
+        data.append('answer', answerText);
+        data.append('is_active', isActive ? 'true' : 'false');
+        
         const r = await fetch(`/products/${productId}/qas`, {
             method: 'POST',
             body: data
@@ -172,6 +198,10 @@ document.getElementById('createForm').addEventListener('submit', async () => {
         if (!r.ok) {
             const err = await r.text();
             throw new Error(err);
+        }
+        const result = await r.json();
+        if (result.created && result.created.length > 0) {
+            alert(`${result.created.length} Q&A başarıyla eklendi!`);
         }
         location.reload();
     } catch(e) {
