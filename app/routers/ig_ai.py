@@ -676,14 +676,36 @@ def product_review_page(request: Request, product_slug: str, limit: int = Query(
             total_count_row = session.exec(
                 text(
                     f"""
-                    SELECT COUNT(DISTINCT c.id)
+                    SELECT COUNT(DISTINCT c.id) as cnt
                     FROM conversations c
                     INNER JOIN message m ON m.conversation_id = c.id
                     WHERE m.ad_id IN ({placeholders_str})
                     """
                 ).params(**count_params)
             ).first()
-            total_count = total_count_row[0] if isinstance(total_count_row, tuple) else (total_count_row if total_count_row is not None else 0)
+            # Extract count value - handle SQLAlchemy Row objects properly
+            if total_count_row is None:
+                total_count = 0
+            else:
+                # SQLAlchemy Row objects - extract the actual integer value
+                try:
+                    # Try accessing as tuple/list first
+                    if isinstance(total_count_row, (list, tuple)):
+                        total_count = int(total_count_row[0]) if total_count_row else 0
+                    # Otherwise try attribute access or index access
+                    elif hasattr(total_count_row, '__getitem__'):
+                        val = total_count_row[0]
+                        total_count = int(val) if val is not None else 0
+                    else:
+                        # Direct value
+                        total_count = int(total_count_row) if total_count_row is not None else 0
+                except (ValueError, TypeError, IndexError, AttributeError) as e:
+                    import logging
+                    logging.getLogger("ig_ai").warning(f"Error extracting total_count: {e}, type={type(total_count_row)}, row={total_count_row}")
+                    total_count = 0
+            
+            # Ensure total_count is an integer for comparisons
+            total_count = int(total_count) if total_count else 0
             
             convo_rows = session.exec(
                 text(
