@@ -197,6 +197,58 @@ def save_story_mapping(story_id: str, sku: Optional[str] = Form(default=None), p
 							"UPDATE ads_products SET product_id=:pid, sku=:sku, auto_linked=0, link_type='story' WHERE ad_id=:id"
 						)
 					).params(id=str(story_key), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
+		
+		# Update conversations that have messages with this story_id
+		# This ensures _detect_focus_product can find the product
+		if story_key:
+			try:
+				# Find all conversations with messages referencing this story
+				conv_ids = session.exec(
+					_text(
+						"""
+						SELECT DISTINCT conversation_id
+						FROM message
+						WHERE story_id = :sid AND conversation_id IS NOT NULL
+						"""
+					)
+				).params(sid=str(story_id)).all()
+				
+				# Update each conversation's last_link_id and last_link_type
+				for conv_row in conv_ids:
+					conv_id = conv_row[0] if isinstance(conv_row, (list, tuple)) else (getattr(conv_row, "conversation_id", None) if hasattr(conv_row, "conversation_id") else None)
+					if conv_id:
+						try:
+							session.exec(
+								_text(
+									"""
+									UPDATE conversations
+									SET last_link_id = :link_id,
+									    last_link_type = 'story'
+									WHERE id = :cid
+									"""
+								)
+							).params(link_id=str(story_key), cid=int(conv_id))
+							
+							# Clear needs_link status if it exists, since product is now linked
+							try:
+								session.exec(
+									_text(
+										"""
+										UPDATE ai_shadow_state
+										SET status = 'pending',
+										    updated_at = CURRENT_TIMESTAMP
+										WHERE conversation_id = :cid
+										  AND status = 'needs_link'
+										"""
+									)
+								).params(cid=int(conv_id))
+							except Exception:
+								pass
+						except Exception:
+							pass
+			except Exception:
+				pass
+	
 	return RedirectResponse(url=f"/stories/{story_id}/edit", status_code=303)
 
 
