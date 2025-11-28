@@ -88,36 +88,85 @@
     </div>
     {% endif %}
 
-    {% if debug_meta and debug_meta.user_payload and debug_meta.user_payload.matching_qas %}
-    <div class="section" style="border-color: #10b981; background: #f0fdf4;">
+    {% if debug_meta %}
+    <div class="section" style="border-color: {% if debug_meta.user_payload and debug_meta.user_payload.matching_qas %}#10b981{% else %}#e5e7eb{% endif %}; background: {% if debug_meta.user_payload and debug_meta.user_payload.matching_qas %}#f0fdf4{% else %}#f9fafb{% endif %};">
       <h3>🔍 Eşleşen Q&A'lar (Embeddings)</h3>
-      <div class="meta" style="margin-bottom: 12px;">
-        Müşteri mesajına göre bulunan <strong>{{ debug_meta.user_payload.matching_qas|length }}</strong> eşleşen Q&A bulundu:
-      </div>
-      {% for qa in debug_meta.user_payload.matching_qas %}
-        <div style="margin-bottom: 16px; padding: 12px; border: 1px solid #d1fae5; border-radius: 8px; background: #fff;">
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-            <div style="font-weight: 600; color: #065f46; flex: 1;">S: {{ qa.question }}</div>
-            <span class="pill" style="background: #d1fae5; color: #065f46; border-color: #a7f3d0; margin-left: 12px;">
-              {{ '%.1f' % (qa.similarity * 100) }}%
-            </span>
+      
+      {% if debug_meta.qa_search_metadata %}
+        {% set qa_meta = debug_meta.qa_search_metadata %}
+        <div style="margin-bottom: 12px; padding: 8px; background: #fff; border-radius: 6px; border: 1px solid #e5e7eb;">
+          <div class="meta" style="margin-bottom: 4px;">
+            <strong>Arama Durumu:</strong>
+            {% if qa_meta.attempted %}
+              <span style="color: #059669;">✓ Arama yapıldı</span>
+            {% else %}
+              <span style="color: #dc2626;">✗ Arama yapılmadı</span>
+            {% endif %}
           </div>
-          <div style="color: #374151; white-space: pre-wrap; padding-left: 12px; border-left: 3px solid #10b981;">C: {{ qa.answer }}</div>
+          {% if qa_meta.query %}
+            <div class="meta" style="margin-bottom: 4px;">
+              <strong>Aranan Metin:</strong> <code style="background: #f3f4f6; padding: 2px 6px; border-radius: 4px;">{{ qa_meta.query }}</code>
+            </div>
+          {% endif %}
+          {% if qa_meta.product_id %}
+            <div class="meta" style="margin-bottom: 4px;">
+              <strong>Ürün ID:</strong> {{ qa_meta.product_id }}
+            </div>
+          {% endif %}
+          {% if qa_meta.reason %}
+            <div class="meta" style="margin-bottom: 4px; color: #dc2626;">
+              <strong>Neden yapılmadı:</strong> {{ qa_meta.reason }}
+            </div>
+          {% endif %}
+          {% if qa_meta.error %}
+            <div class="meta" style="margin-bottom: 4px; color: #dc2626;">
+              <strong>Hata:</strong> <code style="background: #fee2e2; padding: 2px 6px; border-radius: 4px; color: #991b1b;">{{ qa_meta.error }}</code>
+            </div>
+          {% endif %}
+          {% if qa_meta.result_count is defined %}
+            <div class="meta" style="margin-bottom: 4px;">
+              <strong>Bulunan Sonuç:</strong> {{ qa_meta.result_count }} eşleşme
+            </div>
+          {% endif %}
+          {% if qa_meta.limit and qa_meta.min_similarity %}
+            <div class="meta" style="font-size: 11px; color: #6b7280;">
+              Arama parametreleri: limit={{ qa_meta.limit }}, min_similarity={{ qa_meta.min_similarity }}
+            </div>
+          {% endif %}
         </div>
-      {% endfor %}
-      <div class="meta" style="margin-top: 12px;">
-        Bu Q&A'lar AI'ya context olarak verilir ve müşteri sorusuna uygun cevap oluşturmasında kullanılır.
-      </div>
-    </div>
-    {% elif debug_meta and debug_meta.user_payload %}
-    <div class="section" style="border-color: #e5e7eb; background: #f9fafb;">
-      <h3>🔍 Eşleşen Q&A'lar (Embeddings)</h3>
-      <div class="meta">
-        Bu shadow draft için embedding araması yapılmadı veya eşleşen Q&A bulunamadı.
-        {% if debug_meta.user_payload.matching_qas is defined and debug_meta.user_payload.matching_qas|length == 0 %}
-          <br>Eşleşen Q&A listesi boş.
-        {% endif %}
-      </div>
+      {% endif %}
+
+      {% if debug_meta.user_payload and debug_meta.user_payload.matching_qas and debug_meta.user_payload.matching_qas|length > 0 %}
+        <div class="meta" style="margin-bottom: 12px;">
+          Müşteri mesajına göre bulunan <strong>{{ debug_meta.user_payload.matching_qas|length }}</strong> eşleşen Q&A:
+        </div>
+        {% for qa in debug_meta.user_payload.matching_qas %}
+          <div style="margin-bottom: 16px; padding: 12px; border: 1px solid #d1fae5; border-radius: 8px; background: #fff;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+              <div style="font-weight: 600; color: #065f46; flex: 1;">S: {{ qa.question }}</div>
+              <span class="pill" style="background: #d1fae5; color: #065f46; border-color: #a7f3d0; margin-left: 12px;">
+                {{ '%.1f' % (qa.similarity * 100) }}%
+              </span>
+            </div>
+            <div style="color: #374151; white-space: pre-wrap; padding-left: 12px; border-left: 3px solid #10b981;">C: {{ qa.answer }}</div>
+          </div>
+        {% endfor %}
+        <div class="meta" style="margin-top: 12px;">
+          Bu Q&A'lar AI'ya context olarak verilir ve müşteri sorusuna uygun cevap oluşturmasında kullanılır.
+        </div>
+      {% elif debug_meta.qa_search_metadata and debug_meta.qa_search_metadata.attempted %}
+        <div class="meta" style="color: #6b7280;">
+          Arama yapıldı ancak eşleşen Q&A bulunamadı (min_similarity={{ debug_meta.qa_search_metadata.min_similarity }} eşiğini geçen sonuç yok).
+        </div>
+      {% elif not debug_meta.qa_search_metadata or not debug_meta.qa_search_metadata.attempted %}
+        <div class="meta" style="color: #6b7280;">
+          {% if debug_meta.qa_search_metadata and debug_meta.qa_search_metadata.reason %}
+            Arama yapılmadı: {{ debug_meta.qa_search_metadata.reason }}
+          {% else %}
+            Bu shadow draft için embedding araması yapılmadı (eski kayıt veya metadata eksik).
+          {% endif %}
+        </div>
+      {% endif %}
     </div>
     {% endif %}
 

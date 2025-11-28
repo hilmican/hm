@@ -820,7 +820,19 @@ def draft_reply(
 
 	# Search for matching Q&As if we have a product and customer message
 	matching_qas: List[Dict[str, Any]] = []
+	qa_search_metadata: Dict[str, Any] = {
+		"attempted": False,
+		"reason": None,
+		"query": None,
+		"product_id": None,
+		"error": None,
+		"limit": 3,
+		"min_similarity": 0.7,
+	}
 	if product_id_val and last_customer_message:
+		qa_search_metadata["attempted"] = True
+		qa_search_metadata["query"] = last_customer_message
+		qa_search_metadata["product_id"] = product_id_val
 		try:
 			from .embeddings import search_product_qas
 			qa_results = search_product_qas(
@@ -837,6 +849,7 @@ def draft_reply(
 				}
 				for qa, similarity in qa_results
 			]
+			qa_search_metadata["result_count"] = len(matching_qas)
 			if matching_qas:
 				try:
 					log.info(
@@ -849,10 +862,17 @@ def draft_reply(
 					pass
 		except Exception as exc:
 			# Don't fail if Q&A search fails, just log and continue
+			qa_search_metadata["error"] = str(exc)
 			try:
 				log.warning("draft_reply qa_search_failed conversation_id=%s error=%s", conversation_id, exc)
 			except Exception:
 				pass
+	else:
+		# Search was not attempted - record why
+		if not product_id_val:
+			qa_search_metadata["reason"] = "product_id eksik (ürün bulunamadı)"
+		elif not last_customer_message:
+			qa_search_metadata["reason"] = "last_customer_message eksik (müşteri mesajı yok)"
 
 	user_payload: Dict[str, Any] = {
 		"store": store_conf,
@@ -1672,6 +1692,7 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 				"system_prompt": sys_prompt,
 				"user_payload": user_payload,
 				"raw_response": raw_response,
+				"qa_search_metadata": qa_search_metadata,
 			}
 			if api_request_payload:
 				debug_meta["api_request_payload"] = api_request_payload
