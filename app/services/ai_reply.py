@@ -1547,18 +1547,24 @@ HITAP KURALLARI:
 	message_order_instruction = """
 === MESAJ SIRASI VE YANIT KURALI (KRİTİK) ===
 
-Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının EN SON mesajına veya son birkaç mesajına yanıt ver.
+Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş mesajlarına yanıt ver.
 
 1. History listesindeki mesajlar zaman sırasına göre dizilidir (timestamp_ms'ye göre).
-2. Kullanıcının EN SON mesajına (history listesinin sonundaki "in" yönlü mesaj) yanıt ver.
-3. Eğer kullanıcı kısa aralıklarla birden fazla mesaj gönderdiyse (1-2-3 satır), bunların HEPSİNE birlikte yanıt ver.
-4. Geçmiş mesajlara değil, sadece EN SON mesaj(lar)a odaklan.
-5. Kullanıcı "öğrenip dönüş yapalım" gibi bir şey söylediyse, bu EN SON mesajdır ve buna göre yanıt ver.
+2. Son AI yanıtından (OUT mesajı) sonraki TÜM kullanıcı mesajlarına (IN mesajları) yanıt ver.
+3. Eğer kullanıcı birden fazla mesaj gönderdiyse ve bunlara henüz cevap verilmediyse, HEPSİNE tek bir cevapta yanıt ver.
+4. Birden fazla soruya yanıt verirken, her soruyu ayrı satırlarda veya paragraflarda cevaplayabilirsin.
+5. Geçmiş mesajlara (zaten cevaplanmış olanlara) değil, sadece cevap verilmemiş mesajlara odaklan.
+6. Kullanıcı "öğrenip dönüş yapalım" gibi bir şey söylediyse, bu mesaja uygun şekilde yanıt ver.
 
-ÖRNEK:
-- History: [IN: "Bedenlimi acaba", OUT: "Boy kilo söylerseniz...", IN: "Oglum icin sordum", IN: "Ögrenip dönus yapalim"]
-- Bu durumda EN SON mesajlar: "Oglum icin sordum" ve "Ögrenip dönus yapalim"
-- Bu İKİ MESAJA birlikte yanıt ver, önceki "Bedenlimi acaba" mesajına değil.
+ÖRNEK 1 - Tek mesaj:
+- History: [IN: "Bedenlimi acaba", OUT: "Boy kilo söylerseniz...", IN: "Ögrenip dönus yapalim"]
+- Bu durumda cevap verilmemiş mesaj: "Ögrenip dönus yapalim"
+- Bu mesaja yanıt ver.
+
+ÖRNEK 2 - Birden fazla cevap verilmemiş mesaj:
+- History: [IN: "Bedenlimi acaba", OUT: "Boy kilo söylerseniz...", IN: "Oglum icin sordum", IN: "Kac para?", IN: "Kargo ne kadar?"]
+- Bu durumda cevap verilmemiş mesajlar: "Oglum icin sordum", "Kac para?", "Kargo ne kadar?"
+- Bu ÜÇ MESAJA da tek bir cevapta yanıt ver (her birini ayrı satırlarda veya paragraflarda cevaplayabilirsin).
 """
 	sys_prompt_parts.append(message_order_instruction)
 	
