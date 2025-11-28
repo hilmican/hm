@@ -266,7 +266,15 @@ async function searchQAs() {
     resultsDiv.innerHTML = '<p class="meta">Aranıyor...</p>';
     
     try {
-        const r = await fetch(`/products/${productId}/qas/search?query=${encodeURIComponent(query)}&limit=5&min_similarity=0.7`);
+        const formData = new FormData();
+        formData.append('query', query);
+        formData.append('limit', '5');
+        formData.append('min_similarity', '0.7');
+        
+        const r = await fetch(`/products/${productId}/qas/search`, {
+            method: 'POST',
+            body: formData
+        });
         if (!r.ok) {
             const err = await r.text();
             throw new Error(err);

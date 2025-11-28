@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Form
 from sqlmodel import select
 
 from ..db import get_session
@@ -56,9 +56,9 @@ def list_all_qas(is_active: Optional[bool] = Query(None), limit: int = Query(def
 
 @router.post("/qas/search/all")
 def search_all_qas_endpoint(
-	query: str,
-	limit: int = Query(default=10, ge=1, le=50),
-	min_similarity: float = Query(default=0.7, ge=0.0, le=1.0),
+	query: str = Form(...),
+	limit: int = Form(10),
+	min_similarity: float = Form(0.7),
 ):
 	"""Search Q&As across all products using semantic similarity."""
 	if not query or not query.strip():
@@ -152,9 +152,9 @@ def list_product_qas(product_id: int, is_active: Optional[bool] = Query(None)):
 @router.post("/{product_id}/qas")
 def create_product_qa(
 	product_id: int,
-	question: str,
-	answer: str,
-	is_active: bool = True,
+	question: str = Form(...),
+	answer: str = Form(...),
+	is_active: bool = Form(True),
 ):
 	"""Create a new Q&A for a product. Automatically generates embedding."""
 	with get_session() as session:
@@ -282,9 +282,9 @@ def regenerate_qa_embedding(qa_id: int):
 @router.post("/{product_id}/qas/search")
 def search_product_qas_endpoint(
 	product_id: int,
-	query: str,
-	limit: int = Query(default=5, ge=1, le=20),
-	min_similarity: float = Query(default=0.7, ge=0.0, le=1.0),
+	query: str = Form(...),
+	limit: int = Form(5),
+	min_similarity: float = Form(0.7),
 ):
 	"""Search Q&As for a product using semantic similarity."""
 	if not query or not query.strip():
