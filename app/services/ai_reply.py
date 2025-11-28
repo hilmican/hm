@@ -514,6 +514,9 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 	Load recent messages for this conversation and return (history_list, last_customer_message).
 	
 	history_list: [{"dir": "in|out", "text": "str", "timestamp_ms": int}, ...]
+	
+	For REAL conversations: Only include messages actually sent to client (ai_status='sent' or NULL for manual).
+	For MOCK conversations: Include shadow replies with status='sent' or 'suggested'.
 	"""
 	history_from_messages: List[Dict[str, Any]] = []
 	last_customer_message = ""
@@ -554,15 +557,44 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 		except Exception:
 			is_mock_conversation = False
 
-		msgs = (
-			session.exec(
-				select(Message)
-				.where(Message.conversation_id == int(conversation_id))
-				.order_by(Message.timestamp_ms.asc())
-				.limit(limit_val)
-			).all()
-		)
+		# For REAL conversations: Only include messages actually sent to client
+		# For MOCK conversations: Include all messages (they're simulated)
+		if is_mock_conversation:
+			# Mock: include all messages
+			msgs = (
+				session.exec(
+					select(Message)
+					.where(Message.conversation_id == int(conversation_id))
+					.order_by(Message.timestamp_ms.asc())
+					.limit(limit_val)
+				).all()
+			)
+		else:
+			# Real: Only include inbound messages OR outbound messages that were actually sent
+			from sqlalchemy import or_
+			msgs = (
+				session.exec(
+					select(Message)
+					.where(Message.conversation_id == int(conversation_id))
+					.where(
+						# Include all inbound messages (from customer)
+						(Message.direction == "in")
+						|
+						# Include outbound messages that were actually sent
+						(
+							(Message.direction == "out")
+							& (
+								(Message.ai_status == "sent")
+								| (Message.ai_status.is_(None))  # Manual messages (no ai_status)
+							)
+						)
+					)
+					.order_by(Message.timestamp_ms.asc())
+					.limit(limit_val)
+				).all()
+			)
 
+		# For mock conversations, also load shadow replies
 		if is_mock_conversation:
 			try:
 				shadow_query = (
@@ -590,7 +622,8 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 		except Exception:
 			continue
 
-	if shadow_rows:
+	# Only add shadow replies for mock conversations
+	if is_mock_conversation and shadow_rows:
 		for reply in shadow_rows:
 			try:
 				text_val = (reply.reply_text or "").strip()
@@ -621,7 +654,8 @@ def _load_history(conversation_id: int, *, limit: int = 40) -> Tuple[List[Dict[s
 		if not last_customer_message:
 			last_customer_message = ""
 
-	if mock_outbound:
+	# Only merge shadow replies for mock conversations
+	if is_mock_conversation and mock_outbound:
 		history_trimmed = (history_trimmed or []) + mock_outbound
 		history_trimmed.sort(key=lambda item: item.get("timestamp_ms") or 0)
 
@@ -1508,6 +1542,25 @@ HITAP KURALLARI:
 	sys_prompt_parts.append(hail_instructions)
 	sys_prompt_parts.append(repeat_guard_instructions)
 	sys_prompt_parts.append(gender_instructions)
+	
+	# Add message order instruction
+	message_order_instruction = """
+=== MESAJ SIRASI VE YANIT KURALI (KRİTİK) ===
+
+Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının EN SON mesajına veya son birkaç mesajına yanıt ver.
+
+1. History listesindeki mesajlar zaman sırasına göre dizilidir (timestamp_ms'ye göre).
+2. Kullanıcının EN SON mesajına (history listesinin sonundaki "in" yönlü mesaj) yanıt ver.
+3. Eğer kullanıcı kısa aralıklarla birden fazla mesaj gönderdiyse (1-2-3 satır), bunların HEPSİNE birlikte yanıt ver.
+4. Geçmiş mesajlara değil, sadece EN SON mesaj(lar)a odaklan.
+5. Kullanıcı "öğrenip dönüş yapalım" gibi bir şey söylediyse, bu EN SON mesajdır ve buna göre yanıt ver.
+
+ÖRNEK:
+- History: [IN: "Bedenlimi acaba", OUT: "Boy kilo söylerseniz...", IN: "Oglum icin sordum", IN: "Ögrenip dönus yapalim"]
+- Bu durumda EN SON mesajlar: "Oglum icin sordum" ve "Ögrenip dönus yapalim"
+- Bu İKİ MESAJA birlikte yanıt ver, önceki "Bedenlimi acaba" mesajına değil.
+"""
+	sys_prompt_parts.append(message_order_instruction)
 	
 	if product_extra_sys:
 		sys_prompt_parts.append(f"=== EK ÜRÜN TALİMATLARI ===\n{product_extra_sys}")
