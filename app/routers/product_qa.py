@@ -1,0 +1,238 @@
+from __future__ import annotations
+
+import datetime as dt
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from sqlmodel import select
+
+from ..db import get_session
+from ..models import Product, ProductQA
+from ..services.embeddings import (
+	embedding_to_json,
+	generate_embedding,
+	search_all_product_qas,
+	search_product_qas,
+)
+
+router = APIRouter(prefix="/products", tags=["product_qa"])
+
+
+@router.get("/{product_id}/qas")
+def list_product_qas(product_id: int, is_active: Optional[bool] = Query(None)):
+	"""List all Q&As for a product."""
+	with get_session() as session:
+		# Verify product exists
+		product = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not product:
+			raise HTTPException(status_code=404, detail="Product not found")
+		
+		# Build query
+		stmt = select(ProductQA).where(ProductQA.product_id == product_id)
+		if is_active is not None:
+			stmt = stmt.where(ProductQA.is_active == is_active)  # noqa: E712
+		stmt = stmt.order_by(ProductQA.created_at.desc())
+		
+		qas = session.exec(stmt).all()
+		
+		return {
+			"product_id": product_id,
+			"qas": [
+				{
+					"id": qa.id,
+					"question": qa.question,
+					"answer": qa.answer,
+					"is_active": qa.is_active,
+					"has_embedding": bool(qa.embedding_json),
+					"created_at": qa.created_at.isoformat() if qa.created_at else None,
+					"updated_at": qa.updated_at.isoformat() if qa.updated_at else None,
+				}
+				for qa in qas
+			],
+		}
+
+
+@router.post("/{product_id}/qas")
+def create_product_qa(
+	product_id: int,
+	question: str,
+	answer: str,
+	is_active: bool = True,
+):
+	"""Create a new Q&A for a product. Automatically generates embedding."""
+	with get_session() as session:
+		# Verify product exists
+		product = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not product:
+			raise HTTPException(status_code=404, detail="Product not found")
+		
+		if not question or not question.strip():
+			raise HTTPException(status_code=400, detail="question is required")
+		if not answer or not answer.strip():
+			raise HTTPException(status_code=400, detail="answer is required")
+		
+		# Generate embedding from question
+		# We use question for embedding since that's what we'll match against
+		embedding = generate_embedding(question.strip())
+		embedding_json = embedding_to_json(embedding)
+		
+		qa = ProductQA(
+			product_id=product_id,
+			question=question.strip(),
+			answer=answer.strip(),
+			embedding_json=embedding_json,
+			is_active=is_active,
+		)
+		
+		session.add(qa)
+		session.flush()
+		
+		return {
+			"id": qa.id,
+			"product_id": qa.product_id,
+			"question": qa.question,
+			"answer": qa.answer,
+			"is_active": qa.is_active,
+			"has_embedding": bool(qa.embedding_json),
+		}
+
+
+@router.put("/qas/{qa_id}")
+def update_product_qa(
+	qa_id: int,
+	question: Optional[str] = None,
+	answer: Optional[str] = None,
+	is_active: Optional[bool] = None,
+):
+	"""Update a Q&A. Regenerates embedding if question or answer changed."""
+	with get_session() as session:
+		qa = session.exec(select(ProductQA).where(ProductQA.id == qa_id)).first()
+		if not qa:
+			raise HTTPException(status_code=404, detail="Q&A not found")
+		
+		needs_embedding_update = False
+		
+		if question is not None:
+			if not question.strip():
+				raise HTTPException(status_code=400, detail="question cannot be empty")
+			if qa.question != question.strip():
+				qa.question = question.strip()
+				needs_embedding_update = True
+		
+		if answer is not None:
+			if not answer.strip():
+				raise HTTPException(status_code=400, detail="answer cannot be empty")
+			qa.answer = answer.strip()
+			# Regenerate embedding if answer changed too (to keep them in sync)
+			needs_embedding_update = True
+		
+		if is_active is not None:
+			qa.is_active = is_active
+		
+		if needs_embedding_update:
+			# Regenerate embedding from question
+			embedding = generate_embedding(qa.question)
+			qa.embedding_json = embedding_to_json(embedding)
+		
+		qa.updated_at = dt.datetime.utcnow()
+		
+		session.add(qa)
+		session.flush()
+		
+		return {
+			"id": qa.id,
+			"product_id": qa.product_id,
+			"question": qa.question,
+			"answer": qa.answer,
+			"is_active": qa.is_active,
+			"has_embedding": bool(qa.embedding_json),
+		}
+
+
+@router.delete("/qas/{qa_id}")
+def delete_product_qa(qa_id: int):
+	"""Delete a Q&A."""
+	with get_session() as session:
+		qa = session.exec(select(ProductQA).where(ProductQA.id == qa_id)).first()
+		if not qa:
+			raise HTTPException(status_code=404, detail="Q&A not found")
+		
+		session.delete(qa)
+		return {"status": "ok"}
+
+
+@router.post("/qas/{qa_id}/regenerate-embedding")
+def regenerate_qa_embedding(qa_id: int):
+	"""Manually regenerate the embedding for a Q&A."""
+	with get_session() as session:
+		qa = session.exec(select(ProductQA).where(ProductQA.id == qa_id)).first()
+		if not qa:
+			raise HTTPException(status_code=404, detail="Q&A not found")
+		
+		embedding = generate_embedding(qa.question)
+		qa.embedding_json = embedding_to_json(embedding)
+		qa.updated_at = dt.datetime.utcnow()
+		
+		session.add(qa)
+		session.flush()
+		
+		return {
+			"id": qa.id,
+			"has_embedding": bool(qa.embedding_json),
+		}
+
+
+@router.post("/{product_id}/qas/search")
+def search_product_qas_endpoint(
+	product_id: int,
+	query: str,
+	limit: int = Query(default=5, ge=1, le=20),
+	min_similarity: float = Query(default=0.7, ge=0.0, le=1.0),
+):
+	"""Search Q&As for a product using semantic similarity."""
+	if not query or not query.strip():
+		raise HTTPException(status_code=400, detail="query is required")
+	
+	with get_session() as session:
+		# Verify product exists
+		product = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not product:
+			raise HTTPException(status_code=404, detail="Product not found")
+	
+	results = search_product_qas(product_id, query, limit=limit, min_similarity=min_similarity)
+	
+	return {
+		"product_id": product_id,
+		"query": query,
+		"matches": [
+			{
+				"id": qa.id,
+				"question": qa.question,
+				"answer": qa.answer,
+				"similarity": round(similarity, 4),
+			}
+			for qa, similarity in results
+		],
+	}
+
+
+@router.get("/{product_id}/qas/table")
+def product_qa_table(request: Request, product_id: int):
+	"""Render Q&A management UI for a product."""
+	with get_session() as session:
+		product = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not product:
+			raise HTTPException(status_code=404, detail="Product not found")
+		
+		qas = session.exec(
+			select(ProductQA)
+			.where(ProductQA.product_id == product_id)
+			.order_by(ProductQA.created_at.desc())
+		).all()
+		
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"product_qa.html",
+			{"request": request, "product": product, "qas": qas},
+		)
+

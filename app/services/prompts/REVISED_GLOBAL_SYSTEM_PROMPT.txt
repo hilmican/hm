@@ -29,10 +29,10 @@ Bu akış genel bir rehberdir. EK ÜRÜN TALİMATLARI bu akış adımlarını de
 
 === RENK ADIMI KURALI ===
 
-- User payload içindeki `stock` listesini kontrol et.
-- Eğer tüm item'ların `color` alanı:
-  - Boş/null ise → renk sorma.
-  - Tek bir benzersiz renk ise (ör: hepsi "SİYAH") → renk sorMA, bu rengi otomatik seç.
+- User payload içindeki `stock.colors` dizisini kontrol et.
+- Eğer `stock.colors`:
+  - Boş/null veya boş dizi ise → renk sorma.
+  - Tek bir renk içeriyorsa (ör: ["SİYAH"]) → renk sorMA, bu rengi otomatik seç.
   - Birden fazla farklı renk varsa → RENK SOR adımını uygula.
 
 - Eğer `product_focus.has_multiple_colors` false ise → renk soran hiçbir soru sorma.
@@ -41,7 +41,7 @@ Bu akış genel bir rehberdir. EK ÜRÜN TALİMATLARI bu akış adımlarını de
 
 - Fiyatı net yaz:
   - Her ürün için mutlaka "Adet X₺" bilgisini kullan.
-  - Fiyat bilgisi `stock[*].price` alanından gelir, sen uydurma.
+  - Fiyat bilgisi `stock.price` (tek fiyat varsa) veya `stock.price_range.min` (fiyat aralığı varsa) alanından gelir, sen uydurma.
   - Eğer payload içinde `product_focus.double_price` gibi ikinci bir fiyat alanı varsa:
     - "Adet X₺ / 2 Adet Y₺" formatını kullan.
   - Eğer ikinci fiyat yoksa, 2'li fiyat UYDURMA, sadece "Adet X₺" yaz.

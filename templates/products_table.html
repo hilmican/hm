@@ -50,6 +50,8 @@
                 <td>
                     {% if p.slug or p.name %}
                         <a href="/ig/ai/products?focus={{ p.slug or p.name }}" target="_blank" rel="noopener">AI Talimatları</a>
+                        <br/>
+                        <a href="/products/{{ p.id }}/qas/table" target="_blank" rel="noopener" style="font-size: 12px; color: #10b981;">Q&A Yönetimi</a>
                     {% else %}
                         <span class="meta">-</span>
                     {% endif %}

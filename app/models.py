@@ -722,3 +722,21 @@ class AdminPushoverRecipient(SQLModel, table=True):
 	user_key: str = Field(sa_column=Column(String(191)), description="Pushover user key")
 	is_active: bool = Field(default=True, index=True)
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class ProductQA(SQLModel, table=True):
+	"""
+	Product Q&A entries with embeddings for semantic search.
+	Each product can have multiple question-answer pairs.
+	"""
+
+	__tablename__ = "product_qa"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	product_id: int = Field(foreign_key="product.id", index=True, description="Product this Q&A belongs to")
+	question: str = Field(sa_column=Column(Text), description="Question text")
+	answer: str = Field(sa_column=Column(Text), description="Answer text")
+	embedding_json: Optional[str] = Field(default=None, sa_column=Column(Text), description="JSON array of embedding vector")
+	is_active: bool = Field(default=True, index=True, description="Whether this Q&A is active")
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)

@@ -9,6 +9,7 @@ from .services.ai import AIClient
 from .routers import dashboard, importer, clients, items, orders, payments, reconcile, auth
 from .routers import reports
 from .routers import inventory, mappings, products
+from .routers import product_qa
 from .routers import instagram
 from .routers import legal
 from .routers import ig
@@ -200,6 +201,7 @@ def create_app() -> FastAPI:
 	app.include_router(inventory.router)
 	app.include_router(mappings.router)
 	app.include_router(products.router)
+	app.include_router(product_qa.router)
 	app.include_router(instagram.router)
 	app.include_router(legal.router)
 	app.include_router(ig.router)

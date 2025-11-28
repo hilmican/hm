@@ -1,0 +1,303 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Product Q&A - {{ product.name }}</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        h1 { margin-bottom: 12px; }
+        h2 { margin-top: 24px; margin-bottom: 12px; font-size: 18px; }
+        .toolbar { margin: 12px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+        th { background: #fafafa; position: sticky; top: 0; font-weight: 600; }
+        input, textarea, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-family: inherit; }
+        textarea { resize: vertical; min-height: 60px; width: 100%; }
+        a { color: #2563eb; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; display: inline-block; }
+        button { padding: 6px 10px; border-radius: 6px; border: 1px solid #ddd; background: #f9fafb; cursor: pointer; font-family: inherit; }
+        button:hover { background: #f3f4f6; }
+        button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+        button.primary:hover { background: #1d4ed8; }
+        button.danger { background: #ef4444; color: #fff; border-color: #ef4444; }
+        button.danger:hover { background: #dc2626; }
+        button.success { background: #10b981; color: #fff; border-color: #10b981; }
+        button.success:hover { background: #059669; }
+        .card { padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 14px; background: #fafafa; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-weight: 500; margin-bottom: 4px; font-size: 13px; }
+        .form-row { display: flex; gap: 12px; align-items: flex-start; }
+        .form-row > div { flex: 1; }
+        .badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #e5e7eb; color: #374151; }
+        .badge.active { background: #d1fae5; color: #065f46; }
+        .badge.inactive { background: #fee2e2; color: #991b1b; }
+        .badge.no-embedding { background: #fef3c7; color: #92400e; }
+        .similarity-score { font-weight: 600; color: #059669; }
+        .search-results { margin-top: 16px; }
+        .search-result-item { padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px; background: #fff; }
+        .search-result-item .question { font-weight: 600; margin-bottom: 4px; }
+        .search-result-item .answer { color: #4b5563; margin-top: 8px; white-space: pre-wrap; }
+        .meta { color: #6b7280; font-size: 12px; }
+        .inline-edit { display: none; }
+        .inline-edit.active { display: block; }
+        .inline-view.active { display: none; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <div class="toolbar">
+        <a href="/products/table">← Ürünlere Dön</a>
+        <span class="pill">{{ qas|length }} Q&A</span>
+    </div>
+    
+    <h1>Product Q&A: {{ product.name }}</h1>
+    <p class="meta">Product ID: {{ product.id }} | Slug: {{ product.slug }}</p>
+    
+    <div class="card">
+        <h2 style="margin-top: 0;">Yeni Q&A Ekle</h2>
+        <form id="createForm" onsubmit="return false;">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="newQuestion">Soru *</label>
+                    <textarea id="newQuestion" name="question" required placeholder="Örn: Bu ürün hangi bedenlerde var?"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="newAnswer">Cevap *</label>
+                    <textarea id="newAnswer" name="answer" required placeholder="Örn: Ürünümüz S, M, L ve XL bedenlerinde mevcuttur."></textarea>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="is_active" checked> Aktif (embedding otomatik oluşturulacak)
+                </label>
+            </div>
+            <button type="submit" class="primary">Q&A Ekle</button>
+        </form>
+    </div>
+    
+    <div class="card">
+        <h2 style="margin-top: 0;">Q&A Arama (Test)</h2>
+        <div class="form-group">
+            <label for="searchQuery">Arama Metni</label>
+            <input type="text" id="searchQuery" placeholder="Örn: Bedenler neler?" style="width: 100%; max-width: 500px;" />
+        </div>
+        <button onclick="searchQAs()" class="primary">Ara</button>
+        <div id="searchResults" class="search-results" style="display: none;"></div>
+    </div>
+    
+    <h2>Mevcut Q&As</h2>
+    {% if qas %}
+    <table>
+        <thead>
+            <tr>
+                <th>Soru</th>
+                <th>Cevap</th>
+                <th>Durum</th>
+                <th>Embedding</th>
+                <th>İşlemler</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for qa in qas %}
+            <tr data-id="{{ qa.id }}">
+                <td>
+                    <div class="inline-view active">
+                        <div class="question">{{ qa.question }}</div>
+                    </div>
+                    <div class="inline-edit">
+                        <textarea data-field="question" style="width: 100%; min-width: 200px;">{{ qa.question }}</textarea>
+                    </div>
+                </td>
+                <td>
+                    <div class="inline-view active">
+                        <div class="answer" style="white-space: pre-wrap;">{{ qa.answer }}</div>
+                    </div>
+                    <div class="inline-edit">
+                        <textarea data-field="answer" style="width: 100%; min-width: 200px;">{{ qa.answer }}</textarea>
+                    </div>
+                </td>
+                <td>
+                    <div class="inline-view active">
+                        {% if qa.is_active %}
+                            <span class="badge active">Aktif</span>
+                        {% else %}
+                            <span class="badge inactive">Pasif</span>
+                        {% endif %}
+                    </div>
+                    <div class="inline-edit">
+                        <label>
+                            <input type="checkbox" data-field="is_active" {% if qa.is_active %}checked{% endif %}> Aktif
+                        </label>
+                    </div>
+                </td>
+                <td>
+                    {% if qa.embedding_json %}
+                        <span class="badge active">✓ Var</span>
+                    {% else %}
+                        <span class="badge no-embedding">✗ Yok</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="inline-view active">
+                        <button onclick="editRow({{ qa.id }})" class="success" style="padding: 4px 8px; font-size: 12px;">Düzenle</button>
+                        <button onclick="regenerateEmbedding({{ qa.id }})" class="primary" style="padding: 4px 8px; font-size: 12px;" title="Embedding'i yeniden oluştur">🔄</button>
+                        <button onclick="deleteRow({{ qa.id }})" class="danger" style="padding: 4px 8px; font-size: 12px;">Sil</button>
+                    </div>
+                    <div class="inline-edit">
+                        <button onclick="saveRow({{ qa.id }})" class="success" style="padding: 4px 8px; font-size: 12px;">Kaydet</button>
+                        <button onclick="cancelEdit({{ qa.id }})" style="padding: 4px 8px; font-size: 12px;">İptal</button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="meta">Henüz Q&A eklenmemiş.</p>
+    {% endif %}
+</body>
+<script>
+const productId = {{ product.id }};
+
+// Create Q&A
+document.getElementById('createForm').addEventListener('submit', async () => {
+    const form = document.getElementById('createForm');
+    const data = new FormData(form);
+    try {
+        const r = await fetch(`/products/${productId}/qas`, {
+            method: 'POST',
+            body: data
+        });
+        if (!r.ok) {
+            const err = await r.text();
+            throw new Error(err);
+        }
+        location.reload();
+    } catch(e) {
+        alert('Q&A ekleme başarısız: ' + e.message);
+    }
+});
+
+// Edit row
+function editRow(qaId) {
+    const tr = document.querySelector(`tr[data-id="${qaId}"]`);
+    tr.querySelectorAll('.inline-view').forEach(el => el.classList.remove('active'));
+    tr.querySelectorAll('.inline-edit').forEach(el => el.classList.add('active'));
+}
+
+// Cancel edit
+function cancelEdit(qaId) {
+    const tr = document.querySelector(`tr[data-id="${qaId}"]`);
+    tr.querySelectorAll('.inline-view').forEach(el => el.classList.add('active'));
+    tr.querySelectorAll('.inline-edit').forEach(el => el.classList.remove('active'));
+    location.reload();
+}
+
+// Save row
+async function saveRow(qaId) {
+    const tr = document.querySelector(`tr[data-id="${qaId}"]`);
+    const body = {};
+    for (const inp of tr.querySelectorAll('[data-field]')) {
+        const k = inp.getAttribute('data-field');
+        if (inp.type === 'checkbox') {
+            body[k] = inp.checked;
+        } else {
+            body[k] = inp.value;
+        }
+    }
+    try {
+        const r = await fetch(`/products/qas/${qaId}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        if (!r.ok) {
+            const err = await r.text();
+            throw new Error(err);
+        }
+        location.reload();
+    } catch (e) {
+        alert('Kaydetme başarısız: ' + e.message);
+    }
+}
+
+// Delete row
+async function deleteRow(qaId) {
+    if (!confirm('Bu Q&A\'yı silmek istediğinize emin misiniz?')) return;
+    try {
+        const r = await fetch(`/products/qas/${qaId}`, { method: 'DELETE' });
+        if (!r.ok) {
+            const err = await r.text();
+            throw new Error(err);
+        }
+        location.reload();
+    } catch (e) {
+        alert('Silme başarısız: ' + e.message);
+    }
+}
+
+// Regenerate embedding
+async function regenerateEmbedding(qaId) {
+    if (!confirm('Embedding\'i yeniden oluşturmak istediğinize emin misiniz?')) return;
+    try {
+        const r = await fetch(`/products/qas/${qaId}/regenerate-embedding`, { method: 'POST' });
+        if (!r.ok) {
+            const err = await r.text();
+            throw new Error(err);
+        }
+        alert('Embedding yeniden oluşturuldu.');
+        location.reload();
+    } catch (e) {
+        alert('Embedding oluşturma başarısız: ' + e.message);
+    }
+}
+
+// Search Q&As
+async function searchQAs() {
+    const query = document.getElementById('searchQuery').value.trim();
+    if (!query) {
+        alert('Lütfen arama metni girin.');
+        return;
+    }
+    
+    const resultsDiv = document.getElementById('searchResults');
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = '<p class="meta">Aranıyor...</p>';
+    
+    try {
+        const r = await fetch(`/products/${productId}/qas/search?query=${encodeURIComponent(query)}&limit=5&min_similarity=0.7`);
+        if (!r.ok) {
+            const err = await r.text();
+            throw new Error(err);
+        }
+        const data = await r.json();
+        
+        if (data.matches && data.matches.length > 0) {
+            let html = `<h3 style="margin-bottom: 12px;">${data.matches.length} sonuç bulundu:</h3>`;
+            for (const match of data.matches) {
+                html += `
+                    <div class="search-result-item">
+                        <div class="question">${escapeHtml(match.question)}</div>
+                        <div class="meta">Benzerlik: <span class="similarity-score">${(match.similarity * 100).toFixed(1)}%</span></div>
+                        <div class="answer">${escapeHtml(match.answer)}</div>
+                    </div>
+                `;
+            }
+            resultsDiv.innerHTML = html;
+        } else {
+            resultsDiv.innerHTML = '<p class="meta">Sonuç bulunamadı (min. benzerlik: 0.7).</p>';
+        }
+    } catch (e) {
+        resultsDiv.innerHTML = '<p style="color: #ef4444;">Arama başarısız: ' + escapeHtml(e.message) + '</p>';
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+</html>
+

@@ -177,6 +177,79 @@ def _shadow_system_prompt(base_extra: Optional[str] = None) -> str:
 	return base_extra or ""
 
 
+def _compact_stock_list(stock: List[Dict[str, Any]]) -> Dict[str, Any]:
+	"""
+	Transform a full stock list (all SKU combinations) into a compact format.
+	
+	Returns a compact structure with:
+	- colors: [list of unique colors]
+	- sizes: [list of unique sizes]
+	- price_range: {min, max} (if prices available)
+	- price: single price if all items have the same price
+	"""
+	if not stock:
+		return {
+			"colors": [],
+			"sizes": [],
+			"price_range": None,
+		}
+	
+	colors: set[str] = set()
+	sizes: set[str] = set()
+	prices: list[float] = []
+	
+	for entry in stock:
+		color = entry.get("color")
+		if color and isinstance(color, str) and color.strip():
+			colors.add(color.strip())
+		
+		size = entry.get("size")
+		if size and isinstance(size, str) and size.strip():
+			sizes.add(size.strip())
+		
+		price = entry.get("price")
+		if price is not None:
+			try:
+				price_val = float(price)
+				if price_val > 0:
+					prices.append(price_val)
+			except (ValueError, TypeError):
+				pass
+	
+	# Sort colors alphabetically
+	colors_sorted = sorted(list(colors))
+	
+	# Sort sizes: try numeric first, fallback to alphabetical
+	def _sort_size_key(size_str: str) -> tuple[int, float | str]:
+		"""Sort key for sizes: numeric first, then alphabetical."""
+		try:
+			# Try to extract numeric part
+			num_val = float(size_str.strip())
+			return (0, num_val)  # 0 = numeric, use numeric value for sorting
+		except (ValueError, TypeError):
+			return (1, size_str.lower())  # 1 = non-numeric, use alphabetical
+	
+	sizes_sorted = sorted(list(sizes), key=_sort_size_key)
+	
+	result: Dict[str, Any] = {
+		"colors": colors_sorted,
+		"sizes": sizes_sorted,
+	}
+	
+	if prices:
+		result["price_range"] = {
+			"min": min(prices),
+			"max": max(prices),
+		}
+		# If all prices are the same, include a single price
+		if len(set(prices)) == 1:
+			result["price"] = prices[0]
+	else:
+		result["price_range"] = None
+	
+	return result
+
+
 def _load_focus_product_and_stock(conversation_id: int) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
 	"""
 	Resolve focus product (if any) and build a stock snapshot for that product.
@@ -708,15 +781,56 @@ def draft_reply(
 	if double_price is not None:
 		product_focus_data["double_price"] = double_price
 
+	# Transform stock list into compact format (colors, sizes, price_range instead of all SKU combinations)
+	stock_compact = _compact_stock_list(stock)
+
+	# Search for matching Q&As if we have a product and customer message
+	matching_qas: List[Dict[str, Any]] = []
+	if product_id_val and last_customer_message:
+		try:
+			from .embeddings import search_product_qas
+			qa_results = search_product_qas(
+				product_id_val,
+				last_customer_message,
+				limit=3,
+				min_similarity=0.7,
+			)
+			matching_qas = [
+				{
+					"question": qa.question,
+					"answer": qa.answer,
+					"similarity": round(similarity, 3),
+				}
+				for qa, similarity in qa_results
+			]
+			if matching_qas:
+				try:
+					log.info(
+						"draft_reply found_matching_qas conversation_id=%s product_id=%s count=%s",
+						conversation_id,
+						product_id_val,
+						len(matching_qas),
+					)
+				except Exception:
+					pass
+		except Exception as exc:
+			# Don't fail if Q&A search fails, just log and continue
+			try:
+				log.warning("draft_reply qa_search_failed conversation_id=%s error=%s", conversation_id, exc)
+			except Exception:
+				pass
+
 	user_payload: Dict[str, Any] = {
 		"store": store_conf,
 		"product_focus": product_focus_data,
-		"stock": stock,
+		"stock": stock_compact,
 		"history": history,
 		"last_customer_message": last_customer_message,
 		"transcript": transcript,
 		"product_images": product_images,
 	}
+	if matching_qas:
+		user_payload["matching_qas"] = matching_qas
 	state_payload = dict(state or {})
 	hail_already_sent = bool(state_payload.get("hail_sent"))
 	# Detect if this is a first message (no previous AI replies in history)
@@ -1169,6 +1283,20 @@ def draft_reply(
 			"- Örnek: Standart \"Merhabalar abim, Adet 1599₺, ürün özeti, beden sorusu\" mesajı için confidence: 0.75-0.85 arası uygundur.\n\n"
 		)
 	
+	# Add Q&A instructions if we have matching Q&As
+	qa_instruction = ""
+	if matching_qas:
+		qa_instruction = (
+			"\n=== EŞLEŞEN Q&A'LAR ===\n"
+			"Müşterinin sorusuna benzer sorular ve cevapları aşağıda bulunmaktadır. "
+			"Bu cevapları kullanarak müşteriye uygun bir yanıt ver. "
+			"Eğer eşleşen Q&A varsa, onların cevaplarını temel al ama müşterinin sorusuna özelleştir.\n"
+			+ "\n".join([
+				f"Q: {qa['question']}\nA: {qa['answer']}\n(Benzerlik: {qa['similarity']:.1%})\n"
+				for qa in matching_qas
+			]) + "\n"
+		)
+	
 	user_prompt = (
 		"=== KRİTİK TALİMATLAR ===\n"
 		"1. SADECE ve SADECE aşağıdaki JSON şemasına UYGUN bir JSON obje döndür.\n"
@@ -1190,6 +1318,7 @@ def draft_reply(
 		"- confidence sayı olmalı (0.0-1.0), string değil.\n"
 		"- JSON dışında hiçbir metin, açıklama veya yorum ekleme.\n\n"
 		+ confidence_instruction +
+		qa_instruction +
 		"=== BAĞLAM VERİSİ (SADECE BİLGİ İÇİN) ===\n"
 		"CONTEXT_JSON_START\n"
 		f"{context_json}\n"

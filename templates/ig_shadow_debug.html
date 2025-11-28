@@ -88,6 +88,29 @@
     </div>
     {% endif %}
 
+    {% if debug_meta and debug_meta.user_payload and debug_meta.user_payload.matching_qas %}
+    <div class="section" style="border-color: #10b981; background: #f0fdf4;">
+      <h3>🔍 Eşleşen Q&A'lar (Embeddings)</h3>
+      <div class="meta" style="margin-bottom: 12px;">
+        Müşteri mesajına göre bulunan <strong>{{ debug_meta.user_payload.matching_qas|length }}</strong> eşleşen Q&A bulundu:
+      </div>
+      {% for qa in debug_meta.user_payload.matching_qas %}
+        <div style="margin-bottom: 16px; padding: 12px; border: 1px solid #d1fae5; border-radius: 8px; background: #fff;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+            <div style="font-weight: 600; color: #065f46; flex: 1;">S: {{ qa.question }}</div>
+            <span class="pill" style="background: #d1fae5; color: #065f46; border-color: #a7f3d0; margin-left: 12px;">
+              {{ '%.1f' % (qa.similarity * 100) }}%
+            </span>
+          </div>
+          <div style="color: #374151; white-space: pre-wrap; padding-left: 12px; border-left: 3px solid #10b981;">C: {{ qa.answer }}</div>
+        </div>
+      {% endfor %}
+      <div class="meta" style="margin-top: 12px;">
+        Bu Q&A'lar AI'ya context olarak verilir ve müşteri sorusuna uygun cevap oluşturmasında kullanılır.
+      </div>
+    </div>
+    {% endif %}
+
     <div class="section">
       <h3>AI Cevabı (reply_text)</h3>
       <pre>{{ (draft.reply_text or '') }}</pre>
