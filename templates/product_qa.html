@@ -41,7 +41,7 @@
         .meta { color: #6b7280; font-size: 12px; }
         .inline-edit { display: none; }
         .inline-edit.active { display: block; }
-        .inline-view.active { display: none; }
+        .inline-view.editing { display: none; }
     </style>
 </head>
 <body>
@@ -102,7 +102,7 @@
             {% for qa in qas %}
             <tr data-id="{{ qa.id }}">
                 <td>
-                    <div class="inline-view active">
+                    <div class="inline-view">
                         <div class="question">{{ qa.question }}</div>
                     </div>
                     <div class="inline-edit">
@@ -110,7 +110,7 @@
                     </div>
                 </td>
                 <td>
-                    <div class="inline-view active">
+                    <div class="inline-view">
                         <div class="answer" style="white-space: pre-wrap;">{{ qa.answer }}</div>
                     </div>
                     <div class="inline-edit">
@@ -118,7 +118,7 @@
                     </div>
                 </td>
                 <td>
-                    <div class="inline-view active">
+                    <div class="inline-view">
                         {% if qa.is_active %}
                             <span class="badge active">Aktif</span>
                         {% else %}
@@ -139,7 +139,7 @@
                     {% endif %}
                 </td>
                 <td>
-                    <div class="inline-view active">
+                    <div class="inline-view">
                         <button onclick="editRow({{ qa.id }})" class="success" style="padding: 4px 8px; font-size: 12px;">Düzenle</button>
                         <button onclick="regenerateEmbedding({{ qa.id }})" class="primary" style="padding: 4px 8px; font-size: 12px;" title="Embedding'i yeniden oluştur">🔄</button>
                         <button onclick="deleteRow({{ qa.id }})" class="danger" style="padding: 4px 8px; font-size: 12px;">Sil</button>
@@ -182,14 +182,14 @@ document.getElementById('createForm').addEventListener('submit', async () => {
 // Edit row
 function editRow(qaId) {
     const tr = document.querySelector(`tr[data-id="${qaId}"]`);
-    tr.querySelectorAll('.inline-view').forEach(el => el.classList.remove('active'));
+    tr.querySelectorAll('.inline-view').forEach(el => el.classList.add('editing'));
     tr.querySelectorAll('.inline-edit').forEach(el => el.classList.add('active'));
 }
 
 // Cancel edit
 function cancelEdit(qaId) {
     const tr = document.querySelector(`tr[data-id="${qaId}"]`);
-    tr.querySelectorAll('.inline-view').forEach(el => el.classList.add('active'));
+    tr.querySelectorAll('.inline-view').forEach(el => el.classList.remove('editing'));
     tr.querySelectorAll('.inline-edit').forEach(el => el.classList.remove('active'));
     location.reload();
 }
