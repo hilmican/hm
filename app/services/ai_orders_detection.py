@@ -148,14 +148,23 @@ def process_conversations_by_date_range(
 	end_date: dt.date,
 	limit: int = 100,
 	run_id: Optional[int] = None,
+	skip_processed: bool = True,
 ) -> Dict[str, Any]:
 	"""Process conversations by date range and create/update AI order candidates.
 	
-	Returns summary statistics: processed, created, updated, errors
+	Args:
+		start_date: Start date for conversation filtering
+		end_date: End date for conversation filtering
+		limit: Maximum number of conversations to process
+		run_id: Optional run ID for logging
+		skip_processed: If True, skip conversations that already have AI order candidates
+	
+	Returns summary statistics: processed, created, updated, errors, skipped
 	"""
 	processed = 0
 	created = 0
 	updated = 0
+	skipped = 0
 	errors: List[str] = []
 	
 	# Convert dates to milliseconds
@@ -166,21 +175,46 @@ def process_conversations_by_date_range(
 	
 	# Get conversation IDs from messages in date range
 	with get_session() as session:
-		sql = (
-			"SELECT DISTINCT conversation_id FROM message "
-			"WHERE timestamp_ms >= :start_ms AND timestamp_ms < :end_ms "
-			"AND conversation_id IS NOT NULL "
-			"ORDER BY conversation_id DESC "
-			"LIMIT :lim"
-		)
+		if skip_processed:
+			# Exclude conversations that already have AI order candidates
+			sql = (
+				"SELECT DISTINCT m.conversation_id FROM message m "
+				"LEFT JOIN ai_order_candidates aoc ON aoc.conversation_id = m.conversation_id "
+				"WHERE m.timestamp_ms >= :start_ms AND m.timestamp_ms < :end_ms "
+				"AND m.conversation_id IS NOT NULL "
+				"AND aoc.id IS NULL "
+				"ORDER BY m.conversation_id DESC "
+				"LIMIT :lim"
+			)
+		else:
+			# Include all conversations, even if they have candidates (for reprocessing)
+			sql = (
+				"SELECT DISTINCT conversation_id FROM message "
+				"WHERE timestamp_ms >= :start_ms AND timestamp_ms < :end_ms "
+				"AND conversation_id IS NOT NULL "
+				"ORDER BY conversation_id DESC "
+				"LIMIT :lim"
+			)
 		rows = session.exec(_text(sql).params(start_ms=start_ms, end_ms=end_ms, lim=int(limit))).all()
 		conversation_ids = [r.conversation_id if hasattr(r, "conversation_id") else r[0] for r in rows]
+		
+		# If skip_processed is False, we still want to count how many would have been skipped
+		if not skip_processed and conversation_ids:
+			from ..models import AiOrderCandidate
+			existing_candidates = session.exec(
+				select(AiOrderCandidate.conversation_id).where(
+					AiOrderCandidate.conversation_id.in_(conversation_ids)
+				)
+			).all()
+			existing_ids = {c.conversation_id if hasattr(c, "conversation_id") else c[0] for c in existing_candidates}
+			skipped = len([c for c in conversation_ids if c in existing_ids])
 	
 	log.info(
-		"Processing %d conversations for date range %s to %s",
+		"Processing %d conversations for date range %s to %s (skip_processed=%s)",
 		len(conversation_ids),
 		start_date.isoformat(),
 		end_date.isoformat(),
+		skip_processed,
 	)
 	
 	# Process each conversation
@@ -235,7 +269,9 @@ def process_conversations_by_date_range(
 		"processed": processed,
 		"created": created,
 		"updated": updated,
+		"skipped": skipped,
 		"errors": errors,
 		"total_conversations": len(conversation_ids),
+		"skip_processed": skip_processed,
 	}
 

@@ -122,7 +122,7 @@ def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: 
 
 
 @router.get("/detect")
-def detect_ai_orders_page(request: Request, start: Optional[str] = None, end: Optional[str] = None, limit: int = 100, process: Optional[str] = None):
+def detect_ai_orders_page(request: Request, start: Optional[str] = None, end: Optional[str] = None, limit: int = 100, process: Optional[str] = None, skip_processed: Optional[str] = None):
 	"""UI page for batch processing conversations by date range."""
 	def _parse_date(value: Optional[str]) -> Optional[dt.date]:
 		if not value:
@@ -141,18 +141,33 @@ def detect_ai_orders_page(request: Request, start: Optional[str] = None, end: Op
 		end_date = today
 		start_date = today - dt.timedelta(days=7)
 	
+	# Parse skip_processed option
+	# When form is submitted (process=1), if skip_processed is not provided, checkbox was unchecked = reprocess (False)
+	# If skip_processed is provided and not explicitly "0"/"false", it's True (skip)
+	if process:
+		# Form submission - checkbox unchecked means parameter not sent
+		if skip_processed is None:
+			skip_processed_flag = False  # Reprocess all
+		else:
+			skip_processed_flag = skip_processed not in ("0", "false", "False")
+	else:
+		# Initial page load - default to True (skip processed)
+		skip_processed_flag = True if skip_processed is None else (skip_processed not in ("0", "false", "False"))
+	
 	result = None
 	# Only process if dates are provided AND process parameter is set (form submission)
 	if start_date and end_date and process:
 		try:
-			result = process_conversations_by_date_range(start_date, end_date, limit=limit)
+			result = process_conversations_by_date_range(start_date, end_date, limit=limit, skip_processed=skip_processed_flag)
 		except Exception as e:
 			result = {
 				"processed": 0,
 				"created": 0,
 				"updated": 0,
+				"skipped": 0,
 				"errors": [str(e)],
 				"total_conversations": 0,
+				"skip_processed": skip_processed_flag,
 			}
 	
 	templates = request.app.state.templates
@@ -163,13 +178,14 @@ def detect_ai_orders_page(request: Request, start: Optional[str] = None, end: Op
 			"start_date": start_date.isoformat() if start_date else "",
 			"end_date": end_date.isoformat() if end_date else "",
 			"limit": limit,
+			"skip_processed": skip_processed_flag,
 			"result": result,
 		},
 	)
 
 
 @router.post("/detect")
-def detect_ai_orders_api(start: str, end: str, limit: int = 100):
+def detect_ai_orders_api(start: str, end: str, limit: int = 100, skip_processed: bool = True):
 	"""API endpoint for batch processing conversations by date range."""
 	def _parse_date(value: str) -> dt.date:
 		try:
@@ -184,7 +200,7 @@ def detect_ai_orders_api(start: str, end: str, limit: int = 100):
 		raise HTTPException(status_code=400, detail="end_date must be >= start_date")
 	
 	try:
-		result = process_conversations_by_date_range(start_date, end_date, limit=limit)
+		result = process_conversations_by_date_range(start_date, end_date, limit=limit, skip_processed=skip_processed)
 		return result
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
