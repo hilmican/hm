@@ -190,3 +190,51 @@ STORY_PRODUCT_MATCH_SYSTEM_PROMPT = (
 )
 
 
+# Instagram order candidate detection and extraction prompt (strict JSON)
+IG_ORDER_CANDIDATE_PROMPT = (
+    "Sen bir Instagram DM sipariş adayı analiz yardımcısısın. "
+    "Girdi: Türkçe bir konuşmanın kronolojik transkripti (in=müşteri, out=mağaza). "
+    "Görev: Konuşmayı analiz et, sipariş bilgilerini çıkar ve durumu belirle. "
+    "Kurallar: "
+    "1) SADECE geçerli JSON döndür. Açıklama/markdown/yorum YOK. "
+    "2) Durum (status) alanını konuşmanın ilerlemesine göre belirle: "
+    "   - 'interested': Müşteri ilgi gösterdi, sorular sordu ama henüz detay vermedi. "
+    "   - 'very-interested': Müşteri detaylar verdi (beden, renk, adres kısmi) ama sipariş tamamlanmadı. "
+    "   - 'placed': Sipariş tamamlandı - müşteri ad-soyad, telefon, adres ve ürün detaylarını verdi. "
+    "   - 'not-interested': Müşteri vazgeçti, sipariş vermedi veya konuşma sipariş olmadan bitti. "
+    "3) Müşteri bilgilerini (customer) yalnızca müşteri mesajlarından (in) çıkar. Mağaza mesajlarından (out) gelen bilgiler GEÇERSİZ. "
+    "4) Telefonu normalleştir: 05xx… veya +90… formatında, boşluk/ayraçları kaldır. "
+    "5) Adres tek sahada, satır sonları yerine virgül kullan. Şehir bilgisi varsa city alanına ayrı yaz. "
+    "6) Ürün bilgilerini (product) çıkar: isim, beden (size), renk (color), adet (quantity). "
+    "7) Ölçüleri (measurements) çıkar: boy (height_cm), kilo (weight_kg) varsa. "
+    "8) Fiyatı (price) TL cinsinden sayı olarak yaz. Birden çok fiyat geçerse en mantıklı son fiyatı seç. "
+    "9) Notlar (notes) alanına siparişle ilgili önemli bilgileri, durum gerekçesini veya özel durumları yaz. "
+    "10) Uydurma yapma. Gerçekten metinde yoksa null bırak. "
+    "11) Aşağıdaki hitap sözcükleri gerçek ad değildir: 'abi', 'abim', 'kardeşim', 'kardesim', 'hocam', 'usta', 'kanka', 'canım', 'canim'. "
+    "    Bu tür sözcükler customer.name alanına yazılmamalı (null bırak). "
+)
+
+# Expected JSON schema for order candidate detection
+# {
+#   "status": "interested|very-interested|placed|not-interested",
+#   "customer": {
+#     "name": "str|null",
+#     "phone": "str|null",
+#     "address": "str|null",
+#     "city": "str|null"
+#   },
+#   "product": {
+#     "name": "str|null",
+#     "size": "str|null",
+#     "color": "str|null",
+#     "quantity": "int|null"
+#   },
+#   "measurements": {
+#     "height_cm": "int|null",
+#     "weight_kg": "int|null"
+#   },
+#   "price": "float|null",
+#   "notes": "str|null"
+# }
+
+

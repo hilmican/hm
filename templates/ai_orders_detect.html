@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="tr">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Sipariş Tespiti (Tarih Aralığı)</title>
+	<style>
+		:root {
+			--bg: #f5f6fb;
+			--card: #ffffff;
+			--border: #e5e7eb;
+			--muted: #6b7280;
+			--primary: #2563eb;
+			--success: #15803d;
+			--warn: #b45309;
+			--danger: #b91c1c;
+		}
+		body { margin:0; font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color:#0f172a; }
+		.container { max-width: 1000px; margin: 0 auto; padding: 24px 16px 40px; }
+		.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 1px 3px rgba(15,23,42,0.08); padding: 24px; margin-bottom: 20px; }
+		h1 { font-size: 26px; margin: 18px 0 12px; }
+		p.page-desc { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+		.form-group { margin-bottom: 16px; }
+		.form-group label { display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; color: #374151; }
+		.form-group input, .form-group select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
+		.form-row { display: grid; grid-template-columns: 1fr 1fr 120px; gap: 12px; align-items: end; }
+		button { background: var(--primary); color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px; }
+		button:hover { background: #1d4ed8; }
+		button:disabled { background: #9ca3af; cursor: not-allowed; }
+		.results { margin-top: 24px; }
+		.results h2 { font-size: 18px; margin-bottom: 12px; }
+		.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+		.stat-card { padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: #f9fafb; }
+		.stat-card strong { display: block; font-size: 24px; color: var(--primary); margin-top: 4px; }
+		.stat-card label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+		.error-list { background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; margin-top: 16px; }
+		.error-list h3 { font-size: 14px; color: var(--danger); margin: 0 0 8px; }
+		.error-list ul { margin: 0; padding-left: 20px; }
+		.error-list li { font-size: 13px; color: #7f1d1d; margin: 4px 0; }
+		.success-msg { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; margin-top: 16px; color: var(--success); }
+		.link { color: var(--primary); text-decoration: none; font-weight: 500; }
+		.link:hover { text-decoration: underline; }
+	</style>
+</head>
+<body>
+	<div class="container">
+		{% include "_nav.html" %}
+		<h1>Sipariş Tespiti (Tarih Aralığı)</h1>
+		<p class="page-desc">Belirli bir tarih aralığındaki konuşmaları analiz ederek AI sipariş adaylarını otomatik olarak oluşturur veya günceller.</p>
+
+		<div class="card">
+			<form method="get" action="/ai/orders/detect">
+				<input type="hidden" name="process" value="1" />
+				<div class="form-row">
+					<div class="form-group">
+						<label for="start">Başlangıç Tarihi</label>
+						<input type="date" id="start" name="start" value="{{ start_date }}" required />
+					</div>
+					<div class="form-group">
+						<label for="end">Bitiş Tarihi</label>
+						<input type="date" id="end" name="end" value="{{ end_date }}" required />
+					</div>
+					<div class="form-group">
+						<label for="limit">Limit</label>
+						<input type="number" id="limit" name="limit" value="{{ limit }}" min="1" max="500" />
+					</div>
+				</div>
+				<button type="submit">İşle</button>
+			</form>
+		</div>
+
+		{% if result %}
+		<div class="card results">
+			<h2>İşlem Sonuçları</h2>
+			
+			<div class="stat-grid">
+				<div class="stat-card">
+					<label>Toplam Konuşma</label>
+					<strong>{{ result.total_conversations }}</strong>
+				</div>
+				<div class="stat-card">
+					<label>İşlenen</label>
+					<strong>{{ result.processed }}</strong>
+				</div>
+				<div class="stat-card">
+					<label>Oluşturulan</label>
+					<strong>{{ result.created }}</strong>
+				</div>
+				<div class="stat-card">
+					<label>Güncellenen</label>
+					<strong>{{ result.updated }}</strong>
+				</div>
+			</div>
+
+			{% if result.errors and result.errors|length > 0 %}
+			<div class="error-list">
+				<h3>Hatalar ({{ result.errors|length }})</h3>
+				<ul>
+					{% for error in result.errors %}
+					<li>{{ error }}</li>
+					{% endfor %}
+				</ul>
+			</div>
+			{% else %}
+			<div class="success-msg">
+				✓ Tüm konuşmalar başarıyla işlendi.
+			</div>
+			{% endif %}
+
+			<div style="margin-top: 20px;">
+				<a href="/ai/orders" class="link">→ AI Sipariş Adaylarını Görüntüle</a>
+			</div>
+		</div>
+		{% endif %}
+	</div>
+</body>
+</html>
+

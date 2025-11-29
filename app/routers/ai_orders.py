@@ -4,13 +4,14 @@ import datetime as dt
 import json
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from sqlalchemy import or_, text
 from sqlmodel import select
 
 from ..db import get_session
 from ..models import AiOrderCandidate, Conversation, IGUser
 from ..services.ai_orders import ALLOWED_STATUSES
+from ..services.ai_orders_detection import process_conversations_by_date_range
 
 router = APIRouter(prefix="/ai/orders", tags=["ai-orders"])
 
@@ -118,4 +119,73 @@ def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: 
 			"available_statuses": sorted(ALLOWED_STATUSES),
 		},
 	)
+
+
+@router.get("/detect")
+def detect_ai_orders_page(request: Request, start: Optional[str] = None, end: Optional[str] = None, limit: int = 100, process: Optional[str] = None):
+	"""UI page for batch processing conversations by date range."""
+	def _parse_date(value: Optional[str]) -> Optional[dt.date]:
+		if not value:
+			return None
+		try:
+			return dt.date.fromisoformat(value)
+		except Exception:
+			return None
+	
+	start_date = _parse_date(start)
+	end_date = _parse_date(end)
+	
+	# Default to last 7 days if no dates provided (for form display only)
+	if not start_date or not end_date:
+		today = dt.date.today()
+		end_date = today
+		start_date = today - dt.timedelta(days=7)
+	
+	result = None
+	# Only process if dates are provided AND process parameter is set (form submission)
+	if start_date and end_date and process:
+		try:
+			result = process_conversations_by_date_range(start_date, end_date, limit=limit)
+		except Exception as e:
+			result = {
+				"processed": 0,
+				"created": 0,
+				"updated": 0,
+				"errors": [str(e)],
+				"total_conversations": 0,
+			}
+	
+	templates = request.app.state.templates
+	return templates.TemplateResponse(
+		"ai_orders_detect.html",
+		{
+			"request": request,
+			"start_date": start_date.isoformat() if start_date else "",
+			"end_date": end_date.isoformat() if end_date else "",
+			"limit": limit,
+			"result": result,
+		},
+	)
+
+
+@router.post("/detect")
+def detect_ai_orders_api(start: str, end: str, limit: int = 100):
+	"""API endpoint for batch processing conversations by date range."""
+	def _parse_date(value: str) -> dt.date:
+		try:
+			return dt.date.fromisoformat(value)
+		except Exception:
+			raise HTTPException(status_code=400, detail=f"Invalid date format: {value}")
+	
+	start_date = _parse_date(start)
+	end_date = _parse_date(end)
+	
+	if end_date < start_date:
+		raise HTTPException(status_code=400, detail="end_date must be >= start_date")
+	
+	try:
+		result = process_conversations_by_date_range(start_date, end_date, limit=limit)
+		return result
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
