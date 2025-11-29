@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import AiOrderCandidate
+from ..models import AiOrderCandidate, Conversation, Message
 
 log = logging.getLogger("ai.orders")
 
@@ -116,7 +116,28 @@ def _update_candidate(conversation_id: int, status: str, *, note: Optional[str],
 			if extra is not None:
 				extra["payload_keys"] = list(payload_clean.keys()) if isinstance(payload_clean, dict) else None
 		if mark_placed:
-			candidate.placed_at = now
+			# Try to use the conversation's last_message_at as the placed_at timestamp
+			# This represents when the order was actually placed in the conversation
+			conversation = session.exec(
+				select(Conversation).where(Conversation.id == conversation_id).limit(1)
+			).first()
+			if conversation and conversation.last_message_at:
+				candidate.placed_at = conversation.last_message_at
+			else:
+				# Fallback: find the last message timestamp from the conversation
+				last_message = session.exec(
+					select(Message)
+					.where(Message.conversation_id == conversation_id)
+					.order_by(Message.timestamp_ms.desc())
+					.limit(1)
+				).first()
+				if last_message and last_message.timestamp_ms:
+					# Convert milliseconds timestamp to datetime
+					candidate.placed_at = dt.datetime.utcfromtimestamp(last_message.timestamp_ms / 1000.0)
+				else:
+					# Final fallback: use current time (but this shouldn't happen often)
+					log.warning("Could not find conversation or message timestamp for placed order, using current time. conversation_id=%s", conversation_id)
+					candidate.placed_at = now
 		elif status != STATUS_PLACED:
 			candidate.placed_at = None
 		_append_history(candidate, status, note, _sanitize_value(extra) if extra else None, ts=now)
