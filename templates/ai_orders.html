@@ -43,6 +43,20 @@
 		.product-block strong { display:block; }
 		.actions a { color: var(--primary); text-decoration:none; font-weight:600; }
 		.empty { text-align:center; padding:48px 16px; color: var(--muted); font-size:15px; }
+		.insights-toggle { cursor: pointer; color: var(--primary); font-size: 12px; font-weight: 600; margin-top: 4px; }
+		.insights-panel { display: none; margin-top: 12px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border); }
+		.insights-panel.active { display: block; }
+		.insight-section { margin-bottom: 12px; }
+		.insight-section h4 { font-size: 12px; font-weight: 600; color: #475569; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+		.insight-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+		.insight-tag { display: inline-block; padding: 4px 8px; background: #e2e8f0; border-radius: 6px; font-size: 11px; color: #334155; }
+		.insight-tag.positive { background: #dcfce7; color: #166534; }
+		.insight-tag.negative { background: #fee2e2; color: #991b1b; }
+		.insight-tag.neutral { background: #e0e7ff; color: #3730a3; }
+		.quality-badge { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 11px; margin-right: 6px; }
+		.quality-badge.good { background: #dcfce7; color: #166534; }
+		.quality-badge.moderate { background: #fef3c7; color: #92400e; }
+		.quality-badge.poor { background: #fee2e2; color: #991b1b; }
 		@media (max-width: 720px){
 			.filter-bar { flex-direction:column; }
 			th, td { font-size:13px; }
@@ -158,6 +172,107 @@
 							{% else %}
 								-
 							{% endif %}
+							{% if order.insights %}
+								<div class="insights-toggle" onclick="toggleInsights({{ order.id }})">
+									<span id="toggle-{{ order.id }}">▼</span> Insights
+								</div>
+								<div id="insights-{{ order.id }}" class="insights-panel">
+									{% set insights = order.insights %}
+									
+									{% if insights.get('purchase_barriers') %}
+									<div class="insight-section">
+										<h4>Purchase Barriers</h4>
+										<div class="insight-tags">
+											{% for barrier in insights.purchase_barriers %}
+												<span class="insight-tag negative">{{ barrier.replace('-', ' ').title() }}</span>
+											{% endfor %}
+										</div>
+									</div>
+									{% endif %}
+									
+									{% if insights.get('conversion_factors') %}
+									<div class="insight-section">
+										<h4>Conversion Factors</h4>
+										<div class="insight-tags">
+											{% for factor in insights.conversion_factors %}
+												<span class="insight-tag positive">{{ factor.replace('-', ' ').title() }}</span>
+											{% endfor %}
+										</div>
+									</div>
+									{% endif %}
+									
+									{% if insights.get('conversation_quality') %}
+									<div class="insight-section">
+										<h4>Conversation Quality</h4>
+										{% set quality = insights.conversation_quality %}
+										{% if quality.get('response_speed') %}
+											<span class="quality-badge {% if quality.response_speed == 'fast' %}good{% elif quality.response_speed == 'normal' %}moderate{% else %}poor{% endif %}">
+												Speed: {{ quality.response_speed }}
+											</span>
+										{% endif %}
+										{% if quality.get('clarity') %}
+											<span class="quality-badge {% if quality.clarity == 'clear' %}good{% elif quality.clarity == 'moderate' %}moderate{% else %}poor{% endif %}">
+												Clarity: {{ quality.clarity }}
+											</span>
+										{% endif %}
+										{% if quality.get('helpfulness') %}
+											<span class="quality-badge {% if quality.helpfulness == 'very-helpful' %}good{% elif quality.helpfulness == 'helpful' %}moderate{% else %}poor{% endif %}">
+												Helpful: {{ quality.helpfulness.replace('-', ' ') }}
+											</span>
+										{% endif %}
+										{% if quality.get('proactivity') %}
+											<span class="quality-badge {% if quality.proactivity == 'proactive' %}good{% elif quality.proactivity == 'reactive' %}moderate{% else %}poor{% endif %}">
+												Proactive: {{ quality.proactivity }}
+											</span>
+										{% endif %}
+									</div>
+									{% endif %}
+									
+									{% if insights.get('customer_sentiment') %}
+									<div class="insight-section">
+										<h4>Customer Sentiment</h4>
+										{% set sentiment = insights.customer_sentiment %}
+										{% if sentiment.get('engagement') %}
+											<span class="quality-badge {% if sentiment.engagement == 'high' %}good{% elif sentiment.engagement == 'medium' %}moderate{% else %}poor{% endif %}">
+												Engagement: {{ sentiment.engagement }}
+											</span>
+										{% endif %}
+										{% if sentiment.get('satisfaction') %}
+											<span class="quality-badge {% if sentiment.satisfaction == 'satisfied' %}good{% elif sentiment.satisfaction == 'neutral' %}moderate{% else %}poor{% endif %}">
+												Satisfaction: {{ sentiment.satisfaction }}
+											</span>
+										{% endif %}
+										{% if sentiment.get('urgency') %}
+											<span class="quality-badge {% if sentiment.urgency == 'urgent' %}good{% elif sentiment.urgency == 'normal' %}moderate{% else %}poor{% endif %}">
+												Urgency: {{ sentiment.urgency }}
+											</span>
+										{% endif %}
+									</div>
+									{% endif %}
+									
+									{% if insights.get('improvement_areas') and insights.improvement_areas|length > 0 %}
+									<div class="insight-section">
+										<h4>Improvement Areas</h4>
+										<div class="insight-tags">
+											{% for area in insights.improvement_areas %}
+												<span class="insight-tag negative">{{ area.replace('-', ' ').title() }}</span>
+											{% endfor %}
+										</div>
+									</div>
+									{% endif %}
+									
+									{% if insights.get('what_worked_well') and insights.what_worked_well|length > 0 %}
+									<div class="insight-section">
+										<h4>What Worked Well</h4>
+										<div class="insight-tags">
+											{% for item in insights.what_worked_well %}
+												<span class="insight-tag positive">{{ item.replace('-', ' ').title() }}</span>
+											{% endfor %}
+										</div>
+									</div>
+									{% endif %}
+								</div>
+							{% endif %}
 						</td>
 						<td>
 							<div>{{ order.last_status_at or '-' }}</div>
@@ -177,6 +292,19 @@
 			{% endif %}
 		</div>
 	</div>
+	<script>
+		function toggleInsights(orderId) {
+			const panel = document.getElementById('insights-' + orderId);
+			const toggle = document.getElementById('toggle-' + orderId);
+			if (panel.classList.contains('active')) {
+				panel.classList.remove('active');
+				toggle.textContent = '▼';
+			} else {
+				panel.classList.add('active');
+				toggle.textContent = '▲';
+			}
+		}
+	</script>
 </body>
 </html>
 

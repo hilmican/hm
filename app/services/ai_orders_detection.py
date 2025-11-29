@@ -77,14 +77,20 @@ def analyze_conversation_for_order_candidate(conversation_id: int, run_id: Optio
 		'"customer": {"name": "str|null", "phone": "str|null", "address": "str|null", "city": "str|null"}, '
 		'"product": {"name": "str|null", "size": "str|null", "color": "str|null", "quantity": "int|null"}, '
 		'"measurements": {"height_cm": "int|null", "weight_kg": "int|null"}, '
-		'"price": "float|null", "notes": "str|null"}'
+		'"price": "float|null", "notes": "str|null", '
+		'"purchase_barriers": ["str"]|null, '
+		'"conversion_factors": ["str"]|null, '
+		'"conversation_quality": {"response_speed": "fast|normal|slow|null", "clarity": "clear|moderate|unclear|null", "helpfulness": "very-helpful|helpful|not-helpful|null", "proactivity": "proactive|reactive|passive|null"}, '
+		'"customer_sentiment": {"engagement": "high|medium|low|null", "satisfaction": "satisfied|neutral|dissatisfied|null", "urgency": "urgent|normal|casual|null"}, '
+		'"improvement_areas": ["str"], '
+		'"what_worked_well": ["str"]}'
 	)
 	
 	user_prompt = (
 		"Aşağıda bir DM konuşması transkripti var. \n"
-		"Lütfen konuşmayı analiz et, sipariş bilgilerini çıkar ve durumu belirle.\n"
+		"Lütfen konuşmayı kapsamlı bir şekilde analiz et, sipariş bilgilerini çıkar, durumu belirle ve konuşmanın kalitesi ile iyileştirme alanlarını değerlendir.\n"
 		"Durum: interested (ilgi gösterdi), very-interested (detaylar verdi), placed (sipariş tamamlandı), not-interested (vazgeçti/sipariş yok).\n"
-		"Uydurma yapma; metinde yoksa null bırak.\n\n"
+		"Uydurma yapma; metinde yoksa null bırak. Ancak analiz ve değerlendirme alanlarını (purchase_barriers, conversion_factors, conversation_quality, vb.) doldur.\n\n"
 		f"Şema: {schema_hint}\n\n"
 		f"Transkript:\n{transcript}"
 	)
@@ -130,6 +136,12 @@ def analyze_conversation_for_order_candidate(conversation_id: int, run_id: Optio
 		"measurements": data.get("measurements") or {},
 		"price": _parse_price(data.get("price")),
 		"notes": data.get("notes"),
+		"purchase_barriers": data.get("purchase_barriers"),
+		"conversion_factors": data.get("conversion_factors"),
+		"conversation_quality": data.get("conversation_quality") or {},
+		"customer_sentiment": data.get("customer_sentiment") or {},
+		"improvement_areas": data.get("improvement_areas") or [],
+		"what_worked_well": data.get("what_worked_well") or [],
 	}
 	
 	# Ensure customer, product, measurements are dicts
@@ -139,6 +151,22 @@ def analyze_conversation_for_order_candidate(conversation_id: int, run_id: Optio
 		out["product"] = {}
 	if not isinstance(out["measurements"], dict):
 		out["measurements"] = {}
+	
+	# Ensure conversation_quality and customer_sentiment are dicts
+	if not isinstance(out["conversation_quality"], dict):
+		out["conversation_quality"] = {}
+	if not isinstance(out["customer_sentiment"], dict):
+		out["customer_sentiment"] = {}
+	
+	# Ensure arrays are lists
+	if not isinstance(out["improvement_areas"], list):
+		out["improvement_areas"] = []
+	if not isinstance(out["what_worked_well"], list):
+		out["what_worked_well"] = []
+	if out["purchase_barriers"] is not None and not isinstance(out["purchase_barriers"], list):
+		out["purchase_barriers"] = []
+	if out["conversion_factors"] is not None and not isinstance(out["conversion_factors"], list):
+		out["conversion_factors"] = []
 	
 	return out
 
@@ -177,21 +205,25 @@ def process_conversations_by_date_range(
 	with get_session() as session:
 		if skip_processed:
 			# Exclude conversations that already have AI order candidates
+			# Also exclude legacy dm: conversation_ids (they should be migrated to integer IDs)
 			sql = (
 				"SELECT DISTINCT m.conversation_id FROM message m "
 				"LEFT JOIN ai_order_candidates aoc ON aoc.conversation_id = m.conversation_id "
 				"WHERE m.timestamp_ms >= :start_ms AND m.timestamp_ms < :end_ms "
 				"AND m.conversation_id IS NOT NULL "
+				"AND CAST(m.conversation_id AS TEXT) NOT LIKE 'dm:%' "
 				"AND aoc.id IS NULL "
 				"ORDER BY m.conversation_id DESC "
 				"LIMIT :lim"
 			)
 		else:
 			# Include all conversations, even if they have candidates (for reprocessing)
+			# Exclude legacy dm: conversation_ids
 			sql = (
 				"SELECT DISTINCT conversation_id FROM message "
 				"WHERE timestamp_ms >= :start_ms AND timestamp_ms < :end_ms "
 				"AND conversation_id IS NOT NULL "
+				"AND CAST(conversation_id AS TEXT) NOT LIKE 'dm:%' "
 				"ORDER BY conversation_id DESC "
 				"LIMIT :lim"
 			)
@@ -209,7 +241,28 @@ def process_conversations_by_date_range(
 				return r[0]
 			except (TypeError, IndexError):
 				return r
-		conversation_ids = [_extract_conversation_id(r) for r in rows]
+		
+		def _normalize_conversation_id(cid):
+			"""Convert conversation_id to integer, skipping dm: format strings."""
+			if isinstance(cid, int):
+				return cid
+			if isinstance(cid, str):
+				# Skip dm: format strings (legacy data that should be migrated)
+				if cid.startswith("dm:"):
+					return None
+				# Try to convert to int
+				try:
+					return int(cid)
+				except (ValueError, TypeError):
+					return None
+			# Try to convert other types
+			try:
+				return int(cid)
+			except (ValueError, TypeError):
+				return None
+		
+		# Extract and normalize conversation IDs, filtering out None values
+		conversation_ids = [cid for cid in [_normalize_conversation_id(_extract_conversation_id(r)) for r in rows] if cid is not None]
 		
 		# If skip_processed is False, we still want to count how many would have been skipped
 		if not skip_processed and conversation_ids:
@@ -237,13 +290,20 @@ def process_conversations_by_date_range(
 			# Analyze conversation
 			result = analyze_conversation_for_order_candidate(conv_id, run_id=run_id)
 			
-			# Build order payload
+			# Build order payload with all insights
 			order_payload: Dict[str, Any] = {
 				"customer": result.get("customer", {}),
 				"product": result.get("product", {}),
 				"measurements": result.get("measurements", {}),
 				"price": result.get("price"),
 				"notes": result.get("notes"),
+				# Include all insight fields
+				"purchase_barriers": result.get("purchase_barriers"),
+				"conversion_factors": result.get("conversion_factors"),
+				"conversation_quality": result.get("conversation_quality", {}),
+				"customer_sentiment": result.get("customer_sentiment", {}),
+				"improvement_areas": result.get("improvement_areas", []),
+				"what_worked_well": result.get("what_worked_well", []),
 			}
 			
 			# Build status reason from notes or default

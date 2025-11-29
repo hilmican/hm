@@ -194,7 +194,7 @@ STORY_PRODUCT_MATCH_SYSTEM_PROMPT = (
 IG_ORDER_CANDIDATE_PROMPT = (
     "Sen bir Instagram DM sipariş adayı analiz yardımcısısın. "
     "Girdi: Türkçe bir konuşmanın kronolojik transkripti (in=müşteri, out=mağaza). "
-    "Görev: Konuşmayı analiz et, sipariş bilgilerini çıkar ve durumu belirle. "
+    "Görev: Konuşmayı analiz et, sipariş bilgilerini çıkar, durumu belirle ve konuşmanın kalitesi ile iyileştirme alanlarını değerlendir. "
     "Kurallar: "
     "1) SADECE geçerli JSON döndür. Açıklama/markdown/yorum YOK. "
     "2) Durum (status) alanını konuşmanın ilerlemesine göre belirle: "
@@ -212,6 +212,31 @@ IG_ORDER_CANDIDATE_PROMPT = (
     "10) Uydurma yapma. Gerçekten metinde yoksa null bırak. "
     "11) Aşağıdaki hitap sözcükleri gerçek ad değildir: 'abi', 'abim', 'kardeşim', 'kardesim', 'hocam', 'usta', 'kanka', 'canım', 'canim'. "
     "    Bu tür sözcükler customer.name alanına yazılmamalı (null bırak). "
+    "12) Purchase barriers (purchase_barriers): Eğer sipariş tamamlanmadıysa (status != 'placed'), müşterinin neden satın almadığını analiz et. "
+    "    Olası sebepler: 'price-too-high', 'product-unavailable', 'shipping-concerns', 'size-uncertainty', 'color-uncertainty', "
+    "    'payment-issues', 'delivery-time', 'trust-concerns', 'competitor-choice', 'no-response', 'other'. "
+    "    Birden fazla sebep varsa array olarak listele. Hiç sebep belirtilmemişse null. "
+    "13) Conversion factors (conversion_factors): Eğer sipariş tamamlandıysa (status == 'placed'), neyin satın alma kararını tetiklediğini belirle. "
+    "    Olası faktörler: 'clear-pricing', 'fast-response', 'helpful-advice', 'product-availability', 'trust-building', "
+    "    'special-offer', 'urgency-created', 'social-proof', 'easy-process', 'other'. "
+    "    Birden fazla faktör varsa array olarak listele. "
+    "14) Conversation quality (conversation_quality): Konuşmanın kalitesini değerlendir. "
+    "    'response_speed': 'fast'|'normal'|'slow' - Mağaza yanıt hızı (mesajlar arası süre). "
+    "    'clarity': 'clear'|'moderate'|'unclear' - Bilgilerin netliği. "
+    "    'helpfulness': 'very-helpful'|'helpful'|'not-helpful' - Müşteriye yardımcı olma seviyesi. "
+    "    'proactivity': 'proactive'|'reactive'|'passive' - Mağazanın proaktif yaklaşımı. "
+    "15) Customer sentiment (customer_sentiment): Müşterinin genel duygusal durumu ve ilgi seviyesi. "
+    "    'engagement': 'high'|'medium'|'low' - Müşterinin konuşmaya katılım seviyesi. "
+    "    'satisfaction': 'satisfied'|'neutral'|'dissatisfied' - Müşteri memnuniyeti (mesajlardan çıkarılabilirse). "
+    "    'urgency': 'urgent'|'normal'|'casual' - Müşterinin aciliyet seviyesi. "
+    "16) Improvement areas (improvement_areas): Konuşmada iyileştirilebilecek noktalar. "
+    "    Olası alanlar: 'faster-response', 'clearer-pricing', 'better-product-info', 'address-collection', "
+    "    'payment-options', 'shipping-info', 'follow-up', 'objection-handling', 'other'. "
+    "    Birden fazla alan varsa array olarak listele. Hiç iyileştirme gerekmiyorsa boş array []. "
+    "17) What worked well (what_worked_well): Konuşmada başarılı olan, tekrar edilmesi gereken noktalar. "
+    "    Olası başarılar: 'quick-response', 'clear-communication', 'helpful-advice', 'product-knowledge', "
+    "    'friendly-tone', 'problem-solving', 'follow-up', 'other'. "
+    "    Birden fazla başarı varsa array olarak listele. "
 )
 
 # Expected JSON schema for order candidate detection
@@ -234,7 +259,22 @@ IG_ORDER_CANDIDATE_PROMPT = (
 #     "weight_kg": "int|null"
 #   },
 #   "price": "float|null",
-#   "notes": "str|null"
+#   "notes": "str|null",
+#   "purchase_barriers": ["str"]|null,  # Reasons why purchase didn't happen
+#   "conversion_factors": ["str"]|null,  # What led to purchase (if placed)
+#   "conversation_quality": {
+#     "response_speed": "fast|normal|slow|null",
+#     "clarity": "clear|moderate|unclear|null",
+#     "helpfulness": "very-helpful|helpful|not-helpful|null",
+#     "proactivity": "proactive|reactive|passive|null"
+#   },
+#   "customer_sentiment": {
+#     "engagement": "high|medium|low|null",
+#     "satisfaction": "satisfied|neutral|dissatisfied|null",
+#     "urgency": "urgent|normal|casual|null"
+#   },
+#   "improvement_areas": ["str"],  # Areas that could be improved
+#   "what_worked_well": ["str"]  # Positive aspects of the conversation
 # }
 
 

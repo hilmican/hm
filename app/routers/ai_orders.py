@@ -42,6 +42,17 @@ def _format_order_row(candidate: AiOrderCandidate, conversation: Optional[Conver
 	username = getattr(ig_user, "username", None)
 	contact_name = getattr(ig_user, "contact_name", None)
 	contact_phone = getattr(ig_user, "contact_phone", None)
+	
+	# Extract insight fields from payload
+	insights = {
+		"purchase_barriers": payload.get("purchase_barriers"),
+		"conversion_factors": payload.get("conversion_factors"),
+		"conversation_quality": payload.get("conversation_quality", {}),
+		"customer_sentiment": payload.get("customer_sentiment", {}),
+		"improvement_areas": payload.get("improvement_areas", []),
+		"what_worked_well": payload.get("what_worked_well", []),
+	}
+	
 	return {
 		"id": candidate.id,
 		"conversation_id": candidate.conversation_id,
@@ -50,6 +61,7 @@ def _format_order_row(candidate: AiOrderCandidate, conversation: Optional[Conver
 		"status_reason": candidate.status_reason,
 		"status_history": history if isinstance(history, list) else [],
 		"order_payload": payload if isinstance(payload, dict) else {},
+		"insights": insights,
 		"username": username,
 		"contact_name": contact_name,
 		"contact_phone": contact_phone,

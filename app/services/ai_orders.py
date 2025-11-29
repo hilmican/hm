@@ -40,7 +40,34 @@ def _sanitize_value(value: Any) -> Any:
 
 
 def _load_candidate(session, conversation_id: int) -> Optional[AiOrderCandidate]:
-	stmt = select(AiOrderCandidate).where(AiOrderCandidate.conversation_id == int(conversation_id)).limit(1)
+	"""Load an AI order candidate by conversation_id.
+	
+	Args:
+		session: Database session
+		conversation_id: Integer conversation ID (will be converted if needed)
+	
+	Returns:
+		AiOrderCandidate if found, None otherwise
+	"""
+	# Normalize conversation_id to integer
+	if isinstance(conversation_id, str):
+		# Skip dm: format strings (legacy data)
+		if conversation_id.startswith("dm:"):
+			log.warning("Skipping dm: format conversation_id in _load_candidate: %s", conversation_id)
+			return None
+		try:
+			conversation_id = int(conversation_id)
+		except (ValueError, TypeError):
+			log.warning("Invalid conversation_id format in _load_candidate: %s", conversation_id)
+			return None
+	elif not isinstance(conversation_id, int):
+		try:
+			conversation_id = int(conversation_id)
+		except (ValueError, TypeError):
+			log.warning("Invalid conversation_id type in _load_candidate: %s (type: %s)", conversation_id, type(conversation_id))
+			return None
+	
+	stmt = select(AiOrderCandidate).where(AiOrderCandidate.conversation_id == conversation_id).limit(1)
 	return session.exec(stmt).first()
 
 
@@ -94,12 +121,28 @@ def _serialize_candidate(candidate: AiOrderCandidate) -> Dict[str, Any]:
 def _update_candidate(conversation_id: int, status: str, *, note: Optional[str], payload: Optional[Dict[str, Any]] = None, metadata: Optional[Dict[str, Any]] = None, mark_placed: bool = False) -> Dict[str, Any]:
 	if status not in ALLOWED_STATUSES:
 		raise ValueError(f"Unsupported AI order candidate status: {status}")
+	
+	# Normalize conversation_id to integer
+	if isinstance(conversation_id, str):
+		# Skip dm: format strings (legacy data)
+		if conversation_id.startswith("dm:"):
+			raise ValueError(f"Cannot process dm: format conversation_id: {conversation_id}")
+		try:
+			conversation_id = int(conversation_id)
+		except (ValueError, TypeError):
+			raise ValueError(f"Invalid conversation_id format: {conversation_id}")
+	elif not isinstance(conversation_id, int):
+		try:
+			conversation_id = int(conversation_id)
+		except (ValueError, TypeError):
+			raise ValueError(f"Invalid conversation_id type: {conversation_id} (type: {type(conversation_id)})")
+	
 	now = dt.datetime.utcnow()
 	with get_session() as session:
 		candidate = _load_candidate(session, conversation_id)
 		if candidate is None:
 			candidate = AiOrderCandidate(
-				conversation_id=int(conversation_id),
+				conversation_id=conversation_id,
 				status=status,
 				last_status_at=now,
 				created_at=now,
