@@ -5,7 +5,7 @@ import json
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Request, HTTPException
-from sqlalchemy import or_, text
+from sqlalchemy import or_, text, func
 from sqlmodel import select
 
 from ..db import get_session
@@ -105,51 +105,20 @@ def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: 
 			end_dt = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min)
 			stmt = stmt.where(AiOrderCandidate.updated_at < end_dt)
 		
+		# Get all matching rows first (without limit for accurate counts)
+		stmt_unlimited = stmt.order_by(AiOrderCandidate.updated_at.desc())
+		all_matching_rows = session.exec(stmt_unlimited).all()
+		
+		# Calculate status counts from all matching rows
+		status_counts = {status: 0 for status in ALLOWED_STATUSES}
+		for candidate_row, convo_row, user_row in all_matching_rows:
+			status_val = (candidate_row.status or "interested").strip().lower()
+			if status_val in ALLOWED_STATUSES:
+				status_counts[status_val] = status_counts.get(status_val, 0) + 1
+		
+		# Now get limited rows for display
 		stmt = stmt.order_by(AiOrderCandidate.updated_at.desc()).limit(n)
 		rows = session.exec(stmt).all()
-
-		# Build status counts query with same filters (including search and date)
-		count_stmt = (
-			select(AiOrderCandidate.status, text("COUNT(*) as cnt"))
-			.join(Conversation, AiOrderCandidate.conversation_id == Conversation.id)
-			.join(IGUser, IGUser.id == Conversation.ig_user_id, isouter=True)
-		)
-		# Apply the same filters as the main query
-		if query_text:
-			like = f"%{query_text}%"
-			count_stmt = count_stmt.where(
-				or_(
-					IGUser.username.ilike(like),
-					IGUser.contact_name.ilike(like),
-					IGUser.contact_phone.ilike(like),
-				)
-			)
-		if start_date:
-			start_dt = dt.datetime.combine(start_date, dt.time.min)
-			count_stmt = count_stmt.where(AiOrderCandidate.updated_at >= start_dt)
-		if end_date:
-			end_dt = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min)
-			count_stmt = count_stmt.where(AiOrderCandidate.updated_at < end_dt)
-		count_stmt = count_stmt.group_by(AiOrderCandidate.status)
-		
-		count_rows = session.exec(count_stmt).all()
-		status_counts = {}
-		for row in count_rows or []:
-			# Handle both Row and tuple results
-			if hasattr(row, 'status'):
-				status_val = row.status
-				count_val = getattr(row, 'cnt', None) or (row[1] if isinstance(row, (list, tuple)) and len(row) > 1 else 0)
-			else:
-				# Handle tuple result
-				status_val = row[0] if isinstance(row, (list, tuple)) and len(row) > 0 else None
-				count_val = row[1] if isinstance(row, (list, tuple)) and len(row) > 1 else 0
-			if status_val:
-				status_counts[str(status_val)] = int(count_val) if count_val else 0
-		
-		# Ensure all statuses are present (even with 0 count)
-		for status in ALLOWED_STATUSES:
-			if status not in status_counts:
-				status_counts[status] = 0
 
 	orders = []
 	for candidate_row, convo_row, user_row in rows:
