@@ -97,16 +97,30 @@ def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: 
 					IGUser.contact_phone.ilike(like),
 				)
 			)
-		# Date filtering by updated_at
-		if start_date:
-			start_dt = dt.datetime.combine(start_date, dt.time.min)
-			stmt = stmt.where(AiOrderCandidate.updated_at >= start_dt)
-		if end_date:
-			end_dt = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min)
-			stmt = stmt.where(AiOrderCandidate.updated_at < end_dt)
+		# Date filtering: Use placed_at if available (for placed orders), otherwise use conversation's last_message_at
+		# This filters by when the order was actually placed or when the conversation happened
+		if start_date or end_date:
+			# Use COALESCE to prefer placed_at, fall back to last_message_at
+			# If both are None, the row won't match the date filter (which is correct)
+			date_field = func.coalesce(
+				AiOrderCandidate.placed_at,
+				Conversation.last_message_at
+			)
+			if start_date:
+				start_dt = dt.datetime.combine(start_date, dt.time.min)
+				stmt = stmt.where(date_field >= start_dt)
+			if end_date:
+				end_dt = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min)
+				stmt = stmt.where(date_field < end_dt)
 		
 		# Get all matching rows first (without limit for accurate counts)
-		stmt_unlimited = stmt.order_by(AiOrderCandidate.updated_at.desc())
+		# Order by the same date field used for filtering
+		order_date_field = func.coalesce(
+			AiOrderCandidate.placed_at,
+			Conversation.last_message_at,
+			AiOrderCandidate.updated_at  # Final fallback for ordering
+		)
+		stmt_unlimited = stmt.order_by(order_date_field.desc())
 		all_matching_rows = session.exec(stmt_unlimited).all()
 		
 		# Calculate status counts from all matching rows
@@ -117,7 +131,13 @@ def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: 
 				status_counts[status_val] = status_counts.get(status_val, 0) + 1
 		
 		# Now get limited rows for display
-		stmt = stmt.order_by(AiOrderCandidate.updated_at.desc()).limit(n)
+		# Order by the same date field used for filtering
+		order_date_field = func.coalesce(
+			AiOrderCandidate.placed_at,
+			Conversation.last_message_at,
+			AiOrderCandidate.updated_at  # Final fallback for ordering
+		)
+		stmt = stmt.order_by(order_date_field.desc()).limit(n)
 		rows = session.exec(stmt).all()
 
 	orders = []
