@@ -205,25 +205,23 @@ def process_conversations_by_date_range(
 	with get_session() as session:
 		if skip_processed:
 			# Exclude conversations that already have AI order candidates
-			# Also exclude legacy dm: conversation_ids (they should be migrated to integer IDs)
+			# Note: We filter dm: conversation_ids in Python since SQLite type handling can be inconsistent
 			sql = (
 				"SELECT DISTINCT m.conversation_id FROM message m "
 				"LEFT JOIN ai_order_candidates aoc ON aoc.conversation_id = m.conversation_id "
 				"WHERE m.timestamp_ms >= :start_ms AND m.timestamp_ms < :end_ms "
 				"AND m.conversation_id IS NOT NULL "
-				"AND CAST(m.conversation_id AS TEXT) NOT LIKE 'dm:%' "
 				"AND aoc.id IS NULL "
 				"ORDER BY m.conversation_id DESC "
 				"LIMIT :lim"
 			)
 		else:
 			# Include all conversations, even if they have candidates (for reprocessing)
-			# Exclude legacy dm: conversation_ids
+			# Note: We filter dm: conversation_ids in Python since SQLite type handling can be inconsistent
 			sql = (
 				"SELECT DISTINCT conversation_id FROM message "
 				"WHERE timestamp_ms >= :start_ms AND timestamp_ms < :end_ms "
 				"AND conversation_id IS NOT NULL "
-				"AND CAST(conversation_id AS TEXT) NOT LIKE 'dm:%' "
 				"ORDER BY conversation_id DESC "
 				"LIMIT :lim"
 			)
@@ -244,25 +242,42 @@ def process_conversations_by_date_range(
 		
 		def _normalize_conversation_id(cid):
 			"""Convert conversation_id to integer, skipping dm: format strings."""
+			if cid is None:
+				return None
 			if isinstance(cid, int):
 				return cid
 			if isinstance(cid, str):
 				# Skip dm: format strings (legacy data that should be migrated)
-				if cid.startswith("dm:"):
+				cid_str = str(cid).strip()
+				if cid_str.startswith("dm:"):
+					log.debug("Skipping dm: format conversation_id: %s", cid_str)
 					return None
 				# Try to convert to int
 				try:
-					return int(cid)
-				except (ValueError, TypeError):
+					return int(cid_str)
+				except (ValueError, TypeError) as e:
+					log.debug("Failed to convert conversation_id to int: %s (error: %s)", cid_str, str(e))
 					return None
 			# Try to convert other types
 			try:
-				return int(cid)
-			except (ValueError, TypeError):
+				cid_str = str(cid).strip()
+				if cid_str.startswith("dm:"):
+					log.debug("Skipping dm: format conversation_id: %s", cid_str)
+					return None
+				return int(cid_str)
+			except (ValueError, TypeError) as e:
+				log.debug("Failed to convert conversation_id to int: %s (error: %s)", cid, str(e))
 				return None
 		
-		# Extract and normalize conversation IDs, filtering out None values
-		conversation_ids = [cid for cid in [_normalize_conversation_id(_extract_conversation_id(r)) for r in rows] if cid is not None]
+		# Extract and normalize conversation IDs, filtering out None values and ensuring they're integers
+		raw_ids = [_extract_conversation_id(r) for r in rows]
+		normalized_ids = [_normalize_conversation_id(cid) for cid in raw_ids]
+		conversation_ids = [cid for cid in normalized_ids if cid is not None and isinstance(cid, int)]
+		
+		# Log if we filtered out any invalid IDs
+		filtered_count = len(raw_ids) - len(conversation_ids)
+		if filtered_count > 0:
+			log.info("Filtered out %d invalid conversation_ids (dm: format or non-numeric)", filtered_count)
 		
 		# If skip_processed is False, we still want to count how many would have been skipped
 		if not skip_processed and conversation_ids:
@@ -273,8 +288,13 @@ def process_conversations_by_date_range(
 				)
 			).all()
 			# SQLModel returns integers directly for single-column selects
-			existing_ids = {_extract_conversation_id(c) for c in existing_candidates}
+			# Normalize existing IDs to ensure type consistency
+			existing_ids = {_normalize_conversation_id(_extract_conversation_id(c)) for c in existing_candidates}
+			existing_ids = {cid for cid in existing_ids if cid is not None}
 			skipped = len([c for c in conversation_ids if c in existing_ids])
+	
+	# Final type check: ensure all conversation_ids are integers
+	conversation_ids = [cid for cid in conversation_ids if isinstance(cid, int)]
 	
 	log.info(
 		"Processing %d conversations for date range %s to %s (skip_processed=%s)",
@@ -287,6 +307,17 @@ def process_conversations_by_date_range(
 	# Process each conversation
 	for conv_id in conversation_ids:
 		try:
+			# Final safety check: ensure conv_id is an integer
+			if not isinstance(conv_id, int):
+				if isinstance(conv_id, str) and conv_id.startswith("dm:"):
+					log.warning("Skipping dm: format conversation_id: %s", conv_id)
+					continue
+				try:
+					conv_id = int(conv_id)
+				except (ValueError, TypeError) as e:
+					log.warning("Invalid conversation_id format, skipping: %s (error: %s)", conv_id, str(e))
+					continue
+			
 			# Analyze conversation
 			result = analyze_conversation_for_order_candidate(conv_id, run_id=run_id)
 			
