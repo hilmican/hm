@@ -108,19 +108,48 @@ def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: 
 		stmt = stmt.order_by(AiOrderCandidate.updated_at.desc()).limit(n)
 		rows = session.exec(stmt).all()
 
-		count_rows = session.exec(
-			text(
-				"""
-				SELECT COALESCE(status, 'interested') AS st, COUNT(*) AS cnt
-				FROM ai_order_candidates
-				GROUP BY COALESCE(status, 'interested')
-				"""
+		# Build status counts query with same filters (including search and date)
+		count_stmt = (
+			select(AiOrderCandidate.status, text("COUNT(*) as cnt"))
+			.join(Conversation, AiOrderCandidate.conversation_id == Conversation.id)
+			.join(IGUser, IGUser.id == Conversation.ig_user_id, isouter=True)
+		)
+		# Apply the same filters as the main query
+		if query_text:
+			like = f"%{query_text}%"
+			count_stmt = count_stmt.where(
+				or_(
+					IGUser.username.ilike(like),
+					IGUser.contact_name.ilike(like),
+					IGUser.contact_phone.ilike(like),
+				)
 			)
-		).all()
-		status_counts = {
-			str(getattr(row, "st", row[0])): int(getattr(row, "cnt", row[1]))
-			for row in count_rows or []
-		}
+		if start_date:
+			start_dt = dt.datetime.combine(start_date, dt.time.min)
+			count_stmt = count_stmt.where(AiOrderCandidate.updated_at >= start_dt)
+		if end_date:
+			end_dt = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min)
+			count_stmt = count_stmt.where(AiOrderCandidate.updated_at < end_dt)
+		count_stmt = count_stmt.group_by(AiOrderCandidate.status)
+		
+		count_rows = session.exec(count_stmt).all()
+		status_counts = {}
+		for row in count_rows or []:
+			# Handle both Row and tuple results
+			if hasattr(row, 'status'):
+				status_val = row.status
+				count_val = getattr(row, 'cnt', None) or (row[1] if isinstance(row, (list, tuple)) and len(row) > 1 else 0)
+			else:
+				# Handle tuple result
+				status_val = row[0] if isinstance(row, (list, tuple)) and len(row) > 0 else None
+				count_val = row[1] if isinstance(row, (list, tuple)) and len(row) > 1 else 0
+			if status_val:
+				status_counts[str(status_val)] = int(count_val) if count_val else 0
+		
+		# Ensure all statuses are present (even with 0 count)
+		for status in ALLOWED_STATUSES:
+			if status not in status_counts:
+				status_counts[status] = 0
 
 	orders = []
 	for candidate_row, convo_row, user_row in rows:
