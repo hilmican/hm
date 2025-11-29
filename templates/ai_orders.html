@@ -71,6 +71,8 @@
 
 		<form method="get" class="card filter-bar">
 			<input type="search" name="q" placeholder="{{ t(request, 'ai_orders.search_placeholder') }}" value="{{ query }}" />
+			<input type="date" name="start" placeholder="Başlangıç" value="{{ start_date }}" style="flex: 0 0 140px;" />
+			<input type="date" name="end" placeholder="Bitiş" value="{{ end_date }}" style="flex: 0 0 140px;" />
 			<select name="status">
 				<option value="">{{ t(request, 'ai_orders.filter_all_statuses') }}</option>
 				{% for status in available_statuses %}

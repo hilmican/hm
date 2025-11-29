@@ -63,12 +63,23 @@ def _format_order_row(candidate: AiOrderCandidate, conversation: Optional[Conver
 
 
 @router.get("")
-def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: Optional[str] = None, limit: int = 200):
+def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: Optional[str] = None, limit: int = 200, start: Optional[str] = None, end: Optional[str] = None):
+	def _parse_date(value: Optional[str]) -> Optional[dt.date]:
+		if not value:
+			return None
+		try:
+			return dt.date.fromisoformat(value)
+		except Exception:
+			return None
+	
 	n = max(1, min(int(limit or 200), 500))
 	status_filter = (status or "").strip().lower() or None
 	if status_filter and status_filter not in ALLOWED_STATUSES:
 		status_filter = None
 	query_text = (q or "").strip()
+	start_date = _parse_date(start)
+	end_date = _parse_date(end)
+	
 	with get_session() as session:
 		stmt = (
 			select(AiOrderCandidate, Conversation, IGUser)
@@ -86,6 +97,14 @@ def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: 
 					IGUser.contact_phone.ilike(like),
 				)
 			)
+		# Date filtering by updated_at
+		if start_date:
+			start_dt = dt.datetime.combine(start_date, dt.time.min)
+			stmt = stmt.where(AiOrderCandidate.updated_at >= start_dt)
+		if end_date:
+			end_dt = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min)
+			stmt = stmt.where(AiOrderCandidate.updated_at < end_dt)
+		
 		stmt = stmt.order_by(AiOrderCandidate.updated_at.desc()).limit(n)
 		rows = session.exec(stmt).all()
 
@@ -114,6 +133,8 @@ def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: 
 			"orders": orders,
 			"filter_status": status_filter,
 			"query": query_text,
+			"start_date": start_date.isoformat() if start_date else "",
+			"end_date": end_date.isoformat() if end_date else "",
 			"status_counts": status_counts,
 			"limit": n,
 			"available_statuses": sorted(ALLOWED_STATUSES),
