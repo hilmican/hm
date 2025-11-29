@@ -196,7 +196,20 @@ def process_conversations_by_date_range(
 				"LIMIT :lim"
 			)
 		rows = session.exec(_text(sql).params(start_ms=start_ms, end_ms=end_ms, lim=int(limit))).all()
-		conversation_ids = [r.conversation_id if hasattr(r, "conversation_id") else r[0] for r in rows]
+		# Handle different return types: int (direct value), object with attribute, or tuple/list
+		def _extract_conversation_id(r):
+			if isinstance(r, int):
+				return r
+			if hasattr(r, "conversation_id"):
+				return r.conversation_id
+			if isinstance(r, (tuple, list)) and len(r) > 0:
+				return r[0]
+			# Try to access as Row object with index
+			try:
+				return r[0]
+			except (TypeError, IndexError):
+				return r
+		conversation_ids = [_extract_conversation_id(r) for r in rows]
 		
 		# If skip_processed is False, we still want to count how many would have been skipped
 		if not skip_processed and conversation_ids:
@@ -206,7 +219,8 @@ def process_conversations_by_date_range(
 					AiOrderCandidate.conversation_id.in_(conversation_ids)
 				)
 			).all()
-			existing_ids = {c.conversation_id if hasattr(c, "conversation_id") else c[0] for c in existing_candidates}
+			# SQLModel returns integers directly for single-column selects
+			existing_ids = {_extract_conversation_id(c) for c in existing_candidates}
 			skipped = len([c for c in conversation_ids if c in existing_ids])
 	
 	log.info(
