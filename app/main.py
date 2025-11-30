@@ -1,7 +1,10 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.responses import FileResponse
 from starlette.middleware.sessions import SessionMiddleware
+from pathlib import Path
+import os
 
 from .db import init_db
 from .db import engine as _db_engine
@@ -32,8 +35,6 @@ def create_app() -> FastAPI:
 	app = FastAPI(title="Kargo Importer & Management", docs_url=None, redoc_url=None, openapi_url=None)
 
 	app.mount("/static", StaticFiles(directory="static"), name="static")
-	# Also mount /products to serve product images (fallback when CDN URLs are used as relative paths)
-	app.mount("/products", StaticFiles(directory="static/products"), name="products")
 
 	templates = Jinja2Templates(directory="templates")
 	app.state.templates = templates
@@ -203,6 +204,23 @@ def create_app() -> FastAPI:
 	app.include_router(payments.router, prefix="/payments", tags=["payments"]) 
 	app.include_router(inventory.router)
 	app.include_router(mappings.router)
+	# Route handler for product images (must be before products router to catch image requests)
+	@app.get("/products/{folder}/{filename}")
+	async def serve_product_image(folder: str, filename: str):
+		"""Serve product images from static/products/{folder}/{filename}"""
+		# Only serve image files
+		image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'}
+		if not any(filename.lower().endswith(ext) for ext in image_extensions):
+			raise HTTPException(status_code=404, detail="Not an image file")
+		
+		root = Path(os.getenv("IMAGE_UPLOAD_ROOT", "static")).resolve()
+		file_path = root / "products" / folder / filename
+		
+		if not file_path.exists() or not file_path.is_file():
+			raise HTTPException(status_code=404, detail="Image not found")
+		
+		return FileResponse(file_path)
+
 	app.include_router(products.router)
 	app.include_router(product_qa.router)
 	app.include_router(instagram.router)
