@@ -32,6 +32,8 @@ def create_app() -> FastAPI:
 	app = FastAPI(title="Kargo Importer & Management", docs_url=None, redoc_url=None, openapi_url=None)
 
 	app.mount("/static", StaticFiles(directory="static"), name="static")
+	# Also mount /products to serve product images (fallback when CDN URLs are used as relative paths)
+	app.mount("/products", StaticFiles(directory="static/products"), name="products")
 
 	templates = Jinja2Templates(directory="templates")
 	app.state.templates = templates
