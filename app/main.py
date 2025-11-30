@@ -20,6 +20,7 @@ from .routers import posts
 from .routers import noc
 from .routers import costs
 from .routers import ai_orders
+from .routers import soap_test
 from collections import deque
 import time as _time
 from .routers import admin
@@ -213,6 +214,7 @@ def create_app() -> FastAPI:
 	app.include_router(noc.router)
 	app.include_router(costs.router, prefix="/costs", tags=["costs"])
 	app.include_router(ai_orders.router)
+	app.include_router(soap_test.router)
 	# i18n endpoints
 	app.include_router(i18n_router.router)
 

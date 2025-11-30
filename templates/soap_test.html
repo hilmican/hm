@@ -1,0 +1,299 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>SOAP Test - Surat Kargo Takip</title>
+    <style>
+      body { 
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; 
+        margin: 24px; 
+        max-width: 1200px;
+      }
+      .card { 
+        border: 1px solid #e5e7eb; 
+        border-radius: 8px; 
+        padding: 16px; 
+        margin: 12px 0; 
+        background: white;
+      }
+      .form-group {
+        margin-bottom: 16px;
+      }
+      label {
+        display: block;
+        margin-bottom: 4px;
+        font-weight: 500;
+        color: #374151;
+      }
+      input[type="text"], input[type="password"], select {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 14px;
+        box-sizing: border-box;
+      }
+      input:focus, select:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+      }
+      button {
+        background: #3b82f6;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      button:hover {
+        background: #2563eb;
+      }
+      button:disabled {
+        background: #9ca3af;
+        cursor: not-allowed;
+      }
+      .response-section {
+        margin-top: 24px;
+      }
+      .response-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .status-badge {
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .status-200 {
+        background: #d1fae5;
+        color: #065f46;
+      }
+      .status-error {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      pre {
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        padding: 16px;
+        overflow-x: auto;
+        font-size: 12px;
+        line-height: 1.5;
+        max-height: 600px;
+        overflow-y: auto;
+      }
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+        border-bottom: 2px solid #e5e7eb;
+      }
+      .tab {
+        padding: 8px 16px;
+        cursor: pointer;
+        border: none;
+        background: none;
+        color: #6b7280;
+        font-size: 14px;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+      }
+      .tab.active {
+        color: #3b82f6;
+        border-bottom-color: #3b82f6;
+        font-weight: 500;
+      }
+      .tab-content {
+        display: none;
+      }
+      .tab-content.active {
+        display: block;
+      }
+      .loading {
+        display: none;
+        text-align: center;
+        padding: 20px;
+        color: #6b7280;
+      }
+      .loading.active {
+        display: block;
+      }
+      .error {
+        background: #fee2e2;
+        border: 1px solid #fecaca;
+        color: #991b1b;
+        padding: 12px;
+        border-radius: 6px;
+        margin-top: 12px;
+      }
+      h2 {
+        margin-top: 0;
+        color: #111827;
+      }
+      .info {
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        color: #1e40af;
+        padding: 12px;
+        border-radius: 6px;
+        margin-bottom: 16px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h2>SOAP Test - Surat Kargo Takip</h2>
+    
+    <div class="info">
+      <strong>Test Form:</strong> This form is for testing the Surat Kargo shipment tracking SOAP API.
+      The API endpoint is: <code>https://prova.suratkargo.com.tr/services.asmx</code>
+    </div>
+
+    <div class="card">
+      <form id="soapForm" onsubmit="handleSubmit(event); return false;">
+        <div class="form-group">
+          <label for="gonderen_cari_kodu">Gonderen Cari Kodu:</label>
+          <input type="text" id="gonderen_cari_kodu" name="gonderen_cari_kodu" required />
+        </div>
+        
+        <div class="form-group">
+          <label for="takip_no">Takip No:</label>
+          <input type="text" id="takip_no" name="takip_no" required />
+        </div>
+        
+        <div class="form-group">
+          <label for="sifre">Şifre:</label>
+          <input type="password" id="sifre" name="sifre" required />
+        </div>
+        
+        <div class="form-group">
+          <label for="soap_version">SOAP Version:</label>
+          <select id="soap_version" name="soap_version">
+            <option value="1.1">SOAP 1.1</option>
+            <option value="1.2">SOAP 1.2</option>
+          </select>
+        </div>
+        
+        <button type="submit" id="submitBtn">Test API</button>
+      </form>
+      
+      <div class="loading" id="loading">
+        Sending SOAP request...
+      </div>
+    </div>
+
+    <div class="response-section" id="responseSection" style="display: none;">
+      <div class="card">
+        <div class="response-header">
+          <h3>Response</h3>
+          <span class="status-badge" id="statusBadge"></span>
+        </div>
+        
+        <div class="tabs">
+          <button class="tab active" onclick="showTab('response')">Response Body</button>
+          <button class="tab" onclick="showTab('request')">Request Body</button>
+          <button class="tab" onclick="showTab('headers')">Response Headers</button>
+        </div>
+        
+        <div id="tab-response" class="tab-content active">
+          <pre id="responseBody"></pre>
+        </div>
+        
+        <div id="tab-request" class="tab-content">
+          <pre id="requestBody"></pre>
+        </div>
+        
+        <div id="tab-headers" class="tab-content">
+          <pre id="responseHeaders"></pre>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      
+      function showTab(tabName) {
+        // Hide all tabs
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        
+        // Show selected tab
+        event.target.classList.add('active');
+        $(`tab-${tabName}`).classList.add('active');
+      }
+      
+      async function handleSubmit(event) {
+        event.preventDefault();
+        
+        const form = $('soapForm');
+        const formData = new FormData(form);
+        const submitBtn = $('submitBtn');
+        const loading = $('loading');
+        const responseSection = $('responseSection');
+        
+        // Disable form and show loading
+        submitBtn.disabled = true;
+        loading.classList.add('active');
+        responseSection.style.display = 'none';
+        
+        try {
+          const response = await fetch('/soap-test/track', {
+            method: 'POST',
+            body: formData
+          });
+          
+          const data = await response.json();
+          
+          // Show response section
+          responseSection.style.display = 'block';
+          
+          // Update status badge
+          const statusBadge = $('statusBadge');
+          if (data.error) {
+            statusBadge.textContent = 'Error';
+            statusBadge.className = 'status-badge status-error';
+          } else {
+            statusBadge.textContent = `HTTP ${data.status_code}`;
+            statusBadge.className = `status-badge status-${data.status_code === 200 ? '200' : 'error'}`;
+          }
+          
+          // Update response body
+          if (data.error) {
+            $('responseBody').textContent = `Error: ${data.error}`;
+          } else {
+            $('responseBody').textContent = data.response_body || data.raw_response || 'No response body';
+          }
+          
+          // Update request body
+          $('requestBody').textContent = data.request_body || 'No request body';
+          
+          // Update headers
+          if (data.headers) {
+            $('responseHeaders').textContent = JSON.stringify(data.headers, null, 2);
+          } else {
+            $('responseHeaders').textContent = 'No headers';
+          }
+          
+        } catch (error) {
+          responseSection.style.display = 'block';
+          $('statusBadge').textContent = 'Error';
+          $('statusBadge').className = 'status-badge status-error';
+          $('responseBody').textContent = `Network error: ${error.message}`;
+        } finally {
+          submitBtn.disabled = false;
+          loading.classList.remove('active');
+        }
+      }
+    </script>
+  </body>
+</html>
+

@@ -1429,7 +1429,7 @@ def draft_reply(
 		"- Sadece mesajda 'yöneticiye iletiyorum' veya 'eskale ediyorum' demek YETERLİ DEĞİLDİR.\n"
 		"- MUTLAKA `yoneticiye_bildirim_gonder` fonksiyonunu çağır.\n"
 		"- Fonksiyonu çağırdıktan sonra, müşteriye kısa bir bilgilendirme mesajı yazabilirsin ama asla sadece mesaj yazmayla yetinme.\n"
-		"- Eskalasyon yaptığında `should_reply: false` yap ve `reply_text` içinde müşteriye kısa bilgi ver (örn: 'Bu konuyu yöneticimize iletiyorum, en kısa sürede dönüş yapacaklar').\n"
+		"- Eskalasyon yaptığında `should_reply: false` yap.\n"
 		"- Fonksiyonu çağırdıktan sonra otomatik cevap verme - yönetici manuel müdahale edecek.\n"
 	)
 
