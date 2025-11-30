@@ -191,6 +191,11 @@ def daily_report(
 		refund_total_amount = sum(float(o.total_amount or 0.0) for o in refunded_orders)
 		refund_shipping_total = sum(order_shipping_map.get(o.id or 0, 0.0) for o in refunded_orders)
 
+		# Switch (değişim) metrics: count and totals for switched orders in period
+		switched_orders = [o for o in orders if (str(o.status or "").lower() == "switched")]
+		switch_count = len(switched_orders)
+		switch_total_amount = sum(float(o.total_amount or 0.0) for o in switched_orders)
+
 		# Top items by revenue and quantity
 		item_stats: dict[int, dict[str, float]] = {}
 		for o in orders:
@@ -346,6 +351,11 @@ def daily_report(
 				"refund_count": refund_count,
 				"refund_total_amount": refund_total_amount,
 				"refund_shipping_total": refund_shipping_total,
+				# switch (değişim) KPIs
+				"switch_count": switch_count,
+				"switch_total_amount": switch_total_amount,
+				# shipment costs (kargo) as separate KPI
+				"total_shipment_costs": fee_kar,
 			},
 		)
 

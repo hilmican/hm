@@ -79,6 +79,9 @@
             <div class="kpi"><div class="label">İade Adedi</div><div class="value">{{ refund_count or 0 }}</div></div>
             <div class="kpi"><div class="label">İade Toplam</div><div class="value">{{ '%.2f'|format(refund_total_amount or 0) }}</div></div>
             <div class="kpi"><div class="label">İade Kargo</div><div class="value">{{ '%.2f'|format(refund_shipping_total or 0) }}</div></div>
+            <div class="kpi"><div class="label">Değişim Adedi</div><div class="value">{{ switch_count or 0 }}</div></div>
+            <div class="kpi"><div class="label">Değişim Toplam</div><div class="value">{{ '%.2f'|format(switch_total_amount or 0) }}</div></div>
+            <div class="kpi"><div class="label">Toplam Kargo Maliyeti</div><div class="value">{{ '%.2f'|format(total_shipment_costs or 0) }}</div></div>
         </div>
 
         <div class="grid" style="margin-top:16px;">
