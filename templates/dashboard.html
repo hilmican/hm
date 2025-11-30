@@ -54,9 +54,15 @@
 		<div id="uploadResult" class="caption"></div>
 		<div class="grid">
 			<div class="card">
-				<h2>{{ t(request, 'dashboard.order_status_distribution') }}</h2>
+<h2>{{ t(request, 'dashboard.order_status_distribution') }}</h2>
 				<canvas id="statusPie" width="400" height="260" style="display:block;margin:8px auto;"></canvas>
 				<div id="statusLegend" class="caption" style="padding:8px 16px;"></div>
+			</div>
+
+			<div class="card">
+				<h2>{{ t(request, 'dashboard.ongoing_status_distribution') }}</h2>
+				<canvas id="ongoingStatusPie" width="400" height="260" style="display:block;margin:8px auto;"></canvas>
+				<div id="ongoingStatusLegend" class="caption" style="padding:8px 16px;"></div>
 			</div>
 
 			<div class="card">
@@ -199,6 +205,75 @@
 				start = end;
 			});
 			const legend = document.getElementById('statusLegend');
+			if (legend) {
+				const label = (s)=> STATUS_LABELS[String(s||'').toLowerCase()] || (String(s||'').charAt(0).toUpperCase() + String(s||'').slice(1));
+				legend.innerHTML = data.map((r,i)=>`<span style="display:inline-flex;align-items:center;margin-right:12px;">
+					<span style="display:inline-block;width:10px;height:10px;background:${colors[i%colors.length]};border-radius:2px;margin-right:6px;"></span>
+					${label(r.status)}: <strong style="margin-left:4px;">${r.count}</strong>
+				</span>`).join('');
+
+				// Tooltip on hover
+				const tip = document.createElement('div');
+				tip.style.position = 'absolute';
+				tip.style.background = 'rgba(17,24,39,0.9)';
+				tip.style.color = '#fff';
+				tip.style.fontSize = '12px';
+				tip.style.padding = '6px 8px';
+				tip.style.borderRadius = '6px';
+				tip.style.pointerEvents = 'none';
+				tip.style.display = 'none';
+				canvas.parentElement.style.position = 'relative';
+				canvas.parentElement.appendChild(tip);
+				const totals = data.map(r=>r.count||0);
+				const sum = totals.reduce((a,b)=>a+b,0)||1;
+				const cum = []; let acc = 0; for(const r of totals){ acc += r/sum; cum.push(acc); }
+				function sliceAt(theta){
+					let t = theta; while (t < -Math.PI/2) t += Math.PI*2; while (t > Math.PI*3/2) t -= Math.PI*2;
+					let frac = (t + Math.PI/2) / (Math.PI*2);
+					for (let i=0;i<cum.length;i++){ if (frac <= cum[i]) return i; }
+					return cum.length-1;
+				}
+				canvas.addEventListener('mousemove', (e)=>{
+					const rect = canvas.getBoundingClientRect();
+					const x = e.clientX - rect.left - canvas.width/2;
+					const y = e.clientY - rect.top - canvas.height/2;
+					const r = Math.min(canvas.width, canvas.height)/2 - 8;
+					if (Math.sqrt(x*x + y*y) > r){ tip.style.display='none'; return; }
+					const theta = Math.atan2(y, x);
+					const idx = sliceAt(theta);
+					const d = data[idx]; const cnt = totals[idx]; const pct = Math.round((cnt/sum)*1000)/10;
+					tip.textContent = `${label(d.status)}: ${cnt} (${pct}%)`;
+					tip.style.left = (e.clientX - rect.left + 10) + 'px';
+					tip.style.top = (e.clientY - rect.top + 10) + 'px';
+					tip.style.display = 'block';
+				});
+				canvas.addEventListener('mouseleave', ()=>{ tip.style.display='none'; });
+			}
+		})();
+
+		// Ongoing status pie chart (excluding tamamlandi, refunded, switched)
+		(function(){
+			const data = {{ (ongoing_status_counts or []) | tojson }};
+			if (!data || !data.length) return;
+			const canvas = document.getElementById('ongoingStatusPie');
+			if (!canvas) return;
+			const ctx = canvas.getContext('2d');
+			const total = data.reduce((s, r) => s + (r.count || 0), 0) || 1;
+			// Palette for ongoing: dagitimda, gecikmede, sorunlu, stitched
+			const colors = ['#60a5fa','#f59e0b','#ef4444','#34d399'];
+			let start = -Math.PI/2;
+			data.forEach((r, i) => {
+				const frac = (r.count || 0) / total;
+				const end = start + frac * Math.PI * 2;
+				ctx.beginPath();
+				ctx.moveTo(canvas.width/2, canvas.height/2);
+				ctx.arc(canvas.width/2, canvas.height/2, Math.min(canvas.width, canvas.height)/2 - 8, start, end);
+				ctx.closePath();
+				ctx.fillStyle = colors[i % colors.length];
+				ctx.fill();
+				start = end;
+			});
+			const legend = document.getElementById('ongoingStatusLegend');
 			if (legend) {
 				const label = (s)=> STATUS_LABELS[String(s||'').toLowerCase()] || (String(s||'').charAt(0).toUpperCase() + String(s||'').slice(1));
 				legend.innerHTML = data.map((r,i)=>`<span style="display:inline-flex;align-items:center;margin-right:12px;">

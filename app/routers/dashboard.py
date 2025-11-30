@@ -130,6 +130,59 @@ def dashboard(request: Request):
 
 		status_counts = cached_json("dash:status_counts", ttl, _compute_status_counts)
 
+		# Ongoing status counts (excluding tamamlandi, refunded, switched)
+		def _compute_ongoing_status_counts():
+			base = {"dagitimda": 0, "gecikmede": 0, "sorunlu": 0, "stitched": 0}
+			# explicit stitched status
+			if backend == "mysql":
+				rows_stitched = session.exec(text("SELECT COUNT(*) FROM `order` WHERE status = 'stitched'")).first()
+			else:
+				rows_stitched = session.exec(text('SELECT COUNT(*) FROM "order" WHERE status = "stitched"')).first()
+			base["stitched"] = int(rows_stitched[0] or 0) if rows_stitched else 0
+			# derived buckets for ongoing (excluding tamamlandi, refunded, switched)
+			if backend == "mysql":
+				row_buckets = session.exec(text(
+					"SELECT\n"
+					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1 ELSE 0 END) AS dagitimda,\n"
+					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n"
+					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1 ELSE 0 END) AS gecikmede,\n"
+					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1 ELSE 0 END) AS sorunlu\n"
+					"FROM `order` o\n"
+					"LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n"
+					"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')"
+				)).first() or [0, 0, 0]
+			else:
+				row_buckets = session.exec(text(
+					'SELECT\n'
+					'  SUM(CASE\n'
+					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
+					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1\n'
+					'        ELSE 0 END) AS dagitimda,\n'
+					'  SUM(CASE\n'
+					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
+					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n'
+					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1\n'
+					'        ELSE 0 END) AS gecikmede,\n'
+					'  SUM(CASE\n'
+					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
+					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1\n'
+					'        ELSE 0 END) AS sorunlu\n'
+					'FROM "order" o\n'
+					'LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n'
+					'WHERE COALESCE(o.status, "") NOT IN ("refunded","switched","stitched")'
+				)).first() or [0, 0, 0]
+			base["dagitimda"] = int(row_buckets[0] or 0)
+			base["gecikmede"] = int(row_buckets[1] or 0)
+			base["sorunlu"] = int(row_buckets[2] or 0)
+			# return as list in consistent order used by UI
+			order = ["dagitimda", "gecikmede", "sorunlu", "stitched"]
+			return [{"status": k, "count": base.get(k, 0)} for k in order]
+
+		ongoing_status_counts = cached_json("dash:ongoing_status_counts", ttl, _compute_ongoing_status_counts)
+
 		# Best-selling low stock: all-time best sellers with on-hand <= 5, top 10
 		from ..services.inventory import compute_all_time_sold_map, get_stock_map
 		sold_map = compute_all_time_sold_map(session)
@@ -161,6 +214,7 @@ def dashboard(request: Request):
 				"total_to_collect": total_to_collect,
 				"total_fees": total_fees,
 				"order_status_counts": status_counts,
+				"ongoing_status_counts": ongoing_status_counts,
 				"low_stock_best": low_stock_best,
 			},
 		)

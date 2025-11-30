@@ -58,6 +58,7 @@
     "to_collect": "To Collect",
     "total_fees": "Total Fees",
     "order_status_distribution": "Order Status Distribution",
+    "ongoing_status_distribution": "Ongoing Order Status Distribution",
     "low_stock_best": "Top Sellers - Low Stock (<=5)",
     "upload": "Upload",
     "uploading": "Uploading...",
