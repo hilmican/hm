@@ -597,6 +597,34 @@ def init_db() -> None:
                             conn.exec_driver_sql("CREATE INDEX idx_order_paid_by_bank_transfer ON `order`(paid_by_bank_transfer)")
                         except Exception:
                             pass
+                    # Ensure partial payment merging fields exist (MySQL)
+                    if 'merged_into_order_id' not in have_cols:
+                        try:
+                            conn.exec_driver_sql("ALTER TABLE `order` ADD COLUMN merged_into_order_id INT NULL")
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql("CREATE INDEX idx_order_merged_into_order_id ON `order`(merged_into_order_id)")
+                        except Exception:
+                            pass
+                    if 'is_partial_payment' not in have_cols:
+                        try:
+                            conn.exec_driver_sql("ALTER TABLE `order` ADD COLUMN is_partial_payment TINYINT(1) NULL DEFAULT 0")
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql("CREATE INDEX idx_order_is_partial_payment ON `order`(is_partial_payment)")
+                        except Exception:
+                            pass
+                    if 'partial_payment_group_id' not in have_cols:
+                        try:
+                            conn.exec_driver_sql("ALTER TABLE `order` ADD COLUMN partial_payment_group_id INT NULL")
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql("CREATE INDEX idx_order_partial_payment_group_id ON `order`(partial_payment_group_id)")
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 # ai_conversations is deprecated; new deployments should use conversations only

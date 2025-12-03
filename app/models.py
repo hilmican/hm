@@ -58,6 +58,10 @@ class Order(SQLModel, table=True):
     source: str = Field(index=True, description="bizim|kargo")
     # Link to Instagram conversation id (e.g., "dm:<ig_user_id>")
     ig_conversation_id: Optional[str] = Field(default=None, index=True)
+    # Partial payment merging fields
+    merged_into_order_id: Optional[int] = Field(default=None, foreign_key="order.id", index=True, description="If set, this order was merged into the referenced order")
+    is_partial_payment: Optional[bool] = Field(default=False, index=True, description="True if this order is part of a partial payment group")
+    partial_payment_group_id: Optional[int] = Field(default=None, foreign_key="order.id", index=True, description="ID of the primary order in this partial payment group")
 
 
 class OrderItem(SQLModel, table=True):

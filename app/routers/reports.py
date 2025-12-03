@@ -47,6 +47,7 @@ def daily_report(
 			orders = session.exec(
 				select(Order)
 				.where(
+					Order.merged_into_order_id.is_(None),  # Exclude merged orders
 					or_(
 						and_(Order.shipment_date.is_not(None), Order.shipment_date >= start_date, Order.shipment_date <= end_date),
 						and_(Order.data_date.is_not(None), Order.data_date >= start_date, Order.data_date <= end_date),
@@ -61,6 +62,7 @@ def daily_report(
 			orders = session.exec(
 				select(Order)
 				.where(
+					Order.merged_into_order_id.is_(None),  # Exclude merged orders
 					or_(
 						and_(date_col.is_not(None), date_col >= start_date, date_col <= end_date),
 						and_(date_col.is_(None), alt_date_col.is_not(None), alt_date_col >= start_date, alt_date_col <= end_date),
@@ -69,6 +71,8 @@ def daily_report(
 				.order_by(Order.id.desc())
 			).all()
 
+		# Filter out merged orders and count only primary orders
+		orders = [o for o in orders if o.merged_into_order_id is None]
 		order_count = len(orders)
 		total_quantity = sum(int(o.quantity or 0) for o in orders)
 		total_sales = sum(float(o.total_amount or 0.0) for o in orders)
@@ -195,6 +199,11 @@ def daily_report(
 		switched_orders = [o for o in orders if (str(o.status or "").lower() == "switched")]
 		switch_count = len(switched_orders)
 		switch_total_amount = sum(float(o.total_amount or 0.0) for o in switched_orders)
+
+		# Partial payment metrics: count and totals for partial payment orders in period
+		partial_paid_orders = [o for o in orders if (str(o.status or "").lower() == "partial_paid") or (bool(o.is_partial_payment))]
+		partial_paid_count = len(partial_paid_orders)
+		partial_paid_total_amount = sum(float(o.total_amount or 0.0) for o in partial_paid_orders)
 
 		# Top items by revenue and quantity
 		item_stats: dict[int, dict[str, float]] = {}
@@ -354,6 +363,9 @@ def daily_report(
 				# switch (değişim) KPIs
 				"switch_count": switch_count,
 				"switch_total_amount": switch_total_amount,
+				# partial payment KPIs
+				"partial_paid_count": partial_paid_count,
+				"partial_paid_total_amount": partial_paid_total_amount,
 				# shipment costs (kargo) as separate KPI
 				"total_shipment_costs": fee_kar,
 			},

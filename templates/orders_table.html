@@ -69,6 +69,8 @@
         tr.unpaid { background: var(--warn-bg); }
         tr.refunded { color: #b91c1c; background: var(--danger-bg); }
         tr.switched { color: #92400e; background: var(--switch-bg); }
+        tr.partial_paid { background: #fff4e6; }
+        tr.merged { opacity: 0.7; }
         
         @media (max-width: 768px){
             th, td { font-size: 13px; padding: 8px 10px; }
@@ -119,6 +121,7 @@
                 <option value="" {{ 'selected' if not status else '' }}>Tum Durumlar</option>
                 <option value="paid" {{ 'selected' if status == 'paid' else '' }}>Yesil (Odendi)</option>
                 <option value="unpaid" {{ 'selected' if status == 'unpaid' else '' }}>Sari (Odenmedi)</option>
+                <option value="partial_paid" {{ 'selected' if status == 'partial_paid' else '' }}>Turuncu (Kısmi Ödeme)</option>
                 <option value="refunded" {{ 'selected' if status == 'refunded' else '' }}>Kirmizi (Iade)</option>
                 <option value="switched" {{ 'selected' if status == 'switched' else '' }}>Kahverengi (Degisim)</option>
             </select>
@@ -137,11 +140,12 @@
         <button class="btn" onclick="presetAll()">Tüm siparişler</button>
         <button class="btn" onclick="exportExcel()">Excel'e aktar</button>
         <a class="btn" href="/orders/duplicates">Potansiyel Çiftler</a>
+        <a class="btn" href="/orders/partial-payments">Kısmi Ödemeler</a>
     </div>
     <h2>Siparisler</h2>
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th class="tracking">Takip</th><th class="client">Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>I/D Tarihi</th><th>Kanali</th><th>IG DM</th><th></th></tr>
+            <tr><th>ID</th><th class="tracking">Takip</th><th class="client">Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>I/D Tarihi</th><th>Kanali</th><th>IG DM</th><th>Durum</th><th></th></tr>
             <tr>
                 <th colspan="4" style="text-align:right">Toplamlar:</th>
                 <th data-type="num">{{ sum_qty }}</th>
@@ -154,8 +158,19 @@
         <tbody>
             {% for o in rows %}
             {% set rowcls = status_map.get(o.id) if status_map else '' %}
+            {% if o.merged_into_order_id %}
+                {% set rowcls = rowcls + ' merged' if rowcls else 'merged' %}
+            {% endif %}
             <tr class="{{ rowcls }}">
-                <td><a href="/orders/{{ o.id }}/edit" title="Düzenle #{{ o.id }}">{{ o.id }}</a></td>
+                <td>
+                    <a href="/orders/{{ o.id }}/edit" title="Düzenle #{{ o.id }}">{{ o.id }}</a>
+                    {% if o.merged_into_order_id %}
+                        <span style="color: #92400e; font-size: 10px;" title="Birleştirilmiş sipariş">🔗</span>
+                    {% endif %}
+                    {% if o.is_partial_payment %}
+                        <span style="color: #ea580c; font-size: 10px;" title="Kısmi ödeme">💰</span>
+                    {% endif %}
+                </td>
                 <td class="tracking" data-sort="{{ o.tracking_no or '' }}">
                     {% if o.tracking_no %}
                         <span title="{{ o.tracking_no }}">{{ (o.tracking_no or '')[:6] }}</span>
@@ -184,6 +199,15 @@
                         <a class="icon-btn" title="IG Konuşma" aria-label="IG Konuşma" href="/ig/inbox/{{ o.ig_conversation_id }}">
                             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 2h10a5 5 0 0 1 5 5v6a5 5 0 0 1-5 5h-3l-4 4v-4H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z"></path></svg>
                         </a>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if o.merged_into_order_id %}
+                        <a href="/orders/{{ o.merged_into_order_id }}/edit" style="color: #92400e; font-size: 11px;">→#{{ o.merged_into_order_id }}</a>
+                    {% elif o.partial_payment_group_id and o.partial_payment_group_id == o.id %}
+                        <span style="color: #ea580c; font-size: 11px;">Kısmi Ödeme</span>
                     {% else %}
                         -
                     {% endif %}

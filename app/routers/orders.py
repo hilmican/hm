@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Query, Request, HTTPException
 from sqlmodel import select
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, not_
 import datetime as dt
 from typing import Optional
+from collections import defaultdict
 
 from ..db import get_session
 from ..models import Order, Payment, OrderItem, Item, Client, OrderEditLog
@@ -120,6 +121,9 @@ def list_orders_table(
             q = q.where(Order.ig_conversation_id.is_(None))
 
         rows = session.exec(q).all()
+        
+        # Filter out merged orders from main display (or show them with reduced opacity)
+        # For now, we'll show them but mark them differently in the template
 
         # Payments and status map for paid/unpaid classification and refund/stitch display
         order_ids = [o.id for o in rows if o.id]
@@ -129,14 +133,38 @@ def list_orders_table(
             if p.order_id is None:
                 continue
             paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
+        
+        # For partial payment groups, sum payments across all orders in the group
+        # Load partial payment groups
+        partial_groups: dict[int, list[int]] = defaultdict(list)
+        for o in rows:
+            if o.partial_payment_group_id and o.id:
+                partial_groups[o.partial_payment_group_id].append(o.id)
+        
+        # Sum payments for partial payment groups
+        for group_id, group_order_ids in partial_groups.items():
+            if group_id in group_order_ids:
+                # Primary order exists in group
+                group_paid = sum(paid_map.get(oid, 0.0) for oid in group_order_ids)
+                paid_map[group_id] = group_paid
+        
         status_map: dict[int, str] = {}
         for o in rows:
             oid = o.id or 0
             total = float(o.total_amount or 0.0)
-            paid = paid_map.get(oid, 0.0)
+            
+            # For partial payment groups, use group total payments
+            if o.partial_payment_group_id and o.partial_payment_group_id == oid:
+                # This is the primary order in a partial payment group
+                paid = paid_map.get(oid, 0.0)
+            else:
+                paid = paid_map.get(oid, 0.0)
+            
             # refunded/switched take precedence for row classes
             if (o.status or "") in ("refunded", "switched", "stitched"):
                 status_map[oid] = str(o.status)
+            elif (o.status or "") == "partial_paid":
+                status_map[oid] = "partial_paid"
             else:
                 # Consider IBAN (bank transfer) orders as completed/paid
                 if bool(o.paid_by_bank_transfer):
@@ -145,7 +173,7 @@ def list_orders_table(
                     status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
 
         # Optional status filter — ignored for quicksearch presets
-        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched"):
+        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "partial_paid"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
 
         # Preset filters
@@ -607,6 +635,13 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
             order_items.append({"item": it, "quantity": int(oi.quantity or 0)})
         items_all = session.exec(select(Item).order_by(Item.id.desc()).limit(5000)).all()
         logs = session.exec(select(OrderEditLog).where(OrderEditLog.order_id == order_id).order_by(OrderEditLog.id.desc()).limit(100)).all()
+        
+        # Load merged orders (orders merged into this one, or this order merged into another)
+        merged_orders = []
+        if o.partial_payment_group_id and o.partial_payment_group_id == o.id:
+            # This is the primary order, find all orders merged into it
+            merged_orders = session.exec(select(Order).where(Order.merged_into_order_id == order_id)).all()
+        
         # current display strings
         client_disp = None
         if o.client_id:
@@ -631,6 +666,7 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
                 "logs": logs,
                 "client_disp": client_disp,
                 "item_disp": item_disp,
+                "merged_orders": merged_orders,
             },
         )
 
@@ -1058,3 +1094,394 @@ def find_duplicates(request: Request, start: Optional[str] = Query(default=None)
                 })
         templates = request.app.state.templates
         return templates.TemplateResponse("orders_duplicates.html", {"request": request, "groups": dupes, "start": start_date, "end": end_date})
+
+
+@router.get("/partial-payments")
+def find_partial_payments(
+    request: Request,
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
+):
+    """Find potential partial payment orders (same customer phone, same product, different order IDs)."""
+    from ..utils.normalize import normalize_phone
+    
+    def _parse_date_or_default(value: Optional[str], fallback: dt.date) -> dt.date:
+        try:
+            if value:
+                return dt.date.fromisoformat(value)
+        except Exception:
+            pass
+        return fallback
+
+    with get_session() as session:
+        today = dt.date.today()
+        default_start = dt.date(2025, 10, 1)
+        start_date = _parse_date_or_default(start, default_start)
+        end_date = _parse_date_or_default(end, today)
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
+
+        # Find orders that are not already merged and not refunded/switched/stitched
+        base_query = (
+            select(Order)
+            .where(
+                Order.merged_into_order_id.is_(None),
+                or_(
+                    and_(Order.shipment_date.is_not(None), Order.shipment_date >= start_date, Order.shipment_date <= end_date),
+                    and_(Order.data_date.is_not(None), Order.data_date >= start_date, Order.data_date <= end_date),
+                ),
+                or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"]))),
+            )
+        )
+        orders_filtered = session.exec(base_query).all()
+
+        # Group by (normalized phone, item_id)
+        groups: dict[tuple[str, Optional[int]], list[Order]] = defaultdict(list)
+        
+        # Load clients for phone lookup
+        client_ids = {o.client_id for o in orders_filtered if o.client_id}
+        clients = session.exec(select(Client).where(Client.id.in_(list(client_ids)))).all() if client_ids else []
+        client_map = {c.id: c for c in clients if c.id is not None}
+        
+        for order in orders_filtered:
+            if not order.client_id or order.client_id not in client_map:
+                continue
+            client = client_map[order.client_id]
+            phone_norm = normalize_phone(client.phone) if client.phone else ""
+            if not phone_norm:
+                continue
+            # Group by phone and item_id
+            key = (phone_norm, order.item_id)
+            groups[key].append(order)
+
+        # Filter groups: only keep groups with 2+ orders
+        candidate_groups = []
+        
+        # Load payments for all orders
+        order_ids = [o.id for o in orders_filtered if o.id]
+        payments = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
+        payment_map: dict[int, list[Payment]] = defaultdict(list)
+        for p in payments:
+            if p.order_id:
+                payment_map[p.order_id].append(p)
+
+        # Load items for display
+        item_ids = {o.item_id for o in orders_filtered if o.item_id}
+        items = session.exec(select(Item).where(Item.id.in_(list(item_ids)))).all() if item_ids else []
+        item_map = {it.id: it for it in items if it.id is not None}
+
+        for (phone_norm, item_id), order_list in groups.items():
+            if len(order_list) < 2:
+                continue
+            
+            # Calculate totals and payments for this group
+            group_data = []
+            total_payments = 0.0
+            max_order_total = 0.0
+            
+            for order in order_list:
+                order_payments = payment_map.get(order.id or 0, [])
+                paid_amount = sum(float(p.amount or 0.0) for p in order_payments)
+                total_payments += paid_amount
+                order_total = float(order.total_amount or 0.0)
+                max_order_total = max(max_order_total, order_total)
+                
+                item = item_map.get(order.item_id) if order.item_id else None
+                client = client_map.get(order.client_id) if order.client_id else None
+                
+                group_data.append({
+                    "order": order,
+                    "paid_amount": paid_amount,
+                    "order_total": order_total,
+                    "item": item,
+                    "client": client,
+                })
+            
+            # Candidate if: sum of payments < max single order total (indicating partial payment)
+            # Or if orders have different totals but same customer/product
+            if total_payments < max_order_total or len(set(o.total_amount for o in order_list if o.total_amount)) > 1:
+                # Identify primary order (bizim if exists, else first)
+                bizim_orders = [o for o in order_list if (o.source or "") == "bizim"]
+                primary_order = bizim_orders[0] if bizim_orders else order_list[0]
+                
+                candidate_groups.append({
+                    "phone": phone_norm,
+                    "item_id": item_id,
+                    "item": item_map.get(item_id) if item_id else None,
+                    "client": client_map.get(order_list[0].client_id) if order_list[0].client_id else None,
+                    "orders": group_data,
+                    "total_payments": total_payments,
+                    "max_order_total": max_order_total,
+                    "primary_order_id": primary_order.id,
+                })
+
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "orders_partial_payments.html",
+            {
+                "request": request,
+                "groups": candidate_groups,
+                "start": start_date,
+                "end": end_date,
+            },
+        )
+
+
+@router.post("/merge-partial-payments")
+async def merge_partial_payments(request: Request):
+    """Merge selected orders into a primary order for partial payments."""
+    form = await request.form()
+    
+    # Get order IDs from form
+    order_ids_raw = form.getlist("order_ids")
+    try:
+        order_ids = [int(oid) for oid in order_ids_raw if oid]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid order IDs")
+    
+    if len(order_ids) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 orders required for merging")
+    
+    with get_session() as session:
+        # Load all orders
+        orders = session.exec(select(Order).where(Order.id.in_(order_ids))).all()
+        if len(orders) != len(order_ids):
+            raise HTTPException(status_code=404, detail="Some orders not found")
+        
+        # Check if any are already merged
+        already_merged = [o for o in orders if o.merged_into_order_id is not None]
+        if already_merged:
+            raise HTTPException(status_code=400, detail=f"Some orders are already merged: {[o.id for o in already_merged]}")
+        
+        # Check if any are refunded/switched/stitched
+        invalid_status = [o for o in orders if (o.status or "") in ("refunded", "switched", "stitched")]
+        if invalid_status:
+            raise HTTPException(status_code=400, detail=f"Some orders have invalid status: {[o.id for o in invalid_status]}")
+        
+        # Identify primary order: bizim if exists, else first kargo (by ID, oldest)
+        bizim_orders = [o for o in orders if (o.source or "") == "bizim"]
+        if bizim_orders:
+            # Use first bizim order (by ID, oldest)
+            primary_order = min(bizim_orders, key=lambda o: o.id or 0)
+        else:
+            # Use first kargo order (by ID, oldest)
+            primary_order = min(orders, key=lambda o: o.id or 0)
+        
+        secondary_orders = [o for o in orders if o.id != primary_order.id]
+        
+        # Get primary order ID
+        primary_id = primary_order.id
+        if not primary_id:
+            raise HTTPException(status_code=400, detail="Primary order has no ID")
+        
+        # Load payments for all orders
+        all_payments = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all()
+        payment_map: dict[int, list[Payment]] = defaultdict(list)
+        for p in all_payments:
+            if p.order_id:
+                payment_map[p.order_id].append(p)
+        
+        # Merge each secondary order into primary
+        changes_log = []
+        for secondary in secondary_orders:
+            sec_id = secondary.id
+            if not sec_id:
+                continue
+            
+            # Set merged_into_order_id
+            secondary.merged_into_order_id = primary_id
+            secondary.is_partial_payment = True
+            
+            # Set partial_payment_group_id on both
+            primary_order.partial_payment_group_id = primary_id
+            primary_order.is_partial_payment = True
+            secondary.partial_payment_group_id = primary_id
+            
+            # Transfer payments from secondary to primary
+            sec_payments = payment_map.get(sec_id, [])
+            for payment in sec_payments:
+                payment.order_id = primary_id
+                changes_log.append(f"Payment {payment.id} moved from order {sec_id} to {primary_id}")
+            
+            # Combine notes
+            if secondary.notes:
+                if primary_order.notes:
+                    primary_order.notes = f"{primary_order.notes} | [Birleştirildi #{sec_id}]: {secondary.notes}"
+                else:
+                    primary_order.notes = f"[Birleştirildi #{sec_id}]: {secondary.notes}"
+            
+            # Keep earliest dates
+            if secondary.shipment_date and (not primary_order.shipment_date or secondary.shipment_date < primary_order.shipment_date):
+                primary_order.shipment_date = secondary.shipment_date
+            if secondary.data_date and (not primary_order.data_date or secondary.data_date < primary_order.data_date):
+                primary_order.data_date = secondary.data_date
+            
+            changes_log.append(f"Order {sec_id} merged into {primary_id}")
+        
+        # Calculate total payments for primary order (including transferred)
+        all_primary_payments = session.exec(select(Payment).where(Payment.order_id == primary_id)).all()
+        total_paid = sum(float(p.amount or 0.0) for p in all_primary_payments)
+        primary_total = float(primary_order.total_amount or 0.0)
+        
+        # Update status to "partial_paid" if payments < total
+        if total_paid > 0 and total_paid < primary_total:
+            primary_order.status = "partial_paid"
+        elif total_paid >= primary_total and primary_total > 0:
+            # Fully paid, but keep status as is or set to None
+            if (primary_order.status or "") == "partial_paid":
+                primary_order.status = None
+        
+        # Log merge action
+        try:
+            editor = request.session.get("uid") if hasattr(request, "session") else None
+            session.add(OrderEditLog(
+                order_id=primary_id,
+                editor_user_id=editor,
+                action="merge_partial_payments",
+                changes_json=str({
+                    "merged_orders": [o.id for o in secondary_orders],
+                    "total_paid": total_paid,
+                    "primary_total": primary_total,
+                    "changes": changes_log,
+                })
+            ))
+        except Exception:
+            pass
+        
+        return {
+            "status": "ok",
+            "primary_order_id": primary_id,
+            "merged_orders": [o.id for o in secondary_orders],
+            "total_paid": total_paid,
+            "primary_total": primary_total,
+        }
+
+
+@router.post("/merge-partial-payments")
+async def merge_partial_payments(request: Request):
+    """Merge selected orders into a primary order for partial payments."""
+    form = await request.form()
+    
+    # Get order IDs from form
+    order_ids_raw = form.getlist("order_ids")
+    try:
+        order_ids = [int(oid) for oid in order_ids_raw if oid]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid order IDs")
+    
+    if len(order_ids) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 orders required for merging")
+    
+    with get_session() as session:
+        # Load all orders
+        orders = session.exec(select(Order).where(Order.id.in_(order_ids))).all()
+        if len(orders) != len(order_ids):
+            raise HTTPException(status_code=404, detail="Some orders not found")
+        
+        # Check if any are already merged
+        already_merged = [o for o in orders if o.merged_into_order_id is not None]
+        if already_merged:
+            raise HTTPException(status_code=400, detail=f"Some orders are already merged: {[o.id for o in already_merged]}")
+        
+        # Check if any are refunded/switched/stitched
+        invalid_status = [o for o in orders if (o.status or "") in ("refunded", "switched", "stitched")]
+        if invalid_status:
+            raise HTTPException(status_code=400, detail=f"Some orders have invalid status: {[o.id for o in invalid_status]}")
+        
+        # Identify primary order: bizim if exists, else first kargo (by ID, oldest)
+        bizim_orders = [o for o in orders if (o.source or "") == "bizim"]
+        if bizim_orders:
+            # Use first bizim order (by ID, oldest)
+            primary_order = min(bizim_orders, key=lambda o: o.id or 0)
+        else:
+            # Use first kargo order (by ID, oldest)
+            primary_order = min(orders, key=lambda o: o.id or 0)
+        
+        secondary_orders = [o for o in orders if o.id != primary_order.id]
+        
+        # Get primary order ID
+        primary_id = primary_order.id
+        if not primary_id:
+            raise HTTPException(status_code=400, detail="Primary order has no ID")
+        
+        # Load payments for all orders
+        all_payments = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all()
+        payment_map: dict[int, list[Payment]] = defaultdict(list)
+        for p in all_payments:
+            if p.order_id:
+                payment_map[p.order_id].append(p)
+        
+        # Merge each secondary order into primary
+        changes_log = []
+        for secondary in secondary_orders:
+            sec_id = secondary.id
+            if not sec_id:
+                continue
+            
+            # Set merged_into_order_id
+            secondary.merged_into_order_id = primary_id
+            secondary.is_partial_payment = True
+            
+            # Set partial_payment_group_id on both
+            primary_order.partial_payment_group_id = primary_id
+            primary_order.is_partial_payment = True
+            secondary.partial_payment_group_id = primary_id
+            
+            # Transfer payments from secondary to primary
+            sec_payments = payment_map.get(sec_id, [])
+            for payment in sec_payments:
+                payment.order_id = primary_id
+                changes_log.append(f"Payment {payment.id} moved from order {sec_id} to {primary_id}")
+            
+            # Combine notes
+            if secondary.notes:
+                if primary_order.notes:
+                    primary_order.notes = f"{primary_order.notes} | [Birleştirildi #{sec_id}]: {secondary.notes}"
+                else:
+                    primary_order.notes = f"[Birleştirildi #{sec_id}]: {secondary.notes}"
+            
+            # Keep earliest dates
+            if secondary.shipment_date and (not primary_order.shipment_date or secondary.shipment_date < primary_order.shipment_date):
+                primary_order.shipment_date = secondary.shipment_date
+            if secondary.data_date and (not primary_order.data_date or secondary.data_date < primary_order.data_date):
+                primary_order.data_date = secondary.data_date
+            
+            changes_log.append(f"Order {sec_id} merged into {primary_id}")
+        
+        # Calculate total payments for primary order (including transferred)
+        all_primary_payments = session.exec(select(Payment).where(Payment.order_id == primary_id)).all()
+        total_paid = sum(float(p.amount or 0.0) for p in all_primary_payments)
+        primary_total = float(primary_order.total_amount or 0.0)
+        
+        # Update status to "partial_paid" if payments < total
+        if total_paid > 0 and total_paid < primary_total:
+            primary_order.status = "partial_paid"
+        elif total_paid >= primary_total and primary_total > 0:
+            # Fully paid, but keep status as is or set to None
+            if (primary_order.status or "") == "partial_paid":
+                primary_order.status = None
+        
+        # Log merge action
+        try:
+            editor = request.session.get("uid") if hasattr(request, "session") else None
+            session.add(OrderEditLog(
+                order_id=primary_id,
+                editor_user_id=editor,
+                action="merge_partial_payments",
+                changes_json=str({
+                    "merged_orders": [o.id for o in secondary_orders],
+                    "total_paid": total_paid,
+                    "primary_total": primary_total,
+                    "changes": changes_log,
+                })
+            ))
+        except Exception:
+            pass
+        
+        return {
+            "status": "ok",
+            "primary_order_id": primary_id,
+            "merged_orders": [o.id for o in secondary_orders],
+            "total_paid": total_paid,
+            "primary_total": primary_total,
+        }

@@ -66,6 +66,12 @@
 			</div>
 
 			<div class="card">
+				<h2>{{ t(request, 'dashboard.order_lifecycle_distribution') }}</h2>
+				<canvas id="lifecyclePie" width="400" height="260" style="display:block;margin:8px auto;"></canvas>
+				<div id="lifecycleLegend" class="caption" style="padding:8px 16px;"></div>
+			</div>
+
+			<div class="card">
 				<h2>{{ t(request, 'dashboard.low_stock_best') }}</h2>
 				<table>
 					<thead>
@@ -312,6 +318,83 @@
 					const idx = sliceAt(theta);
 					const d = data[idx]; const cnt = totals[idx]; const pct = Math.round((cnt/sum)*1000)/10;
 					tip.textContent = `${label(d.status)}: ${cnt} (${pct}%)`;
+					tip.style.left = (e.clientX - rect.left + 10) + 'px';
+					tip.style.top = (e.clientY - rect.top + 10) + 'px';
+					tip.style.display = 'block';
+				});
+				canvas.addEventListener('mouseleave', ()=>{ tip.style.display='none'; });
+			}
+		})();
+
+		// Order lifecycle pie chart (bizim orders: creation to payment time)
+		(function(){
+			const data = {{ (lifecycle_distribution or []) | tojson }};
+			if (!data || !data.length) return;
+			const canvas = document.getElementById('lifecyclePie');
+			if (!canvas) return;
+			const ctx = canvas.getContext('2d');
+			const total = data.reduce((s, r) => s + (r.count || 0), 0) || 1;
+			// Palette for lifecycle buckets: 0-3, 4-6, 7-9, 10-12, 13-15, 16+
+			const colors = ['#10b981','#60a5fa','#f59e0b','#ef4444','#a78bfa','#fbbf24'];
+			let start = -Math.PI/2;
+			data.forEach((r, i) => {
+				const frac = (r.count || 0) / total;
+				const end = start + frac * Math.PI * 2;
+				ctx.beginPath();
+				ctx.moveTo(canvas.width/2, canvas.height/2);
+				ctx.arc(canvas.width/2, canvas.height/2, Math.min(canvas.width, canvas.height)/2 - 8, start, end);
+				ctx.closePath();
+				ctx.fillStyle = colors[i % colors.length];
+				ctx.fill();
+				start = end;
+			});
+			const legend = document.getElementById('lifecycleLegend');
+			if (legend) {
+				const lifecycleLabels = {
+					"0-3": "{{ t(request, 'dashboard.lifecycle_days_0_3') }}",
+					"4-6": "{{ t(request, 'dashboard.lifecycle_days_4_6') }}",
+					"7-9": "{{ t(request, 'dashboard.lifecycle_days_7_9') }}",
+					"10-12": "{{ t(request, 'dashboard.lifecycle_days_10_12') }}",
+					"13-15": "{{ t(request, 'dashboard.lifecycle_days_13_15') }}",
+					"16+": "{{ t(request, 'dashboard.lifecycle_days_16_plus') }}"
+				};
+				const label = (b)=> lifecycleLabels[b] || b;
+				legend.innerHTML = data.map((r,i)=>`<span style="display:inline-flex;align-items:center;margin-right:12px;">
+					<span style="display:inline-block;width:10px;height:10px;background:${colors[i%colors.length]};border-radius:2px;margin-right:6px;"></span>
+					${label(r.bucket)}: <strong style="margin-left:4px;">${r.count}</strong>
+				</span>`).join('');
+
+				// Tooltip on hover
+				const tip = document.createElement('div');
+				tip.style.position = 'absolute';
+				tip.style.background = 'rgba(17,24,39,0.9)';
+				tip.style.color = '#fff';
+				tip.style.fontSize = '12px';
+				tip.style.padding = '6px 8px';
+				tip.style.borderRadius = '6px';
+				tip.style.pointerEvents = 'none';
+				tip.style.display = 'none';
+				canvas.parentElement.style.position = 'relative';
+				canvas.parentElement.appendChild(tip);
+				const totals = data.map(r=>r.count||0);
+				const sum = totals.reduce((a,b)=>a+b,0)||1;
+				const cum = []; let acc = 0; for(const r of totals){ acc += r/sum; cum.push(acc); }
+				function sliceAt(theta){
+					let t = theta; while (t < -Math.PI/2) t += Math.PI*2; while (t > Math.PI*3/2) t -= Math.PI*2;
+					let frac = (t + Math.PI/2) / (Math.PI*2);
+					for (let i=0;i<cum.length;i++){ if (frac <= cum[i]) return i; }
+					return cum.length-1;
+				}
+				canvas.addEventListener('mousemove', (e)=>{
+					const rect = canvas.getBoundingClientRect();
+					const x = e.clientX - rect.left - canvas.width/2;
+					const y = e.clientY - rect.top - canvas.height/2;
+					const r = Math.min(canvas.width, canvas.height)/2 - 8;
+					if (Math.sqrt(x*x + y*y) > r){ tip.style.display='none'; return; }
+					const theta = Math.atan2(y, x);
+					const idx = sliceAt(theta);
+					const d = data[idx]; const cnt = totals[idx]; const pct = Math.round((cnt/sum)*1000)/10;
+					tip.textContent = `${label(d.bucket)}: ${cnt} (${pct}%)`;
 					tip.style.left = (e.clientX - rect.left + 10) + 'px';
 					tip.style.top = (e.clientY - rect.top + 10) + 'px';
 					tip.style.display = 'block';

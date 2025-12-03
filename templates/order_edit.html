@@ -26,6 +26,29 @@
         </div>
     </div>
     {% endif %}
+    {% if order.merged_into_order_id %}
+    <div class="card" style="margin-bottom:12px; padding:12px; background:#fff4e6; border-color:#ea580c;">
+        <div style="font-size:13px; color:#92400e;">
+            <strong>⚠️ Bu sipariş birleştirilmiş:</strong>
+            <a href="/orders/{{ order.merged_into_order_id }}/edit" style="color:#ea580c; font-weight:600;">Sipariş #{{ order.merged_into_order_id }}</a> siparişine birleştirilmiş.
+        </div>
+    </div>
+    {% endif %}
+    {% if order.is_partial_payment and order.partial_payment_group_id == order.id %}
+    <div class="card" style="margin-bottom:12px; padding:12px; background:#fff4e6; border-color:#ea580c;">
+        <div style="font-size:13px; color:#92400e;">
+            <strong>💰 Kısmi Ödeme Grubu:</strong> Bu sipariş kısmi ödeme grubunun birincil siparişidir.
+            {% if merged_orders %}
+            <div style="margin-top:8px;">
+                <strong>Birleştirilmiş siparişler:</strong>
+                {% for merged in merged_orders %}
+                    <a href="/orders/{{ merged.id }}/edit" style="color:#ea580c;">#{{ merged.id }}</a>{% if not loop.last %}, {% endif %}
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
     <div class="card">
         <form method="post" action="/orders/{{ order.id }}/edit">
             <div class="row">
@@ -73,6 +96,7 @@
                         <option value="" {{ 'selected' if st=='' else '' }}>(boş)</option>
                         <option value="paid" {{ 'selected' if st=='paid' else '' }}>paid</option>
                         <option value="unpaid" {{ 'selected' if st=='unpaid' else '' }}>unpaid</option>
+                        <option value="partial_paid" {{ 'selected' if st=='partial_paid' else '' }}>partial_paid (Kısmi Ödeme)</option>
                         <option value="refunded" {{ 'selected' if st=='refunded' else '' }}>refunded</option>
                         <option value="switched" {{ 'selected' if st=='switched' else '' }}>switched</option>
                     </select>
