@@ -62,6 +62,7 @@
                 </thead>
                 <tbody>
                 {% for g in groups %}
+                    {% set group_index = loop.index0 %}
                     <tr class="group-header">
                         <td colspan="10" style="padding: 12px;">
                             <strong>Grup:</strong> {{ g.client.name if g.client else 'Bilinmeyen' }} 
@@ -77,7 +78,7 @@
                             <input type="checkbox" 
                                    name="order_ids" 
                                    value="{{ o_data.order.id }}" 
-                                   data-group="{{ loop.parent.loop.index0 }}"
+                                   data-group="{{ group_index }}"
                                    class="order-checkbox" />
                         </td>
                         <td>
