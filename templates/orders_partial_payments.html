@@ -57,14 +57,16 @@
                         <th>Tutar</th>
                         <th>Ödenen</th>
                         <th>Kalan</th>
+                        <th>Data Tarihi</th>
+                        <th>Kargo Tarihi</th>
                         <th>Durum</th>
                     </tr>
                 </thead>
                 <tbody>
-                {% for g in groups %}
+                    {% for g in groups %}
                     {% set group_index = loop.index0 %}
                     <tr class="group-header">
-                        <td colspan="10" style="padding: 12px;">
+                        <td colspan="12" style="padding: 12px;">
                             <strong>Grup:</strong> {{ g.client.name if g.client else 'Bilinmeyen' }} 
                             ({{ g.phone }}) | 
                             <strong>Ürün:</strong> {{ g.item.name if g.item else 'ID: ' + g.item_id|string if g.item_id else 'Yok' }} |
@@ -102,6 +104,8 @@
                         <td>{{ '%.2f'|format(o_data.order_total or 0) }}</td>
                         <td>{{ '%.2f'|format(o_data.paid_amount or 0) }}</td>
                         <td>{{ '%.2f'|format((o_data.order_total or 0) - (o_data.paid_amount or 0)) }}</td>
+                        <td>{{ o_data.order.data_date or '-' }}</td>
+                        <td>{{ o_data.order.shipment_date or '-' }}</td>
                         <td>{{ o_data.order.status or '-' }}</td>
                     </tr>
                     {% endfor %}
