@@ -121,8 +121,8 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 order.total_amount = rec.get("total_amount")
             if rec.get("shipment_date") and not order.shipment_date:
                 order.shipment_date = rec.get("shipment_date")
-            if rec.get("shipment_date") and not order.data_date:
-                order.data_date = rec.get("shipment_date")
+            # DO NOT update data_date - preserve the oldest date (original bizim order date)
+            # data_date should remain as the original order creation date
             if rec.get("alici_kodu"):
                 cur = order.notes or None
                 ak = f"AliciKodu:{rec.get('alici_kodu')}"
@@ -156,9 +156,24 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
 
     # payments: idempotent per (order_id, date)
     amt_raw = rec.get("payment_amount")
-    pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
-    if (amt_raw or 0.0) > 0 and pdate is not None and order is not None:
-        existing = session.exec(select(Payment).where(Payment.order_id == order.id, Payment.date == pdate)).first()
+    # For kargo: payment_date comes from Excel filename (when payment was received)
+    # Legacy 'date' field uses delivery_date/shipment_date for compatibility
+    pdate_legacy = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
+    # Extract payment date from filename (for kargo, this is when payment Excel was created/received)
+    payment_date_from_filename = None
+    if run.source == "kargo" and run.filename:
+        # Extract date from filename (first 10 chars if ISO format: YYYY-MM-DD)
+        import re
+        import datetime as _dt
+        match = re.match(r'^(\d{4}-\d{2}-\d{2})', run.filename)
+        if match:
+            try:
+                payment_date_from_filename = _dt.date.fromisoformat(match.group(1))
+            except:
+                pass
+    
+    if (amt_raw or 0.0) > 0 and pdate_legacy is not None and order is not None:
+        existing = session.exec(select(Payment).where(Payment.order_id == order.id, Payment.date == pdate_legacy)).first()
         fee_kom = rec.get("fee_komisyon") or 0.0
         fee_hiz = rec.get("fee_hizmet") or 0.0
         # Ignore any fee_kargo coming from Excel and compute deterministically
@@ -173,7 +188,8 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 client_id=order.client_id,
                 order_id=order.id,
                 amount=amt,
-                date=pdate,
+                date=pdate_legacy,  # Legacy field
+                payment_date=payment_date_from_filename,  # Actual payment date from filename
                 method=rec.get("payment_method") or "kargo",
                 reference=rec.get("tracking_no"),
                 fee_komisyon=fee_kom,
@@ -381,7 +397,7 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                     unit_price=rec.get("unit_price"),
                     total_amount=rec.get("total_amount"),
                 shipment_date=rec.get("shipment_date"),
-                data_date=run.data_date,
+                data_date=rec.get("shipment_date") or run.data_date,  # Use shipment_date (actual order date) as oldest date
                 source="bizim",
                     notes=(rec.get("notes") or None),
                 )

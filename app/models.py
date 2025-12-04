@@ -78,7 +78,8 @@ class Payment(SQLModel, table=True):
     order_id: Optional[int] = Field(default=None, foreign_key="order.id")
     amount: float
     # avoid shadowing the field name 'date' with the type name; use dt.date explicitly
-    date: Optional[dt.date] = Field(default=None, index=True)
+    date: Optional[dt.date] = Field(default=None, index=True, description="Legacy field, kept for compatibility")
+    payment_date: Optional[dt.date] = Field(default=None, index=True, description="Actual payment date (from kargo Excel filename)")
     method: Optional[str] = None
     reference: Optional[str] = None
     # fees and net amount (amount - sum(fees))

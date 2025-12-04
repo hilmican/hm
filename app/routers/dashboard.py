@@ -24,7 +24,7 @@ def dashboard(request: Request):
 		# Fast aggregates with short-lived cache
 		ttl = int(os.getenv("CACHE_TTL_DASHBOARD", "60"))
 		# detect dialect for cross-db SQL where needed
-		backend = session.get_bind().dialect.name if session.get_bind() is not None else "sqlite"
+		backend = session.get_bind().dialect.name if session.get_bind() is not None else "mysql"
 		def _scalar(sel):
 			res = session.exec(sel).one_or_none()
 			if res is None:
@@ -78,54 +78,26 @@ def dashboard(request: Request):
 		def _compute_status_counts():
 			base = {"tamamlandi": 0, "dagitimda": 0, "gecikmede": 0, "sorunlu": 0, "refunded": 0, "switched": 0, "stitched": 0}
 			# explicit statuses
-			if backend == "mysql":
-				rows_explicit = session.exec(text("SELECT status, COUNT(*) FROM `order` WHERE status IN ('refunded','switched','stitched') GROUP BY status")).all()
-			else:
-				rows_explicit = session.exec(text('SELECT status, COUNT(*) FROM "order" WHERE status IN ("refunded","switched","stitched") GROUP BY status')).all()
+			rows_explicit = session.exec(text("SELECT status, COUNT(*) FROM `order` WHERE status IN ('refunded','switched','stitched') GROUP BY status")).all()
 			for st, cnt in rows_explicit:
 				if st in ("refunded", "switched", "stitched"):
 					base[str(st)] = int(cnt or 0)
 			# derived buckets for others (exclude merged orders)
-			if backend == "mysql":
-				row_buckets = session.exec(text(
-					"SELECT\n"
-					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0 THEN 1 ELSE 0 END) AS tamamlandi,\n"
-					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
-					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1 ELSE 0 END) AS dagitimda,\n"
-					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
-					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n"
-					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1 ELSE 0 END) AS gecikmede,\n"
-					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
-					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1 ELSE 0 END) AS sorunlu\n"
-					"FROM `order` o\n"
-					"LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n"
-					"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')\n"
-					"  AND o.merged_into_order_id IS NULL"
-				)).first() or [0, 0, 0, 0]
-			else:
-				row_buckets = session.exec(text(
-					'SELECT\n'
-					'  SUM(CASE\n'
-					'        WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0 THEN 1\n'
-					'        ELSE 0 END) AS tamamlandi,\n'
-					'  SUM(CASE\n'
-					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
-					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1\n'
-					'        ELSE 0 END) AS dagitimda,\n'
-					'  SUM(CASE\n'
-					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
-					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n'
-					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1\n'
-					'        ELSE 0 END) AS gecikmede,\n'
-					'  SUM(CASE\n'
-					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
-					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1\n'
-					'        ELSE 0 END) AS sorunlu\n'
-					'FROM "order" o\n'
-					'LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n'
-					'WHERE COALESCE(o.status, "") NOT IN ("refunded","switched","stitched")\n'
-					'  AND o.merged_into_order_id IS NULL'
-				)).first() or [0, 0, 0, 0]
+			row_buckets = session.exec(text(
+				"SELECT\n"
+				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0 THEN 1 ELSE 0 END) AS tamamlandi,\n"
+				"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+				"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1 ELSE 0 END) AS dagitimda,\n"
+				"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+				"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n"
+				"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1 ELSE 0 END) AS gecikmede,\n"
+				"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+				"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1 ELSE 0 END) AS sorunlu\n"
+				"FROM `order` o\n"
+				"LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n"
+				"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')\n"
+				"  AND o.merged_into_order_id IS NULL"
+			)).first() or [0, 0, 0, 0]
 			base["tamamlandi"] = int(row_buckets[0] or 0)
 			base["dagitimda"] = int(row_buckets[1] or 0)
 			base["gecikmede"] = int(row_buckets[2] or 0)
@@ -140,48 +112,23 @@ def dashboard(request: Request):
 		def _compute_ongoing_status_counts():
 			base = {"dagitimda": 0, "gecikmede": 0, "sorunlu": 0, "stitched": 0}
 			# explicit stitched status
-			if backend == "mysql":
-				rows_stitched = session.exec(text("SELECT COUNT(*) FROM `order` WHERE status = 'stitched'")).first()
-			else:
-				rows_stitched = session.exec(text('SELECT COUNT(*) FROM "order" WHERE status = "stitched"')).first()
+			rows_stitched = session.exec(text("SELECT COUNT(*) FROM `order` WHERE status = 'stitched'")).first()
 			base["stitched"] = int(rows_stitched[0] or 0) if rows_stitched else 0
 			# derived buckets for ongoing (excluding tamamlandi, refunded, switched, and merged orders)
-			if backend == "mysql":
-				row_buckets = session.exec(text(
-					"SELECT\n"
-					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
-					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1 ELSE 0 END) AS dagitimda,\n"
-					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
-					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n"
-					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1 ELSE 0 END) AS gecikmede,\n"
-					"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
-					"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1 ELSE 0 END) AS sorunlu\n"
-					"FROM `order` o\n"
-					"LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n"
-					"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')\n"
-					"  AND o.merged_into_order_id IS NULL"
-				)).first() or [0, 0, 0]
-			else:
-				row_buckets = session.exec(text(
-					'SELECT\n'
-					'  SUM(CASE\n'
-					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
-					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1\n'
-					'        ELSE 0 END) AS dagitimda,\n'
-					'  SUM(CASE\n'
-					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
-					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n'
-					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1\n'
-					'        ELSE 0 END) AS gecikmede,\n'
-					'  SUM(CASE\n'
-					'        WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n'
-					'         AND (COALESCE(julianday(date("now")) - julianday(COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1\n'
-					'        ELSE 0 END) AS sorunlu\n'
-					'FROM "order" o\n'
-					'LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n'
-					'WHERE COALESCE(o.status, "") NOT IN ("refunded","switched","stitched")\n'
-					'  AND o.merged_into_order_id IS NULL'
-				)).first() or [0, 0, 0]
+			row_buckets = session.exec(text(
+				"SELECT\n"
+				"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+				"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 7) THEN 1 ELSE 0 END) AS dagitimda,\n"
+				"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+				"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 7)\n"
+				"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) <= 17) THEN 1 ELSE 0 END) AS gecikmede,\n"
+				"  SUM(CASE WHEN NOT (COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0)\n"
+				"           AND (COALESCE(DATEDIFF(CURDATE(), COALESCE(o.shipment_date, o.data_date)), 0) > 17) THEN 1 ELSE 0 END) AS sorunlu\n"
+				"FROM `order` o\n"
+				"LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n"
+				"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')\n"
+				"  AND o.merged_into_order_id IS NULL"
+			)).first() or [0, 0, 0]
 			base["dagitimda"] = int(row_buckets[0] or 0)
 			base["gecikmede"] = int(row_buckets[1] or 0)
 			base["sorunlu"] = int(row_buckets[2] or 0)
@@ -191,118 +138,64 @@ def dashboard(request: Request):
 
 		ongoing_status_counts = cached_json("dash:ongoing_status_counts", ttl, _compute_ongoing_status_counts)
 
-		# Order lifecycle distribution (bizim orders: creation to payment time)
+		# Order lifecycle distribution (bizim orders: bizim excel date to payment date)
 		def _compute_lifecycle_distribution():
 			# Only completed orders from bizim source
-			# Use shipment_date (actual order date from excel) instead of data_date (import date)
-			# Use MAX(date) to get the date of the last payment (when order was completed)
+			# Use o.data_date as the bizim order creation date (from bizim Excel filename or shipment_date)
+			# Use COALESCE(MAX(payment_date), MAX(date)) to get the actual payment date (from kargo Excel filename)
 			# Buckets: 0-3, 4-6, 7-9, 10-12, 13-15, 16+ days
-			if backend == "mysql":
-				row_buckets = session.exec(text(
-					"SELECT\n"
-					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
-					"           AND o.source = 'bizim'\n"
-					"           AND o.shipment_date IS NOT NULL\n"
-					"           AND p.completion_payment_date IS NOT NULL\n"
-					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 0\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) <= 3 THEN 1 ELSE 0 END) AS days_0_3,\n"
-					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
-					"           AND o.source = 'bizim'\n"
-					"           AND o.shipment_date IS NOT NULL\n"
-					"           AND p.completion_payment_date IS NOT NULL\n"
-					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 4\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) <= 6 THEN 1 ELSE 0 END) AS days_4_6,\n"
-					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
-					"           AND o.source = 'bizim'\n"
-					"           AND o.shipment_date IS NOT NULL\n"
-					"           AND p.completion_payment_date IS NOT NULL\n"
-					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 7\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) <= 9 THEN 1 ELSE 0 END) AS days_7_9,\n"
-					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
-					"           AND o.source = 'bizim'\n"
-					"           AND o.shipment_date IS NOT NULL\n"
-					"           AND p.completion_payment_date IS NOT NULL\n"
-					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 10\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) <= 12 THEN 1 ELSE 0 END) AS days_10_12,\n"
-					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
-					"           AND o.source = 'bizim'\n"
-					"           AND o.shipment_date IS NOT NULL\n"
-					"           AND p.completion_payment_date IS NOT NULL\n"
-					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 13\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) <= 15 THEN 1 ELSE 0 END) AS days_13_15,\n"
-					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
-					"           AND o.source = 'bizim'\n"
-					"           AND o.shipment_date IS NOT NULL\n"
-					"           AND p.completion_payment_date IS NOT NULL\n"
-					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 16 THEN 1 ELSE 0 END) AS days_16_plus\n"
-					"FROM `order` o\n"
-					"LEFT JOIN (\n"
-					"  SELECT order_id, SUM(amount) AS paid, MAX(date) AS completion_payment_date\n"
-					"  FROM payment\n"
-					"  WHERE order_id IS NOT NULL\n"
-					"  GROUP BY order_id\n"
-					") p ON p.order_id = o.id\n"
-					"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')"
-				)).first() or [0, 0, 0, 0, 0, 0]
-			else:
-				row_buckets = session.exec(text(
-					'SELECT\n'
-					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
-					'           AND o.source = "bizim"\n'
-					'           AND o.shipment_date IS NOT NULL\n'
-					'           AND p.completion_payment_date IS NOT NULL\n'
-					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 0\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) <= 3 THEN 1 ELSE 0 END) AS days_0_3,\n'
-					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
-					'           AND o.source = "bizim"\n'
-					'           AND o.shipment_date IS NOT NULL\n'
-					'           AND p.completion_payment_date IS NOT NULL\n'
-					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 4\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) <= 6 THEN 1 ELSE 0 END) AS days_4_6,\n'
-					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
-					'           AND o.source = "bizim"\n'
-					'           AND o.shipment_date IS NOT NULL\n'
-					'           AND p.completion_payment_date IS NOT NULL\n'
-					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 7\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) <= 9 THEN 1 ELSE 0 END) AS days_7_9,\n'
-					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
-					'           AND o.source = "bizim"\n'
-					'           AND o.shipment_date IS NOT NULL\n'
-					'           AND p.completion_payment_date IS NOT NULL\n'
-					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 10\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) <= 12 THEN 1 ELSE 0 END) AS days_10_12,\n'
-					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
-					'           AND o.source = "bizim"\n'
-					'           AND o.shipment_date IS NOT NULL\n'
-					'           AND p.completion_payment_date IS NOT NULL\n'
-					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 13\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) <= 15 THEN 1 ELSE 0 END) AS days_13_15,\n'
-					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
-					'           AND o.source = "bizim"\n'
-					'           AND o.shipment_date IS NOT NULL\n'
-					'           AND p.completion_payment_date IS NOT NULL\n'
-					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 16 THEN 1 ELSE 0 END) AS days_16_plus\n'
-					'FROM "order" o\n'
-					'LEFT JOIN (\n'
-					'  SELECT order_id, SUM(amount) AS paid, MAX(date) AS completion_payment_date\n'
-					'  FROM payment\n'
-					'  WHERE order_id IS NOT NULL\n'
-					'  GROUP BY order_id\n'
-					') p ON p.order_id = o.id\n'
-					'WHERE COALESCE(o.status, "") NOT IN ("refunded","switched","stitched")'
-				)).first() or [0, 0, 0, 0, 0, 0]
+			row_buckets = session.exec(text(
+				"SELECT\n"
+				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
+				"           AND o.source = 'bizim'\n"
+				"           AND o.data_date IS NOT NULL\n"
+				"           AND p.completion_payment_date IS NOT NULL\n"
+				"           AND o.merged_into_order_id IS NULL\n"
+				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 0\n"
+				"           AND DATEDIFF(p.completion_payment_date, o.data_date) <= 3 THEN 1 ELSE 0 END) AS days_0_3,\n"
+				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
+				"           AND o.source = 'bizim'\n"
+				"           AND o.data_date IS NOT NULL\n"
+				"           AND p.completion_payment_date IS NOT NULL\n"
+				"           AND o.merged_into_order_id IS NULL\n"
+				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 4\n"
+				"           AND DATEDIFF(p.completion_payment_date, o.data_date) <= 6 THEN 1 ELSE 0 END) AS days_4_6,\n"
+				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
+				"           AND o.source = 'bizim'\n"
+				"           AND o.data_date IS NOT NULL\n"
+				"           AND p.completion_payment_date IS NOT NULL\n"
+				"           AND o.merged_into_order_id IS NULL\n"
+				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 7\n"
+				"           AND DATEDIFF(p.completion_payment_date, o.data_date) <= 9 THEN 1 ELSE 0 END) AS days_7_9,\n"
+				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
+				"           AND o.source = 'bizim'\n"
+				"           AND o.data_date IS NOT NULL\n"
+				"           AND p.completion_payment_date IS NOT NULL\n"
+				"           AND o.merged_into_order_id IS NULL\n"
+				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 10\n"
+				"           AND DATEDIFF(p.completion_payment_date, o.data_date) <= 12 THEN 1 ELSE 0 END) AS days_10_12,\n"
+				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
+				"           AND o.source = 'bizim'\n"
+				"           AND o.data_date IS NOT NULL\n"
+				"           AND p.completion_payment_date IS NOT NULL\n"
+				"           AND o.merged_into_order_id IS NULL\n"
+				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 13\n"
+				"           AND DATEDIFF(p.completion_payment_date, o.data_date) <= 15 THEN 1 ELSE 0 END) AS days_13_15,\n"
+				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
+				"           AND o.source = 'bizim'\n"
+				"           AND o.data_date IS NOT NULL\n"
+				"           AND p.completion_payment_date IS NOT NULL\n"
+				"           AND o.merged_into_order_id IS NULL\n"
+				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 16 THEN 1 ELSE 0 END) AS days_16_plus\n"
+				"FROM `order` o\n"
+				"LEFT JOIN (\n"
+				"  SELECT order_id, SUM(amount) AS paid, COALESCE(MAX(payment_date), MAX(date)) AS completion_payment_date\n"
+				"  FROM payment\n"
+				"  WHERE order_id IS NOT NULL\n"
+				"  GROUP BY order_id\n"
+				") p ON p.order_id = o.id\n"
+				"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')"
+			)).first() or [0, 0, 0, 0, 0, 0]
 			return [
 				{"bucket": "0-3", "count": int(row_buckets[0] or 0)},
 				{"bucket": "4-6", "count": int(row_buckets[1] or 0)},
