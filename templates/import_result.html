@@ -116,7 +116,7 @@
 							<td>{{ r.message }}</td>
 							<td>{{ r.matched_client_id or '' }}</td>
 							<td>{{ r.matched_order_id or '' }}</td>
-							<td style="max-width:520px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="{{ r.mapped_json }}">{{ r.mapped_json }}</td>
+							<td style="max-width:600px; white-space:pre-wrap; word-wrap:break-word; word-break:break-all; font-family:monospace; font-size:12px; line-height:1.4;">{{ r.mapped_json }}</td>
 						</tr>
 						{% endfor %}
 					</tbody>
