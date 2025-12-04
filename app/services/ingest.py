@@ -791,9 +791,22 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 	if not mid:
 		return None
 	# idempotency by ig_message_id - use INSERT IGNORE to avoid race conditions
-	# First check if exists (fast path for already-processed messages)
-	exists = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid LIMIT 1").params(mid=str(mid))).first()
-	if exists:
+	# Check if message already exists - if so, only update raw_json (preserve existing text)
+	exists_row = session.exec(text("SELECT id, text FROM message WHERE ig_message_id = :mid LIMIT 1").params(mid=str(mid))).first()
+	if exists_row:
+		# Message already exists - update raw_json but preserve existing text
+		# This handles status callbacks (delivered/read) that don't include message text
+		raw_json_data = json.dumps(event, ensure_ascii=False)
+		try:
+			session.exec(
+				text("UPDATE message SET raw_json = :raw_json WHERE ig_message_id = :mid").params(
+					raw_json=raw_json_data,
+					mid=str(mid)
+				)
+			)
+		except Exception:
+			pass
+		# Return None to indicate message was already processed (no new insert)
 		return None
 	sender_id = (event.get("sender") or {}).get("id")
 	recipient_id = (event.get("recipient") or {}).get("id")
