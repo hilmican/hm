@@ -57,6 +57,9 @@
             <div>
                 <button class="btn" type="button" onclick="recalcCosts()" style="background:#0ea5e9">Maliyeti Yeniden Hesapla</button>
             </div>
+            <div>
+                <button class="btn" type="button" onclick="fixCancelledOrders()" style="background:#ef4444">İptal Edilen Siparişleri Düzelt</button>
+            </div>
         </form>
 
         <div class="kpis">
@@ -268,6 +271,28 @@
                 alert(`Güncellendi: ${j.updated_orders} sipariş`);
                 // Refresh the page to reflect recalculated totals
                 location.href = `/reports/daily?${params.toString()}`;
+            }catch(e){
+                alert('Ağ hatası: ' + e);
+            }
+        }
+        async function fixCancelledOrders(){
+            if(!confirm('İptal edilen tüm siparişlerin finansal değerlerini (toplam, maliyet, kargo) sıfırlamak istediğinizden emin misiniz? Bu işlem geri alınamaz.')){
+                return;
+            }
+            try{
+                const res = await fetch('/admin/orders/fix-cancelled', { method: 'POST' });
+                if(!res.ok){
+                    const t = await res.text();
+                    alert('Düzeltme başarısız: ' + t);
+                    return;
+                }
+                const j = await res.json();
+                if(j.status === 'ok'){
+                    alert(`Başarılı! ${j.fixed_count} sipariş düzeltildi. Sayfa yenileniyor...`);
+                    location.reload();
+                } else {
+                    alert('Beklenmeyen yanıt: ' + JSON.stringify(j));
+                }
             }catch(e){
                 alert('Ağ hatası: ' + e);
             }
