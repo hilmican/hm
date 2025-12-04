@@ -194,6 +194,7 @@ def dashboard(request: Request):
 		# Order lifecycle distribution (bizim orders: creation to payment time)
 		def _compute_lifecycle_distribution():
 			# Only completed orders from bizim source
+			# Use shipment_date (actual order date from excel) instead of data_date (import date)
 			# Use MAX(date) to get the date of the last payment (when order was completed)
 			# Buckets: 0-3, 4-6, 7-9, 10-12, 13-15, 16+ days
 			if backend == "mysql":
@@ -201,45 +202,45 @@ def dashboard(request: Request):
 					"SELECT\n"
 					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 					"           AND o.source = 'bizim'\n"
-					"           AND o.data_date IS NOT NULL\n"
+					"           AND o.shipment_date IS NOT NULL\n"
 					"           AND p.completion_payment_date IS NOT NULL\n"
 					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 0\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.data_date) <= 3 THEN 1 ELSE 0 END) AS days_0_3,\n"
+					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 0\n"
+					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) <= 3 THEN 1 ELSE 0 END) AS days_0_3,\n"
 					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 					"           AND o.source = 'bizim'\n"
-					"           AND o.data_date IS NOT NULL\n"
+					"           AND o.shipment_date IS NOT NULL\n"
 					"           AND p.completion_payment_date IS NOT NULL\n"
 					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 4\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.data_date) <= 6 THEN 1 ELSE 0 END) AS days_4_6,\n"
+					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 4\n"
+					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) <= 6 THEN 1 ELSE 0 END) AS days_4_6,\n"
 					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 					"           AND o.source = 'bizim'\n"
-					"           AND o.data_date IS NOT NULL\n"
+					"           AND o.shipment_date IS NOT NULL\n"
 					"           AND p.completion_payment_date IS NOT NULL\n"
 					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 7\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.data_date) <= 9 THEN 1 ELSE 0 END) AS days_7_9,\n"
+					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 7\n"
+					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) <= 9 THEN 1 ELSE 0 END) AS days_7_9,\n"
 					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 					"           AND o.source = 'bizim'\n"
-					"           AND o.data_date IS NOT NULL\n"
+					"           AND o.shipment_date IS NOT NULL\n"
 					"           AND p.completion_payment_date IS NOT NULL\n"
 					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 10\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.data_date) <= 12 THEN 1 ELSE 0 END) AS days_10_12,\n"
+					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 10\n"
+					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) <= 12 THEN 1 ELSE 0 END) AS days_10_12,\n"
 					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 					"           AND o.source = 'bizim'\n"
-					"           AND o.data_date IS NOT NULL\n"
+					"           AND o.shipment_date IS NOT NULL\n"
 					"           AND p.completion_payment_date IS NOT NULL\n"
 					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 13\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.data_date) <= 15 THEN 1 ELSE 0 END) AS days_13_15,\n"
+					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 13\n"
+					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) <= 15 THEN 1 ELSE 0 END) AS days_13_15,\n"
 					"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 					"           AND o.source = 'bizim'\n"
-					"           AND o.data_date IS NOT NULL\n"
+					"           AND o.shipment_date IS NOT NULL\n"
 					"           AND p.completion_payment_date IS NOT NULL\n"
 					"           AND o.merged_into_order_id IS NULL\n"
-					"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 16 THEN 1 ELSE 0 END) AS days_16_plus\n"
+					"           AND DATEDIFF(p.completion_payment_date, o.shipment_date) >= 16 THEN 1 ELSE 0 END) AS days_16_plus\n"
 					"FROM `order` o\n"
 					"LEFT JOIN (\n"
 					"  SELECT order_id, SUM(amount) AS paid, MAX(date) AS completion_payment_date\n"
@@ -254,45 +255,45 @@ def dashboard(request: Request):
 					'SELECT\n'
 					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
 					'           AND o.source = "bizim"\n'
-					'           AND o.data_date IS NOT NULL\n'
+					'           AND o.shipment_date IS NOT NULL\n'
 					'           AND p.completion_payment_date IS NOT NULL\n'
 					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.data_date)) >= 0\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.data_date)) <= 3 THEN 1 ELSE 0 END) AS days_0_3,\n'
+					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 0\n'
+					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) <= 3 THEN 1 ELSE 0 END) AS days_0_3,\n'
 					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
 					'           AND o.source = "bizim"\n'
-					'           AND o.data_date IS NOT NULL\n'
+					'           AND o.shipment_date IS NOT NULL\n'
 					'           AND p.completion_payment_date IS NOT NULL\n'
 					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.data_date)) >= 4\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.data_date)) <= 6 THEN 1 ELSE 0 END) AS days_4_6,\n'
+					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 4\n'
+					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) <= 6 THEN 1 ELSE 0 END) AS days_4_6,\n'
 					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
 					'           AND o.source = "bizim"\n'
-					'           AND o.data_date IS NOT NULL\n'
+					'           AND o.shipment_date IS NOT NULL\n'
 					'           AND p.completion_payment_date IS NOT NULL\n'
 					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.data_date)) >= 7\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.data_date)) <= 9 THEN 1 ELSE 0 END) AS days_7_9,\n'
+					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 7\n'
+					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) <= 9 THEN 1 ELSE 0 END) AS days_7_9,\n'
 					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
 					'           AND o.source = "bizim"\n'
-					'           AND o.data_date IS NOT NULL\n'
+					'           AND o.shipment_date IS NOT NULL\n'
 					'           AND p.completion_payment_date IS NOT NULL\n'
 					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.data_date)) >= 10\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.data_date)) <= 12 THEN 1 ELSE 0 END) AS days_10_12,\n'
+					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 10\n'
+					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) <= 12 THEN 1 ELSE 0 END) AS days_10_12,\n'
 					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
 					'           AND o.source = "bizim"\n'
-					'           AND o.data_date IS NOT NULL\n'
+					'           AND o.shipment_date IS NOT NULL\n'
 					'           AND p.completion_payment_date IS NOT NULL\n'
 					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.data_date)) >= 13\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.data_date)) <= 15 THEN 1 ELSE 0 END) AS days_13_15,\n'
+					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 13\n'
+					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) <= 15 THEN 1 ELSE 0 END) AS days_13_15,\n'
 					'  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n'
 					'           AND o.source = "bizim"\n'
-					'           AND o.data_date IS NOT NULL\n'
+					'           AND o.shipment_date IS NOT NULL\n'
 					'           AND p.completion_payment_date IS NOT NULL\n'
 					'           AND o.merged_into_order_id IS NULL\n'
-					'           AND (julianday(p.completion_payment_date) - julianday(o.data_date)) >= 16 THEN 1 ELSE 0 END) AS days_16_plus\n'
+					'           AND (julianday(p.completion_payment_date) - julianday(o.shipment_date)) >= 16 THEN 1 ELSE 0 END) AS days_16_plus\n'
 					'FROM "order" o\n'
 					'LEFT JOIN (\n'
 					'  SELECT order_id, SUM(amount) AS paid, MAX(date) AS completion_payment_date\n'
