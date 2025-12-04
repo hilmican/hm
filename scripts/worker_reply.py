@@ -858,28 +858,74 @@ def main() -> None:
 									text_lines = [line.strip() for line in reply_text.split('\n') if line.strip()]
 									if not text_lines:
 										text_lines = [reply_text.strip()]
+									# Image messages (if any) come first; map text lines only to the last N ids
+									text_start_idx = max(0, len(all_message_ids) - len(text_lines))
 									
 									# Persist each message with its corresponding text line
 									for idx, msg_id in enumerate(all_message_ids):
 										if not msg_id:
 											continue
+										is_text_msg = idx >= text_start_idx
+										msg_text = (
+											text_lines[idx - text_start_idx]
+											if is_text_msg and (idx - text_start_idx) < len(text_lines)
+											else None
+										)
+
 										# Check if message already exists
 										existing = session.exec(select(Message).where(Message.ig_message_id == str(msg_id))).first()
-										if not existing:
-											# Use the corresponding text line, or the full text if we have fewer lines than messages
-											msg_text = text_lines[idx] if idx < len(text_lines) else (text_lines[-1] if text_lines else reply_text)
-											msg = Message(
-												ig_sender_id=str(entity_id),
-												ig_recipient_id=str(ig_user_id) if ig_user_id else None,
-												ig_message_id=str(msg_id),
-												text=msg_text,
-												timestamp_ms=now_ms + idx,  # Slight offset to maintain order
-												conversation_id=int(cid),
-												direction="out",
-												ai_status="sent",
-												ai_json=json.dumps({"auto_sent": True, "confidence": confidence, "reason": data.get("reason"), "state": new_state, "message_index": idx, "total_messages": len(all_message_ids)}, ensure_ascii=False),
-											)
-											session.add(msg)
+
+										if existing:
+											# Backfill missing text/ai_status/ai_json on webhook echoes that arrive without text
+											needs_update = False
+											if msg_text and not (getattr(existing, "text", None) or "").strip():
+												existing.text = msg_text
+												needs_update = True
+											if getattr(existing, "ai_status", None) != "sent":
+												existing.ai_status = "sent"
+												needs_update = True
+											if not getattr(existing, "ai_json", None):
+												existing.ai_json = json.dumps(
+													{
+														"auto_sent": True,
+														"confidence": confidence,
+														"reason": data.get("reason"),
+														"state": new_state,
+														"message_index": idx,
+														"total_messages": len(all_message_ids),
+														"is_text": is_text_msg,
+													},
+													ensure_ascii=False,
+												)
+												needs_update = True
+											if needs_update:
+												session.add(existing)
+											continue
+
+										# Insert new row
+										msg = Message(
+											ig_sender_id=str(entity_id),
+											ig_recipient_id=str(ig_user_id) if ig_user_id else None,
+											ig_message_id=str(msg_id),
+											text=msg_text,
+											timestamp_ms=now_ms + idx,  # Slight offset to maintain order
+											conversation_id=int(cid),
+											direction="out",
+											ai_status="sent",
+											ai_json=json.dumps(
+												{
+													"auto_sent": True,
+													"confidence": confidence,
+													"reason": data.get("reason"),
+													"state": new_state,
+													"message_index": idx,
+													"total_messages": len(all_message_ids),
+													"is_text": is_text_msg,
+												},
+												ensure_ascii=False,
+											),
+										)
+										session.add(msg)
 									session.commit()
 							except Exception as persist_err:
 								try:
