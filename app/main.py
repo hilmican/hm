@@ -9,7 +9,7 @@ import os
 from .db import init_db
 from .db import engine as _db_engine
 from .services.ai import AIClient
-from .routers import dashboard, importer, clients, items, orders, payments, reconcile, auth
+from .routers import dashboard, importer, clients, items, orders, payments, reconcile, auth, excel_tracker
 from .routers import reports
 from .routers import inventory, mappings, products
 from .routers import product_qa
@@ -198,6 +198,7 @@ def create_app() -> FastAPI:
 	app.include_router(admin.router)
 	app.include_router(importer.router, prefix="/import")
 	app.include_router(reconcile.router, prefix="/reconcile")
+	app.include_router(excel_tracker.router)
 	app.include_router(clients.router, prefix="/clients", tags=["clients"]) 
 	app.include_router(items.router, prefix="/items", tags=["items"]) 
 	app.include_router(orders.router, prefix="/orders", tags=["orders"]) 

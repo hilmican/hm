@@ -1,0 +1,130 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<title>Excel Dosyası Takibi</title>
+	<style>
+		body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+		.card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+		.card h2 { margin: 0; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
+		.search-section { padding: 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+		.search-form { display: flex; gap: 8px; align-items: center; }
+		.search-form input { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+		.search-form button { padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+		.search-form button:hover { background: #2563eb; }
+		table { width: 100%; border-collapse: collapse; }
+		th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+		th { background: #fafafa; position: sticky; top: 0; font-weight: 600; }
+		.badge { display: inline-block; padding: 3px 6px; border-radius: 6px; font-size: 12px; background: #eef2ff; color: #1d4ed8; }
+		.badge.created { background: #d1fae5; color: #065f46; }
+		.badge.skipped { background: #fef3c7; color: #92400e; }
+		.badge.unmatched { background: #fee2e2; color: #991b1b; }
+		.badge.error { background: #fee2e2; color: #991b1b; }
+		.order-header { padding: 16px; background: #f0f9ff; border-bottom: 1px solid #e5e7eb; }
+		.order-header h3 { margin: 0 0 8px 0; font-size: 18px; }
+		.order-header p { margin: 4px 0; color: #6b7280; font-size: 14px; }
+		.download-link { color: #3b82f6; text-decoration: none; padding: 4px 8px; border-radius: 4px; }
+		.download-link:hover { background: #eff6ff; }
+		.mapped-data { font-family: monospace; font-size: 12px; background: #f9fafb; padding: 8px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; max-width: 600px; }
+		.file-missing { color: #ef4444; font-style: italic; }
+	</style>
+</head>
+<body>
+	{% include "_nav.html" %}
+	<h1>Excel Dosyası Takibi</h1>
+	
+	<div class="card">
+		<div class="search-section">
+			<form class="search-form" method="get" action="/excel-tracker">
+				<input type="number" name="order_id" placeholder="Sipariş ID" value="{{ order_id or '' }}" />
+				<span>veya</span>
+				<input type="text" name="q" placeholder="Müşteri adı veya telefon" value="{{ q }}" style="flex: 1; min-width: 200px;" />
+				<button type="submit">Ara</button>
+			</form>
+		</div>
+	</div>
+	
+	{% if orders_data %}
+		{% for item in orders_data %}
+		<div class="card">
+			<div class="order-header">
+				<h3>Sipariş #{{ item.order.id }}</h3>
+				<p>
+					<strong>Müşteri:</strong> {{ item.client.name if item.client else 'Bilinmiyor' }}
+					{% if item.client and item.client.phone %} · {{ item.client.phone }}{% endif %}
+				</p>
+				<p>
+					<strong>Toplam:</strong> {{ item.order.total_amount }} TL
+					{% if item.order.shipment_date %} · <strong>Kargo Tarihi:</strong> {{ item.order.shipment_date }}{% endif %}
+					{% if item.order.data_date %} · <strong>Data Tarihi:</strong> {{ item.order.data_date }}{% endif %}
+					· <strong>Kaynak:</strong> {{ item.order.source }}
+				</p>
+			</div>
+			
+			<table>
+				<thead>
+					<tr>
+						<th>Import Run</th>
+						<th>Kaynak</th>
+						<th>Dosya Adı</th>
+						<th>Satır #</th>
+						<th>Durum</th>
+						<th>Mesaj</th>
+						<th>Tarih</th>
+						<th>Dosya</th>
+						<th>Eşleşen Veri</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for row in item.import_rows %}
+					<tr>
+						<td>#{{ row.import_run_id }}</td>
+						<td>{{ row.source }}</td>
+						<td><strong>{{ row.filename }}</strong></td>
+						<td>{{ row.row_index }}</td>
+						<td><span class="badge {{ row.status }}">{{ row.status }}</span></td>
+						<td>{{ row.message or '' }}</td>
+						<td>
+							{% if row.data_date %}{{ row.data_date }}{% endif %}
+							{% if row.started_at %}<br><small>{{ row.started_at.strftime('%Y-%m-%d %H:%M') if row.started_at else '' }}</small>{% endif %}
+						</td>
+						<td>
+							{% if row.file_exists %}
+								<a href="/excel-tracker/download/{{ row.import_run_id }}" class="download-link" target="_blank">📥 İndir</a>
+							{% else %}
+								<span class="file-missing">Dosya bulunamadı</span>
+							{% endif %}
+						</td>
+						<td>
+							<div class="mapped-data">
+								{% if row.mapped_data %}
+									{% for key, value in row.mapped_data.items() %}
+										<strong>{{ key }}:</strong> {{ value }}<br>
+									{% endfor %}
+								{% else %}
+									(veri yok)
+								{% endif %}
+							</div>
+						</td>
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+		{% endfor %}
+	{% elif order_id or q %}
+		<div class="card">
+			<div style="padding: 16px; text-align: center; color: #6b7280;">
+				Sonuç bulunamadı. Farklı bir arama terimi deneyin.
+			</div>
+		</div>
+	{% else %}
+		<div class="card">
+			<div style="padding: 16px; text-align: center; color: #6b7280;">
+				Bir sipariş ID veya müşteri adı/telefonu ile arama yapın.
+			</div>
+		</div>
+	{% endif %}
+</body>
+</html>
+
