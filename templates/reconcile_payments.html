@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Ödeme Düzeltme</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    h1 { margin-bottom: 16px; }
+    form { margin-bottom: 16px; }
+    label { font-size: 14px; margin-right: 8px; }
+    input[type="text"] { padding: 6px 8px; border-radius: 6px; border: 1px solid #d1d5db; min-width: 260px; }
+    button, .btn { padding: 6px 10px; border-radius: 6px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; font-size: 13px; text-align: left; }
+    th { background: #fafafa; position: sticky; top: 0; z-index: 1; }
+    .badge { display:inline-block; padding:2px 6px; border-radius:6px; font-size:11px; background:#eef2ff; color:#1d4ed8; }
+    .hint { font-size:12px; color:#6b7280; margin-top:4px; }
+    .highlight { background:#ecfdf3; }
+  </style>
+</head>
+<body>
+  {% include "_nav.html" %}
+  <h1>Ödeme Düzeltme</h1>
+
+  <form method="get" action="/reconcile/payments">
+    <label> Müşteri Ara (isim veya telefon): </label>
+    <input type="text" name="q" value="{{ q or '' }}" placeholder="Örn: Mustafa Bahşi veya 543..." />
+    {% if client %}
+      <input type="hidden" name="client_id" value="{{ client.id }}" />
+    {% endif %}
+    <button type="submit">Ara</button>
+  </form>
+
+  {% if client %}
+    <div style="margin-bottom:12px; font-size:14px;">
+      <strong>Seçili Müşteri:</strong>
+      {{ client.name }} ({{ client.phone or 'telefon yok' }}) — ID: {{ client.id }}
+    </div>
+
+    <div class="hint">
+      Her satır bir ödemeyi gösterir. <strong>\"Yeni Sipariş\"</strong> alanından doğru siparişi seçip
+      <strong>\"Seçimleri Uygula\"</strong> butonuna basarak ödemeyi o siparişe taşıyabilirsiniz.
+      Aynı müşterinin tüm siparişleri listelenir.
+    </div>
+
+    <form id="movesForm" onsubmit="return false;">
+      <table>
+        <thead>
+          <tr>
+            <th>Ödeme ID</th>
+            <th>Tarih</th>
+            <th>Tutar</th>
+            <th>Yöntem</th>
+            <th>Mevcut Sipariş</th>
+            <th>Yeni Sipariş</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          {% set p = row.payment %}
+          {% set o = row.order %}
+          {% set is_hint = (highlight_amount is not none and highlight_date is not none and p.amount == highlight_amount and (p.date|string) == highlight_date) %}
+          <tr class="{{ 'highlight' if is_hint else '' }}">
+            <td>#{{ p.id }}</td>
+            <td>{{ p.date or '' }}</td>
+            <td><span class="badge">{{ '%.2f'|format(p.amount or 0.0) }}</span></td>
+            <td>{{ p.method or '' }}</td>
+            <td>
+              {% if o %}
+                #{{ o.id }} · {{ o.total_amount or 0 }} · {{ o.shipment_date or o.data_date or '' }}
+              {% else %}
+                <em>Bağlı sipariş yok</em>
+              {% endif %}
+            </td>
+            <td>
+              <select data-payment="{{ p.id }}">
+                <option value="">(değiştirme)</option>
+                {% for od in orders %}
+                  <option value="{{ od.id }}" {% if od.id == p.order_id %}selected{% endif %}>
+                    #{{ od.id }} · {{ od.total_amount or 0 }} · {{ od.shipment_date or od.data_date or '' }}
+                  </option>
+                {% endfor %}
+              </select>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <div style="margin-top:10px;">
+        <button class="btn" onclick="applyMoves()">Seçimleri Uygula</button>
+      </div>
+    </form>
+  {% else %}
+    <p style="margin-top:16px; font-size:14px; color:#6b7280;">
+      Lütfen yukarıdan müşteri arayın. Örneğin kargo raporundaki isim veya telefon numarasını kullanabilirsiniz.
+    </p>
+  {% endif %}
+
+  <script>
+  async function applyMoves() {
+    const moves = [];
+    document.querySelectorAll('select[data-payment]').forEach(sel => {
+      const pid = Number(sel.getAttribute('data-payment'));
+      const oid = Number(sel.value || 0);
+      const current = Number(sel.getAttribute('data-current') || 0);
+      if (pid && oid && oid !== current) {
+        moves.push({ payment_id: pid, new_order_id: oid });
+      }
+    });
+    if (!moves.length) {
+      alert('Taşınacak ödeme seçmediniz.');
+      return;
+    }
+    try {
+      const r = await fetch('/reconcile/payments/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ moves })
+      });
+      if (!r.ok) {
+        const t = await r.text();
+        alert('Hata: ' + t);
+        return;
+      }
+      const data = await r.json();
+      alert('Güncellenen ödeme sayısı: ' + (data.changed || 0));
+      location.reload();
+    } catch (e) {
+      alert('Ağ hatası');
+    }
+  }
+  </script>
+</body>
+</html>
+
+

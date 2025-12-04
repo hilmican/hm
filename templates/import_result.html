@@ -106,6 +106,7 @@
 							<th style="width:90px;">Client ID</th>
 							<th style="width:90px;">Order ID</th>
 							<th>Detay (mapped_json)</th>
+							<th style="width:130px;">Ödeme Düzelt</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -117,6 +118,14 @@
 							<td>{{ r.matched_client_id or '' }}</td>
 							<td>{{ r.matched_order_id or '' }}</td>
 							<td style="max-width:600px; white-space:pre-wrap; word-wrap:break-word; word-break:break-all; font-family:monospace; font-size:12px; line-height:1.4;">{{ r.mapped_json }}</td>
+							<td>
+								{% if r.reconcile_url and r.payment_amount %}
+									<a href="{{ r.reconcile_url }}" style="font-size:12px; text-decoration:none; padding:4px 8px; border-radius:6px; border:1px solid #d1d5db; background:#f9fafb;">
+										Ödemeyi Düzelt<br />
+										<span style="font-size:11px; color:#4b5563;">{{ '%.2f'|format(r.payment_amount or 0.0) }} · {{ r.payment_date or '' }}</span>
+									</a>
+								{% endif %}
+							</td>
 						</tr>
 						{% endfor %}
 					</tbody>

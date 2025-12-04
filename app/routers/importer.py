@@ -1020,12 +1020,37 @@ def import_result(run_ids: str, request: Request):
         # Detailed per-row view grouped by run for debugging (created/skipped/duplicate etc.)
         rows_by_run: dict[int, list[dict]] = {int(r.id or 0): [] for r in runs}
         max_rows_per_run = 1000
+        # Preload clients for quick lookup
+        client_ids = sorted({ir.matched_client_id for ir in rows if ir.matched_client_id})
+        client_map: dict[int, str] = {}
+        if client_ids:
+            from ..models import Client as _Client
+            crows = session.exec(_select(_Client).where(_Client.id.in_(client_ids))).all()
+            for c in crows:
+                if c.id is not None:
+                    client_map[int(c.id)] = c.name or ""
+
         for ir in rows:
             rid = int(ir.import_run_id or 0)
             bucket = rows_by_run.setdefault(rid, [])
             if len(bucket) >= max_rows_per_run:
                 continue
             mapped_json = ir.mapped_json or ""
+            # Extract a few structured hints for payment reconciliation links
+            try:
+                rec = eval(mapped_json) if mapped_json else {}
+            except Exception:
+                rec = {}
+            payment_amount = rec.get("payment_amount")
+            pay_date = rec.get("delivery_date") or rec.get("shipment_date")
+            # build optional link to payment reconciliation page
+            reconcile_url = None
+            if ir.matched_client_id and payment_amount and pay_date:
+                try:
+                    reconcile_url = f"/reconcile/payments?client_id={int(ir.matched_client_id)}&amount={float(payment_amount)}&date={str(pay_date)}"
+                except Exception:
+                    reconcile_url = None
+
             if mapped_json and len(mapped_json) > 600:
                 mapped_preview = mapped_json[:580] + "…"
             else:
@@ -1038,7 +1063,11 @@ def import_result(run_ids: str, request: Request):
                     "message": ir.message,
                     "matched_client_id": ir.matched_client_id,
                     "matched_order_id": ir.matched_order_id,
+                    "matched_client_name": client_map.get(int(ir.matched_client_id)) if ir.matched_client_id else None,
                     "mapped_json": mapped_preview,
+                    "payment_amount": payment_amount,
+                    "payment_date": str(pay_date) if pay_date is not None else None,
+                    "reconcile_url": reconcile_url,
                 }
             )
         templates = request.app.state.templates

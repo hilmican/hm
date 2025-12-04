@@ -6,7 +6,7 @@ import json
 import datetime as dt
 
 from ..db import get_session
-from ..models import ReconcileTask, ImportRow, Order, OrderItem, Item, ImportRun, Client
+from ..models import ReconcileTask, ImportRow, Order, OrderItem, Item, ImportRun, Client, Payment
 from ..services.inventory import adjust_stock
 
 router = APIRouter()
@@ -194,3 +194,123 @@ def search_orders(q: str, limit: int = 20):
                 if remaining <= 0:
                     break
     return {"orders": results}
+
+
+@router.get("/payments")
+def reconcile_payments(request: Request, q: str | None = None, client_id: int | None = None, amount: float | None = None, date: str | None = None):
+    """Interactive reconciliation page for mis-assigned payments between a client's orders.
+
+    - q: free text for client search (name or phone, like orders table search)
+    - client_id: direct client selection (takes precedence over q)
+    - amount/date: optional hints from import pages to highlight a specific payment row
+    """
+    from datetime import date as _date
+
+    with get_session() as session:
+        client = None
+        if client_id:
+            client = session.exec(select(Client).where(Client.id == client_id)).first()
+        elif q:
+            q_norm = (q or "").strip()
+            if q_norm:
+                digits = "".join(ch for ch in q_norm if ch.isdigit())
+                if digits and len(digits) >= 3:
+                    client = session.exec(
+                        select(Client)
+                        .where(Client.phone != None)
+                        .where(Client.phone.contains(digits))
+                    ).first()
+                if not client:
+                    client = session.exec(
+                        select(Client).where(Client.name.contains(q_norm))
+                    ).first()
+
+        orders: list[Order] = []
+        payments: list[Payment] = []
+        highlight_amount: float | None = None
+        highlight_date: _date | None = None
+
+        if client:
+            orders = session.exec(
+                select(Order)
+                .where(Order.client_id == client.id)
+                .order_by(Order.id.desc())
+            ).all()
+            order_ids = [o.id for o in orders if o.id]
+            payments = session.exec(
+                select(Payment).where(Payment.order_id.in_(order_ids))
+            ).all() if order_ids else []
+
+        try:
+            if amount is not None:
+                highlight_amount = float(amount)
+        except Exception:
+            highlight_amount = None
+        try:
+            if date:
+                import datetime as _dt
+                highlight_date = _dt.date.fromisoformat(str(date))
+        except Exception:
+            highlight_date = None
+
+        # Build simple maps for template
+        order_map = {o.id: o for o in orders if o.id is not None}
+        rows: list[dict] = []
+        for p in sorted(payments, key=lambda x: (x.date or _date.min, x.id or 0)):
+            oid = p.order_id
+            o = order_map.get(oid)
+            rows.append(
+                {
+                    "payment": p,
+                    "order": o,
+                }
+            )
+
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "reconcile_payments.html",
+            {
+                "request": request,
+                "client": client,
+                "orders": orders,
+                "rows": rows,
+                "q": q or "",
+                "highlight_amount": highlight_amount,
+                "highlight_date": str(highlight_date) if highlight_date else None,
+            },
+        )
+
+
+@router.post("/payments/apply")
+def reconcile_payments_apply(body: dict):
+    """Apply manual payment moves between a client's orders.
+
+    body: { moves: [{ payment_id, new_order_id }] }
+    """
+    moves = body.get("moves") or []
+    if not isinstance(moves, list) or not moves:
+        raise HTTPException(status_code=400, detail="moves[] required")
+
+    changed = 0
+    with get_session() as session:
+        for mv in moves:
+            try:
+                pid = int(mv.get("payment_id"))
+                new_oid = int(mv.get("new_order_id"))
+            except Exception:
+                continue
+            if not pid or not new_oid:
+                continue
+            p = session.exec(select(Payment).where(Payment.id == pid)).first()
+            if not p:
+                continue
+            current_order = session.exec(select(Order).where(Order.id == p.order_id)).first() if p.order_id else None
+            target_order = session.exec(select(Order).where(Order.id == new_oid)).first()
+            if not target_order:
+                continue
+            # Safety: require same client when both orders exist
+            if current_order and current_order.client_id and target_order.client_id and (current_order.client_id != target_order.client_id):
+                continue
+            p.order_id = new_oid
+            changed += 1
+        return {"status": "ok", "changed": changed}
