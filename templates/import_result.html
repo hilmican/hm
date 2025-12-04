@@ -87,6 +87,43 @@
 				</tbody>
 			</table>
 		</div>
+		<div class="card">
+			<h2>Tüm Satırlar (durum ve eşleşmeler)</h2>
+			<p style="padding:8px 16px; font-size:13px; color:#6b7280;">
+				Her çalışma için ilk 1000 satır gösterilir. Bu tablo, kopya ve atlanan satırlar dahil her satırın nasıl işlendiğini incelemek içindir.
+			</p>
+			{% for run in runs %}
+			<div style="margin:8px 16px 16px;">
+				<h3 style="margin:4px 0 8px; font-size:14px;">
+					Run #{{ run.id }} – {{ run.source }} – {{ run.filename }}
+				</h3>
+				<table>
+					<thead>
+						<tr>
+							<th style="width:60px;">Satır #</th>
+							<th style="width:90px;">Durum</th>
+							<th style="width:120px;">Mesaj</th>
+							<th style="width:90px;">Client ID</th>
+							<th style="width:90px;">Order ID</th>
+							<th>Detay (mapped_json)</th>
+						</tr>
+					</thead>
+					<tbody>
+						{% for r in rows_by_run.get(run.id, []) %}
+						<tr>
+							<td>{{ r.row_index }}</td>
+							<td><span class="badge">{{ r.status }}</span></td>
+							<td>{{ r.message }}</td>
+							<td>{{ r.matched_client_id or '' }}</td>
+							<td>{{ r.matched_order_id or '' }}</td>
+							<td style="max-width:520px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="{{ r.mapped_json }}">{{ r.mapped_json }}</td>
+						</tr>
+						{% endfor %}
+					</tbody>
+				</table>
+			</div>
+			{% endfor %}
+		</div>
 		<div style="margin-top:16px;">
 			<a href="/dashboard" style="text-decoration:none; padding:8px 12px; border:1px solid #ddd; border-radius:6px;">Panoya Dön</a>
 		</div>

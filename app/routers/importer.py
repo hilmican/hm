@@ -987,7 +987,7 @@ def import_result(run_ids: str, request: Request):
         # Aggregate row-level counters from ImportRow
         from sqlmodel import select as _select
         rows = session.exec(
-            _select(ImportRow).where(ImportRow.import_run_id.in_(ids))
+            _select(ImportRow).where(ImportRow.import_run_id.in_(ids)).order_by(ImportRow.import_run_id, ImportRow.row_index)
         ).all()
         for ir in rows:
             st = (ir.status or "").lower()
@@ -1017,6 +1017,30 @@ def import_result(run_ids: str, request: Request):
                     "matched_order_id": ir.matched_order_id,
                     "mapped_json": ir.mapped_json,
                 })
+        # Detailed per-row view grouped by run for debugging (created/skipped/duplicate etc.)
+        rows_by_run: dict[int, list[dict]] = {int(r.id or 0): [] for r in runs}
+        max_rows_per_run = 1000
+        for ir in rows:
+            rid = int(ir.import_run_id or 0)
+            bucket = rows_by_run.setdefault(rid, [])
+            if len(bucket) >= max_rows_per_run:
+                continue
+            mapped_json = ir.mapped_json or ""
+            if mapped_json and len(mapped_json) > 600:
+                mapped_preview = mapped_json[:580] + "…"
+            else:
+                mapped_preview = mapped_json
+            bucket.append(
+                {
+                    "run_id": ir.import_run_id,
+                    "row_index": ir.row_index,
+                    "status": ir.status,
+                    "message": ir.message,
+                    "matched_client_id": ir.matched_client_id,
+                    "matched_order_id": ir.matched_order_id,
+                    "mapped_json": mapped_preview,
+                }
+            )
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "import_result.html",
@@ -1037,6 +1061,7 @@ def import_result(run_ids: str, request: Request):
                 } for r in runs],
                 "totals": totals,
                 "failures": failures,
+                "rows_by_run": rows_by_run,
             },
         )
 
