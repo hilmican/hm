@@ -368,7 +368,7 @@ def refund_order(order_id: int):
 
 @router.post("/{order_id}/cancel")
 def cancel_order(order_id: int, body: dict = Body(default={})):
-    """Cancel an order. Optionally restore inventory."""
+    """Cancel an order. Optionally restore inventory and zero out financials."""
     with get_session() as session:
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
@@ -376,12 +376,12 @@ def cancel_order(order_id: int, body: dict = Body(default={})):
         # idempotent: if already cancelled/refunded/switched, do nothing
         if (o.status or "") in ("cancelled", "refunded", "switched", "stitched"):
             return {"status": "ok", "message": "already_processed"}
-        
+
         # Check if we should restore inventory (default: True)
         restore_inventory = body.get("restore_inventory", True)
         if isinstance(restore_inventory, str):
             restore_inventory = restore_inventory.lower() in ("true", "1", "yes", "on")
-        
+
         # Restore inventory if requested
         if restore_inventory:
             oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
@@ -390,27 +390,39 @@ def cancel_order(order_id: int, body: dict = Body(default={})):
                     continue
                 qty = int(oi.quantity or 0)
                 if qty > 0:
-                    adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order_id, reason=f"order-cancel:{order_id}")
-        
+                    adjust_stock(
+                        session,
+                        item_id=int(oi.item_id),
+                        delta=qty,
+                        related_order_id=order_id,
+                        reason=f"order-cancel:{order_id}",
+                    )
+
+        # Mark as cancelled and zero out financial impact
         o.status = "cancelled"
         o.return_or_switch_date = dt.date.today()
-        # cost should be zero for cancelled orders
         try:
+            # These will make reports treat the order as "no sale"
+            o.total_amount = 0.0
             o.total_cost = 0.0
+            o.shipping_fee = 0.0
         except Exception:
             pass
-        
+
         # Log the cancellation
         try:
             from ..models import OrderEditLog
-            session.add(OrderEditLog(
-                order_id=order_id,
-                action="cancel",
-                changes_json=str({"restore_inventory": restore_inventory})
-            ))
+
+            session.add(
+                OrderEditLog(
+                    order_id=order_id,
+                    action="cancel",
+                    changes_json=str({"restore_inventory": restore_inventory}),
+                )
+            )
         except Exception:
             pass
-        
+
         return {"status": "ok", "restore_inventory": restore_inventory}
 
 
