@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, Request, HTTPException
+from fastapi import APIRouter, Query, Request, HTTPException, Body
 from sqlmodel import select
 from sqlalchemy import or_, and_, not_
 import datetime as dt
@@ -160,8 +160,8 @@ def list_orders_table(
             else:
                 paid = paid_map.get(oid, 0.0)
             
-            # refunded/switched take precedence for row classes
-            if (o.status or "") in ("refunded", "switched", "stitched"):
+            # refunded/switched/cancelled take precedence for row classes
+            if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
                 status_map[oid] = str(o.status)
             elif (o.status or "") == "partial_paid":
                 status_map[oid] = "partial_paid"
@@ -173,14 +173,14 @@ def list_orders_table(
                     status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
 
         # Optional status filter — ignored for quicksearch presets
-        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "partial_paid"):
+        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "partial_paid", "cancelled"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
 
         # Preset filters
         if preset == "overdue_unpaid_7":
             cutoff = today - dt.timedelta(days=7)
             def _is_overdue_unpaid(o: Order) -> bool:
-                if (o.status or "") in ("refunded", "switched", "stitched"):
+                if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
                     return False
                 # IBAN-marked orders are considered completed, not overdue/unpaid
                 if bool(o.paid_by_bank_transfer):
@@ -242,9 +242,9 @@ def list_orders_table(
                     acc += float(item_cost_map.get(int(iid), 0.0)) * int(qty or 0)
                 cost_map[int(oid)] = round(acc, 2)
 
-        # For refunded/switched orders, force cost to zero for display/aggregates
+        # For refunded/switched/cancelled orders, force cost to zero for display/aggregates
         for o in rows:
-            if (o.status or "") in ("refunded", "switched", "stitched"):
+            if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
                 if o.id is not None:
                     cost_map[int(o.id)] = 0.0
 
@@ -301,7 +301,7 @@ def recalc_financials():
             else:
                 o.shipping_fee = compute_shipping_fee(amt)
             # cost from order items * item.cost (zero if refunded/switched or negative totals)
-            if (o.status or "") in ("refunded", "switched", "stitched") or (float(o.total_amount or 0.0) < 0.0):
+            if (o.status or "") in ("refunded", "switched", "stitched", "cancelled") or (float(o.total_amount or 0.0) < 0.0):
                 o.total_cost = 0.0
             else:
                 total_cost = 0.0
@@ -345,8 +345,8 @@ def refund_order(order_id: int):
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
-        # idempotent: if already refunded/switched, do nothing
-        if (o.status or "") in ("refunded", "switched", "stitched"):
+        # idempotent: if already refunded/switched/cancelled, do nothing
+        if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
             return {"status": "ok", "message": "already_processed"}
         # add stock back for all order items
         oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
@@ -364,6 +364,54 @@ def refund_order(order_id: int):
         except Exception:
             pass
         return {"status": "ok"}
+
+
+@router.post("/{order_id}/cancel")
+def cancel_order(order_id: int, body: dict = Body(default={})):
+    """Cancel an order. Optionally restore inventory."""
+    with get_session() as session:
+        o = session.exec(select(Order).where(Order.id == order_id)).first()
+        if not o:
+            raise HTTPException(status_code=404, detail="Order not found")
+        # idempotent: if already cancelled/refunded/switched, do nothing
+        if (o.status or "") in ("cancelled", "refunded", "switched", "stitched"):
+            return {"status": "ok", "message": "already_processed"}
+        
+        # Check if we should restore inventory (default: True)
+        restore_inventory = body.get("restore_inventory", True)
+        if isinstance(restore_inventory, str):
+            restore_inventory = restore_inventory.lower() in ("true", "1", "yes", "on")
+        
+        # Restore inventory if requested
+        if restore_inventory:
+            oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
+            for oi in oitems:
+                if oi.item_id is None:
+                    continue
+                qty = int(oi.quantity or 0)
+                if qty > 0:
+                    adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order_id, reason=f"order-cancel:{order_id}")
+        
+        o.status = "cancelled"
+        o.return_or_switch_date = dt.date.today()
+        # cost should be zero for cancelled orders
+        try:
+            o.total_cost = 0.0
+        except Exception:
+            pass
+        
+        # Log the cancellation
+        try:
+            from ..models import OrderEditLog
+            session.add(OrderEditLog(
+                order_id=order_id,
+                action="cancel",
+                changes_json=str({"restore_inventory": restore_inventory})
+            ))
+        except Exception:
+            pass
+        
+        return {"status": "ok", "restore_inventory": restore_inventory}
 
 
 @router.get("/export")
@@ -431,7 +479,7 @@ def export_orders(
             oid = o.id or 0
             total = float(o.total_amount or 0.0)
             paid = paid_map.get(oid, 0.0)
-            if (o.status or "") in ("refunded", "switched", "stitched"):
+            if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
                 status_map[oid] = str(o.status)
             else:
                 # Treat IBAN (bank transfer) as paid/completed
@@ -439,12 +487,12 @@ def export_orders(
                     status_map[oid] = "paid"
                 else:
                     status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
-        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched"):
+        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "cancelled"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
         if preset == "overdue_unpaid_7":
             cutoff = today - dt.timedelta(days=7)
             def _is_overdue_unpaid(o: Order) -> bool:
-                if (o.status or "") in ("refunded", "switched", "stitched"):
+                if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
                     return False
                 base_date = o.shipment_date or o.data_date
                 if (base_date is None) or (base_date > cutoff):
@@ -479,9 +527,9 @@ def export_orders(
                 for (iid, qty) in order_item_map.get(int(oid), []):
                     acc += float(item_cost_map.get(int(iid), 0.0)) * int(qty or 0)
                 cost_map[int(oid)] = round(acc, 2)
-        # Force zero cost for refunded/switched orders
+        # Force zero cost for refunded/switched/cancelled orders
         for o in rows:
-            if (o.status or "") in ("refunded", "switched", "stitched"):
+            if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
                 if o.id is not None:
                     cost_map[int(o.id)] = 0.0
         # Apply high_cost_70 preset if requested
@@ -537,8 +585,8 @@ def switch_order(order_id: int):
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
-        # idempotent: if already refunded/switched, do nothing
-        if (o.status or "") in ("refunded", "switched", "stitched"):
+        # idempotent: if already refunded/switched/cancelled, do nothing
+        if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
             return {"status": "ok", "message": "already_processed"}
         # add stock back for all order items
         oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
@@ -605,7 +653,7 @@ def update_total(order_id: int, body: dict):
         # Ensure product cost is zero when refunded/switched/stitched or negative totals
         try:
             status_lc = str(o.status or "").lower()
-            if status_lc in ("refunded", "switched", "stitched") or (float(o.total_amount or 0.0) < 0.0):
+            if status_lc in ("refunded", "switched", "stitched", "cancelled") or (float(o.total_amount or 0.0) < 0.0):
                 o.total_cost = 0.0
         except Exception:
             pass
@@ -816,7 +864,7 @@ async def edit_order_apply(order_id: int, request: Request):
                 for iid, qv in new_items_map.items():
                     total_qty_sum += int(qv)
                     session.add(OrderItem(order_id=order_id, item_id=int(iid), quantity=int(qv)))
-                    if (o.status or "") not in ("refunded", "switched", "stitched"):
+                    if (o.status or "") not in ("refunded", "switched", "stitched", "cancelled"):
                         adjust_stock(session, item_id=int(iid), delta=-int(qv), related_order_id=order_id, reason=f"order-edit:{order_id}")
                     else:
                         adjust_stock(session, item_id=int(iid), delta=int(qv), related_order_id=order_id, reason=f"order-edit:{order_id}:status={o.status}")
@@ -933,7 +981,7 @@ async def edit_order_apply(order_id: int, request: Request):
                 if (mv.direction or "out") == "out":
                     session.delete(mv)
             # rebuild order items/out movements if order is not refunded/switched
-            if (o.status or "") not in ("refunded", "switched", "stitched"):
+            if (o.status or "") not in ("refunded", "switched", "stitched", "cancelled"):
                 if o.item_id and int(o.quantity or 0) > 0:
                     session.add(OrderItem(order_id=order_id, item_id=int(o.item_id), quantity=int(o.quantity or 0)))
                     adjust_stock(session, item_id=int(o.item_id), delta=-int(o.quantity or 0), related_order_id=order_id, reason=f"order-edit:{order_id}")
@@ -964,7 +1012,7 @@ async def edit_order_apply(order_id: int, request: Request):
         # Final guard: zero product cost if refunded/switched/stitched or negative totals
         try:
             status_lc = str(o.status or "").lower()
-            if status_lc in ("refunded", "switched", "stitched") or (float(o.total_amount or 0.0) < 0.0):
+            if status_lc in ("refunded", "switched", "stitched", "cancelled") or (float(o.total_amount or 0.0) < 0.0):
                 o.total_cost = 0.0
         except Exception:
             pass
@@ -1130,7 +1178,7 @@ def find_partial_payments(
                     and_(Order.shipment_date.is_not(None), Order.shipment_date >= start_date, Order.shipment_date <= end_date),
                     and_(Order.data_date.is_not(None), Order.data_date >= start_date, Order.data_date <= end_date),
                 ),
-                or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"]))),
+                or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched", "cancelled"]))),
             )
         )
         orders_filtered = session.exec(base_query).all()
@@ -1253,8 +1301,8 @@ async def merge_partial_payments(request: Request):
         if already_merged:
             raise HTTPException(status_code=400, detail=f"Some orders are already merged: {[o.id for o in already_merged]}")
         
-        # Check if any are refunded/switched/stitched
-        invalid_status = [o for o in orders if (o.status or "") in ("refunded", "switched", "stitched")]
+        # Check if any are refunded/switched/stitched/cancelled
+        invalid_status = [o for o in orders if (o.status or "") in ("refunded", "switched", "stitched", "cancelled")]
         if invalid_status:
             raise HTTPException(status_code=400, detail=f"Some orders have invalid status: {[o.id for o in invalid_status]}")
         
@@ -1383,8 +1431,8 @@ async def merge_partial_payments(request: Request):
         if already_merged:
             raise HTTPException(status_code=400, detail=f"Some orders are already merged: {[o.id for o in already_merged]}")
         
-        # Check if any are refunded/switched/stitched
-        invalid_status = [o for o in orders if (o.status or "") in ("refunded", "switched", "stitched")]
+        # Check if any are refunded/switched/stitched/cancelled
+        invalid_status = [o for o in orders if (o.status or "") in ("refunded", "switched", "stitched", "cancelled")]
         if invalid_status:
             raise HTTPException(status_code=400, detail=f"Some orders have invalid status: {[o.id for o in invalid_status]}")
         

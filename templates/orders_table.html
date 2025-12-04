@@ -69,6 +69,7 @@
         tr.unpaid { background: var(--warn-bg); }
         tr.refunded { color: #b91c1c; background: var(--danger-bg); }
         tr.switched { color: #92400e; background: var(--switch-bg); }
+        tr.cancelled { color: #6b7280; background: #f3f4f6; text-decoration: line-through; }
         tr.partial_paid { background: #fff4e6; }
         tr.merged { opacity: 0.7; }
         
@@ -122,6 +123,7 @@
                 <option value="paid" {{ 'selected' if status == 'paid' else '' }}>Yesil (Odendi)</option>
                 <option value="unpaid" {{ 'selected' if status == 'unpaid' else '' }}>Sari (Odenmedi)</option>
                 <option value="partial_paid" {{ 'selected' if status == 'partial_paid' else '' }}>Turuncu (Kısmi Ödeme)</option>
+                <option value="cancelled" {{ 'selected' if status == 'cancelled' else '' }}>Gri (İptal Edildi)</option>
                 <option value="refunded" {{ 'selected' if status == 'refunded' else '' }}>Kirmizi (Iade)</option>
                 <option value="switched" {{ 'selected' if status == 'switched' else '' }}>Kahverengi (Degisim)</option>
             </select>
@@ -214,6 +216,9 @@
                 </td>
                 <td>
                     <div class="icon-actions">
+                        <button class="icon-btn warn" title="İptal Et" aria-label="İptal Et" onclick="cancelOrder({{ o.id }})">
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                        </button>
                         <button class="icon-btn warn" title="İade" aria-label="İade" onclick="refund({{ o.id }})">
                             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5l-5 5 5 5V5z"></path><path d="M9 7h5a5 5 0 1 1 0 10H9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
                         </button>
@@ -247,6 +252,26 @@
             </div>
         </div>
     </div>
+    <!-- Cancel order confirmation modal -->
+    <div id="cancelOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="cancelModalTitle">
+        <div class="modal">
+            <h3 id="cancelModalTitle">Siparişi İptal Et</h3>
+            <div class="row">
+                <div>
+                    <p style="margin: 0 0 12px 0; color: #6b7280;">Bu siparişi iptal etmek istediğinizden emin misiniz?</p>
+                </div>
+                <div class="form-inline">
+                    <input id="cancelRestoreInventory" type="checkbox" checked />
+                    <label for="cancelRestoreInventory" style="margin:0;cursor:pointer;">Stok değerlerini düzelt (envanteri geri ekle)</label>
+                </div>
+                <div id="cancelError" class="err"></div>
+            </div>
+            <div class="actions">
+                <button id="cancelCancel" class="btn">Vazgeç</button>
+                <button id="cancelConfirm" class="btn warn">İptal Et</button>
+            </div>
+        </div>
+    </div>
     <script>
     async function recalc(){
         try{
@@ -274,6 +299,45 @@
             location.reload();
         }catch(e){ alert('Ag hatasi: ' + e); }
     }
+    // Cancel order modal handlers
+    const cancelOverlay = document.getElementById('cancelOverlay');
+    const cancelRestoreInventory = document.getElementById('cancelRestoreInventory');
+    const cancelConfirm = document.getElementById('cancelConfirm');
+    const cancelCancel = document.getElementById('cancelCancel');
+    const cancelError = document.getElementById('cancelError');
+    let cancelingOrderId = null;
+    function showCancelOverlay(){ cancelOverlay.style.display = 'flex'; }
+    function hideCancelOverlay(){ cancelOverlay.style.display = 'none'; cancelError.textContent=''; cancelingOrderId = null; }
+    function cancelOrder(id){
+        cancelingOrderId = id;
+        cancelRestoreInventory.checked = true;
+        cancelError.textContent = '';
+        showCancelOverlay();
+    }
+    cancelCancel?.addEventListener('click', ()=>{ hideCancelOverlay(); });
+    cancelOverlay?.addEventListener('click', (e)=>{ if(e.target === cancelOverlay){ hideCancelOverlay(); } });
+    cancelConfirm?.addEventListener('click', async ()=>{
+        cancelError.textContent = '';
+        const id = cancelingOrderId;
+        if(!id){ hideCancelOverlay(); return; }
+        const restoreInv = !!cancelRestoreInventory.checked;
+        try{
+            const res = await fetch(`/orders/${id}/cancel`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ restore_inventory: restoreInv })
+            });
+            if(!res.ok){
+                const t = await res.text();
+                cancelError.textContent = 'İptal hatası: ' + (t || res.status);
+                return;
+            }
+            hideCancelOverlay();
+            location.reload();
+        }catch(e){
+            cancelError.textContent = 'Ağ hatası: ' + e;
+        }
+    });
     // Inline modal state/handlers
     const overlay = document.getElementById('editOverlay');
     const epTotal = document.getElementById('epTotal');
