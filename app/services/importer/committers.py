@@ -111,7 +111,9 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 run.updated_clients += 1
 
         # try to find an existing bizim order by client/date
-        order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"))
+        # Prefer orders with matching payment_amount if available
+        payment_amount = rec.get("payment_amount")
+        order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"), preferred_amount=payment_amount)
         if order:
             matched_order_id = order.id
             matched_client_id = client.id

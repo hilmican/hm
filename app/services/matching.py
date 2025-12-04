@@ -37,10 +37,11 @@ def find_order_by_tracking(session, tracking_no: str | None) -> Order | None:
 	return session.exec(select(Order).where(Order.tracking_no == tracking_no)).first()
 
 
-def find_order_by_client_and_date(session, client_id: int | None, date_val) -> Order | None:
-    """Find an order for a client around a date, preferring source='bizim'.
+def find_order_by_client_and_date(session, client_id: int | None, date_val, preferred_amount: float | None = None) -> Order | None:
+    """Find an order for a client around a date, preferring source='bizim' and matching amounts.
 
     Matches if either data_date OR shipment_date falls within ±7 days.
+    If preferred_amount is provided, prefers orders with total_amount matching that amount.
     """
     if not client_id or not date_val:
         return None
@@ -61,9 +62,22 @@ def find_order_by_client_and_date(session, client_id: int | None, date_val) -> O
     if not rows:
         return None
     bizim = [o for o in rows if (o.source or "") == "bizim"]
-    if bizim:
-        return bizim[0]
-    return rows[0]
+    if not bizim:
+        bizim = rows
+    
+    # If preferred_amount is provided, prefer orders with matching total_amount
+    if preferred_amount is not None:
+        matching_amount = [o for o in bizim if o.total_amount and abs(float(o.total_amount) - float(preferred_amount)) < 0.01]
+        if matching_amount:
+            # Among matching amounts, prefer exact date matches
+            exact_date = [o for o in matching_amount if (
+                (o.data_date == date_val) or (o.shipment_date == date_val)
+            )]
+            if exact_date:
+                return exact_date[0]
+            return matching_amount[0]
+    
+    return bizim[0]
 
 
 def find_recent_placeholder_kargo_for_client(session, client_id: int, days: int = 7) -> Order | None:
