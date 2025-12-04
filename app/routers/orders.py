@@ -300,16 +300,12 @@ def recalc_financials():
                 o.shipping_fee = 89.0
             else:
                 o.shipping_fee = compute_shipping_fee(amt)
-            # cost from order items * item.cost (zero if refunded/switched or negative totals)
+            # cost from order items using FIFO (zero if refunded/switched or negative totals)
             if (o.status or "") in ("refunded", "switched", "stitched", "cancelled") or (float(o.total_amount or 0.0) < 0.0):
                 o.total_cost = 0.0
             else:
-                total_cost = 0.0
-                oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == (o.id or 0))).all()
-                for oi in oitems:
-                    it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
-                    total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
-                o.total_cost = round(total_cost, 2)
+                from ..services.inventory import calculate_order_cost_fifo
+                o.total_cost = calculate_order_cost_fifo(session, o.id or 0)
             updated += 1
         return {"status": "ok", "orders_updated": updated}
 
@@ -318,7 +314,7 @@ def recalc_financials():
 def recalc_costs():
     with get_session() as session:
         rows = session.exec(select(Order)).all()
-        from sqlmodel import select as _select
+        from ..services.inventory import calculate_order_cost_fifo
         updated = 0
         for o in rows:
             if not o.id:
@@ -328,13 +324,9 @@ def recalc_costs():
                     o.total_cost = 0.0
                     updated += 1
                 continue
-            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == o.id)).all()
-            total_cost = 0.0
-            for oi in oitems:
-                it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
-                total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
-            if o.total_cost != round(total_cost, 2):
-                o.total_cost = round(total_cost, 2)
+            new_cost = calculate_order_cost_fifo(session, o.id)
+            if o.total_cost != new_cost:
+                o.total_cost = new_cost
                 updated += 1
         return {"status": "ok", "orders_updated": updated}
 
@@ -887,17 +879,13 @@ async def edit_order_apply(order_id: int, request: Request):
                 if total_qty_sum != int(o.quantity or 0):
                     changes["quantity"] = [o.quantity, total_qty_sum]
                     o.quantity = total_qty_sum
-                # recompute total_cost (zero if refunded/switched)
+                # recompute total_cost using FIFO (zero if refunded/switched)
                 try:
-                    from ..models import Item as _Item
+                    from ..services.inventory import calculate_order_cost_fifo
                     if (o.status or "") in ("refunded", "switched", "stitched"):
                         o.total_cost = 0.0
                     else:
-                        total_cost = 0.0
-                        for iid, qv in new_items_map.items():
-                            it = session.exec(_select(_Item).where(_Item.id == int(iid))).first()
-                            total_cost += float(qv) * float((it.cost or 0.0) if it else 0.0)
-                        o.total_cost = round(total_cost, 2)
+                        o.total_cost = calculate_order_cost_fifo(session, order_id)
                 except Exception:
                     pass
         # compare and set fields

@@ -108,6 +108,7 @@ def create_movement(body: Dict[str, Any]):
     delta = body.get("delta")
     direction = body.get("direction")
     quantity = body.get("quantity")
+    unit_cost = body.get("unit_cost")  # Purchase cost when adding inventory
     if item_id is None:
         raise HTTPException(status_code=400, detail="item_id required")
     # Support either {delta} (may be negative) or {direction, quantity>0}
@@ -122,7 +123,7 @@ def create_movement(body: Dict[str, Any]):
             it = session.exec(select(Item).where(Item.id == item_id)).first()
             if not it:
                 raise HTTPException(status_code=404, detail="Item not found")
-            adjust_stock(session, item_id=item_id, delta=d, related_order_id=None)
+            adjust_stock(session, item_id=item_id, delta=d, related_order_id=None, unit_cost=unit_cost)
             return {"status": "ok"}
     # Fallback to direction/quantity path
     if direction not in ("in", "out") or not isinstance(quantity, int) or quantity <= 0:
@@ -131,7 +132,12 @@ def create_movement(body: Dict[str, Any]):
         it = session.exec(select(Item).where(Item.id == item_id)).first()
         if not it:
             raise HTTPException(status_code=404, detail="Item not found")
-        mv = StockMovement(item_id=item_id, direction=direction, quantity=quantity)
+        mv = StockMovement(
+            item_id=item_id,
+            direction=direction,
+            quantity=quantity,
+            unit_cost=unit_cost if direction == "in" else None  # Only store cost for purchases
+        )
         session.add(mv)
         return {"status": "ok", "movement_id": mv.id or 0}
 
@@ -253,7 +259,7 @@ def series_add(body: Dict[str, Any]):
 	colors: List[str] = body.get("colors") or [None]  # type: ignore
 	quantity_per_variant: int = body.get("quantity_per_variant") or 0
 	price = body.get("price")
-	cost = body.get("cost")
+	cost = body.get("cost")  # This is the purchase cost from producer
 	if not product_id or quantity_per_variant <= 0 or not sizes:
 		raise HTTPException(status_code=400, detail="product_id, sizes[], quantity_per_variant>0 required")
 	with get_session() as session:
@@ -268,8 +274,14 @@ def series_add(body: Dict[str, Any]):
 				if price is not None:
 					it.price = price
 				if cost is not None:
-					it.cost = cost
-				mv = StockMovement(item_id=it.id, direction="in", quantity=quantity_per_variant)
+					it.cost = cost  # Update item default cost for reference
+				# Store purchase cost on the movement itself
+				mv = StockMovement(
+					item_id=it.id,
+					direction="in",
+					quantity=quantity_per_variant,
+					unit_cost=cost  # IMPORTANT: Store purchase cost here
+				)
 				session.add(mv)
 				created.append(it.id or 0)
 		return {"status": "ok", "created_item_ids": created}

@@ -105,6 +105,10 @@ class StockMovement(SQLModel, table=True):
     item_id: int = Field(foreign_key="item.id")
     direction: str = Field(description="in|out")
     quantity: int
+    unit_cost: Optional[float] = Field(
+        default=None,
+        description="Purchase cost per unit (only for direction='in' purchases from producer)"
+    )
     related_order_id: Optional[int] = Field(default=None, foreign_key="order.id")
     reason: Optional[str] = None
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)

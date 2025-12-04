@@ -378,7 +378,7 @@ def recalculate_costs(
 	end: Optional[str] = Query(default=None),
 	date_field: str = Query(default="shipment", regex="^(shipment|data|both)$"),
 ):
-	"""Backfill per-order total_cost using OrderItems and Item.cost for the selected period."""
+	"""Backfill per-order total_cost using FIFO method based on purchase costs for the selected period."""
 	# default to last 7 days inclusive
 	today = dt.date.today()
 	default_start = today - dt.timedelta(days=6)
@@ -388,6 +388,7 @@ def recalculate_costs(
 		start_date, end_date = end_date, start_date
 	updated = 0
 	with get_session() as session:
+		from ..services.inventory import calculate_order_cost_fifo
 		# Select orders as in daily_report
 		if date_field == "both":
 			orders = session.exec(
@@ -413,30 +414,13 @@ def recalculate_costs(
 				)
 				.order_by(Order.id.desc())
 			).all()
-		# Group OrderItems and costs
-		order_ids = [o.id for o in orders if o.id]
-		order_items = session.exec(select(OrderItem).where(OrderItem.order_id.in_(order_ids))).all() if order_ids else []
-		order_item_map: dict[int, list[tuple[int, int]]] = {}
-		all_item_ids: set[int] = set()
-		for oi in order_items:
-			if oi.order_id is None or oi.item_id is None:
-				continue
-			order_item_map.setdefault(int(oi.order_id), []).append((int(oi.item_id), int(oi.quantity or 0)))
-			all_item_ids.add(int(oi.item_id))
-		cost_items = session.exec(select(Item).where(Item.id.in_(sorted(all_item_ids)))).all() if all_item_ids else []
-		cost_map: dict[int, float] = {it.id: float(it.cost or 0.0) for it in cost_items if it.id is not None}
-		# Recompute per order
+		# Recompute per order using FIFO
 		for o in orders:
-			acc = 0.0
-			if o.id and (o.id in order_item_map):
-				for (iid, qty) in order_item_map.get(o.id, []):
-					acc += float(cost_map.get(iid, 0.0)) * int(qty or 0)
-			elif o.item_id is not None:
-				it = session.exec(select(Item).where(Item.id == o.item_id)).first()
-				if it:
-					acc = float(it.cost or 0.0) * int(o.quantity or 0)
+			if not o.id:
+				continue
+			new_cost = calculate_order_cost_fifo(session, o.id)
 			# Update only if changed or previously null
-			if o.total_cost is None or float(o.total_cost or 0.0) != round(acc, 2):
-				o.total_cost = round(acc, 2)
+			if o.total_cost is None or float(o.total_cost or 0.0) != new_cost:
+				o.total_cost = new_cost
 				updated += 1
 	return {"status": "ok", "updated_orders": updated}

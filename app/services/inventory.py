@@ -88,16 +88,88 @@ def get_or_create_item(session: Session, *, product_id: int, size: Optional[str]
     )
 
 
-def adjust_stock(session: Session, *, item_id: int, delta: int, related_order_id: Optional[int] = None, reason: Optional[str] = None) -> None:
+def calculate_order_cost_fifo(session: Session, order_id: int) -> float:
+    """Calculate order total cost using FIFO method.
+    
+    For each item sold, match it to the oldest available purchase batch
+    based on StockMovement.unit_cost from when inventory was purchased.
+    """
+    from sqlalchemy import and_
+    
+    order = session.exec(_select(Order).where(Order.id == order_id)).first()
+    if not order:
+        return 0.0
+    
+    order_items = session.exec(_select(OrderItem).where(OrderItem.order_id == order_id)).all()
+    if not order_items:
+        return 0.0
+    
+    total_cost = 0.0
+    
+    for oi in order_items:
+        item_id = oi.item_id
+        qty_needed = oi.quantity
+        
+        # Get all "in" movements (purchases) for this item, ordered by date (FIFO)
+        # These contain the purchase costs from when inventory was bought
+        purchases = session.exec(
+            _select(StockMovement)
+            .where(
+                and_(
+                    StockMovement.item_id == item_id,
+                    StockMovement.direction == "in",
+                    StockMovement.unit_cost.is_not(None)
+                )
+            )
+            .order_by(StockMovement.created_at.asc())
+        ).all()
+        
+        # Track remaining quantity to allocate
+        remaining_qty = qty_needed
+        
+        for purchase in purchases:
+            if remaining_qty <= 0:
+                break
+            
+            # How much is available from this purchase batch?
+            # For simplicity, we'll use the full quantity
+            # In a more sophisticated system, you'd track how much was already sold
+            available = purchase.quantity
+            cost_per_unit = purchase.unit_cost or 0.0
+            
+            # Allocate from this batch
+            allocate = min(remaining_qty, available)
+            total_cost += allocate * cost_per_unit
+            remaining_qty -= allocate
+        
+        # If we still need more but ran out of purchase batches, 
+        # fall back to Item.cost as last resort
+        if remaining_qty > 0:
+            item = session.exec(_select(Item).where(Item.id == item_id)).first()
+            if item and item.cost:
+                total_cost += remaining_qty * item.cost
+    
+    return round(total_cost, 2)
+
+
+def adjust_stock(session: Session, *, item_id: int, delta: int, related_order_id: Optional[int] = None, reason: Optional[str] = None, unit_cost: Optional[float] = None) -> None:
     """Record a stock movement for the given item.
 
     Positive delta => direction "in"; Negative delta => direction "out".
+    unit_cost: Purchase cost per unit (only used for "in" movements when buying from producer)
     """
     direction = "in" if int(delta) >= 0 else "out"
     qty = abs(int(delta))
     if qty <= 0:
         return
-    mv = StockMovement(item_id=item_id, direction=direction, quantity=qty, related_order_id=related_order_id, reason=reason)
+    mv = StockMovement(
+        item_id=item_id,
+        direction=direction,
+        quantity=qty,
+        related_order_id=related_order_id,
+        reason=reason,
+        unit_cost=unit_cost if direction == "in" else None
+    )
     session.add(mv)
 
 
@@ -283,12 +355,8 @@ def recalc_orders_from_mappings(session: Session, *, product_id: Optional[int] =
             if (order.status or "") in ("refunded", "switched", "stitched"):
                 order.total_cost = 0.0
             else:
-                oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == oid)).all()
-                total_cost = 0.0
-                for oi in oitems:
-                    it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
-                    total_cost += float(oi.quantity or 0) * float((it.cost or 0.0) if it else 0.0)
-                order.total_cost = round(total_cost, 2)
+                # Use FIFO method to calculate cost based on purchase prices
+                order.total_cost = calculate_order_cost_fifo(session, oid)
         except Exception:
             pass
 

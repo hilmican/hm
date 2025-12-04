@@ -1123,6 +1123,20 @@ def init_db() -> None:
                 except Exception:
                     pass
 
+                # Ensure stockmovement.unit_cost exists for tracking purchase costs
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stockmovement' AND COLUMN_NAME = 'unit_cost'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE stockmovement ADD COLUMN unit_cost DOUBLE NULL")
+                except Exception:
+                    pass
+
                 return
         except Exception as e:
             last_err = e
