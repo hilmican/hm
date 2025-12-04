@@ -208,6 +208,56 @@ def merge_clients(source_id: int, target_id: int):
         return {"status": "ok", "reassigned_orders": reassigned, "source_id": source_id, "target_id": target_id}
 
 
+@router.post("/orders/fix-cancelled")
+def fix_cancelled_orders():
+    """Fix all cancelled orders that have non-zero financial values.
+    
+    Sets total_amount, total_cost, and shipping_fee to 0.0
+    for all orders with status='cancelled' that still have non-zero values.
+    """
+    from sqlalchemy import or_, and_
+    fixed_count = 0
+    fixed_orders = []
+    with get_session() as session:
+        # Find all cancelled orders with non-zero financials
+        cancelled_orders = session.exec(
+            select(Order).where(
+                Order.status == "cancelled",
+                # At least one financial field is non-zero
+                or_(
+                    and_(Order.total_amount.is_not(None), Order.total_amount != 0.0),
+                    and_(Order.total_cost.is_not(None), Order.total_cost != 0.0),
+                    and_(Order.shipping_fee.is_not(None), Order.shipping_fee != 0.0),
+                )
+            )
+        ).all()
+        
+        for o in cancelled_orders:
+            original_amount = float(o.total_amount or 0.0)
+            original_cost = float(o.total_cost or 0.0)
+            original_shipping = float(o.shipping_fee or 0.0)
+            
+            # Zero out financials
+            o.total_amount = 0.0
+            o.total_cost = 0.0
+            o.shipping_fee = 0.0
+            
+            fixed_orders.append({
+                "id": o.id,
+                "original_amount": original_amount,
+                "original_cost": original_cost,
+                "original_shipping": original_shipping,
+            })
+            fixed_count += 1
+        
+        # Session commits automatically via context manager
+    return {
+        "status": "ok",
+        "fixed_count": fixed_count,
+        "fixed_orders": fixed_orders[:100],  # Limit response size
+    }
+
+
 @router.post("/cache/invalidate")
 def cache_invalidate(request: Request):
     uid = request.session.get("uid")

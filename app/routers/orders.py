@@ -373,8 +373,9 @@ def cancel_order(order_id: int, body: dict = Body(default={})):
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
-        # idempotent: if already cancelled/refunded/switched, do nothing
-        if (o.status or "") in ("cancelled", "refunded", "switched", "stitched"):
+        # Allow re-processing cancelled orders to fix financials
+        # Only skip if already refunded/switched/stitched (those are final states)
+        if (o.status or "") in ("refunded", "switched", "stitched"):
             return {"status": "ok", "message": "already_processed"}
 
         # Check if we should restore inventory (default: True)
