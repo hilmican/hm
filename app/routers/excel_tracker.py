@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from sqlmodel import select
+from sqlalchemy import func
 from pathlib import Path
 import ast
 
@@ -46,8 +47,11 @@ def excel_tracker_page(request: Request, order_id: int | None = None, q: str | N
                         .limit(20)
                     ).all()
                 if not clients:
+                    # Case-insensitive name search using func.lower and LIKE
                     clients = session.exec(
-                        select(Client).where(Client.name.contains(q_norm)).limit(20)
+                        select(Client)
+                        .where(func.lower(Client.name).like(f"%{q_norm.lower()}%"))
+                        .limit(20)
                     ).all()
                 
                 if clients:

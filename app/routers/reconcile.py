@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 from sqlmodel import select
+from sqlalchemy import func
 import json
 import datetime as dt
 
@@ -221,8 +222,9 @@ def reconcile_payments(request: Request, q: str | None = None, client_id: int | 
                         .where(Client.phone.contains(digits))
                     ).first()
                 if not client:
+                    # Case-insensitive name search using func.lower and LIKE
                     client = session.exec(
-                        select(Client).where(Client.name.contains(q_norm))
+                        select(Client).where(func.lower(Client.name).like(f"%{q_norm.lower()}%"))
                     ).first()
 
         orders: list[Order] = []
