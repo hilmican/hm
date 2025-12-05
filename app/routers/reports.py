@@ -7,10 +7,11 @@ from sqlalchemy import or_, and_, text
 import os
 
 from ..db import get_session
-from ..models import Order, Payment, Item, Client, ImportRun, StockMovement, OrderItem, Cost
+from ..models import Order, Payment, Item, Client, ImportRun, StockMovement, OrderItem, Cost, Account, Income
 from ..services.shipping import compute_shipping_fee
 from ..services.inventory import get_stock_map
 from ..services.cache import cached_json
+from ..services.finance import get_account_balances, detect_payment_leaks
 
 
 router = APIRouter()
@@ -424,3 +425,100 @@ def recalculate_costs(
 				o.total_cost = new_cost
 				updated += 1
 	return {"status": "ok", "updated_orders": updated}
+
+
+@router.get("/finance")
+def finance_report(request: Request, start: Optional[str] = Query(default=None), end: Optional[str] = Query(default=None)):
+	"""Financial overview: account balances, income vs expenses, unpaid orders (cash leaks)."""
+	today = dt.date.today()
+	default_start = today - dt.timedelta(days=29)
+	start_date = _parse_date_or_default(start, default_start)
+	end_date = _parse_date_or_default(end, today)
+	if end_date < start_date:
+		start_date, end_date = end_date, start_date
+	
+	with get_session() as session:
+		# Get all accounts with balances
+		accounts = session.exec(select(Account).where(Account.is_active == True).order_by(Account.name.asc())).all()
+		balances = get_account_balances(session)
+		
+		# Get income entries in period
+		incomes = session.exec(
+			select(Income)
+			.where(Income.date.is_not(None))
+			.where(Income.date >= start_date)
+			.where(Income.date <= end_date)
+			.order_by(Income.date.desc())
+		).all()
+		total_income = sum(float(inc.amount) for inc in incomes)
+		
+		# Get expenses in period
+		expenses = session.exec(
+			select(Cost)
+			.where(Cost.date.is_not(None))
+			.where(Cost.date >= start_date)
+			.where(Cost.date <= end_date)
+			.order_by(Cost.date.desc())
+		).all()
+		total_expenses = sum(float(exp.amount) for exp in expenses)
+		
+		# Income by account
+		income_by_account = {}
+		for inc in incomes:
+			acc_id = inc.account_id
+			if acc_id not in income_by_account:
+				income_by_account[acc_id] = 0.0
+			income_by_account[acc_id] += float(inc.amount)
+		
+		# Expenses by account
+		expense_by_account = {}
+		for exp in expenses:
+			if exp.account_id:
+				acc_id = exp.account_id
+				if acc_id not in expense_by_account:
+					expense_by_account[acc_id] = 0.0
+				expense_by_account[acc_id] += float(exp.amount)
+		
+		# Detect payment leaks
+		leaks = detect_payment_leaks(session, min_days_old=7)
+		
+		# Recent transactions (last 20)
+		recent_transactions = []
+		for inc in incomes[:20]:
+			account = session.exec(select(Account).where(Account.id == inc.account_id)).first()
+			recent_transactions.append({
+				"type": "income",
+				"date": inc.date,
+				"amount": inc.amount,
+				"account": account.name if account else f"Account {inc.account_id}",
+				"description": f"{inc.source} - {inc.reference or ''}",
+			})
+		for exp in expenses[:20]:
+			account = session.exec(select(Account).where(Account.id == exp.account_id)).first() if exp.account_id else None
+			recent_transactions.append({
+				"type": "expense",
+				"date": exp.date,
+				"amount": -exp.amount,
+				"account": account.name if account else "No account",
+				"description": exp.details or "",
+			})
+		recent_transactions.sort(key=lambda x: x["date"] or dt.date.min, reverse=True)
+		recent_transactions = recent_transactions[:20]
+		
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"reports_finance.html",
+			{
+				"request": request,
+				"start": start_date,
+				"end": end_date,
+				"accounts": accounts,
+				"balances": balances,
+				"total_income": total_income,
+				"total_expenses": total_expenses,
+				"income_by_account": income_by_account,
+				"expense_by_account": expense_by_account,
+				"leaks": leaks,
+				"recent_transactions": recent_transactions,
+			},
+		)

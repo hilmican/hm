@@ -1137,6 +1137,117 @@ def init_db() -> None:
                 except Exception:
                     pass
 
+                # Ensure account table exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'account'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql(
+                            """
+                            CREATE TABLE account (
+                                id INT PRIMARY KEY AUTO_INCREMENT,
+                                name VARCHAR(191) NOT NULL,
+                                type VARCHAR(64) NOT NULL,
+                                iban VARCHAR(191) NULL,
+                                initial_balance DOUBLE NOT NULL DEFAULT 0.0,
+                                notes TEXT NULL,
+                                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                INDEX idx_account_name (name),
+                                INDEX idx_account_type (type),
+                                INDEX idx_account_active (is_active)
+                            )
+                            """
+                        )
+                except Exception:
+                    pass
+
+                # Ensure income table exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'income'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql(
+                            """
+                            CREATE TABLE income (
+                                id INT PRIMARY KEY AUTO_INCREMENT,
+                                account_id INT NOT NULL,
+                                amount DOUBLE NOT NULL,
+                                date DATE NULL,
+                                source VARCHAR(64) NOT NULL,
+                                reference VARCHAR(191) NULL,
+                                notes TEXT NULL,
+                                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                INDEX idx_income_account (account_id),
+                                INDEX idx_income_date (date),
+                                INDEX idx_income_source (source),
+                                FOREIGN KEY (account_id) REFERENCES account(id) ON DELETE RESTRICT
+                            )
+                            """
+                        )
+                except Exception:
+                    pass
+
+                # Ensure orderpayment table exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'orderpayment'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql(
+                            """
+                            CREATE TABLE orderpayment (
+                                id INT PRIMARY KEY AUTO_INCREMENT,
+                                income_id INT NOT NULL,
+                                order_id INT NOT NULL,
+                                expected_amount DOUBLE NULL,
+                                collected_amount DOUBLE NULL,
+                                collected_at DATETIME NULL,
+                                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                INDEX idx_orderpayment_income (income_id),
+                                INDEX idx_orderpayment_order (order_id),
+                                INDEX idx_orderpayment_collected (collected_at),
+                                FOREIGN KEY (income_id) REFERENCES income(id) ON DELETE RESTRICT,
+                                FOREIGN KEY (order_id) REFERENCES `order`(id) ON DELETE RESTRICT
+                            )
+                            """
+                        )
+                except Exception:
+                    pass
+
+                # Ensure cost.account_id exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cost' AND COLUMN_NAME = 'account_id'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE cost ADD COLUMN account_id INT NULL")
+                        conn.exec_driver_sql("CREATE INDEX idx_cost_account ON cost(account_id)")
+                        conn.exec_driver_sql(
+                            "ALTER TABLE cost ADD CONSTRAINT fk_cost_account FOREIGN KEY (account_id) REFERENCES account(id) ON DELETE SET NULL"
+                        )
+                except Exception:
+                    pass
+
                 return
         except Exception as e:
             last_err = e

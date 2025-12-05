@@ -1,0 +1,154 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Finans Raporu</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      h1 { margin-bottom: 12px; }
+      .toolbar { display:flex; gap:12px; align-items:flex-end; margin:14px 0; flex-wrap:wrap; }
+      .btn { background:#2563eb; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer }
+      table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+      th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+      th { background: #fafafa; position: sticky; top: 0; }
+      .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:18px; }
+      .card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background:#fff; }
+      .card h2 { margin: 0; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
+      .card .body { padding: 12px 16px; }
+      .stat-card { text-align: center; }
+      .stat-value { font-size: 32px; font-weight: 600; margin: 8px 0; }
+      .stat-label { color: #6b7280; font-size: 14px; }
+      .balance-positive { color: #059669; }
+      .balance-negative { color: #dc2626; }
+      .balance-zero { color: #6b7280; }
+      .leak-warning { background: #fef2f2; border-left: 4px solid #ef4444; padding: 12px; margin: 8px 0; }
+      .leak-warning strong { color: #dc2626; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>Finans Raporu</h1>
+
+    <form class="toolbar" method="get" action="/reports/finance">
+      <div>
+        <label style="display:block;font-size:12px;color:#374151">Başlangıç</label>
+        <input type="date" name="start" value="{{ start }}" />
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:#374151">Bitiş</label>
+        <input type="date" name="end" value="{{ end }}" />
+      </div>
+      <div>
+        <button class="btn" type="submit">Uygula</button>
+      </div>
+    </form>
+
+    <div class="grid" style="margin-top: 18px;">
+      <div class="card stat-card">
+        <div class="body">
+          <div class="stat-label">Toplam Gelir</div>
+          <div class="stat-value balance-positive">{{ '%.2f'|format(total_income) }} ₺</div>
+        </div>
+      </div>
+      <div class="card stat-card">
+        <div class="body">
+          <div class="stat-label">Toplam Gider</div>
+          <div class="stat-value balance-negative">{{ '%.2f'|format(total_expenses) }} ₺</div>
+        </div>
+      </div>
+      <div class="card stat-card">
+        <div class="body">
+          <div class="stat-label">Net</div>
+          <div class="stat-value {% if (total_income - total_expenses) > 0 %}balance-positive{% elif (total_income - total_expenses) < 0 %}balance-negative{% else %}balance-zero{% endif %}">
+            {{ '%.2f'|format(total_income - total_expenses) }} ₺
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 18px;">
+      <h2>Hesap Bakiyeleri</h2>
+      <div class="body" style="padding:0">
+        <table>
+          <thead>
+            <tr>
+              <th>Hesap</th>
+              <th>Tür</th>
+              <th>Güncel Bakiye</th>
+              <th>Gelir (Dönem)</th>
+              <th>Gider (Dönem)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for acc in accounts %}
+            {% if acc.id %}
+            <tr>
+              <td><a href="/accounts/{{ acc.id }}/transactions">{{ acc.name }}</a></td>
+              <td>{{ acc.type }}</td>
+              <td>
+                {% set balance = balances.get(acc.id, 0.0) %}
+                <span class="{% if balance > 0 %}balance-positive{% elif balance < 0 %}balance-negative{% else %}balance-zero{% endif %}">
+                  {{ '%.2f'|format(balance) }} ₺
+                </span>
+              </td>
+              <td>{{ '%.2f'|format(income_by_account.get(acc.id, 0.0)) }} ₺</td>
+              <td>{{ '%.2f'|format(expense_by_account.get(acc.id, 0.0)) }} ₺</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {% if leaks %}
+    <div class="card" style="margin-top: 18px;">
+      <h2>⚠️ Ödenmemiş Siparişler (Nakit Sızıntısı)</h2>
+      <div class="body">
+        <p class="muted">7 günden eski ve henüz tahsil edilmemiş siparişler:</p>
+        {% for leak in leaks %}
+        <div class="leak-warning">
+          <strong>Sipariş #{{ leak.order_id }}</strong> - Takip: {{ leak.tracking_no or '-' }}<br>
+          Beklenen Ödeme: <strong>{{ '%.2f'|format(leak.expected_payment) }} ₺</strong><br>
+          Toplam: {{ '%.2f'|format(leak.total_amount or 0) }} ₺ | 
+          Tarih: {{ leak.shipment_date or leak.data_date or '-' }}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card" style="margin-top: 18px;">
+      <h2>Son İşlemler</h2>
+      <div class="body" style="padding:0">
+        <table>
+          <thead>
+            <tr>
+              <th>Tarih</th>
+              <th>Tür</th>
+              <th>Hesap</th>
+              <th>Açıklama</th>
+              <th>Tutar</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for txn in recent_transactions %}
+            <tr>
+              <td>{{ txn.date }}</td>
+              <td>{{ 'Gelir' if txn.type == 'income' else 'Gider' }}</td>
+              <td>{{ txn.account }}</td>
+              <td>{{ txn.description }}</td>
+              <td class="{% if txn.amount > 0 %}balance-positive{% else %}balance-negative{% endif %}">
+                {{ '%.2f'|format(txn.amount) }} ₺
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>
+

@@ -539,9 +539,46 @@ class CostType(SQLModel, table=True):
 class Cost(SQLModel, table=True):
 	id: Optional[int] = Field(default=None, primary_key=True)
 	type_id: int = Field(foreign_key="costtype.id", index=True)
+	account_id: Optional[int] = Field(default=None, foreign_key="account.id", index=True, description="Account from which expense was paid")
 	amount: float
 	date: Optional[dt.date] = Field(default=None, index=True)
 	details: Optional[str] = Field(default=None, sa_column=Column(Text))
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class Account(SQLModel, table=True):
+	"""Company bank accounts, physical safes, and other money storage locations."""
+	id: Optional[int] = Field(default=None, primary_key=True)
+	name: str = Field(index=True, description="Account name, e.g., 'Main Bank Account', 'Physical Safe 1'")
+	type: str = Field(index=True, description="Account type: 'bank', 'safe', 'cash', 'other'")
+	iban: Optional[str] = Field(default=None, description="IBAN or identifier for bank accounts")
+	initial_balance: float = Field(default=0.0, description="Starting balance when account was created")
+	notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+	is_active: bool = Field(default=True, index=True)
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
+class Income(SQLModel, table=True):
+	"""Income entries: money received from shipment firm, IBAN payments, etc."""
+	id: Optional[int] = Field(default=None, primary_key=True)
+	account_id: int = Field(foreign_key="account.id", index=True)
+	amount: float
+	date: Optional[dt.date] = Field(default=None, index=True)
+	source: str = Field(index=True, description="Source type: 'shipment_firm', 'iban_customer', 'other'")
+	reference: Optional[str] = Field(default=None, description="Reference number or description")
+	notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class OrderPayment(SQLModel, table=True):
+	"""Links orders to income entries when payments are collected."""
+	id: Optional[int] = Field(default=None, primary_key=True)
+	income_id: int = Field(foreign_key="income.id", index=True, description="Bulk payment income entry")
+	order_id: int = Field(foreign_key="order.id", index=True)
+	expected_amount: Optional[float] = Field(default=None, description="Expected payment amount for this order")
+	collected_amount: Optional[float] = Field(default=None, description="Actual collected amount (may differ due to fees)")
+	collected_at: Optional[dt.datetime] = Field(default=None, index=True)
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 
 

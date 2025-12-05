@@ -1,0 +1,296 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Gelir Girişi</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      h1 { margin-bottom: 12px; }
+      .toolbar { display:flex; gap:12px; align-items:flex-end; margin:14px 0; flex-wrap:wrap; }
+      .btn { background:#2563eb; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer }
+      .btn-success { background:#059669; }
+      .btn-danger { background:#ef4444; }
+      input[type=date], input[type=text], input[type=number], select { padding:6px 8px; border:1px solid #ddd; border-radius:6px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+      th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+      th { background: #fafafa; position: sticky; top: 0; }
+      .grid { display:grid; grid-template-columns: 1fr; gap:18px; }
+      @media (min-width: 1100px) { .grid { grid-template-columns: 1fr 1fr; } }
+      .card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background:#fff; }
+      .card h2 { margin: 0; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
+      .card .body { padding: 12px 16px; }
+      .row { display:flex; gap:12px; flex-wrap:wrap; }
+      .field { display:block; }
+      .field label { display:block; font-size:12px; color:#374151; margin-bottom:4px; }
+      .muted { color:#6b7280; font-size:12px; }
+      .order-row { cursor: pointer; }
+      .order-row:hover { background: #f9fafb; }
+      .order-row.selected { background: #dbeafe; }
+      .order-row input[type=checkbox] { margin-right: 8px; }
+      .summary { background: #f0f9ff; padding: 12px; border-radius: 6px; margin-top: 12px; }
+      .summary strong { color: #1e40af; }
+      #searchBox { width: 100%; max-width: 400px; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>Gelir Girişi</h1>
+
+    <form class="toolbar" method="get" action="/income/table">
+      <div>
+        <label style="display:block;font-size:12px;color:#374151">Başlangıç</label>
+        <input type="date" name="start" value="{{ start }}" />
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:#374151">Bitiş</label>
+        <input type="date" name="end" value="{{ end }}" />
+      </div>
+      <div>
+        <button class="btn" type="submit">Uygula</button>
+      </div>
+    </form>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Yeni Gelir Ekle</h2>
+        <div class="body">
+          <form id="incomeForm" method="post" action="/income/add" class="row">
+            <div class="field">
+              <label>Hesap</label>
+              <select name="account_id" id="accountSelect" required>
+                <option value="">Seçiniz...</option>
+                {% for acc in accounts %}
+                {% if acc.id %}
+                <option value="{{ acc.id }}">{{ acc.name }} ({{ acc.type }})</option>
+                {% endif %}
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label>Tutar</label>
+              <input type="number" step="0.01" name="amount" id="amountInput" required />
+            </div>
+            <div class="field">
+              <label>Tarih</label>
+              <input type="date" name="date" value="{{ today }}" />
+            </div>
+            <div class="field">
+              <label>Kaynak</label>
+              <select name="source" required>
+                <option value="shipment_firm">Kargo Firması</option>
+                <option value="iban_customer">Müşteri IBAN</option>
+                <option value="other">Diğer</option>
+              </select>
+            </div>
+            <div class="field" style="min-width:280px; flex:1">
+              <label>Referans / Açıklama</label>
+              <input type="text" name="reference" placeholder="Opsiyonel" />
+            </div>
+            <div class="field" style="min-width:280px; flex:1">
+              <label>Notlar</label>
+              <input type="text" name="notes" placeholder="Opsiyonel" />
+            </div>
+            {% if start %}<input type="hidden" name="start" value="{{ start }}"/>{% endif %}
+            {% if end %}<input type="hidden" name="end" value="{{ end }}"/>{% endif %}
+            <div style="align-self:flex-end">
+              <button class="btn" type="submit">Kaydet</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Sipariş Tahsilatı</h2>
+        <div class="body">
+          <div class="field">
+            <label>Sipariş Ara</label>
+            <input type="text" id="searchBox" placeholder="Takip no, müşteri adı..." />
+          </div>
+          <button class="btn" type="button" onclick="loadUnpaidOrders()">Ödenmemiş Siparişleri Yükle</button>
+          
+          <div id="ordersContainer" style="margin-top: 12px; max-height: 400px; overflow-y: auto;">
+            <p class="muted">Ödenmemiş siparişleri yüklemek için yukarıdaki butona tıklayın.</p>
+          </div>
+          
+          <div id="summary" class="summary" style="display: none;">
+            <strong>Seçilen Siparişler:</strong> <span id="selectedCount">0</span> adet<br>
+            <strong>Toplam Beklenen:</strong> <span id="totalExpected">0.00</span> ₺
+          </div>
+          
+          <button class="btn btn-success" type="button" id="collectBtn" onclick="collectSelectedOrders()" style="margin-top: 12px; display: none;">
+            Seçili Siparişleri Tahsil Et ve Gelir Oluştur
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h2>Gelir Geçmişi</h2>
+      <div class="body" style="padding:0">
+        <table>
+          <thead>
+            <tr>
+              <th>Tarih</th>
+              <th>Hesap</th>
+              <th>Kaynak</th>
+              <th>Tutar</th>
+              <th>Referans</th>
+              <th>Notlar</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for inc in income_entries %}
+            <tr>
+              <td>{{ inc.date }}</td>
+              <td>{{ account_map.get(inc.account_id, inc.account_id) }}</td>
+              <td>{{ inc.source }}</td>
+              <td>{{ '%.2f'|format(inc.amount) }} ₺</td>
+              <td>{{ inc.reference or '-' }}</td>
+              <td>{{ inc.notes or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <script>
+      let selectedOrders = new Set();
+      let ordersData = [];
+
+      // Load unpaid orders
+      async function loadUnpaidOrders() {
+        const search = document.getElementById('searchBox').value;
+        const params = new URLSearchParams();
+        if (search) params.append('q', search);
+        params.append('limit', '500');
+
+        try {
+          const res = await fetch(`/income/orders-to-collect?${params}`);
+          const data = await res.json();
+          ordersData = data.orders || [];
+          renderOrders();
+        } catch (e) {
+          console.error('Failed to load orders:', e);
+          alert('Siparişler yüklenemedi');
+        }
+      }
+
+      function renderOrders() {
+        const container = document.getElementById('ordersContainer');
+        if (ordersData.length === 0) {
+          container.innerHTML = '<p class="muted">Ödenmemiş sipariş bulunamadı.</p>';
+          return;
+        }
+
+        let html = '<table><thead><tr><th></th><th>ID</th><th>Takip</th><th>Müşteri</th><th>Toplam</th><th>Beklenen</th><th>Tarih</th></tr></thead><tbody>';
+        ordersData.forEach(order => {
+          const checked = selectedOrders.has(order.id) ? 'checked' : '';
+          html += `<tr class="order-row ${checked ? 'selected' : ''}" onclick="toggleOrder(${order.id})">
+            <td><input type="checkbox" ${checked} onchange="toggleOrder(${order.id})" /></td>
+            <td>${order.id}</td>
+            <td>${order.tracking_no || '-'}</td>
+            <td>${order.client_name}</td>
+            <td>${order.total_amount ? order.total_amount.toFixed(2) : '0.00'} ₺</td>
+            <td>${order.expected_payment.toFixed(2)} ₺</td>
+            <td>${order.shipment_date || order.data_date || '-'}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+        updateSummary();
+      }
+
+      function toggleOrder(orderId) {
+        if (selectedOrders.has(orderId)) {
+          selectedOrders.delete(orderId);
+        } else {
+          selectedOrders.add(orderId);
+        }
+        renderOrders();
+      }
+
+      function updateSummary() {
+        const selected = Array.from(selectedOrders);
+        let total = 0;
+        selected.forEach(id => {
+          const order = ordersData.find(o => o.id === id);
+          if (order) total += order.expected_payment;
+        });
+
+        document.getElementById('selectedCount').textContent = selected.length;
+        document.getElementById('totalExpected').textContent = total.toFixed(2);
+        document.getElementById('summary').style.display = selected.length > 0 ? 'block' : 'none';
+        document.getElementById('collectBtn').style.display = selected.length > 0 ? 'block' : 'none';
+      }
+
+      async function collectSelectedOrders() {
+        const selected = Array.from(selectedOrders);
+        if (selected.length === 0) {
+          alert('Lütfen en az bir sipariş seçin');
+          return;
+        }
+
+        const accountId = document.getElementById('accountSelect').value;
+        const amount = parseFloat(document.getElementById('amountInput').value);
+        const date = document.querySelector('input[name="date"]').value;
+        const source = document.querySelector('select[name="source"]').value;
+        const reference = document.querySelector('input[name="reference"]').value;
+        const notes = document.querySelector('input[name="notes"]').value;
+
+        if (!accountId) {
+          alert('Lütfen bir hesap seçin');
+          return;
+        }
+
+        if (!amount || amount <= 0) {
+          alert('Lütfen geçerli bir tutar girin');
+          return;
+        }
+
+        if (!confirm(`${selected.length} siparişi tahsil etmek istediğinizden emin misiniz?`)) {
+          return;
+        }
+
+        try {
+          const res = await fetch('/income/bulk-collect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              account_id: parseInt(accountId),
+              amount: amount,
+              date: date,
+              source: source,
+              reference: reference,
+              notes: notes,
+              order_ids: selected,
+            }),
+          });
+
+          const data = await res.json();
+          if (data.error) {
+            alert('Hata: ' + data.error);
+            return;
+          }
+
+          alert(`Başarılı! ${data.orders_collected} sipariş tahsil edildi.`);
+          selectedOrders.clear();
+          loadUnpaidOrders();
+          location.reload();
+        } catch (e) {
+          console.error('Failed to collect orders:', e);
+          alert('Tahsilat işlemi başarısız');
+        }
+      }
+
+      // Initialize
+      document.getElementById('searchBox').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          loadUnpaidOrders();
+        }
+      });
+    </script>
+  </body>
+</html>
+

@@ -6,7 +6,7 @@ from fastapi.responses import RedirectResponse
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Cost, CostType
+from ..models import Cost, CostType, Account
 
 
 router = APIRouter()
@@ -37,6 +37,7 @@ def costs_page(
 		start_date, end_date = end_date, start_date
 	with get_session() as session:
 		types = session.exec(select(CostType).order_by(CostType.name.asc())).all()
+		accounts = session.exec(select(Account).where(Account.is_active == True).order_by(Account.name.asc())).all()
 		rows = session.exec(
 			select(Cost)
 			.where(Cost.date.is_not(None))
@@ -45,6 +46,7 @@ def costs_page(
 			.order_by(Cost.date.desc(), Cost.id.desc())
 		).all()
 		type_map = {t.id: t.name for t in types if t.id is not None}
+		account_map = {a.id: a.name for a in accounts if a.id is not None}
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"costs.html",
@@ -53,8 +55,10 @@ def costs_page(
 				"start": start_date,
 				"end": end_date,
 				"types": types,
+				"accounts": accounts,
 				"rows": rows,
 				"type_map": type_map,
+				"account_map": account_map,
 				"today": today,
 			},
 		)
@@ -101,6 +105,7 @@ def add_cost(
 	amount: float = Form(...),
 	date: Optional[str] = Form(default=None),
 	details: Optional[str] = Form(default=None),
+	account_id: Optional[int] = Form(default=None),
 	start: Optional[str] = Form(default=None),
 	end: Optional[str] = Form(default=None),
 ):
@@ -110,7 +115,13 @@ def add_cost(
 		when = dt.date.today()
 	with get_session() as session:
 		try:
-			c = Cost(type_id=int(type_id), amount=float(amount), date=when, details=(details or "").strip() or None)
+			c = Cost(
+				type_id=int(type_id),
+				amount=float(amount),
+				date=when,
+				details=(details or "").strip() or None,
+				account_id=int(account_id) if account_id else None,
+			)
 			session.add(c)
 			session.commit()
 		except Exception:

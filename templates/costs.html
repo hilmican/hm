@@ -62,6 +62,15 @@
               <label>Tarih</label>
               <input type="date" name="date" value="{{ today }}" />
             </div>
+            <div class="field">
+              <label>Hesap (Opsiyonel)</label>
+              <select name="account_id">
+                <option value="">Hesap seçilmedi</option>
+                {% for acc in accounts %}
+                  <option value="{{ acc.id }}">{{ acc.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
             <div class="field" style="min-width:280px; flex:1">
               <label>Detay</label>
               <input type="text" name="details" placeholder="örn. Kampanya X reklamları" />
@@ -104,6 +113,7 @@
               <th>Tarih</th>
               <th>Tür</th>
               <th>Tutar</th>
+              <th>Hesap</th>
               <th>Detay</th>
             </tr>
           </thead>
@@ -112,7 +122,8 @@
             <tr>
               <td>{{ r.date }}</td>
               <td>{{ type_map.get(r.type_id) or r.type_id }}</td>
-              <td>{{ '%.2f'|format(r.amount or 0) }}</td>
+              <td>{{ '%.2f'|format(r.amount or 0) }} ₺</td>
+              <td>{{ account_map.get(r.account_id, '-') if r.account_id else '-' }}</td>
               <td>{{ r.details or '' }}</td>
             </tr>
             {% endfor %}
