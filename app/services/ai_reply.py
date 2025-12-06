@@ -1065,6 +1065,11 @@ def draft_reply(
 	if upsell_config:
 		user_payload["upsell_config"] = upsell_config
 	state_payload = dict(state or {})
+	# Seed essential state flags so prompt conditions (e.g., upsell) work deterministically
+	if product_id_val:
+		state_payload.setdefault("current_focus_product_id", product_id_val)
+	state_payload.setdefault("upsell_offered", False)
+	state_payload.setdefault("upsell_accepted", False)
 	hail_already_sent = bool(state_payload.get("hail_sent"))
 	# Detect if this is a first message (no previous AI replies in history)
 	is_first_message = not hail_already_sent and len([h for h in history if h.get("dir") == "out"]) == 0
@@ -1982,14 +1987,40 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 		if data is None or not isinstance(data, dict):
 			# Clean agent_reply_text before using it as fallback
 			clean_agent_text = agent_reply_text or ""
-			if clean_agent_text:
-				# Remove any embedded state objects from agent text
-				import re
-				state_pattern = r'["\'],?\s*"state"\s*:\s*\{'
-				match = re.search(state_pattern, clean_agent_text)
-				if match:
-					clean_agent_text = clean_agent_text[:match.start()].strip()
-					clean_agent_text = re.sub(r'["\']\s*,?\s*$', '', clean_agent_text)
+			parsed_agent_reply = None
+			if isinstance(clean_agent_text, str) and clean_agent_text.lstrip().startswith("{"):
+				try:
+					parsed_agent_reply = json.loads(clean_agent_text)
+				except Exception:
+					parsed_agent_reply = None
+			if isinstance(parsed_agent_reply, dict):
+				candidate_text = (
+					parsed_agent_reply.get("reply_text")
+					or parsed_agent_reply.get("text")
+					or parsed_agent_reply.get("message")
+					or parsed_agent_reply.get("content")
+				)
+				if isinstance(candidate_text, str) and candidate_text.strip():
+					clean_agent_text = candidate_text.strip()
+				parsed_state = parsed_agent_reply.get("state")
+				if isinstance(parsed_state, dict):
+					try:
+						# Only merge when we don't already have state payload
+						if not state_payload:
+							state_payload = parsed_state
+					except Exception:
+						pass
+			if clean_agent_text and isinstance(clean_agent_text, str):
+				# Remove any embedded state objects from agent text (legacy malformed JSON)
+				try:
+					import re
+					state_pattern = r'["\'],?\s*"state"\s*:\s*\{'
+					match = re.search(state_pattern, clean_agent_text)
+					if match:
+						clean_agent_text = clean_agent_text[:match.start()].strip()
+						clean_agent_text = re.sub(r'["\']\s*,?\s*$', '', clean_agent_text)
+				except Exception:
+					pass
 			
 			data = {
 				"should_reply": True,
