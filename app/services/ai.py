@@ -146,8 +146,11 @@ class AIClient:
             payload: Dict[str, Any] = {
                 "model": self._model,
                 "messages": current_messages,
-                "response_format": {"type": "json_object"},
             }
+            # CRITICAL: response_format and tools are mutually exclusive in OpenAI API
+            # Only use JSON mode when tools are NOT provided
+            if not tools:
+                payload["response_format"] = {"type": "json_object"}
             if temperature is not None:
                 payload["temperature"] = temperature
             payload[self._token_param] = max_output_tokens
