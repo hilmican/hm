@@ -37,6 +37,30 @@ MAPPING_SYSTEM_PROMPT = (
 _PROMPT_CACHE: dict[str, tuple[str, float]] = {}
 _PROMPT_LAST_CHECK: dict[str, float] = {}
 
+# Default serializer prompt (Stage 2 JSON mapping)
+SERIALIZER_SYSTEM_PROMPT = """
+Sen bir satış asistanı için LOG/STATE serializer'sın.
+Tools kullanmayacaksın, sadece JSON üreteceksin.
+
+Aşağıdaki şemaya TAM UYAN tek bir JSON objesi döndür:
+{
+  "should_reply": true,
+  "reply_text": "string",
+  "confidence": 0.0,
+  "reason": "string",
+  "notes": null,
+  "state": object | null
+}
+
+Alan kuralları:
+- reply_text: Agent çağrısında müşteriye gönderilen son DM metni.
+- should_reply: Bu turda müşteriye DM gittiyse true, admin eskalasyonu olup DM gitmediyse false.
+- confidence: 0.0 - 1.0 arası sayı.
+- reason: Kısa açıklama.
+- notes: null veya string.
+- state: Güncel satış state'i (cart, current_focus_product, payment, upsell, vs.); yoksa null.
+"""
+
 
 def _read_file_text(path: Path) -> str | None:
 	try:
@@ -125,6 +149,39 @@ def get_global_system_prompt() -> str:
 	)
 	_PROMPT_CACHE[key] = (default_prompt, _PROMPT_CACHE.get(key, (None, 0.0))[1] if _PROMPT_CACHE.get(key) else 0.0)
 	return default_prompt
+
+
+def get_serializer_prompt() -> str:
+	"""
+	Return the serializer system prompt for mapping Agent DM + state to JSON.
+	- Supports hot-reload via AGENT_SERIALIZER_PROMPT_FILE
+	"""
+	key = "serializer_system"
+	now = time.time()
+	refresh_sec = float(os.getenv("PROMPT_REFRESH_SECONDS", "5"))
+	if key in _PROMPT_CACHE and (now - _PROMPT_LAST_CHECK.get(key, 0.0) < max(1.0, refresh_sec)):
+		return _PROMPT_CACHE[key][0]
+	_PROMPT_LAST_CHECK[key] = now
+	custom_path = os.getenv("AGENT_SERIALIZER_PROMPT_FILE")
+	if custom_path:
+		p = Path(custom_path)
+	else:
+		p = Path("app/services/prompts/AGENT_SERIALIZER_PROMPT.txt")
+	try:
+		if p.exists():
+			mt = p.stat().st_mtime
+			cached = _PROMPT_CACHE.get(key)
+			if (not cached) or (mt != cached[1]):
+				txt = _read_file_text(p)
+				if txt and txt.strip():
+					_PROMPT_CACHE[key] = (txt, mt)
+					return txt
+			if cached:
+				return cached[0]
+	except Exception:
+		pass
+	_PROMPT_CACHE[key] = (SERIALIZER_SYSTEM_PROMPT, _PROMPT_CACHE.get(key, (None, 0.0))[1] if _PROMPT_CACHE.get(key) else 0.0)
+	return SERIALIZER_SYSTEM_PROMPT
 
 
 # Instagram purchase detection and contact extraction prompt (strict JSON)

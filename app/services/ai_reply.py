@@ -37,7 +37,7 @@ from .ai_orders import (
 	submit_candidate_order,
 )
 from .ai_utils import parse_height_weight, calculate_size_suggestion, detect_color_count
-from .prompts import get_global_system_prompt
+from .prompts import get_global_system_prompt, get_serializer_prompt
 from ..utils.normalize import TURKISH_MAP
 
 
@@ -1081,6 +1081,167 @@ def draft_reply(
 
 	tool_handlers["mark_ai_order_very_interested"] = _handle_very_interested_tool
 
+	# Focus product change
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "change_focus_product",
+				"description": "Konuşmanın odaklandığı ürünü değiştir.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"product_id": {"type": "integer"},
+						"reason": {"type": "string"},
+					},
+					"required": ["product_id"],
+				},
+			},
+		}
+	)
+
+	def _handle_change_focus_tool(args: Dict[str, Any]) -> str:
+		pid = _clean_positive_int(args.get("product_id"))
+		reason = _clean_tool_str(args.get("reason"))
+		if pid:
+			state_payload["current_focus_product_id"] = pid
+		if reason:
+			state_payload["focus_change_reason"] = reason
+		result = {"product_id": pid, "reason": reason}
+		callback_entry = {"name": "change_focus_product", "arguments": args, "result": result}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, "change_focus_product", args, result)
+		return json.dumps(result, ensure_ascii=False)
+
+	tool_handlers["change_focus_product"] = _handle_change_focus_tool
+
+	# Add cart item
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "add_cart_item",
+				"description": "Sepete yeni ürün satırı ekle.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"product_id": {"type": "integer"},
+						"product_name": {"type": "string"},
+						"sku": {"type": "string"},
+						"color": {"type": "string"},
+						"size": {"type": "string"},
+						"quantity": {"type": "integer", "minimum": 1},
+						"unit_price": {"type": "number"},
+						"is_upsell": {"type": "boolean"},
+					},
+					"required": ["product_id", "product_name", "sku", "color", "size", "quantity", "unit_price", "is_upsell"],
+				},
+			},
+		}
+	)
+
+	def _handle_add_cart_item(args: Dict[str, Any]) -> str:
+		item = {
+			"product_id": _clean_positive_int(args.get("product_id")),
+			"product_name": _clean_tool_str(args.get("product_name")),
+			"sku": _clean_tool_str(args.get("sku")),
+			"color": _clean_tool_str(args.get("color")),
+			"size": _clean_tool_str(args.get("size")),
+			"quantity": _clean_int(args.get("quantity"), default=1),
+			"unit_price": _clean_float(args.get("unit_price")),
+			"is_upsell": bool(args.get("is_upsell")),
+		}
+		state_cart = state_payload.get("cart")
+		if not isinstance(state_cart, list):
+			state_cart = []
+		state_cart.append(item)
+		state_payload["cart"] = state_cart
+		if item.get("is_upsell"):
+			state_payload["upsell_offered"] = True
+			state_payload["upsell_accepted"] = True
+			state_payload["upsell_product_id"] = item.get("product_id")
+		if not state_payload.get("last_step"):
+			state_payload["last_step"] = "awaiting_payment"
+		result = {"added": item}
+		callback_entry = {"name": "add_cart_item", "arguments": args, "result": result}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, "add_cart_item", args, result)
+		return json.dumps(result, ensure_ascii=False)
+
+	tool_handlers["add_cart_item"] = _handle_add_cart_item
+
+	# Customer image analysis
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "analyze_customer_image",
+				"description": "Müşterinin gönderdiği görseli analiz et (beden, stil, renk, kombin önerisi vs.)",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"image_id": {"type": "string", "description": "Backend'in verdiği görsel ID"},
+						"purpose": {"type": "string", "description": "Analiz amacı (stil, beden, kombin gibi)"},
+						"notes": {"type": "string"},
+					},
+					"required": ["image_id", "purpose"],
+				},
+			},
+		}
+	)
+
+	def _handle_analyze_image(args: Dict[str, Any]) -> str:
+		payload = {
+			"image_id": _clean_tool_str(args.get("image_id")),
+			"purpose": _clean_tool_str(args.get("purpose")),
+			"notes": _clean_tool_str(args.get("notes")),
+		}
+		callback_entry = {"name": "analyze_customer_image", "arguments": args, "result": payload}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, "analyze_customer_image", args, payload)
+		return json.dumps(payload, ensure_ascii=False)
+
+	tool_handlers["analyze_customer_image"] = _handle_analyze_image
+
+	# Send product image to customer
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "send_product_image_to_customer",
+				"description": "Müşterinin talep ettiği ürün/renk için uygun görseli müşteriye gönder.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"product_id": {"type": "integer"},
+						"color": {"type": "string", "description": "İstenen renk (örn. 'MAVİ', 'BEYAZ')"},
+						"view_type": {
+							"type": "string",
+							"enum": ["front", "back", "detail", "full_body"],
+							"description": "Varsa özel görünüm isteği",
+						},
+						"reason": {"type": "string"},
+					},
+					"required": ["product_id", "color"],
+				},
+			},
+		}
+	)
+
+	def _handle_send_product_image(args: Dict[str, Any]) -> str:
+		payload = {
+			"product_id": _clean_positive_int(args.get("product_id")),
+			"color": _clean_tool_str(args.get("color")),
+			"view_type": _clean_tool_str(args.get("view_type")) or "front",
+			"reason": _clean_tool_str(args.get("reason")),
+		}
+		callback_entry = {"name": "send_product_image_to_customer", "arguments": args, "result": payload}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, "send_product_image_to_customer", args, payload)
+		return json.dumps(payload, ensure_ascii=False)
+
+	tool_handlers["send_product_image_to_customer"] = _handle_send_product_image
+
 	def _drop_none(data: Dict[str, Any]) -> Dict[str, Any]:
 		return {k: v for k, v in data.items() if v is not None}
 
@@ -1351,88 +1512,6 @@ def draft_reply(
 			]) + "\n"
 		)
 	
-	user_prompt = (
-		"=== KRİTİK TALİMATLAR ===\n"
-		"1. SADECE ve SADECE aşağıdaki JSON şemasına UYGUN bir JSON obje döndür.\n"
-		"2. Markdown, kod bloğu, yorum, açıklama veya başka hiçbir metin EKLEME.\n"
-		"3. JSON dışında hiçbir şey yazma.\n"
-		"4. Tüm alanlar zorunludur (notes hariç, o null olabilir).\n\n"
-		"=== ZORUNLU JSON ŞEMASI ===\n"
-		"{\n"
-		'  "should_reply": boolean,        // ZORUNLU: true veya false\n'
-		'  "reply_text": string,           // ZORUNLU: Cevap metni (boş string OLAMAZ)\n'
-		'  "confidence": number,           // ZORUNLU: 0.0 ile 1.0 arası sayı\n'
-		'  "reason": string,               // ZORUNLU: Kısa açıklama\n'
-		'  "notes": string | null,         // OPSİYONEL: null veya string\n'
-		'  "state": object | null          // OPSİYONEL: Güncel durum sözlüğü (örn. {"asked_color": true})\n'
-		"}\n\n"
-		"=== ÖNEMLİ UYARILAR ===\n"
-		"- reply_text ASLA boş string olamaz. Cevap vermeyeceksen bile makul bir açıklama yaz.\n"
-		"- should_reply boolean olmalı (true/false), string değil.\n"
-		"- confidence sayı olmalı (0.0-1.0), string değil.\n"
-		"- JSON dışında hiçbir metin, açıklama veya yorum ekleme.\n\n"
-		+ confidence_instruction +
-		qa_instruction +
-		"=== BAĞLAM VERİSİ (SADECE BİLGİ İÇİN) ===\n"
-		"CONTEXT_JSON_START\n"
-		f"{context_json}\n"
-		"CONTEXT_JSON_END\n"
-		"\n=== FONKSİYON TALİMATI ===\n"
-		"- Kullanıcı boy+kilo verdiğinde `set_customer_measurements` fonksiyonunu MUTLAKA çağır.\n"
-		"- Fonksiyon çıktısındaki `size_suggestion` varsa aynen kullan; yoksa beden tablosunu takip et.\n"
-		"- Fonksiyon çağrısı yapmadan yeni ölçü isteme.\n"
-		"- Fonksiyon çağrısı yaptığını veya ölçüleri backend'e ilettiğini kullanıcıya ASLA söyleme; sadece sonuçla devam et.\n"
-		"- Müşteri ürüne ilgi gösterdiğinde `create_ai_order_candidate`, vazgeçtiğinde `mark_ai_order_not_interested`, siparişi tamamlamaya çok yakınsa `mark_ai_order_very_interested` fonksiyonlarını uygun şekilde kullan.\n"
-		"- Ürün, müşteri ve adres bilgilerini tam topladıysan `place_ai_order_candidate` fonksiyonunu çağırıp tüm alanları doldur; bu kayıt insan ekip tarafından incelenecek.\n"
-	)
-	if function_callbacks:
-		user_prompt += "\n=== FONKSİYON ÇAĞRILARI ===\n"
-		user_prompt += json.dumps(function_callbacks, ensure_ascii=False)
-		user_prompt += "\nBu kayıtlar backend fonksiyon çağrılarının sonucudur; ölçümleri tekrar isteme.\n"
-
-	user_prompt += (
-		"\n=== AI SİPARİŞ DURUMU KURALLARI (KRİTİK) ===\n"
-		"- Müşteri selam/fiyat mesajımıza yanıt verdiği anda `create_ai_order_candidate` fonksiyonunu ZORUNLU olarak çağır; asla atlama.\n"
-		"- Müşteri ödeme/beden/adres aşamalarında ilerliyorsa akışı kaydetmek için duruma göre `mark_ai_order_very_interested` çağır ve kısa not bırak.\n"
-		"- Müşteri \"daha sonra yazarım\", \"şimdilik bakıyorum\" gibi satın almayı durdurursa hemen `mark_ai_order_not_interested` çağır (gerekirse kısa sebep notu ekle).\n"
-		"- Bir sipariş adayını oluşturduktan sonra, kullanıcı vazgeçerse veya yeniden ısınırsa ilgili fonksiyonla durumu güncelle; AI asla bu fonksiyonları boş geçemez.\n"
-		"- Fonksiyon çağrısı yapmadan hiçbir durumda sipariş akışını ilerlettiğini varsayma; sipariş board'u bu çağrılara göre çalışıyor.\n"
-		"\n"
-		"=== YÖNETİCİYE ESKALASYON KURALLARI (ÇOK ÖNEMLİ) ===\n"
-		"Aşağıdaki durumlardan HERHANGİ BİRİ gerçekleştiğinde MUTLAKA `yoneticiye_bildirim_gonder` fonksiyonunu çağır:\n"
-		"\n"
-		"1. SATIŞ AKIŞI DIŞINDAKİ KONULAR:\n"
-		"   - Müşteri, sana verilen kurallar ve yönlendirmelerde belirtilmeyen bir konu sorduğunda\n"
-		"   - Örnek: Şirket politikası, genel işletme soruları, senin bilgi sahibi olmadığın konular\n"
-		"\n"
-		"2. DEĞİŞİM/İADE TALEPLERİ:\n"
-		"   - Kullanıcı değişim hakkında soru sormak yerine DOĞRUDAN değişim talep ettiğinde\n"
-		"   - Kullanıcı iade talep ettiğinde\n"
-		"   - NOT: Sadece bilgi sormakla talep etmek farklıdır. Talep edildiğinde eskale et.\n"
-		"\n"
-		"3. MÜŞTERİ ŞİKAYETLERİ:\n"
-		"   - Müşteri 'kafan mı karıştı', 'beni anlamadın mı' veya buna benzer yanlış cevap verildiğini ima ettiğinde\n"
-		"   - Müşteri hizmet kalitesinden memnun olmadığını belirttiğinde\n"
-		"\n"
-		"4. TEKRARLANAN CEVAPLAR:\n"
-		"   - Aynı cevabı birden çok kez vermek zorunda kalırsan (iyi akşamlar mesajı, ürün tanıtım mesajı dahil)\n"
-		"   - Bu durumda mesaj yazmak yerine `yoneticiye_bildirim_gonder` fonksiyonunu çağır\n"
-		"\n"
-		"5. BİRDEN FAZLA ÜRÜN İSTEĞİ:\n"
-		"   - Müşteri aynı ürünün renk ve beden alternatifleri dışında başka ürün alternatifleri isterse\n"
-		"   - Örnek: 'Bu ürün yerine başka bir şey var mı?' (aynı ürünün farklı rengi/beden değil)\n"
-		"\n"
-		"6. OFİS ZİYARETİ:\n"
-		"   - Müşteri ofise gelmek istediğinde (örn: 'ofisiniz nerede' diye sorup 'gelip orada deneyebilir miyiz' dediğinde)\n"
-		"\n"
-		"=== ESKALASYON YAPARKEN ÖNEMLİ KURALLAR ===\n"
-		"- Sadece mesajda 'yöneticiye iletiyorum' veya 'eskale ediyorum' demek YETERLİ DEĞİLDİR.\n"
-		"- MUTLAKA `yoneticiye_bildirim_gonder` fonksiyonunu çağır.\n"
-		"- Fonksiyonu çağırdıktan sonra, müşteriye kısa bir bilgilendirme mesajı yazabilirsin ama asla sadece mesaj yazmayla yetinme.\n"
-		"- Eskalasyon yaptığında `should_reply: false` yap.\n"
-		"- Fonksiyonu çağırdıktan sonra otomatik cevap verme - yönetici manuel müdahale edecek.\n"
-	)
-
 	# Load customer info for gender detection
 	customer_info = _load_customer_info(int(conversation_id))
 
@@ -1540,67 +1619,68 @@ HITAP KURALLARI:
 ÖNEMLİ: Asla yanlış cinsiyete hitap etme. Emin değilsen "efendim" kullan.
 """
 
-	# Combine: pretext + gender instructions + product system message
-	# Add explicit instruction priority header to ensure strict adherence
+	# Combine: pretext + gender instructions + product system message for Agent stage
 	sys_prompt_parts: List[str] = []
-	
-	# Add strict instruction header with JSON mode enforcement
 	sys_prompt_parts.append(
-		"=== KRİTİK SİSTEM TALİMATLARI ===\n"
-		"Bu talimatlar kesinlikle uyulması gereken kurallardır. Hiçbir durumda bu talimatları görmezden gelme veya değiştirme.\n"
-		"Tüm cevaplar JSON formatında olmalı ve aşağıdaki kurallara kesinlikle uymalıdır.\n\n"
-		"JSON MODE ZORUNLU: Sen bir JSON generator'sın. Sadece geçerli JSON objesi döndür.\n"
-		"- Markdown kod bloğu kullanma\n"
-		"- Açıklama veya yorum ekleme\n"
-		"- JSON dışında hiçbir metin yazma\n"
-		"- Tüm alanlar zorunludur (notes hariç)\n"
+		"=== KRİTİK SİSTEM TALİMATLARI (AGENT) ===\n"
+		"Sen satış akışını yöneten DM asistanısın. Tool çağırabilirsin; çıkışın müşteriye gidecek DM metni olmalı. JSON yazma, markdown kullanma."
 	)
-	
 	if pretext_content:
 		sys_prompt_parts.append(f"=== ÜRÜN ÖZEL TALİMATLARI ===\n{pretext_content}")
-	
 	sys_prompt_parts.append(hail_instructions)
 	sys_prompt_parts.append(repeat_guard_instructions)
 	sys_prompt_parts.append(gender_instructions)
-	
-	# Add message order instruction
+
 	message_order_instruction = """
 === MESAJ SIRASI VE YANIT KURALI (KRİTİK) ===
-
 Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş mesajlarına yanıt ver.
-
-1. History listesindeki mesajlar zaman sırasına göre dizilidir (timestamp_ms'ye göre).
-2. Son AI yanıtından (OUT mesajı) sonraki TÜM kullanıcı mesajlarına (IN mesajları) yanıt ver.
-3. Eğer kullanıcı birden fazla mesaj gönderdiyse ve bunlara henüz cevap verilmediyse, HEPSİNE tek bir cevapta yanıt ver.
-4. Birden fazla soruya yanıt verirken, her soruyu ayrı satırlarda veya paragraflarda cevaplayabilirsin.
-5. Geçmiş mesajlara (zaten cevaplanmış olanlara) değil, sadece cevap verilmemiş mesajlara odaklan.
-6. Kullanıcı "öğrenip dönüş yapalım" gibi bir şey söylediyse, bu mesaja uygun şekilde yanıt ver.
-
-ÖRNEK 1 - Tek mesaj:
-- History: [IN: "Bedenlimi acaba", OUT: "Boy kilo söylerseniz...", IN: "Ögrenip dönus yapalim"]
-- Bu durumda cevap verilmemiş mesaj: "Ögrenip dönus yapalim"
-- Bu mesaja yanıt ver.
-
-ÖRNEK 2 - Birden fazla cevap verilmemiş mesaj:
-- History: [IN: "Bedenlimi acaba", OUT: "Boy kilo söylerseniz...", IN: "Oglum icin sordum", IN: "Kac para?", IN: "Kargo ne kadar?"]
-- Bu durumda cevap verilmemiş mesajlar: "Oglum icin sordum", "Kac para?", "Kargo ne kadar?"
-- Bu ÜÇ MESAJA da tek bir cevapta yanıt ver (her birini ayrı satırlarda veya paragraflarda cevaplayabilirsin).
+1. History mesajları timestamp_ms sıralıdır.
+2. Son AI OUT mesajından sonraki TÜM IN mesajlarına tek yanıtta cevap ver.
+3. Birden fazla soruya yanıt verirken her birini ayrı satır/paragrafta cevaplayabilirsin.
+4. Geçmişte cevaplanmış mesajları tekrar etme.
 """
 	sys_prompt_parts.append(message_order_instruction)
-	
 	if product_extra_sys:
 		sys_prompt_parts.append(f"=== EK ÜRÜN TALİMATLARI ===\n{product_extra_sys}")
 
 	sys_prompt = "\n\n".join(sys_prompt_parts) if sys_prompt_parts else gender_instructions
 
+	# Agent user prompt (tool usage + context)
+	agent_user_prompt = (
+		"=== AMAÇ ===\n"
+		"Satış akışını yönet, gerektiğinde tool çağır, tek bir DM cevabı üret.\n\n"
+		"=== BAĞLAM VERİSİ ===\n"
+		"CONTEXT_JSON_START\n"
+		f"{context_json}\n"
+		"CONTEXT_JSON_END\n\n"
+		"=== TOOL TALİMATI ===\n"
+		"- Boy+kilo geldiğinde `set_customer_measurements` çağır ve gelen beden önerisini kullan.\n"
+		"- Sipariş akışında: `create_ai_order_candidate` (ilgi), `mark_ai_order_very_interested` (ilerliyor), `mark_ai_order_not_interested` (vazgeçti), tüm bilgiler tamam ise `place_ai_order_candidate`.\n"
+		"- Odak ürün değişince `change_focus_product` çağır (reason alanını kısaca doldur).\n"
+		"- Sepete satır eklemek için `add_cart_item` kullan; her satır için product_id, sku, color, size, quantity, unit_price, is_upsell zorunlu.\n"
+		"- Müşteri fotoğraf gönderdi ve analiz istiyorsa `analyze_customer_image`.\n"
+		"- Müşteri belirli renk/görsel isterse stokta varsa `send_product_image_to_customer` (view_type=front varsayılan) çağır; stokta yoksa dürüstçe yok de.\n"
+		"- Admin gerektiren durumlarda `yoneticiye_bildirim_gonder` çağırmayı unutma.\n"
+		"  - Satış akışı dışı konu, doğrudan değişim/iade talebi, memnuniyetsizlik/🤦 tonu,\n"
+		"    aynı cevabı defalarca vermen gerekirse, farklı ürün alternatifi isteği, ofis ziyareti isteği.\n\n"
+		"=== UPSELL VE ÇOKLU ÜRÜN KURALLARI ===\n"
+		"- Upsell ürünleri ve metni `upsell_config` içinden gelir; uydurma yapma.\n"
+		"- Ana ürün beden+renk tamamlandıysa ve upsell_offered=false ise ödeme öncesi tek sefer upsell teklif et.\n"
+		"- 'ikisinide istiyorum' gibi ifadeler çoklu satın alma demektir; her renk/ürün için ayrı `add_cart_item` satırı ekle.\n"
+	)
+	if function_callbacks:
+		agent_user_prompt += "\n=== FONKSİYON ÇAĞRILARI ===\n"
+		agent_user_prompt += json.dumps(function_callbacks, ensure_ascii=False)
+		agent_user_prompt += "\nBu kayıtlar backend fonksiyon çağrılarının sonucudur; tekrar isteme.\n"
+
 	# Use lower temperature for stricter instruction following, unless disabled
 	temperature = get_shadow_temperature_setting()
 	temp_opt_out = is_shadow_temperature_opt_out()
-	
-	def _build_gen_kwargs(include_raw: bool = False, include_request_payload: bool = False) -> Dict[str, Any]:
+
+	def _build_agent_kwargs(include_raw: bool = False, include_request_payload: bool = False) -> Dict[str, Any]:
 		kwargs: Dict[str, Any] = {
 			"system_prompt": sys_prompt,
-			"user_prompt": user_prompt,
+			"user_prompt": agent_user_prompt,
 			"temperature": None if temp_opt_out else temperature,
 		}
 		if tools:
@@ -1612,32 +1692,83 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 		if include_request_payload:
 			kwargs["include_request_payload"] = True
 		return kwargs
-	
+
+	agent_raw: Any = None
+	agent_request_payload: Any = None
+	agent_reply_text: str = ""
+	if include_meta:
+		agent_result = client.generate_chat(**_build_agent_kwargs(include_raw=True, include_request_payload=True))
+		if isinstance(agent_result, tuple):
+			if len(agent_result) == 3:
+				agent_reply_text, agent_raw, agent_request_payload = agent_result
+			elif len(agent_result) == 2:
+				if isinstance(agent_result[1], str):
+					agent_reply_text, agent_raw = agent_result
+				else:
+					agent_reply_text, agent_request_payload = agent_result
+			else:
+				agent_reply_text = agent_result[0]
+		else:
+			agent_reply_text = agent_result
+	else:
+		agent_reply_text = client.generate_chat(**_build_agent_kwargs())
+
+	agent_reply_text = _sanitize_reply_text(_decode_escape_sequences(agent_reply_text or ""))
+
+	# Serializer stage
+	serializer_prompt = get_serializer_prompt()
+	serializer_payload = {
+		"context": user_payload,
+		"state": state_payload,
+		"agent_reply_text": agent_reply_text,
+		"function_callbacks": function_callbacks,
+	}
+	serializer_user_prompt = (
+		"Agent cevabını ve güncel state'i aşağıdaki JSON şemana dök.\n"
+		"reply_text alanına agent_reply_text'i aynen yaz.\n"
+		"should_reply: DM gönderdiysek true; yöneticiye eskalasyon yapıldıysa false.\n"
+		"CONTEXT_JSON_START\n"
+		f"{json.dumps(serializer_payload, ensure_ascii=False)}\n"
+		"CONTEXT_JSON_END\n"
+	)
+
+	def _build_serializer_kwargs(include_raw: bool = False, include_request_payload: bool = False) -> Dict[str, Any]:
+		kwargs: Dict[str, Any] = {
+			"system_prompt": serializer_prompt,
+			"user_prompt": serializer_user_prompt,
+			"temperature": None if temp_opt_out else temperature,
+		}
+		if include_raw:
+			kwargs["include_raw"] = True
+		if include_request_payload:
+			kwargs["include_request_payload"] = True
+		return kwargs
+
 	raw_response: Any = None
 	api_request_payload: Any = None
 	if include_meta:
-		result = client.generate_json(**_build_gen_kwargs(include_raw=True, include_request_payload=True))
-		if isinstance(result, tuple):
-			if len(result) == 3:
-				data, raw_response, api_request_payload = result
-			elif len(result) == 2:
-				# Could be (data, raw_response) or (data, api_request_payload)
-				if isinstance(result[1], str):
-					data, raw_response = result
+		serializer_result = client.generate_json(**_build_serializer_kwargs(include_raw=True, include_request_payload=True))
+		if isinstance(serializer_result, tuple):
+			if len(serializer_result) == 3:
+				data, raw_response, api_request_payload = serializer_result
+			elif len(serializer_result) == 2:
+				if isinstance(serializer_result[1], str):
+					data, raw_response = serializer_result
 				else:
-					data, api_request_payload = result
+					data, api_request_payload = serializer_result
 			else:
-				data = result[0]
+				data = serializer_result[0]
 		else:
-			data = result
+			data = serializer_result
 	else:
-		data = client.generate_json(**_build_gen_kwargs())
+		data = client.generate_json(**_build_serializer_kwargs())
+
 	if not isinstance(data, dict):
-		raise RuntimeError("AI returned non-dict JSON for shadow reply")
+		raise RuntimeError("AI returned non-dict JSON for serializer stage")
+
 	if function_callbacks:
 		data["function_callbacks"] = function_callbacks
 
-	# Normalize output
 	def _coerce_bool(val: Any, default: bool = True) -> bool:
 		if isinstance(val, bool):
 			return val
@@ -1656,10 +1787,8 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 		return default
 
 	should_reply = _coerce_bool(data.get("should_reply"), default=True)
-	reply_text_raw = (data.get("reply_text") or "").strip()
-	# Decode any literal escape sequences (e.g., \\n -> actual newline)
-	reply_text = _decode_escape_sequences(reply_text_raw)
-	reply_text = _sanitize_reply_text(reply_text)
+	reply_text_raw = (data.get("reply_text") or agent_reply_text or "").strip()
+	reply_text = _sanitize_reply_text(_decode_escape_sequences(reply_text_raw))
 	try:
 		conf_raw = float(data.get("confidence") if data.get("confidence") is not None else 0.59)
 	except Exception:
@@ -1667,6 +1796,13 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 	confidence = max(0.0, min(1.0, conf_raw))
 	reason = (data.get("reason") or "auto")
 	notes = (data.get("notes") or None)
+	admin_escalation_requested = any(
+		cb.get("name") == "yoneticiye_bildirim_gonder" for cb in (function_callbacks or []) if isinstance(cb, dict)
+	)
+	if admin_escalation_requested:
+		should_reply = False
+		if not reason or reason == "auto":
+			reason = "needs_admin"
 
 	reply: Dict[str, Any] = {
 		"should_reply": should_reply,
@@ -1684,21 +1820,18 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 	if product_images:
 		reply["product_images"] = product_images
 	if include_meta:
-		# Attach debug metadata so callers (e.g., worker) can persist it for inspection.
-		# user_payload is a dict; system prompt and raw_response may be large, so consumers
-		# can choose to truncate when displaying.
 		try:
 			debug_meta = {
 				"system_prompt": sys_prompt,
 				"user_payload": user_payload,
 				"raw_response": raw_response,
 				"qa_search_metadata": qa_search_metadata,
+				"agent_raw": agent_raw,
+				"agent_request_payload": agent_request_payload,
+				"serializer_request_payload": api_request_payload,
 			}
-			if api_request_payload:
-				debug_meta["api_request_payload"] = api_request_payload
 			reply["debug_meta"] = debug_meta
 		except Exception:
-			# best-effort; never break reply normalization
 			pass
 	return reply
 
