@@ -50,8 +50,11 @@ def check_prompt_loading() -> bool:
         status_ser = "✅" if has_serializer else "❌"
         status_glob = "✅" if has_global else "❌"
         
-        print(f"{status_ser} Serializer prompt loading: {len(serializer)} chars")
-        print(f"{status_glob} Global system prompt loading: {len(global_prompt)} chars")
+        serializer_len = len(serializer) if serializer else 0
+        global_prompt_len = len(global_prompt) if global_prompt else 0
+        
+        print(f"{status_ser} Serializer prompt loading: {serializer_len} chars")
+        print(f"{status_glob} Global system prompt loading: {global_prompt_len} chars")
         
         return has_serializer and has_global
     except Exception as e:

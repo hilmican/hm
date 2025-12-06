@@ -210,3 +210,4 @@ If issues arise:
 4. Check prompt files are readable
 5. Ensure all tools have handlers registered
 
+
