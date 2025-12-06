@@ -259,6 +259,28 @@ class AIClient:
                     if include_raw:
                         return data, txt
                     return data
+            except Exception:
+                pass
+            # Final fallback: return empty, with warnings including raw text (truncated)
+            raw_full = cleaned if 'cleaned' in locals() else txt
+            data = {
+                "products_to_create": [],
+                "mappings_to_create": [],
+                "notes": None,
+                "warnings": [
+                    "AI yanıtı geçerli JSON değil; öneriler boş döndü.",
+                    f"AI raw: {raw_full}"
+                ],
+            }
+            if include_request_payload and final_request_payload:
+                if include_raw:
+                    return data, txt, final_request_payload
+                else:
+                    return data, final_request_payload
+            if include_raw:
+                return data, txt
+            return data
+
 
     def generate_chat(
         self,
