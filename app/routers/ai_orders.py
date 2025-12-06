@@ -112,6 +112,8 @@ def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: 
 		# Date filtering: Use placed_at if available (for placed orders), otherwise use conversation's last_message_at
 		# This filters by when the order was actually placed or when the conversation happened
 		if start_date or end_date:
+			# Treat UI dates as UTC+3 (TR); shift to UTC for DB filtering
+			tz_offset = dt.timedelta(hours=3)
 			# Use COALESCE to prefer placed_at, fall back to last_message_at
 			# If both are None, the row won't match the date filter (which is correct)
 			date_field = func.coalesce(
@@ -119,10 +121,10 @@ def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: 
 				Conversation.last_message_at
 			)
 			if start_date:
-				start_dt = dt.datetime.combine(start_date, dt.time.min)
+				start_dt = dt.datetime.combine(start_date, dt.time.min) - tz_offset
 				stmt = stmt.where(date_field >= start_dt)
 			if end_date:
-				end_dt = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min)
+				end_dt = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min) - tz_offset
 				stmt = stmt.where(date_field < end_dt)
 		
 		# Get all matching rows first (without limit for accurate counts)
@@ -209,7 +211,13 @@ def detect_ai_orders_page(request: Request, start: Optional[str] = None, end: Op
 	# Only process if dates are provided AND process parameter is set (form submission)
 	if start_date and end_date and process:
 		try:
-			result = process_conversations_by_date_range(start_date, end_date, limit=limit, skip_processed=skip_processed_flag)
+			result = process_conversations_by_date_range(
+				start_date,
+				end_date,
+				limit=limit,
+				skip_processed=skip_processed_flag,
+				tz_offset_hours=3,
+			)
 		except Exception as e:
 			result = {
 				"processed": 0,
@@ -251,7 +259,13 @@ def detect_ai_orders_api(start: str, end: str, limit: int = 100, skip_processed:
 		raise HTTPException(status_code=400, detail="end_date must be >= start_date")
 	
 	try:
-		result = process_conversations_by_date_range(start_date, end_date, limit=limit, skip_processed=skip_processed)
+		result = process_conversations_by_date_range(
+			start_date,
+			end_date,
+			limit=limit,
+			skip_processed=skip_processed,
+			tz_offset_hours=3,
+		)
 		return result
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")

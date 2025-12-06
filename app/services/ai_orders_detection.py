@@ -177,6 +177,7 @@ def process_conversations_by_date_range(
 	limit: int = 100,
 	run_id: Optional[int] = None,
 	skip_processed: bool = True,
+	tz_offset_hours: int = 0,
 ) -> Dict[str, Any]:
 	"""Process conversations by date range and create/update AI order candidates.
 	
@@ -186,6 +187,7 @@ def process_conversations_by_date_range(
 		limit: Maximum number of conversations to process
 		run_id: Optional run ID for logging
 		skip_processed: If True, skip conversations that already have AI order candidates
+		tz_offset_hours: Treat provided dates as this UTC offset (e.g., 3 for UTC+3)
 	
 	Returns summary statistics: processed, created, updated, errors, skipped
 	"""
@@ -195,9 +197,10 @@ def process_conversations_by_date_range(
 	skipped = 0
 	errors: List[str] = []
 	
-	# Convert dates to milliseconds
-	start_dt = dt.datetime.combine(start_date, dt.time.min)
-	end_dt = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min)
+	# Convert dates (provided in local time) to UTC milliseconds
+	tz_offset = dt.timedelta(hours=tz_offset_hours)
+	start_dt = dt.datetime.combine(start_date, dt.time.min) - tz_offset
+	end_dt = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min) - tz_offset
 	start_ms = int(start_dt.timestamp() * 1000)
 	end_ms = int(end_dt.timestamp() * 1000)
 	

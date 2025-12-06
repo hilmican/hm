@@ -144,6 +144,32 @@ class Product(SQLModel, table=True):
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 
+class ProductUpsell(SQLModel, table=True):
+	__tablename__ = "product_upsell"
+	__table_args__ = (UniqueConstraint("product_id", "upsell_product_id", name="uq_product_upsell_pair"),)
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	product_id: int = Field(
+		foreign_key="product.id",
+		index=True,
+		description="Main product to offer upsells from",
+	)
+	upsell_product_id: int = Field(
+		foreign_key="product.id",
+		index=True,
+		description="Product to be offered as upsell",
+	)
+	copy: Optional[str] = Field(
+		default=None,
+		sa_column=Column(Text),
+		description="Custom upsell text shown to customer",
+	)
+	position: int = Field(default=1, index=True, description="Display order (ascending)")
+	is_active: bool = Field(default=True, index=True)
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
 class ProductImage(SQLModel, table=True):
     __tablename__ = "product_images"
 

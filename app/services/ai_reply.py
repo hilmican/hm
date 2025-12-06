@@ -13,6 +13,7 @@ from ..db import get_session
 from ..models import (
 	Message,
 	Product,
+	ProductUpsell,
 	Item,
 	Conversation,
 	IGUser,
@@ -175,6 +176,49 @@ def _shadow_system_prompt(base_extra: Optional[str] = None) -> str:
 	- high-level behavior rules
 	"""
 	return base_extra or ""
+
+
+def _load_manual_upsells(product_id: int) -> Dict[int, Dict[str, Any]]:
+	"""
+	Load manually configured upsells for a product (if any).
+	"""
+	if not product_id:
+		return {}
+	upsell_map: Dict[int, Dict[str, Any]] = {}
+	try:
+		with get_session() as session:
+			rows = (
+				session.exec(
+					select(ProductUpsell, Product)
+					.join(Product, ProductUpsell.upsell_product_id == Product.id)
+					.where(
+						ProductUpsell.product_id == product_id,
+						ProductUpsell.is_active.is_(True),
+					)
+					.order_by(ProductUpsell.position.asc(), ProductUpsell.id.asc())
+				)
+				.all()
+				or []
+			)
+		for pu, upsell_prod in rows:
+			if not upsell_prod or not upsell_prod.id:
+				continue
+			copy_text = (pu.copy or "").strip() or (upsell_prod.name or f"Ürün {upsell_prod.id}")
+			upsell_map[upsell_prod.id] = {
+				"product_id": upsell_prod.id,
+				"product_name": upsell_prod.name,
+				"copy": copy_text,
+				"cooccurrence_count": None,
+				"source": "manual",
+				"position": pu.position,
+			}
+		return upsell_map
+	except Exception as exc:
+		try:
+			log.warning("_load_manual_upsells failed product_id=%s error=%s", product_id, str(exc)[:200])
+		except Exception:
+			pass
+		return {}
 
 
 def _calculate_upsell_recommendations(product_id: int, limit_orders: int = 100, min_cooccurrence: int = 2) -> Dict[int, Dict[str, Any]]:
@@ -1028,28 +1072,41 @@ def draft_reply(
 		elif not last_customer_message:
 			qa_search_metadata["reason"] = "last_customer_message eksik (müşteri mesajı yok)"
 
-	# Calculate upsell recommendations based on order history
+	# Calculate upsell recommendations: prefer manual config, fall back to auto
 	upsell_config: Dict[str, Any] = {}
 	if product_id_val:
-		try:
-			upsell_recommendations = _calculate_upsell_recommendations(product_id_val, limit_orders=100, min_cooccurrence=2)
-			if upsell_recommendations:
-				# Build upsell_config structure: by_product_id[product_id] = {product_id, product_name, copy, ...}
-				upsell_config["by_product_id"] = upsell_recommendations
-				try:
-					log.info(
-						"draft_reply upsell_config conversation_id=%s product_id=%s count=%s",
-						conversation_id,
-						product_id_val,
-						len(upsell_recommendations),
-					)
-				except Exception:
-					pass
-		except Exception as exc:
+		manual_upsells = _load_manual_upsells(product_id_val)
+		if manual_upsells:
+			upsell_config["by_product_id"] = manual_upsells
 			try:
-				log.warning("draft_reply upsell_calc_failed conversation_id=%s product_id=%s error=%s", conversation_id, product_id_val, str(exc)[:200])
+				log.info(
+					"draft_reply upsell_config_manual conversation_id=%s product_id=%s count=%s",
+					conversation_id,
+					product_id_val,
+					len(manual_upsells),
+				)
 			except Exception:
 				pass
+		else:
+			try:
+				upsell_recommendations = _calculate_upsell_recommendations(product_id_val, limit_orders=100, min_cooccurrence=2)
+				if upsell_recommendations:
+					# Build upsell_config structure: by_product_id[product_id] = {product_id, product_name, copy, ...}
+					upsell_config["by_product_id"] = upsell_recommendations
+					try:
+						log.info(
+							"draft_reply upsell_config_auto conversation_id=%s product_id=%s count=%s",
+							conversation_id,
+							product_id_val,
+							len(upsell_recommendations),
+						)
+					except Exception:
+						pass
+			except Exception as exc:
+				try:
+					log.warning("draft_reply upsell_calc_failed conversation_id=%s product_id=%s error=%s", conversation_id, product_id_val, str(exc)[:200])
+				except Exception:
+					pass
 	
 	user_payload: Dict[str, Any] = {
 		"store": store_conf,
@@ -2082,7 +2139,16 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 				if "reason" in parsed_reply and not data.get("reason"):
 					data["reason"] = parsed_reply.get("reason")
 		except Exception:
-			pass
+			# Last-resort: strip prefix even if closing quote/brace is missing
+			try:
+				if reply_text_raw.lstrip().startswith('{"reply_text"'):
+					raw = reply_text_raw.split('{"reply_text"', 1)[1]
+					raw = raw.lstrip(" :").lstrip('"')
+					raw = raw.rstrip('}"\' \n\r\t')
+					if raw:
+						reply_text_raw = raw
+			except Exception:
+				pass
 	
 	# Fix: If reply_text contains JSON-like structures (e.g., state object), extract just the text part
 	# This can happen if the serializer malformed the JSON and embedded state in reply_text

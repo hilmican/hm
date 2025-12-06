@@ -181,6 +181,16 @@ def _unwrap_reply_text(text: str) -> str:
 					extracted = m.group(1)
 					if extracted:
 						txt = extracted.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+				elif txt.lstrip().startswith('{"reply_text"'):
+					# Last-resort: strip prefix even if closing quote/brace is missing
+					try:
+						raw = txt.split('{"reply_text"', 1)[1]
+						raw = raw.lstrip(" :").lstrip('"')
+						raw = raw.rstrip('}"\' \n\r\t')
+						if raw:
+							txt = raw.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+					except Exception:
+						pass
 			except Exception:
 				pass
 	try:

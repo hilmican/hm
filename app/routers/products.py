@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Form, Request
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Product, Item
+from ..models import Product, Item, ProductUpsell
 from ..utils.slugify import slugify
 
 
@@ -77,6 +77,149 @@ def products_table(request: Request, limit: int = Query(default=10000, ge=1, le=
             "products_table.html",
             {"request": request, "rows": rows, "limit": limit},
         )
+
+
+@router.get("/upsells")
+def products_upsells_page(request: Request):
+	with get_session() as session:
+		products = session.exec(select(Product).order_by(Product.name.asc())).all()
+	templates = request.app.state.templates
+	return templates.TemplateResponse(
+		"product_upsells.html",
+		{"request": request, "products": products},
+	)
+
+
+@router.get("/{product_id}/upsells")
+def list_product_upsells(product_id: int):
+	with get_session() as session:
+		product = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not product:
+			raise HTTPException(status_code=404, detail="Product not found")
+		rows = (
+			session.exec(
+				select(ProductUpsell, Product)
+				.join(Product, ProductUpsell.upsell_product_id == Product.id)
+				.where(ProductUpsell.product_id == product_id)
+				.order_by(ProductUpsell.position.asc(), ProductUpsell.id.asc())
+			).all()
+			or []
+		)
+		return {
+			"product_id": product_id,
+			"upsells": [
+				{
+					"id": pu.id,
+					"product_id": pu.product_id,
+					"upsell_product_id": pu.upsell_product_id,
+					"upsell_product_name": upsell_prod.name if upsell_prod else None,
+					"copy": pu.copy,
+					"position": pu.position,
+					"is_active": pu.is_active,
+				}
+				for pu, upsell_prod in rows
+			],
+		}
+
+
+@router.post("/{product_id}/upsells")
+def create_product_upsell(product_id: int, body: dict):
+	upsell_product_id = body.get("upsell_product_id")
+	if not upsell_product_id:
+		raise HTTPException(status_code=400, detail="upsell_product_id required")
+	copy = (body.get("copy") or "").strip() or None
+	position_raw = body.get("position")
+	try:
+		position = int(position_raw) if position_raw is not None else None
+	except Exception:
+		raise HTTPException(status_code=400, detail="Invalid position")
+
+	def _to_bool(val) -> bool:
+		if isinstance(val, bool):
+			return val
+		if isinstance(val, str):
+			return val.strip().lower() in {"1", "true", "yes", "on"}
+		return bool(val)
+
+	is_active = _to_bool(body.get("is_active", True))
+
+	with get_session() as session:
+		product = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not product:
+			raise HTTPException(status_code=404, detail="Product not found")
+		upsell_product = session.exec(select(Product).where(Product.id == upsell_product_id)).first()
+		if not upsell_product:
+			raise HTTPException(status_code=404, detail="Upsell product not found")
+		existing = session.exec(
+			select(ProductUpsell).where(
+				ProductUpsell.product_id == product_id,
+				ProductUpsell.upsell_product_id == upsell_product_id,
+			)
+		).first()
+		if existing:
+			raise HTTPException(status_code=409, detail="Upsell already exists for this product")
+
+		if position is None:
+			current_max = session.exec(
+				select(ProductUpsell.position)
+				.where(ProductUpsell.product_id == product_id)
+				.order_by(ProductUpsell.position.desc())
+				.limit(1)
+			).first()
+			position = (current_max or 0) + 1
+
+		pu = ProductUpsell(
+			product_id=product_id,
+			upsell_product_id=upsell_product_id,
+			copy=copy,
+			position=position,
+			is_active=is_active,
+		)
+		session.add(pu)
+		session.flush()
+		return {
+			"id": pu.id,
+			"product_id": pu.product_id,
+			"upsell_product_id": pu.upsell_product_id,
+			"copy": pu.copy,
+			"position": pu.position,
+			"is_active": pu.is_active,
+		}
+
+
+@router.put("/upsells/{upsell_id}")
+def update_product_upsell(upsell_id: int, body: dict):
+	with get_session() as session:
+		pu = session.exec(select(ProductUpsell).where(ProductUpsell.id == upsell_id)).first()
+		if not pu:
+			raise HTTPException(status_code=404, detail="Upsell not found")
+		if "copy" in body:
+			val = (body.get("copy") or "").strip()
+			pu.copy = val or None
+		if "position" in body:
+			try:
+				pu.position = int(body.get("position"))
+			except Exception:
+				raise HTTPException(status_code=400, detail="Invalid position")
+		if "is_active" in body:
+			val = body.get("is_active")
+			if isinstance(val, bool):
+				pu.is_active = val
+			elif isinstance(val, str):
+				pu.is_active = val.strip().lower() in {"1", "true", "yes", "on"}
+			else:
+				pu.is_active = bool(val)
+		return {"status": "ok", "id": pu.id}
+
+
+@router.delete("/upsells/{upsell_id}")
+def delete_product_upsell(upsell_id: int):
+	with get_session() as session:
+		pu = session.exec(select(ProductUpsell).where(ProductUpsell.id == upsell_id)).first()
+		if not pu:
+			raise HTTPException(status_code=404, detail="Upsell not found")
+		session.delete(pu)
+		return {"status": "ok"}
 
 
 @router.put("/{product_id}")

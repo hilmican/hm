@@ -1,0 +1,251 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Upsell Yönetimi</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:0 18px 32px 18px; }
+    h1 { margin:18px 0 8px 0; }
+    .container { max-width: 1100px; margin:0 auto; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:14px; margin:12px 0; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
+    label { font-size:14px; font-weight:600; color:#111827; margin-right:8px; }
+    select, textarea, input { padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:14px; }
+    textarea { width:100%; min-height:70px; resize:vertical; }
+    button { padding:8px 12px; border:none; border-radius:6px; background:#2563eb; color:#fff; cursor:pointer; }
+    button:disabled { opacity:0.6; cursor:not-allowed; }
+    table { width:100%; border-collapse: collapse; margin-top:8px; }
+    th, td { padding:8px; border-bottom:1px solid #e5e7eb; text-align:left; }
+    th { background:#f1f5f9; font-size:13px; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#e0f2fe; color:#075985; font-size:12px; }
+    .muted { color:#6b7280; font-size:13px; }
+    .actions { display:flex; gap:6px; align-items:center; }
+    .danger { background:#ef4444; }
+    .success { background:#16a34a; }
+    .inline { display:inline-flex; gap:6px; align-items:center; }
+    .row-input { width:100%; }
+    .toast { position:fixed; top:12px; right:12px; background:#111827; color:#fff; padding:10px 14px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.18); display:none; }
+  </style>
+</head>
+<body>
+  {% include "_nav.html" %}
+  <div class="container">
+    <h1>Upsell Yönetimi</h1>
+    <p class="muted">Seçili ürün için manuel upsell ürünleri ve metinlerini tanımla. Manuel tanım varsa AI otomatik hesaplamadan önce bunları kullanır.</p>
+
+    <div class="card">
+      <div class="inline" style="gap:10px; flex-wrap:wrap;">
+        <label for="productSelect">Ana ürün</label>
+        <select id="productSelect"></select>
+        <button id="openProductsBtn" type="button">📝 Ürün Tablosu</button>
+        <span class="muted" id="selectedHint"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Yeni upsell ekle</h3>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start;">
+        <div style="flex:1; min-width:220px;">
+          <label for="upsellProductSelect">Upsell ürün</label><br/>
+          <select id="upsellProductSelect" style="width:100%;"></select>
+        </div>
+        <div style="flex:2; min-width:260px;">
+          <label for="copyInput">Metin (isteğe bağlı)</label><br/>
+          <textarea id="copyInput" placeholder="Örn: Bununla birlikte X de almak ister misin?"></textarea>
+        </div>
+        <div style="width:140px;">
+          <label for="positionInput">Sıra</label><br/>
+          <input id="positionInput" type="number" min="1" value="1" style="width:100%;" />
+        </div>
+        <div style="width:140px; padding-top:8px;">
+          <label class="inline" style="font-weight:500;"><input id="activeInput" type="checkbox" checked style="margin-right:6px;"/>Aktif</label>
+        </div>
+        <div style="align-self:flex-end;">
+          <button id="addUpsellBtn" type="button">Ekle</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <h3 style="margin:0;">Upsell listesi</h3>
+        <span class="pill" id="rowCountPill">0 kayıt</span>
+        <span class="muted" id="emptyState" style="display:none;">Seçili ürün için upsell bulunamadı.</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Upsell Ürün</th>
+            <th>Metin</th>
+            <th style="width:90px;">Sıra</th>
+            <th style="width:80px;">Aktif</th>
+            <th style="width:160px;">İşlemler</th>
+          </tr>
+        </thead>
+        <tbody id="upsellTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const products = {{ products | tojson }};
+    const productSelect = document.getElementById('productSelect');
+    const upsellProductSelect = document.getElementById('upsellProductSelect');
+    const copyInput = document.getElementById('copyInput');
+    const positionInput = document.getElementById('positionInput');
+    const activeInput = document.getElementById('activeInput');
+    const addUpsellBtn = document.getElementById('addUpsellBtn');
+    const upsellTableBody = document.getElementById('upsellTableBody');
+    const rowCountPill = document.getElementById('rowCountPill');
+    const emptyState = document.getElementById('emptyState');
+    const toast = document.getElementById('toast');
+    const selectedHint = document.getElementById('selectedHint');
+
+    function showToast(msg, variant='info') {
+      toast.textContent = msg;
+      toast.style.background = variant === 'error' ? '#ef4444' : '#111827';
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 2500);
+    }
+
+    function populateProductSelects() {
+      const opts = products.slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+      productSelect.innerHTML = opts.map(p => `<option value="${p.id}">${p.name} (#${p.id})</option>`).join('');
+      upsellProductSelect.innerHTML = opts.map(p => `<option value="${p.id}">${p.name} (#${p.id})</option>`).join('');
+      const firstId = productSelect.value;
+      updateSelectedHint();
+      if (firstId) {
+        loadUpsells(firstId);
+      }
+    }
+
+    function updateSelectedHint() {
+      const sel = products.find(p => String(p.id) === String(productSelect.value));
+      selectedHint.textContent = sel ? `Seçilen: ${sel.name} (#${sel.id})` : '';
+    }
+
+    async function loadUpsells(productId) {
+      upsellTableBody.innerHTML = '';
+      emptyState.style.display = 'none';
+      rowCountPill.textContent = '...';
+      try {
+        const res = await fetch(`/products/${productId}/upsells`);
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        renderUpsells(data.upsells || []);
+      } catch (e) {
+        showToast('Upsell listesi alınamadı', 'error');
+        rowCountPill.textContent = '0 kayıt';
+      }
+    }
+
+    function renderUpsells(rows) {
+      upsellTableBody.innerHTML = '';
+      rowCountPill.textContent = `${rows.length} kayıt`;
+      if (!rows.length) {
+        emptyState.style.display = 'inline';
+        return;
+      }
+      emptyState.style.display = 'none';
+      for (const r of rows) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>#${r.id}</td>
+          <td>${r.upsell_product_name || ('ID ' + r.upsell_product_id)}</td>
+          <td><textarea class="row-input copy" data-id="${r.id}">${r.copy || ''}</textarea></td>
+          <td><input class="row-input position" type="number" min="1" value="${r.position || 1}" data-id="${r.id}"></td>
+          <td style="text-align:center;"><input type="checkbox" class="row-input active" data-id="${r.id}" ${r.is_active ? 'checked' : ''}></td>
+          <td>
+            <div class="actions">
+              <button class="success" data-action="save" data-id="${r.id}">Kaydet</button>
+              <button class="danger" data-action="delete" data-id="${r.id}">Sil</button>
+            </div>
+          </td>
+        `;
+        upsellTableBody.appendChild(tr);
+      }
+    }
+
+    upsellTableBody.addEventListener('click', async (e) => {
+      const action = e.target.getAttribute('data-action');
+      if (!action) return;
+      const id = e.target.getAttribute('data-id');
+      if (action === 'save') {
+        await saveRow(id);
+      } else if (action === 'delete') {
+        if (confirm('Silinsin mi?')) {
+          await deleteRow(id);
+        }
+      }
+    });
+
+    async function saveRow(id) {
+      const copyEl = upsellTableBody.querySelector(`textarea.copy[data-id="${id}"]`);
+      const posEl = upsellTableBody.querySelector(`input.position[data-id="${id}"]`);
+      const activeEl = upsellTableBody.querySelector(`input.active[data-id="${id}"]`);
+      const body = {
+        copy: copyEl ? copyEl.value : null,
+        position: posEl ? Number(posEl.value || 1) : 1,
+        is_active: activeEl ? activeEl.checked : true,
+      };
+      try {
+        const res = await fetch(`/products/upsells/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error(await res.text());
+        showToast('Güncellendi');
+        loadUpsells(productSelect.value);
+      } catch (e) {
+        showToast('Kaydedilemedi', 'error');
+      }
+    }
+
+    async function deleteRow(id) {
+      try {
+        const res = await fetch(`/products/upsells/${id}`, { method:'DELETE' });
+        if (!res.ok) throw new Error(await res.text());
+        showToast('Silindi');
+        loadUpsells(productSelect.value);
+      } catch (e) {
+        showToast('Silinemedi', 'error');
+      }
+    }
+
+    addUpsellBtn.addEventListener('click', async () => {
+      const productId = productSelect.value;
+      const upsellId = upsellProductSelect.value;
+      const body = {
+        upsell_product_id: Number(upsellId),
+        copy: copyInput.value,
+        position: Number(positionInput.value || 1),
+        is_active: activeInput.checked,
+      };
+      addUpsellBtn.disabled = true;
+      try {
+        const res = await fetch(`/products/${productId}/upsells`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error(await res.text());
+        copyInput.value = '';
+        positionInput.value = '1';
+        activeInput.checked = true;
+        showToast('Eklendi');
+        loadUpsells(productId);
+      } catch (e) {
+        showToast('Eklenemedi: aynı ürün için olabilir', 'error');
+      } finally {
+        addUpsellBtn.disabled = false;
+      }
+    });
+
+    productSelect.addEventListener('change', () => {
+      updateSelectedHint();
+      loadUpsells(productSelect.value);
+    });
+
+    document.getElementById('openProductsBtn').addEventListener('click', () => {
+      window.open('/products/table', '_blank', 'noopener');
+    });
+
+    populateProductSelects();
+  </script>
+</body>
+</html>
+
