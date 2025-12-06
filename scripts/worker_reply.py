@@ -152,6 +152,42 @@ def _decode_escape_sequences(text: str) -> str:
 			return text
 
 
+def _unwrap_reply_text(text: str) -> str:
+	"""
+	If the model wrapped reply_text inside a JSON blob (e.g., {"reply_text":"..."}),
+	extract just the human-readable message and drop any embedded state objects.
+	"""
+	if not text:
+		return text
+	txt = str(text).strip()
+	if txt.startswith("{"):
+		try:
+			parsed = json.loads(txt)
+			if isinstance(parsed, dict):
+				candidate = (
+					parsed.get("reply_text")
+					or parsed.get("text")
+					or parsed.get("message")
+					or parsed.get("content")
+				)
+				if isinstance(candidate, str) and candidate.strip():
+					txt = candidate.strip()
+		except Exception:
+			pass
+	try:
+		import re
+		state_pattern = r'["\'],?\s*"state"\s*:\s*\{'
+		match = re.search(state_pattern, txt)
+		if match:
+			txt = txt[: match.start()].strip()
+			txt = re.sub(r'["\']\s*,?\s*$', "", txt)
+		if txt.startswith('"') and txt.endswith('"'):
+			txt = txt[1:-1]
+	except Exception:
+		pass
+	return txt
+
+
 # Debounce delay: wait this long after last message before generating reply
 # Configurable via AI_REPLY_DEBOUNCE_SECONDS env var (default: 5 seconds)
 DEBOUNCE_SECONDS = int(os.getenv("AI_REPLY_DEBOUNCE_SECONDS", "15"))
@@ -571,7 +607,8 @@ def main() -> None:
 					except Exception:
 						pass
 				reply_text_raw = (data.get("reply_text") or "").strip()
-				# Decode any literal escape sequences (e.g., \\n -> actual newline)
+				# Unwrap JSON-wrapped replies and decode any literal escape sequences (e.g., \\n -> actual newline)
+				reply_text_raw = _unwrap_reply_text(reply_text_raw)
 				reply_text = _decode_escape_sequences(reply_text_raw)
 				reply_text = _sanitize_reply_text(reply_text)
 				product_images = data.get("product_images") or []
