@@ -80,9 +80,6 @@ class AIClient:
     ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], str], Tuple[Dict[str, Any], Dict[str, Any]], Tuple[Dict[str, Any], str, Dict[str, Any]]]:
         if not self._enabled or not self._client:
             raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")
-        
-        # Ensure we always return a dict, never None
-        try:
 
         messages: list[dict[str, Any]] = []
         if system_prompt:
