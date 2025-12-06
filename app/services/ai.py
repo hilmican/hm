@@ -300,6 +300,37 @@ class AIClient:
                 return data, txt
             return data
 
+        # Normalize parsed JSON to a dict and surface warnings for callers
+        warnings: list[str] = []
+        normalized: Dict[str, Any]
+        if isinstance(data, dict):
+            normalized = data
+        elif isinstance(data, list):
+            if data and all(isinstance(x, dict) for x in data):
+                normalized = data[0]
+                warnings.append("AI returned list; using first object.")
+            else:
+                normalized = {"value": data}
+                warnings.append("AI returned non-dict JSON; wrapped under 'value'.")
+        else:
+            normalized = {"value": data}
+            warnings.append("AI returned non-dict JSON; wrapped under 'value'.")
+        if warnings:
+            existing_warnings = []
+            if isinstance(normalized.get("warnings"), list):
+                existing_warnings.extend(normalized.get("warnings"))  # type: ignore[arg-type]
+            elif normalized.get("warnings"):
+                existing_warnings.append(str(normalized.get("warnings")))
+            normalized["warnings"] = existing_warnings + warnings
+
+        if include_request_payload and final_request_payload:
+            if include_raw:
+                return normalized, txt, final_request_payload
+            return normalized, final_request_payload
+        if include_raw:
+            return normalized, txt
+        return normalized
+
 
     def generate_chat(
         self,
