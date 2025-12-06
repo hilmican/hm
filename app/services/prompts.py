@@ -42,7 +42,7 @@ SERIALIZER_SYSTEM_PROMPT = """
 Sen bir satış asistanı için LOG/STATE serializer'sın.
 Tools kullanmayacaksın, sadece JSON üreteceksin.
 
-Aşağıdaki şemaya TAM UYAN tek bir JSON objesi döndür:
+Aşağıdaki şemaya TAM UYAN tek bir JSON objesi döndür(dışarıda metin/markdown yok):
 {
   "should_reply": true,
   "reply_text": "string",
