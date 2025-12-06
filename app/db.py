@@ -62,24 +62,24 @@ def init_db() -> None:
     last_err: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-			# Handle concurrent DDL (e.g., table creation) gracefully: MySQL error 1684
-			for _ in range(3):
-				try:
-					SQLModel.metadata.create_all(engine)
-					break
-				except OperationalError as oe:
-					code = None
-					try:
-						code = oe.orig.args[0] if oe.orig and hasattr(oe.orig, "args") else None
-					except Exception:
-						code = None
-					if code == 1684:
-						time.sleep(2.0)
-						continue
-					raise
-			else:
-				# If we exhaust retries without break, re-raise last error
-				raise last_err or RuntimeError("create_all failed after retries")
+            # Handle concurrent DDL (e.g., table creation) gracefully: MySQL error 1684
+            for _ in range(3):
+                try:
+                    SQLModel.metadata.create_all(engine)
+                    break
+                except OperationalError as oe:
+                    code = None
+                    try:
+                        code = oe.orig.args[0] if oe.orig and hasattr(oe.orig, "args") else None
+                    except Exception:
+                        code = None
+                    if code == 1684:
+                        time.sleep(2.0)
+                        continue
+                    raise
+            else:
+                # If we exhaust retries without break, re-raise last error
+                raise last_err or RuntimeError("create_all failed after retries")
             # MySQL-only migrations
             with engine.begin() as conn:
                 def _exec_ddl(sql: str) -> None:
