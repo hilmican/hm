@@ -8,6 +8,8 @@ from sqlalchemy import text as _text
 
 from ..db import get_session
 from ..services.monitoring import increment_counter
+import json
+import re
 from .ai_ig import _detect_focus_product
 
 
@@ -125,12 +127,49 @@ def insert_draft(
 	attempt_no: int = 0,
 	status: str = "suggested",
 ) -> int:
+	def _unwrap_reply_text(text: Any) -> str:
+		if not text:
+			return ""
+		txt = str(text).strip()
+		if txt.startswith("{"):
+			# Try JSON first
+			try:
+				parsed = json.loads(txt)
+				if isinstance(parsed, dict):
+					candidate = (
+						parsed.get("reply_text")
+						or parsed.get("text")
+						or parsed.get("message")
+						or parsed.get("content")
+					)
+					if isinstance(candidate, str) and candidate.strip():
+						txt = candidate.strip()
+			except Exception:
+				# Regex fallback for malformed JSON
+				m = re.search(r'"reply_text"\\s*:\\s*"(.+?)"', txt, re.DOTALL)
+				if m:
+					extracted = m.group(1)
+					txt = extracted.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+		try:
+			# Strip any embedded state object
+			state_pattern = r'["\\\'],?\\s*"state"\\s*:\\s*\\{'
+			match = re.search(state_pattern, txt)
+			if match:
+				txt = txt[: match.start()].strip()
+				txt = re.sub(r'["\\\']\\s*,?\\s*$', "", txt)
+			if txt.startswith('"') and txt.endswith('"'):
+				txt = txt[1:-1]
+		except Exception:
+			pass
+		return txt
+
 	if not conversation_id or not reply_text:
 		return 0
 	try:
 		cid_int = int(conversation_id)
 	except Exception:
 		return 0
+	reply_text = _unwrap_reply_text(reply_text)
 	with get_session() as session:
 		row_id = 0
 		try:
