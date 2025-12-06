@@ -1,6 +1,7 @@
 import datetime as dt
 from typing import Optional
 
+from pydantic import ConfigDict
 from sqlmodel import Field, SQLModel
 from sqlalchemy import UniqueConstraint, Text, Column, BigInteger, String
 
@@ -147,6 +148,7 @@ class Product(SQLModel, table=True):
 class ProductUpsell(SQLModel, table=True):
 	__tablename__ = "product_upsell"
 	__table_args__ = (UniqueConstraint("product_id", "upsell_product_id", name="uq_product_upsell_pair"),)
+	model_config = ConfigDict(populate_by_name=True)
 
 	id: Optional[int] = Field(default=None, primary_key=True)
 	product_id: int = Field(
@@ -159,10 +161,11 @@ class ProductUpsell(SQLModel, table=True):
 		index=True,
 		description="Product to be offered as upsell",
 	)
-	copy: Optional[str] = Field(
+	copy_text: Optional[str] = Field(
 		default=None,
-		sa_column=Column(Text),
-		description="Custom upsell text shown to customer",
+		alias="copy",
+		sa_column=Column("copy", Text),
+		description="Custom upsell text shown to customer (alias: copy)",
 	)
 	position: int = Field(default=1, index=True, description="Display order (ascending)")
 	is_active: bool = Field(default=True, index=True)

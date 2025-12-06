@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Form, Request
+from fastapi.encoders import jsonable_encoder
 from sqlmodel import select
 
 from ..db import get_session
@@ -83,10 +84,17 @@ def products_table(request: Request, limit: int = Query(default=10000, ge=1, le=
 def products_upsells_page(request: Request):
 	with get_session() as session:
 		products = session.exec(select(Product).order_by(Product.name.asc())).all()
+	# Ensure plain JSON-serializable payload for the template (avoid SQLModel instances)
+	products_json = jsonable_encoder(
+		[
+			{"id": p.id, "name": p.name, "slug": p.slug, "default_price": p.default_price}
+			for p in products
+		]
+	)
 	templates = request.app.state.templates
 	return templates.TemplateResponse(
 		"product_upsells.html",
-		{"request": request, "products": products},
+		{"request": request, "products": products_json},
 	)
 
 
@@ -113,7 +121,7 @@ def list_product_upsells(product_id: int):
 					"product_id": pu.product_id,
 					"upsell_product_id": pu.upsell_product_id,
 					"upsell_product_name": upsell_prod.name if upsell_prod else None,
-					"copy": pu.copy,
+					"copy": pu.copy_text,
 					"position": pu.position,
 					"is_active": pu.is_active,
 				}
@@ -171,7 +179,7 @@ def create_product_upsell(product_id: int, body: dict):
 		pu = ProductUpsell(
 			product_id=product_id,
 			upsell_product_id=upsell_product_id,
-			copy=copy,
+			copy_text=copy,
 			position=position,
 			is_active=is_active,
 		)
@@ -181,7 +189,7 @@ def create_product_upsell(product_id: int, body: dict):
 			"id": pu.id,
 			"product_id": pu.product_id,
 			"upsell_product_id": pu.upsell_product_id,
-			"copy": pu.copy,
+			"copy": pu.copy_text,
 			"position": pu.position,
 			"is_active": pu.is_active,
 		}
@@ -195,7 +203,7 @@ def update_product_upsell(upsell_id: int, body: dict):
 			raise HTTPException(status_code=404, detail="Upsell not found")
 		if "copy" in body:
 			val = (body.get("copy") or "").strip()
-			pu.copy = val or None
+			pu.copy_text = val or None
 		if "position" in body:
 			try:
 				pu.position = int(body.get("position"))

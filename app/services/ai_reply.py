@@ -203,7 +203,7 @@ def _load_manual_upsells(product_id: int) -> Dict[int, Dict[str, Any]]:
 		for pu, upsell_prod in rows:
 			if not upsell_prod or not upsell_prod.id:
 				continue
-			copy_text = (pu.copy or "").strip() or (upsell_prod.name or f"Ürün {upsell_prod.id}")
+			copy_text = (getattr(pu, "copy_text", None) or getattr(pu, "copy", None) or "").strip() or (upsell_prod.name or f"Ürün {upsell_prod.id}")
 			upsell_map[upsell_prod.id] = {
 				"product_id": upsell_prod.id,
 				"product_name": upsell_prod.name,
