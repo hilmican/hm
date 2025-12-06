@@ -451,14 +451,6 @@ class AIClient:
         if include_raw:
             return txt, txt
         return txt
-        if include_request_payload and final_request_payload:
-            if include_raw:
-                return data, txt, final_request_payload
-            else:
-                return data, final_request_payload
-        if include_raw:
-            return data, txt
-        return data
 
 
 def get_ai_shadow_model_from_settings(default: str = "gpt-4o-mini") -> str:
