@@ -177,6 +177,148 @@ def _shadow_system_prompt(base_extra: Optional[str] = None) -> str:
 	return base_extra or ""
 
 
+def _calculate_upsell_recommendations(product_id: int, limit_orders: int = 100, min_cooccurrence: int = 2) -> Dict[int, Dict[str, Any]]:
+	"""
+	Calculate upsell recommendations based on order history.
+	
+	For a given product, finds the latest X orders that contain it, then identifies
+	other products that were frequently ordered together with it.
+	
+	Args:
+		product_id: The product ID to find upsells for
+		limit_orders: Maximum number of recent orders to analyze (default: 100)
+		min_cooccurrence: Minimum number of times a product must appear together (default: 2)
+	
+	Returns:
+		Dict mapping product_id to upsell config: {
+			product_id: {
+				"product_id": int,
+				"product_name": str,
+				"copy": str,  # Suggested upsell text
+				"cooccurrence_count": int,  # How many times it appeared together
+			}
+		}
+	"""
+	if not product_id:
+		return {}
+	
+	from collections import defaultdict
+	from sqlalchemy import and_, or_
+	from ..models import OrderItem, Order
+	
+	upsell_map: Dict[int, Dict[str, Any]] = {}
+	
+	try:
+		with get_session() as session:
+			# Step 1: Find recent orders that contain this product
+			# We need to join OrderItem -> Item -> Product to find orders with this product
+			recent_orders_query = (
+				select(OrderItem.order_id)
+				.join(Item, OrderItem.item_id == Item.id)
+				.where(Item.product_id == product_id)
+				.join(Order, OrderItem.order_id == Order.id)
+				.where(
+					# Only consider completed orders (not cancelled/refunded)
+					or_(
+						Order.status.is_(None),
+						Order.status.not_in(("iptal", "iade", "refunded", "cancelled")),
+					)
+				)
+				.order_by(Order.id.desc())
+				.limit(limit_orders)
+				.distinct()
+			)
+			
+			order_ids_result = session.exec(recent_orders_query).all()
+			order_ids = [oid for oid in order_ids_result if oid]
+			
+			if not order_ids:
+				return {}
+			
+			# Step 2: For each of these orders, find all other products
+			# Count how many times each other product appears with our target product
+			cooccurrence_count: Dict[int, int] = defaultdict(int)
+			product_names: Dict[int, str] = {}
+			product_prices: Dict[int, Optional[float]] = {}
+			
+			# Get all OrderItems for these orders, excluding items from our target product
+			# We'll query OrderItem and join to get Item and Product info
+			other_order_items = session.exec(
+				select(OrderItem)
+				.join(Item, OrderItem.item_id == Item.id)
+				.join(Product, Item.product_id == Product.id)
+				.where(
+					and_(
+						OrderItem.order_id.in_(order_ids),
+						Item.product_id != product_id,
+						Item.product_id.is_not(None),
+					)
+				)
+			).all()
+			
+			# Process each order item to count cooccurrences
+			for oi in other_order_items:
+				item = session.exec(select(Item).where(Item.id == oi.item_id)).first()
+				if not item or not item.product_id or item.product_id == product_id:
+					continue
+				
+				other_pid = item.product_id
+				cooccurrence_count[other_pid] += 1
+				
+				# Get product name if not already cached
+				if other_pid not in product_names:
+					prod = session.exec(select(Product).where(Product.id == other_pid)).first()
+					if prod:
+						product_names[other_pid] = prod.name or f"Product {other_pid}"
+					else:
+						product_names[other_pid] = f"Product {other_pid}"
+				
+				# Get price if not already cached
+				if other_pid not in product_prices and item.price:
+					try:
+						product_prices[other_pid] = float(item.price)
+					except (ValueError, TypeError):
+						pass
+			
+			# Step 3: Build upsell config for products that meet minimum cooccurrence
+			for other_pid, count in cooccurrence_count.items():
+				if count >= min_cooccurrence:
+					product_name = product_names.get(other_pid, f"Product {other_pid}")
+					price = product_prices.get(other_pid)
+					
+					# Generate suggested copy text
+					copy_parts = []
+					if price:
+						copy_parts.append(f"{product_name} - {price:.0f}₺")
+					else:
+						copy_parts.append(product_name)
+					
+					copy_text = f"Bununla birlikte {copy_parts[0]} de almak ister misin?"
+					
+					upsell_map[other_pid] = {
+						"product_id": other_pid,
+						"product_name": product_name,
+						"copy": copy_text,
+						"cooccurrence_count": count,
+					}
+			
+			# Sort by cooccurrence count (descending) and limit to top 3
+			sorted_upsells = sorted(
+				upsell_map.items(),
+				key=lambda x: x[1]["cooccurrence_count"],
+				reverse=True
+			)[:3]
+			
+			return {pid: config for pid, config in sorted_upsells}
+			
+	except Exception as e:
+		try:
+			log.warning("_calculate_upsell_recommendations failed product_id=%s error=%s", product_id, str(e)[:200])
+		except Exception:
+			pass
+		return {}
+
+
 def _compact_stock_list(stock: List[Dict[str, Any]]) -> Dict[str, Any]:
 	"""
 	Transform a full stock list (all SKU combinations) into a compact format.
@@ -874,6 +1016,29 @@ def draft_reply(
 		elif not last_customer_message:
 			qa_search_metadata["reason"] = "last_customer_message eksik (müşteri mesajı yok)"
 
+	# Calculate upsell recommendations based on order history
+	upsell_config: Dict[str, Any] = {}
+	if product_id_val:
+		try:
+			upsell_recommendations = _calculate_upsell_recommendations(product_id_val, limit_orders=100, min_cooccurrence=2)
+			if upsell_recommendations:
+				# Build upsell_config structure: by_product_id[product_id] = {product_id, product_name, copy, ...}
+				upsell_config["by_product_id"] = upsell_recommendations
+				try:
+					log.info(
+						"draft_reply upsell_config conversation_id=%s product_id=%s count=%s",
+						conversation_id,
+						product_id_val,
+						len(upsell_recommendations),
+					)
+				except Exception:
+					pass
+		except Exception as exc:
+			try:
+				log.warning("draft_reply upsell_calc_failed conversation_id=%s product_id=%s error=%s", conversation_id, product_id_val, str(exc)[:200])
+			except Exception:
+				pass
+	
 	user_payload: Dict[str, Any] = {
 		"store": store_conf,
 		"product_focus": product_focus_data,
@@ -885,6 +1050,8 @@ def draft_reply(
 	}
 	if matching_qas:
 		user_payload["matching_qas"] = matching_qas
+	if upsell_config:
+		user_payload["upsell_config"] = upsell_config
 	state_payload = dict(state or {})
 	hail_already_sent = bool(state_payload.get("hail_sent"))
 	# Detect if this is a first message (no previous AI replies in history)
@@ -1763,8 +1930,59 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 	else:
 		data = client.generate_json(**_build_serializer_kwargs())
 
+	# Handle non-dict responses gracefully
 	if not isinstance(data, dict):
-		raise RuntimeError("AI returned non-dict JSON for serializer stage")
+		# Log the actual type and content for debugging
+		data_type = type(data).__name__
+		data_preview = str(data)[:500] if data is not None else "None"
+		try:
+			log.error(
+				"serializer_non_dict_json conversation_id=%s type=%s preview=%s",
+				conversation_id,
+				data_type,
+				data_preview,
+			)
+		except Exception:
+			pass
+		
+		# Try to extract dict from list or other structures
+		if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+			# If it's a list with a dict, use the first dict
+			data = data[0]
+			try:
+				log.warning("serializer_extracted_from_list conversation_id=%s", conversation_id)
+			except Exception:
+				pass
+		elif isinstance(data, str):
+			# Try to parse as JSON string
+			try:
+				parsed = json.loads(data)
+				if isinstance(parsed, dict):
+					data = parsed
+					try:
+						log.warning("serializer_parsed_from_string conversation_id=%s", conversation_id)
+					except Exception:
+						pass
+			except Exception:
+				pass
+		
+		# If still not a dict, create a fallback response
+		if not isinstance(data, dict):
+			data = {
+				"should_reply": True,
+				"reply_text": agent_reply_text or "",
+				"confidence": 0.5,
+				"reason": f"serializer_returned_{data_type}_fallback_to_agent",
+				"notes": f"Serializer stage returned {data_type} instead of dict. Using agent reply as fallback.",
+			}
+			try:
+				log.warning(
+					"serializer_fallback conversation_id=%s agent_reply_len=%s",
+					conversation_id,
+					len(agent_reply_text or ""),
+				)
+			except Exception:
+				pass
 
 	if function_callbacks:
 		data["function_callbacks"] = function_callbacks
