@@ -207,11 +207,13 @@ def create_app() -> FastAPI:
 	app.include_router(payments.router, prefix="/payments", tags=["payments"]) 
 	app.include_router(inventory.router)
 	app.include_router(mappings.router)
-	# Route handler for product images (must be before products router to catch image requests)
+	# Products routes come before the image handler to avoid intercepting API paths
+	app.include_router(products.router)
+	# Route handler for product images
 	@app.get("/products/{folder}/{filename}")
 	async def serve_product_image(folder: str, filename: str):
 		"""Serve product images from static/products/{folder}/{filename}"""
-		# Only serve image files
+		# Only serve image files (prevents clashes with /products/{id}/...)
 		image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'}
 		if not any(filename.lower().endswith(ext) for ext in image_extensions):
 			raise HTTPException(status_code=404, detail="Not an image file")
@@ -224,7 +226,6 @@ def create_app() -> FastAPI:
 		
 		return FileResponse(file_path)
 
-	app.include_router(products.router)
 	app.include_router(product_qa.router)
 	app.include_router(instagram.router)
 	app.include_router(legal.router)
