@@ -1931,9 +1931,9 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 		data = client.generate_json(**_build_serializer_kwargs())
 
 	# Handle non-dict responses gracefully
-	if not isinstance(data, dict):
+	if data is None or not isinstance(data, dict):
 		# Log the actual type and content for debugging
-		data_type = type(data).__name__
+		data_type = type(data).__name__ if data is not None else "NoneType"
 		data_preview = str(data)[:500] if data is not None else "None"
 		try:
 			log.error(
@@ -1967,19 +1967,31 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 				pass
 		
 		# If still not a dict, create a fallback response
-		if not isinstance(data, dict):
+		if data is None or not isinstance(data, dict):
+			# Clean agent_reply_text before using it as fallback
+			clean_agent_text = agent_reply_text or ""
+			if clean_agent_text:
+				# Remove any embedded state objects from agent text
+				import re
+				state_pattern = r'["\'],?\s*"state"\s*:\s*\{'
+				match = re.search(state_pattern, clean_agent_text)
+				if match:
+					clean_agent_text = clean_agent_text[:match.start()].strip()
+					clean_agent_text = re.sub(r'["\']\s*,?\s*$', '', clean_agent_text)
+			
 			data = {
 				"should_reply": True,
-				"reply_text": agent_reply_text or "",
+				"reply_text": clean_agent_text,
 				"confidence": 0.5,
 				"reason": f"serializer_returned_{data_type}_fallback_to_agent",
 				"notes": f"Serializer stage returned {data_type} instead of dict. Using agent reply as fallback.",
+				"state": state_payload,  # Use the state we already have
 			}
 			try:
 				log.warning(
 					"serializer_fallback conversation_id=%s agent_reply_len=%s",
 					conversation_id,
-					len(agent_reply_text or ""),
+					len(clean_agent_text),
 				)
 			except Exception:
 				pass
