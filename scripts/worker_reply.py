@@ -173,7 +173,16 @@ def _unwrap_reply_text(text: str) -> str:
 				if isinstance(candidate, str) and candidate.strip():
 					txt = candidate.strip()
 		except Exception:
-			pass
+			# Fallback: regex extraction when JSON is malformed
+			try:
+				import re
+				m = re.search(r'"reply_text"\s*:\s*"(.+?)"', txt, re.DOTALL)
+				if m:
+					extracted = m.group(1)
+					if extracted:
+						txt = extracted.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+			except Exception:
+				pass
 	try:
 		import re
 		state_pattern = r'["\'],?\s*"state"\s*:\s*\{'
