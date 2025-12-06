@@ -2031,6 +2031,28 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 	should_reply = _coerce_bool(data.get("should_reply"), default=True)
 	reply_text_raw = (data.get("reply_text") or agent_reply_text or "").strip()
 	
+	# Fix: If reply_text contains a serialized JSON object (e.g., {"reply_text": "..."}),
+	# extract the actual text and optionally propagate confidence/reason fields.
+	if reply_text_raw and reply_text_raw.lstrip().startswith("{"):
+		try:
+			parsed_reply = json.loads(reply_text_raw)
+			if isinstance(parsed_reply, dict):
+				candidate_text = (
+					parsed_reply.get("reply_text")
+					or parsed_reply.get("text")
+					or parsed_reply.get("message")
+					or parsed_reply.get("content")
+				)
+				if isinstance(candidate_text, str) and candidate_text.strip():
+					reply_text_raw = candidate_text.strip()
+				# Use confidence/reason from parsed payload when serializer left them empty
+				if "confidence" in parsed_reply and data.get("confidence") is None:
+					data["confidence"] = parsed_reply.get("confidence")
+				if "reason" in parsed_reply and not data.get("reason"):
+					data["reason"] = parsed_reply.get("reason")
+		except Exception:
+			pass
+	
 	# Fix: If reply_text contains JSON-like structures (e.g., state object), extract just the text part
 	# This can happen if the serializer malformed the JSON and embedded state in reply_text
 	if reply_text_raw:
