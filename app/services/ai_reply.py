@@ -2006,6 +2006,28 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 
 	should_reply = _coerce_bool(data.get("should_reply"), default=True)
 	reply_text_raw = (data.get("reply_text") or agent_reply_text or "").strip()
+	
+	# Fix: If reply_text contains JSON-like structures (e.g., state object), extract just the text part
+	# This can happen if the serializer malformed the JSON and embedded state in reply_text
+	if reply_text_raw:
+		# Check for common patterns where state object got embedded in reply_text
+		# Pattern: "text","state":{...} or "text", "state":{...}
+		import re
+		# Match pattern where reply_text ends with JSON state object
+		# Look for: ","state": or ',"state": followed by JSON object
+		state_pattern = r'["\'],?\s*"state"\s*:\s*\{'
+		match = re.search(state_pattern, reply_text_raw)
+		if match:
+			# Extract text before the state object
+			reply_text_raw = reply_text_raw[:match.start()].strip()
+			# Remove trailing quote and comma if present
+			reply_text_raw = re.sub(r'["\']\s*,?\s*$', '', reply_text_raw)
+		
+		# Also check for any remaining JSON-like structures and clean them
+		if reply_text_raw.startswith('"') and reply_text_raw.endswith('"'):
+			# Remove outer quotes if present
+			reply_text_raw = reply_text_raw[1:-1]
+	
 	reply_text = _sanitize_reply_text(_decode_escape_sequences(reply_text_raw))
 	try:
 		conf_raw = float(data.get("confidence") if data.get("confidence") is not None else 0.59)
