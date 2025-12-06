@@ -212,8 +212,15 @@ def _calculate_upsell_recommendations(product_id: int, limit_orders: int = 100, 
 		with get_session() as session:
 			# Step 1: Find recent orders that contain this product
 			# We need to join OrderItem -> Item -> Product to find orders with this product
-			recent_orders_query = (
-				select(OrderItem.order_id)
+			# Fix SQL: When using DISTINCT, ORDER BY columns must be in SELECT
+			# Use a subquery approach to avoid DISTINCT + ORDER BY conflict
+			from sqlalchemy import func
+			# First, get distinct order_ids with their max Order.id for sorting
+			subquery = (
+				select(
+					OrderItem.order_id,
+					func.max(Order.id).label("max_order_id")
+				)
 				.join(Item, OrderItem.item_id == Item.id)
 				.where(Item.product_id == product_id)
 				.join(Order, OrderItem.order_id == Order.id)
@@ -224,9 +231,14 @@ def _calculate_upsell_recommendations(product_id: int, limit_orders: int = 100, 
 						Order.status.not_in(("iptal", "iade", "refunded", "cancelled")),
 					)
 				)
-				.order_by(Order.id.desc())
+				.group_by(OrderItem.order_id)
+			).subquery()
+			
+			# Then order by max_order_id and get the order_ids
+			recent_orders_query = (
+				select(subquery.c.order_id)
+				.order_by(subquery.c.max_order_id.desc())
 				.limit(limit_orders)
-				.distinct()
 			)
 			
 			order_ids_result = session.exec(recent_orders_query).all()
@@ -2051,7 +2063,8 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 	admin_escalation_requested = any(
 		cb.get("name") == "yoneticiye_bildirim_gonder" for cb in (function_callbacks or []) if isinstance(cb, dict)
 	)
-	if admin_escalation_requested:
+	# Don't escalate to admin just because serializer failed - that's a technical issue, not a business escalation
+	if admin_escalation_requested and not reason.startswith("serializer_returned_"):
 		should_reply = False
 		if not reason or reason == "auto":
 			reason = "needs_admin"

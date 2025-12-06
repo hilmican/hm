@@ -237,6 +237,22 @@ class AIClient:
             print("[AI DEBUG] in_tokens=", in_tokens, "max_tokens=", max_output_tokens, "raw_len=", len(txt))
         except Exception:
             pass
+        
+        # If txt is empty, return a fallback dict immediately
+        if not txt:
+            fallback_data = {
+                "error": "Empty response from AI",
+                "warnings": ["AI returned empty response"],
+            }
+            if include_request_payload and final_request_payload:
+                if include_raw:
+                    return fallback_data, "", final_request_payload
+                else:
+                    return fallback_data, final_request_payload
+            if include_raw:
+                return fallback_data, ""
+            return fallback_data
+        
         try:
             data = json.loads(txt)
         except Exception:
