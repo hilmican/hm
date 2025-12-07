@@ -11,7 +11,7 @@ from app.db import get_session
 from sqlalchemy import text as _text
 from sqlmodel import select
 
-from app.services.ai_reply import draft_reply, _sanitize_reply_text
+from app.services.ai_reply import draft_reply, _sanitize_reply_text, _select_product_images_for_reply
 from app.services.instagram_api import send_message
 from app.services.ai_orders import get_candidate_snapshot
 from app.models import SystemSetting, Product
@@ -149,7 +149,57 @@ def _decode_escape_sequences(text: str) -> str:
 			result = text.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
 			return result
 		except Exception:
-			return text
+	return text
+
+
+def _coerce_product_id_set(value: Any) -> set[int]:
+	ids: set[int] = set()
+	if value is None:
+		return ids
+	iterable = value if isinstance(value, (list, tuple, set)) else [value]
+	for v in iterable:
+		try:
+			ids.add(int(v))
+		except Exception:
+			continue
+	return ids
+
+
+def _collect_image_requests(
+	callbacks: list[dict[str, Any]],
+	*,
+	fallback_product_id: Optional[int] = None,
+) -> tuple[list[str], set[int]]:
+	"""
+	Pick up explicit send_product_image_to_customer tool calls and resolve
+	images by product/color so we can actually send them.
+	"""
+	urls: list[str] = []
+	product_ids: set[int] = set()
+	for cb in callbacks:
+		if not isinstance(cb, dict):
+			continue
+		if cb.get("name") != "send_product_image_to_customer":
+			continue
+		args = cb.get("result") or cb.get("arguments") or {}
+		pid_raw = args.get("product_id") or fallback_product_id
+		try:
+			pid = int(pid_raw) if pid_raw is not None else None
+		except Exception:
+			pid = None
+		if not pid:
+			continue
+		color_val = args.get("color")
+		variant_key = str(color_val).strip().lower() if color_val else None
+		images = _select_product_images_for_reply(pid, variant_key=variant_key)
+		if not images and fallback_product_id and fallback_product_id == pid:
+			images = _select_product_images_for_reply(pid, variant_key=None)
+		for img in images:
+			url = img.get("url")
+			if url and url not in urls:
+				urls.append(url)
+		product_ids.add(pid)
+	return urls, product_ids
 
 
 def _unwrap_reply_text(text: str) -> str:
@@ -527,6 +577,11 @@ def main() -> None:
 				except Exception:
 					pass
 				new_state = _coerce_state(data.get("state"), fallback=current_state)
+				images_sent_products = _coerce_product_id_set(
+					current_state.get("images_sent_product_ids") if isinstance(current_state, dict) else None
+				)
+				if isinstance(new_state, dict):
+					images_sent_products.update(_coerce_product_id_set(new_state.get("images_sent_product_ids")))
 				state_last_step = ""
 				asked_payment = False
 				asked_address = False
@@ -631,6 +686,12 @@ def main() -> None:
 				reply_text = _decode_escape_sequences(reply_text_raw)
 				reply_text = _sanitize_reply_text(reply_text)
 				product_images = data.get("product_images") or []
+				current_focus_pid = None
+				if isinstance(new_state, dict):
+					try:
+						current_focus_pid = int(new_state.get("current_focus_product_id"))
+					except Exception:
+						current_focus_pid = None
 				try:
 					# Log raw data (truncated) for debugging model behavior
 					try:
@@ -716,11 +777,23 @@ def main() -> None:
 							image_urls.append(str(img.get("url")))
 				except Exception:
 					image_urls = []
-				if image_urls and not bool(st.get("ai_images_sent")):
+				requested_image_urls, requested_image_pids = _collect_image_requests(
+					function_callbacks, fallback_product_id=current_focus_pid
+				)
+				auto_image_urls: list[str] = []
+				auto_image_product_ids: set[int] = set()
+				if image_urls and current_focus_pid and current_focus_pid not in images_sent_products:
+					auto_image_urls = image_urls
+					auto_image_product_ids.add(current_focus_pid)
+				image_urls_combined: list[str] = []
+				for u in auto_image_urls + requested_image_urls:
+					if u and u not in image_urls_combined:
+						image_urls_combined.append(u)
+				if auto_image_urls:
 					action_entry = {
 						"type": "send_product_images",
-						"image_count": len(image_urls),
-						"image_urls": image_urls,
+						"image_count": len(auto_image_urls),
+						"image_urls": auto_image_urls,
 						"trigger": "first_ai_response",
 					}
 					try:
@@ -736,10 +809,21 @@ def main() -> None:
 					except Exception:
 						pass
 					actions.append(action_entry)
-					try:
+				if requested_image_urls:
+					actions.append(
+						{
+							"type": "send_product_images",
+							"image_count": len(requested_image_urls),
+							"image_urls": requested_image_urls,
+							"trigger": "tool_send_product_image",
+							"product_id": current_focus_pid or None,
+						}
+					)
+				try:
+					if actions:
 						data["actions"] = actions
-					except Exception:
-						pass
+				except Exception:
+					pass
 				actions_json = json.dumps(actions, ensure_ascii=False) if actions else None
 				confidence = float(data.get("confidence") or 0.6)
 				
@@ -857,14 +941,14 @@ def main() -> None:
 				
 				# Auto-send if confidence threshold met
 				sent_message_id: Optional[str] = None
+				images_were_sent = False
 				if should_auto_send and conversation_id_for_send:
 					try:
 						log.info("ai_shadow: auto-sending reply for conversation_id=%s confidence=%.2f", cid, confidence)
 						# Use image URLs that were already extracted from product_images
-						# Send images if we have them and haven't sent them before
 						image_urls_to_send: list[str] = []
-						if image_urls and not bool(st.get("ai_images_sent")):
-							image_urls_to_send = image_urls
+						if image_urls_combined:
+							image_urls_to_send = image_urls_combined
 							log.info("ai_shadow: including %d image(s) in reply", len(image_urls_to_send))
 						
 						# Send message via async function
@@ -891,6 +975,15 @@ def main() -> None:
 						
 						# Mark images as sent if we actually sent any
 						if image_urls_to_send:
+							images_were_sent = True
+							images_sent_products.update(auto_image_product_ids)
+							images_sent_products.update(requested_image_pids)
+							if isinstance(new_state, dict):
+								try:
+									new_state["images_sent_product_ids"] = sorted(images_sent_products)
+								except Exception:
+									new_state["images_sent_product_ids"] = list(images_sent_products)
+							state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
 							try:
 								with get_session() as session:
 									session.exec(
@@ -1032,7 +1125,7 @@ def main() -> None:
 								"UPDATE ai_shadow_state SET status=:s, state_json=:state, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
 							).params(s=status_to_set, state=state_json_dump, cid=int(cid))
 						)
-						if actions_json:
+						if actions_json and images_were_sent:
 							session.exec(
 								_text(
 									"UPDATE ai_shadow_state SET ai_images_sent=1 WHERE conversation_id=:cid"
