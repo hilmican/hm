@@ -2033,6 +2033,13 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 		"- Teklif yaptıysan `state.upsell_offered=true` yap; müşteri kabul ederse `add_cart_item` ile is_upsell=true ekle ve `state.upsell_accepted=true` yap.\n"
 	)
 	sys_prompt_parts.append(message_order_instruction)
+	upsell_timing_instruction = (
+		f"=== UPSELL ZAMANLAMA KURALI (KRİTİK) ===\n"
+		f"upsell_ready = {'true' if upsell_ready else 'false'}\n"
+		"- upsell_ready false ise HİÇ upsell teklif etme.\n"
+		"- upsell_ready true ve upsell_config varsa, tek sefer upsell teklif et (force_upsell true ise zorunlu).\n"
+	)
+	sys_prompt_parts.append(upsell_timing_instruction)
 	if upsell_offer_needed:
 		sys_prompt_parts.append(upsell_force_instruction)
 	if product_extra_sys:
@@ -2067,14 +2074,14 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 		"- Müşteri upsell ürünün fotoğrafını veya bilgilerini isterse: `upsell_config.by_product_id[upsell_product_id].images` listesinden uygun fotoğrafı `send_product_image_to_customer` ile gönder veya ürün bilgilerini (fiyat, renk, beden seçenekleri) paylaş.\n"
 		"- Upsell ürünü sepete eklerken: `upsell_config.by_product_id[upsell_product_id].stock` listesinden uygun SKU, color, size, price bilgilerini kullan.\n"
 		"- Eğer müşteri upsell ürünü için renk/beden belirtmediyse, stock listesindeki ilk uygun varyantı seç veya default değerleri kullan.\n"
-		"- Ana ürün beden+renk tamamlandıysa ve upsell_offered=false ise ödeme öncesi tek sefer upsell teklif et.\n"
+		"- Ödeme/adres netleşmeden (upsell_ready=false) upsell teklif ETME. Ödeme/adres netleştiğinde ve upsell_offered=false ise tek sefer teklif et.\n"
 		"- Müşteri sipariş tamamlandıktan sonra ek ürün isterse (örn: 'jogger pantolon da ekle'), upsell ürününü `add_cart_item` ile sepete ekle.\n"
 		"- 'ikisinide istiyorum' gibi ifadeler çoklu satın alma demektir; her renk/ürün için ayrı `add_cart_item` satırı ekle.\n"
 	)
 	if upsell_offer_needed:
 		agent_user_prompt += (
 			"\n=== ZORUNLU UPSELL (force_upsell=true) ===\n"
-			"- Cevabın içinde tek paragraf upsell önerisi ekle; ürün/renk/beden/fiyatı upsell_config'ten seç.\n"
+			"- Cevabın içinde tek paragraf upsell önerisi ekle; ürün/renk/beden/fiyatı upsell_config'ten seç. Eğer upsell_ready=false ise teklif yapma.\n"
 			"- Teklif yaptıysan state.upsell_offered=true olarak döndür; müşteri EVET derse add_cart_item ile is_upsell=true ekle ve state.upsell_accepted=true yap.\n"
 		)
 	if function_callbacks:
