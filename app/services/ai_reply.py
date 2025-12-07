@@ -2415,8 +2415,7 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 	reply["state"] = _normalize_state(data.get("state"), fallback=state_payload)
 	if product_images:
 		reply["product_images"] = product_images
-
-	# Enforce upsell when hazır ama yapılmadıysa: cevabı göndermeden blokla
+	# Upsell hazır ama yapılmadıysa: otomatik fallback upsell metni üret ve gönder
 	if upsell_offer_needed:
 		state_final = reply.get("state") or {}
 		upsell_done = bool(state_final.get("upsell_offered")) or any(
@@ -2424,10 +2423,62 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 			for cb in (function_callbacks or [])
 			if isinstance(cb, dict)
 		)
-		if not upsell_done:
-			reply["should_reply"] = False
-			reply["reason"] = "needs_upsell"
-			reply["notes"] = "Upsell hazır; upsell_offered=false. Teklif eklenip yeniden denenmeli."
+		if not upsell_done and upsell_config and "by_product_id" in upsell_config:
+			upsell_entry = next(iter(upsell_config["by_product_id"].values()), None)
+			if upsell_entry:
+				stock_list = upsell_entry.get("stock") or []
+				preferred_size = (
+					(state_final.get("size_suggestion") if isinstance(state_final, dict) else None)
+					or parsed_data.get("size_suggestion")
+				)
+				selected = None
+				if preferred_size:
+					for item in stock_list:
+						if str(item.get("size") or "").strip().upper() == str(preferred_size).strip().upper():
+							selected = item
+							break
+				if not selected and stock_list:
+					selected = stock_list[0]
+				price_val = None
+				if selected and selected.get("price") is not None:
+					try:
+						price_val = float(selected.get("price"))
+					except Exception:
+						price_val = None
+				if price_val is None:
+					try:
+						price_val = float(upsell_entry.get("default_price"))
+					except Exception:
+						price_val = None
+				color_val = (selected or {}).get("color") or upsell_entry.get("default_color")
+				size_val = (selected or {}).get("size") or preferred_size
+				name_val = upsell_entry.get("product_name") or "Upsell ürün"
+				price_txt = f" {price_val:.0f}₺" if price_val else ""
+				variant_txt_parts = []
+				if size_val:
+					variant_txt_parts.append(f"{size_val}")
+				if color_val:
+					variant_txt_parts.append(f"{color_val}")
+				variant_txt = " / ".join(variant_txt_parts)
+				upsell_line = f"{name_val}"
+				if variant_txt:
+					upsell_line += f" – {variant_txt}"
+				if price_txt:
+					upsell_line += f" ·{price_txt}"
+				upsell_text = (
+					"Bu kombini tamamlayan bir ürün önereyim mi abim? "
+					f"{upsell_line}. Uygunsa sepete ekleyeyim mi?"
+				)
+				if reply_text and upsell_text:
+					reply["reply_text"] = (reply_text + "\n\n" + upsell_text).strip()
+				elif upsell_text:
+					reply["reply_text"] = upsell_text
+				reply["should_reply"] = True
+				reply["reason"] = "auto_upsell_fallback"
+				reply_state = reply.get("state") or {}
+				if isinstance(reply_state, dict):
+					reply_state["upsell_offered"] = True
+					reply.setdefault("state", reply_state)
 
 	if include_meta:
 		try:
