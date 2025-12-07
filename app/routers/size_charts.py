@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
 from sqlmodel import select
 
 from ..db import get_session
@@ -71,13 +72,30 @@ def size_charts_table(request: Request):
 	with get_session() as session:
 		charts = session.exec(select(SizeChart).order_by(SizeChart.name.asc())).all()
 		entry_map = _load_entries(session, [c.id for c in charts if c.id])
+		entry_map_json = {
+			cid: jsonable_encoder(
+				[
+					{
+						"id": e.id,
+						"size_label": e.size_label,
+						"height_min": e.height_min,
+						"height_max": e.height_max,
+						"weight_min": e.weight_min,
+						"weight_max": e.weight_max,
+						"notes": e.notes,
+					}
+					for e in rows
+				]
+			)
+			for cid, rows in entry_map.items()
+		}
 	templates = request.app.state.templates
 	return templates.TemplateResponse(
 		"size_charts.html",
 		{
 			"request": request,
 			"charts": charts,
-			"entries": entry_map,
+			"entries": entry_map_json,
 		},
 	)
 
