@@ -1,0 +1,178 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Beden Tablolari</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    h1 { margin: 0 0 12px 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+    th { background: #fafafa; position: sticky; top: 0; }
+    input, textarea { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+    button { padding: 6px 10px; border-radius: 6px; border: 1px solid #ddd; background: #f9fafb; cursor: pointer; }
+    .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin-bottom: 16px; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: #4338ca; font-size: 12px; }
+    .muted { color: #6b7280; font-size: 13px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  </style>
+</head>
+<body>
+  {% include "_nav.html" %}
+  <h1>Beden Tablolari</h1>
+  <div class="card">
+    <h3 style="margin-top:0;">Yeni Beden Tablosu</h3>
+    <form id="createChart" onsubmit="return false;" class="row">
+      <input name="name" placeholder="Ad (örn. Pantolon Slim)" required />
+      <input name="description" placeholder="Açıklama" style="min-width:240px; flex:1;" />
+      <button type="submit" style="background:#2563eb; color:#fff; border:none;">Olustur</button>
+    </form>
+  </div>
+
+  {% for chart in charts %}
+  <div class="card" data-chart="{{ chart.id }}">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+      <div>
+        <div style="font-weight:600;">{{ chart.name }}</div>
+        <div class="muted">{{ chart.description or "Açıklama yok" }}</div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="saveChart" data-id="{{ chart.id }}" style="background:#10b981;color:#fff;border:none;">Kaydet</button>
+        <button class="deleteChart" data-id="{{ chart.id }}" style="background:#ef4444;color:#fff;border:none;">Sil</button>
+      </div>
+    </div>
+    <div class="row" style="margin:10px 0;">
+      <input class="chartName" data-id="{{ chart.id }}" value="{{ chart.name }}" />
+      <input class="chartDesc" data-id="{{ chart.id }}" value="{{ chart.description or '' }}" placeholder="Açıklama" style="min-width:200px; flex:1;" />
+    </div>
+    <div style="margin:10px 0 4px 0; font-weight:600;">Satırlar</div>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Beden</th><th>Boy min</th><th>Boy max</th><th>Kilo min</th><th>Kilo max</th><th>Not</th><th>İşlemler</th></tr>
+      </thead>
+      <tbody>
+        {% for entry in entries.get(chart.id, []) %}
+        <tr data-entry="{{ entry.id }}">
+          <td>{{ entry.id }}</td>
+          <td><input data-field="size_label" value="{{ entry.size_label }}" style="width:80px;" /></td>
+          <td><input data-field="height_min" type="number" value="{{ entry.height_min or '' }}" style="width:80px;" /></td>
+          <td><input data-field="height_max" type="number" value="{{ entry.height_max or '' }}" style="width:80px;" /></td>
+          <td><input data-field="weight_min" type="number" value="{{ entry.weight_min or '' }}" style="width:80px;" /></td>
+          <td><input data-field="weight_max" type="number" value="{{ entry.weight_max or '' }}" style="width:80px;" /></td>
+          <td><input data-field="notes" value="{{ entry.notes or '' }}" style="min-width:120px;" /></td>
+          <td>
+            <button class="saveEntry" data-chart="{{ chart.id }}" data-entry="{{ entry.id }}" style="background:#10b981;color:#fff;border:none;">Kaydet</button>
+            <button class="delEntry" data-chart="{{ chart.id }}" data-entry="{{ entry.id }}" style="background:#ef4444;color:#fff;border:none;">Sil</button>
+          </td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td>Yeni</td>
+          <td><input data-new="size_label" placeholder="M / 32" style="width:80px;" /></td>
+          <td><input data-new="height_min" type="number" placeholder="cm" style="width:80px;" /></td>
+          <td><input data-new="height_max" type="number" placeholder="cm" style="width:80px;" /></td>
+          <td><input data-new="weight_min" type="number" placeholder="kg" style="width:80px;" /></td>
+          <td><input data-new="weight_max" type="number" placeholder="kg" style="width:80px;" /></td>
+          <td><input data-new="notes" placeholder="Not" style="min-width:120px;" /></td>
+          <td><button class="addEntry" data-chart="{{ chart.id }}" style="background:#2563eb;color:#fff;border:none;">Ekle</button></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+
+<script>
+async function fetchJSON(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text());
+  if (r.status === 204) return null;
+  return r.json().catch(() => ({}));
+}
+
+const createForm = document.getElementById('createChart');
+if (createForm) {
+  createForm.addEventListener('submit', async () => {
+    const body = Object.fromEntries(new FormData(createForm));
+    try {
+      await fetchJSON('/size-charts', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      location.reload();
+    } catch (e) { alert('Olusturma hatasi'); }
+  });
+}
+
+for (const btn of document.querySelectorAll('.saveChart')) {
+  btn.addEventListener('click', async (e) => {
+    const id = e.target.getAttribute('data-id');
+    const card = e.target.closest('[data-chart]');
+    const name = card.querySelector('.chartName').value;
+    const description = card.querySelector('.chartDesc').value;
+    try {
+      await fetchJSON(`/size-charts/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, description })});
+      alert('Kaydedildi');
+    } catch (err) { alert('Kaydetme hatasi'); }
+  });
+}
+
+for (const btn of document.querySelectorAll('.deleteChart')) {
+  btn.addEventListener('click', async (e) => {
+    const id = e.target.getAttribute('data-id');
+    if (!confirm('Bu beden tablosu silinsin mi?')) return;
+    try {
+      await fetchJSON(`/size-charts/${id}`, { method:'DELETE' });
+      location.reload();
+    } catch (err) { alert('Silme hatasi'); }
+  });
+}
+
+for (const btn of document.querySelectorAll('.addEntry')) {
+  btn.addEventListener('click', async (e) => {
+    const chartId = e.target.getAttribute('data-chart');
+    const tr = e.target.closest('tr');
+    const body = {};
+    tr.querySelectorAll('input[data-new]').forEach(inp => {
+      let v = inp.value;
+      const k = inp.getAttribute('data-new');
+      if (['height_min','height_max','weight_min','weight_max'].includes(k) && v !== '') v = Number(v);
+      body[k] = v === '' ? null : v;
+    });
+    try {
+      await fetchJSON(`/size-charts/${chartId}/entries`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      location.reload();
+    } catch (err) { alert('Satir ekleme hatasi'); }
+  });
+}
+
+for (const btn of document.querySelectorAll('.saveEntry')) {
+  btn.addEventListener('click', async (e) => {
+    const chartId = e.target.getAttribute('data-chart');
+    const entryId = e.target.getAttribute('data-entry');
+    const tr = e.target.closest('tr');
+    const body = {};
+    tr.querySelectorAll('input[data-field]').forEach(inp => {
+      let v = inp.value;
+      const k = inp.getAttribute('data-field');
+      if (['height_min','height_max','weight_min','weight_max'].includes(k) && v !== '') v = Number(v);
+      body[k] = v === '' ? null : v;
+    });
+    try {
+      await fetchJSON(`/size-charts/${chartId}/entries/${entryId}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      alert('Satir guncellendi');
+    } catch (err) { alert('Satir kaydedilemedi'); }
+  });
+}
+
+for (const btn of document.querySelectorAll('.delEntry')) {
+  btn.addEventListener('click', async (e) => {
+    const chartId = e.target.getAttribute('data-chart');
+    const entryId = e.target.getAttribute('data-entry');
+    if (!confirm('Satir silinsin mi?')) return;
+    try {
+      await fetchJSON(`/size-charts/${chartId}/entries/${entryId}`, { method:'DELETE' });
+      location.reload();
+    } catch (err) { alert('Satir silinemedi'); }
+  });
+}
+</script>
+</body>
+</html>
+

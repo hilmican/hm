@@ -153,3 +153,50 @@ class AIApplyRequest(BaseModel):
     suggestions: AISuggestResponse
     create_products: bool = True
     create_rules: bool = True
+
+
+# --- Size chart schemas ---
+
+
+class SizeChartEntryPayload(BaseModel):
+	size_label: str
+	height_min: int | None = None
+	height_max: int | None = None
+	weight_min: int | None = None
+	weight_max: int | None = None
+	notes: str | None = None
+
+
+class SizeChartCreate(BaseModel):
+	name: str
+	description: str | None = None
+
+
+class SizeChartUpdate(BaseModel):
+	name: str | None = None
+	description: str | None = None
+
+
+class SizeChartEntryCreate(SizeChartEntryPayload):
+	pass
+
+
+class SizeChartEntryUpdate(BaseModel):
+	size_label: str | None = None
+	height_min: int | None = None
+	height_max: int | None = None
+	weight_min: int | None = None
+	weight_max: int | None = None
+	notes: str | None = None
+
+
+class SizeChartResponse(BaseModel):
+	id: int
+	name: str
+	description: str | None = None
+	entries: list[SizeChartEntryPayload] = []
+
+
+class ProductSizeChartAssign(BaseModel):
+	product_id: int
+	size_chart_id: int

@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Urun Beden Tablolari</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+    th { background: #fafafa; position: sticky; top: 0; }
+    select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; }
+    button { padding: 6px 10px; border-radius: 6px; border: 1px solid #ddd; background: #f9fafb; cursor: pointer; }
+  </style>
+</head>
+<body>
+  {% include "_nav.html" %}
+  <h1>Ürünlere Beden Tablosu Ata</h1>
+  <p style="color:#6b7280; font-size:13px;">Her ürün için tek beden tablosu seçilir. Değiştirildiğinde eski bağ kaldırılır.</p>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Ad</th><th>Slug</th><th>Beden Tablosu</th><th>İşlem</th></tr>
+    </thead>
+    <tbody>
+      {% for p in products %}
+      <tr data-id="{{ p.id }}">
+        <td>{{ p.id }}</td>
+        <td>{{ p.name }}</td>
+        <td>{{ p.slug }}</td>
+        <td>
+          <select data-field="size_chart_id">
+            <option value="">- Seçili değil -</option>
+            {% for sc in charts %}
+              <option value="{{ sc.id }}" {% if assignment_map.get(p.id) == sc.id %}selected{% endif %}>{{ sc.name }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td><button class="saveBtn" style="background:#10b981;color:#fff;border:none;">Kaydet</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+<script>
+async function fetchJSON(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json().catch(() => ({}));
+}
+
+document.querySelectorAll('.saveBtn').forEach(btn => {
+  btn.addEventListener('click', async (e) => {
+    const tr = e.target.closest('tr');
+    const id = tr.getAttribute('data-id');
+    const select = tr.querySelector('select[data-field="size_chart_id"]');
+    const body = { size_chart_id: select.value === '' ? null : Number(select.value) };
+    try {
+      await fetchJSON(`/products/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      alert('Kaydedildi');
+    } catch (err) {
+      alert('Kayit hatasi');
+    }
+  });
+});
+</script>
+</body>
+</html>
+

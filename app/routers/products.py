@@ -5,7 +5,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Product, Item, ProductUpsell
+from ..models import Product, Item, ProductUpsell, ProductSizeChart, SizeChart
 from ..utils.slugify import slugify
 
 
@@ -17,6 +17,8 @@ router = APIRouter(prefix="/products", tags=["products"])
 def list_products(limit: int = Query(default=500, ge=1, le=5000)):
 	with get_session() as session:
 		rows = session.exec(select(Product).order_by(Product.id.desc()).limit(limit)).all()
+		assignments = session.exec(select(ProductSizeChart)).all()
+		assignment_map = {a.product_id: a.size_chart_id for a in assignments if a.product_id and a.size_chart_id}
 		return {
 			"products": [
 				{
@@ -27,6 +29,7 @@ def list_products(limit: int = Query(default=500, ge=1, le=5000)):
 					"default_color": p.default_color,
 					"default_price": p.default_price,
 					"ai_variant_exclusions": p.ai_variant_exclusions,
+					"size_chart_id": assignment_map.get(p.id or 0),
 				}
 				for p in rows
 			]
@@ -40,6 +43,7 @@ def create_product(
     default_price: float | None = Form(None),
     default_color: str | None = Form(None),
     ai_variant_exclusions: str | None = Form(None),
+	size_chart_id: int | None = Form(None),
 ):
 	if not name:
 		raise HTTPException(status_code=400, detail="name required")
@@ -57,6 +61,13 @@ def create_product(
 			ai_variant_exclusions=ai_variant_exclusions,
 		)
 		session.add(p)
+		if size_chart_id:
+			sc = session.exec(select(SizeChart).where(SizeChart.id == size_chart_id)).first()
+			if not sc:
+				raise HTTPException(status_code=404, detail="Size chart not found")
+			session.flush()
+			link = ProductSizeChart(product_id=p.id, size_chart_id=size_chart_id)
+			session.add(link)
 		session.flush()
 		return {
 			"id": p.id,
@@ -66,6 +77,7 @@ def create_product(
 			"default_price": p.default_price,
 			"default_color": p.default_color,
 			"ai_variant_exclusions": p.ai_variant_exclusions,
+			"size_chart_id": size_chart_id,
 		}
 
 
@@ -232,7 +244,7 @@ def delete_product_upsell(upsell_id: int):
 
 @router.put("/{product_id}")
 def update_product(product_id: int, body: dict):
-    allowed = {"name", "default_unit", "default_price", "default_color", "ai_variant_exclusions"}
+    allowed = {"name", "default_unit", "default_price", "default_color", "ai_variant_exclusions", "size_chart_id"}
     with get_session() as session:
         p = session.exec(select(Product).where(Product.id == product_id)).first()
         if not p:
@@ -259,6 +271,29 @@ def update_product(product_id: int, body: dict):
         if "ai_variant_exclusions" in body:
             val = body.get("ai_variant_exclusions")
             p.ai_variant_exclusions = val if isinstance(val, str) and val.strip() else None
+        if "size_chart_id" in body:
+            sc_id = body.get("size_chart_id")
+            if sc_id in (None, ""):
+                existing = session.exec(
+                    select(ProductSizeChart).where(ProductSizeChart.product_id == product_id)
+                ).first()
+                if existing:
+                    session.delete(existing)
+            else:
+                try:
+                    sc_int = int(sc_id)
+                except Exception:
+                    raise HTTPException(status_code=400, detail="Invalid size_chart_id")
+                sc = session.exec(select(SizeChart).where(SizeChart.id == sc_int)).first()
+                if not sc:
+                    raise HTTPException(status_code=404, detail="Size chart not found")
+                existing = session.exec(
+                    select(ProductSizeChart).where(ProductSizeChart.product_id == product_id)
+                ).first()
+                if existing:
+                    existing.size_chart_id = sc_int
+                else:
+                    session.add(ProductSizeChart(product_id=product_id, size_chart_id=sc_int))
         return {"status": "ok", "id": p.id}
 
 

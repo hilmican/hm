@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Item, Product, StockMovement, Order
+from ..models import Item, Product, StockMovement, Order, ProductSizeChart
 from ..services.inventory import get_stock_map, recalc_orders_from_mappings, adjust_stock
 
 
@@ -43,7 +43,10 @@ def product_attributes(product_id: int = Query(...)):
 			return sorted(set(vals))
 		sizes = _extract(size_rows)
 		colors = _extract(color_rows)
-		return {"sizes": sizes, "colors": colors}
+		sc = session.exec(
+			select(ProductSizeChart.size_chart_id).where(ProductSizeChart.product_id == product_id)
+		).first()
+		return {"sizes": sizes, "colors": colors, "size_chart_id": sc[0] if isinstance(sc, (list, tuple)) else sc}
 
 @router.get("/stock")
 def list_stock(product_id: Optional[int] = Query(default=None), size: Optional[str] = Query(default=None), color: Optional[str] = Query(default=None), limit: int = Query(default=1000, ge=1, le=10000)):

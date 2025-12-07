@@ -11,7 +11,7 @@ from .db import engine as _db_engine
 from .services.ai import AIClient
 from .routers import dashboard, importer, clients, items, orders, payments, reconcile, auth, excel_tracker
 from .routers import reports
-from .routers import inventory, mappings, products
+from .routers import inventory, mappings, products, size_charts
 from .routers import product_qa
 from .routers import instagram
 from .routers import legal
@@ -209,6 +209,7 @@ def create_app() -> FastAPI:
 	app.include_router(mappings.router)
 	# Products routes come before the image handler to avoid intercepting API paths
 	app.include_router(products.router)
+	app.include_router(size_charts.router)
 	# Route handler for product images
 	@app.get("/products/{folder}/{filename}")
 	async def serve_product_image(folder: str, filename: str):

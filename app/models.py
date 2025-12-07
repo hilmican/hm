@@ -173,6 +173,49 @@ class ProductUpsell(SQLModel, table=True):
 	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 
+class SizeChart(SQLModel, table=True):
+	"""Reusable size chart that can be attached to products."""
+
+	__tablename__ = "size_charts"
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	name: str = Field(index=True, unique=True, description="Human readable name (e.g., Pantolon Slim)")
+	description: Optional[str] = Field(default=None, sa_column=Column(Text))
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
+class SizeChartEntry(SQLModel, table=True):
+	"""One row in a size chart defining a height/weight window and suggested size."""
+
+	__tablename__ = "size_chart_entries"
+	__table_args__ = (UniqueConstraint("size_chart_id", "size_label", "height_min", "height_max", "weight_min", "weight_max", name="uq_size_chart_entry_range"),)
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	size_chart_id: int = Field(foreign_key="size_charts.id", index=True)
+	size_label: str = Field(index=True, description="Displayed size value like S, M, 32")
+	height_min: Optional[int] = Field(default=None, description="Inclusive minimum height (cm)")
+	height_max: Optional[int] = Field(default=None, description="Inclusive maximum height (cm)")
+	weight_min: Optional[int] = Field(default=None, description="Inclusive minimum weight (kg)")
+	weight_max: Optional[int] = Field(default=None, description="Inclusive maximum weight (kg)")
+	notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
+class ProductSizeChart(SQLModel, table=True):
+	"""Assign a size chart to a product (one-to-one today, extensible later)."""
+
+	__tablename__ = "product_size_charts"
+	__table_args__ = (UniqueConstraint("product_id", name="uq_product_size_chart_product"),)
+
+	id: Optional[int] = Field(default=None, primary_key=True)
+	product_id: int = Field(foreign_key="product.id", index=True)
+	size_chart_id: int = Field(foreign_key="size_charts.id", index=True)
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
 class ProductImage(SQLModel, table=True):
     __tablename__ = "product_images"
 

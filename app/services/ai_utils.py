@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Any
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Product, Item
+from ..models import Product, Item, ProductSizeChart, SizeChartEntry
 
 size_log = logging.getLogger("ai.size_matrix")
 DECIMAL_HEIGHT_PATTERN = re.compile(r'(?<!\d)1[\s\.,/-]+([5-9][0-9])(?!\d)', re.IGNORECASE)
@@ -280,7 +280,7 @@ def calculate_size_suggestion(height_cm: int, weight_kg: int, product_id: int) -
 	"""
 	Calculate size suggestion based on height and weight for a product.
 	
-	Uses the explicit size matrices provided by the business team.
+	Uses product-specific size charts first, then falls back to legacy matrices.
 	Returns: size string (e.g., "M", "L", "32") or None if cannot determine
 	"""
 	if not height_cm or not weight_kg or not product_id:
@@ -302,6 +302,56 @@ def calculate_size_suggestion(height_cm: int, weight_kg: int, product_id: int) -
 			for item in items:
 				if item.size:
 					available_sizes.add(item.size.strip().upper())
+			
+			# Check product-specific size chart first
+			psc = session.exec(
+				select(ProductSizeChart).where(ProductSizeChart.product_id == product_id)
+			).first()
+			if psc and psc.size_chart_id:
+				entries = session.exec(
+					select(SizeChartEntry)
+					.where(SizeChartEntry.size_chart_id == psc.size_chart_id)
+					.order_by(SizeChartEntry.id.asc())
+				).all()
+				if entries:
+					def _match_entry(e: SizeChartEntry) -> bool:
+						if e.height_min and height_cm < e.height_min:
+							return False
+						if e.height_max and height_cm > e.height_max:
+							return False
+						if e.weight_min and weight_kg < e.weight_min:
+							return False
+						if e.weight_max and weight_kg > e.weight_max:
+							return False
+						return True
+					
+					def _span(e: SizeChartEntry) -> int:
+						# smaller span wins; treat None as wide range
+						h_span = (e.height_max - e.height_min) if (e.height_max and e.height_min) else 1000
+						w_span = (e.weight_max - e.weight_min) if (e.weight_max and e.weight_min) else 1000
+						return h_span + w_span
+					
+					matches: list[tuple[int, str]] = []
+					matches_relaxed: list[tuple[int, str]] = []
+					for e in entries:
+						size_label = (e.size_label or "").strip()
+						if not size_label:
+							continue
+						size_norm = size_label.upper()
+						if not _match_entry(e):
+							continue
+						entry_span = _span(e)
+						if available_sizes:
+							if size_norm in available_sizes:
+								matches.append((entry_span, size_norm))
+							else:
+								matches_relaxed.append((entry_span, size_norm))
+						else:
+							matches.append((entry_span, size_norm))
+					if matches:
+						return sorted(matches, key=lambda x: (x[0], x[1]))[0][1]
+					if matches_relaxed:
+						return sorted(matches_relaxed, key=lambda x: (x[0], x[1]))[0][1]
 			
 			if not available_sizes:
 				return None
