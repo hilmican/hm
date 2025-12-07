@@ -13,6 +13,7 @@ from ..schemas import (
 	SizeChartEntryCreate,
 	SizeChartEntryUpdate,
 	ProductSizeChartAssign,
+	SizeChartGridUpsert,
 )
 
 
@@ -259,4 +260,66 @@ def assign_product(chart_id: int, body: ProductSizeChartAssign):
 			link = ProductSizeChart(product_id=body.product_id, size_chart_id=chart_id)
 			session.add(link)
 		return {"status": "ok", "product_id": body.product_id, "size_chart_id": chart_id}
+
+
+@router.post("/{chart_id}/grid")
+def upsert_grid(chart_id: int, body: SizeChartGridUpsert):
+	with get_session() as session:
+		chart = session.exec(select(SizeChart).where(SizeChart.id == chart_id)).first()
+		if not chart:
+			raise HTTPException(status_code=404, detail="Size chart not found")
+		if not body.height_bands or not body.weight_bands:
+			raise HTTPException(status_code=400, detail="height_bands and weight_bands required")
+		if not body.grid:
+			raise HTTPException(status_code=400, detail="grid required")
+		try:
+			hb = sorted(set(int(x) for x in body.height_bands if x is not None))
+			wb = sorted(set(int(x) for x in body.weight_bands if x is not None))
+		except Exception:
+			raise HTTPException(status_code=400, detail="height_bands/weight_bands must be integers")
+		if len(body.grid) != len(wb):
+			raise HTTPException(status_code=400, detail="grid row count must match weight_bands length")
+		col_count = len(hb)
+		for row in body.grid:
+			if len(row) != col_count:
+				raise HTTPException(status_code=400, detail="each grid row must match height_bands length")
+
+		def _ranges(bands: list[int]) -> list[tuple[int, int | None]]:
+			ranges = []
+			for idx, start in enumerate(bands):
+				end = bands[idx + 1] - 1 if idx + 1 < len(bands) else None
+				ranges.append((start, end))
+			return ranges
+
+		h_ranges = _ranges(hb)
+		w_ranges = _ranges(wb)
+
+		# clear existing entries
+		existing_entries = session.exec(
+			select(SizeChartEntry).where(SizeChartEntry.size_chart_id == chart_id)
+		).all()
+		for e in existing_entries:
+			session.delete(e)
+
+		count = 0
+		for w_idx, w_range in enumerate(w_ranges):
+			for h_idx, h_range in enumerate(h_ranges):
+				val_raw = body.grid[w_idx][h_idx]
+				if val_raw is None:
+					continue
+				val = str(val_raw).strip()
+				if not val:
+					continue
+				entry = SizeChartEntry(
+					size_chart_id=chart_id,
+					size_label=val,
+					height_min=h_range[0],
+					height_max=h_range[1],
+					weight_min=w_range[0],
+					weight_max=w_range[1],
+				)
+				session.add(entry)
+				count += 1
+
+		return {"status": "ok", "inserted": count}
 

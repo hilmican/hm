@@ -197,6 +197,12 @@ class SizeChartResponse(BaseModel):
 	entries: list[SizeChartEntryPayload] = []
 
 
+class SizeChartGridUpsert(BaseModel):
+	height_bands: list[int]
+	weight_bands: list[int]
+	grid: list[list[str | None]]
+
+
 class ProductSizeChartAssign(BaseModel):
 	product_id: int
 	size_chart_id: int
