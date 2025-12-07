@@ -364,7 +364,6 @@ def process_conversations_by_date_range(
 			status_reason = result.get("notes") or f"AI analizi: {result.get('status', 'unknown')}"
 			
 			# Check if candidate already exists
-			from ..models import AiOrderCandidate
 			with get_session() as session:
 				existing = session.exec(
 					select(AiOrderCandidate).where(AiOrderCandidate.conversation_id == conv_id).limit(1)
