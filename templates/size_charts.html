@@ -45,39 +45,41 @@
       <input class="chartName" data-id="{{ chart.id }}" value="{{ chart.name }}" />
       <input class="chartDesc" data-id="{{ chart.id }}" value="{{ chart.description or '' }}" placeholder="Açıklama" style="min-width:200px; flex:1;" />
     </div>
-    <div style="margin:10px 0 4px 0; font-weight:600;">Satırlar</div>
-    <table>
-      <thead>
-        <tr><th>ID</th><th>Beden</th><th>Boy min</th><th>Boy max</th><th>Kilo min</th><th>Kilo max</th><th>Not</th><th>İşlemler</th></tr>
-      </thead>
-      <tbody>
-        {% for entry in entries.get(chart.id, []) %}
-        <tr data-entry="{{ entry.id }}">
-          <td>{{ entry.id }}</td>
-          <td><input data-field="size_label" value="{{ entry.size_label }}" style="width:80px;" /></td>
-          <td><input data-field="height_min" type="number" value="{{ entry.height_min or '' }}" style="width:80px;" /></td>
-          <td><input data-field="height_max" type="number" value="{{ entry.height_max or '' }}" style="width:80px;" /></td>
-          <td><input data-field="weight_min" type="number" value="{{ entry.weight_min or '' }}" style="width:80px;" /></td>
-          <td><input data-field="weight_max" type="number" value="{{ entry.weight_max or '' }}" style="width:80px;" /></td>
-          <td><input data-field="notes" value="{{ entry.notes or '' }}" style="min-width:120px;" /></td>
-          <td>
-            <button class="saveEntry" data-chart="{{ chart.id }}" data-entry="{{ entry.id }}" style="background:#10b981;color:#fff;border:none;">Kaydet</button>
-            <button class="delEntry" data-chart="{{ chart.id }}" data-entry="{{ entry.id }}" style="background:#ef4444;color:#fff;border:none;">Sil</button>
-          </td>
-        </tr>
-        {% endfor %}
-        <tr>
-          <td>Yeni</td>
-          <td><input data-new="size_label" placeholder="M / 32" style="width:80px;" /></td>
-          <td><input data-new="height_min" type="number" placeholder="cm" style="width:80px;" /></td>
-          <td><input data-new="height_max" type="number" placeholder="cm" style="width:80px;" /></td>
-          <td><input data-new="weight_min" type="number" placeholder="kg" style="width:80px;" /></td>
-          <td><input data-new="weight_max" type="number" placeholder="kg" style="width:80px;" /></td>
-          <td><input data-new="notes" placeholder="Not" style="min-width:120px;" /></td>
-          <td><button class="addEntry" data-chart="{{ chart.id }}" style="background:#2563eb;color:#fff;border:none;">Ekle</button></td>
-        </tr>
-      </tbody>
-    </table>
+    <details style="margin-top:10px;">
+      <summary style="font-weight:600; cursor:pointer;">Satır modunu aç/kapat (manuel)</summary>
+      <table style="margin-top:8px;">
+        <thead>
+          <tr><th>ID</th><th>Beden</th><th>Boy min</th><th>Boy max</th><th>Kilo min</th><th>Kilo max</th><th>Not</th><th>İşlemler</th></tr>
+        </thead>
+        <tbody>
+          {% for entry in entries.get(chart.id, []) %}
+          <tr data-entry="{{ entry.id }}">
+            <td>{{ entry.id }}</td>
+            <td><input data-field="size_label" value="{{ entry.size_label }}" style="width:80px;" /></td>
+            <td><input data-field="height_min" type="number" value="{{ entry.height_min or '' }}" style="width:80px;" /></td>
+            <td><input data-field="height_max" type="number" value="{{ entry.height_max or '' }}" style="width:80px;" /></td>
+            <td><input data-field="weight_min" type="number" value="{{ entry.weight_min or '' }}" style="width:80px;" /></td>
+            <td><input data-field="weight_max" type="number" value="{{ entry.weight_max or '' }}" style="width:80px;" /></td>
+            <td><input data-field="notes" value="{{ entry.notes or '' }}" style="min-width:120px;" /></td>
+            <td>
+              <button class="saveEntry" data-chart="{{ chart.id }}" data-entry="{{ entry.id }}" style="background:#10b981;color:#fff;border:none;">Kaydet</button>
+              <button class="delEntry" data-chart="{{ chart.id }}" data-entry="{{ entry.id }}" style="background:#ef4444;color:#fff;border:none;">Sil</button>
+            </td>
+          </tr>
+          {% endfor %}
+          <tr>
+            <td>Yeni</td>
+            <td><input data-new="size_label" placeholder="M / 32" style="width:80px;" /></td>
+            <td><input data-new="height_min" type="number" placeholder="cm" style="width:80px;" /></td>
+            <td><input data-new="height_max" type="number" placeholder="cm" style="width:80px;" /></td>
+            <td><input data-new="weight_min" type="number" placeholder="kg" style="width:80px;" /></td>
+            <td><input data-new="weight_max" type="number" placeholder="kg" style="width:80px;" /></td>
+            <td><input data-new="notes" placeholder="Not" style="min-width:120px;" /></td>
+            <td><button class="addEntry" data-chart="{{ chart.id }}" style="background:#2563eb;color:#fff;border:none;">Ekle</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </details>
 
     <div style="margin-top:16px; padding:10px; border:1px dashed #cbd5e1; border-radius:10px;">
       <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
@@ -237,7 +239,6 @@ document.querySelectorAll('.saveMatrix').forEach(btn => {
     if (!hb.length || !wb.length) { alert('Boy ve kilo bantlarını girin'); return; }
     const cells = document.querySelectorAll(`input[data-cell][data-chart="${chartId}"]`);
     if (!cells.length) { alert('Önce matrisi oluşturun'); return; }
-    // build grid rows by weight order as entered
     const grid = wb.map(() => hb.map(() => null));
     cells.forEach(inp => {
       const w = parseInt(inp.getAttribute('data-w'), 10);
@@ -254,7 +255,8 @@ document.querySelectorAll('.saveMatrix').forEach(btn => {
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ height_bands: hb, weight_bands: wb, grid })
       });
-      alert('Matris kaydedildi');
+      alert('Matris kaydedildi (mevcut tablo güncellendi)');
+      // tabloyu yeniden doldurmak için sayfayı yenile
       location.reload();
     } catch (err) { alert('Matris kaydedilemedi: ' + err); }
   });

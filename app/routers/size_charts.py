@@ -47,20 +47,7 @@ def list_size_charts(include_entries: bool = Query(default=True)):
 					"id": c.id,
 					"name": c.name,
 					"description": c.description,
-					"entries": [
-						{
-							"id": e.id,
-							"size_label": e.size_label,
-							"height_min": e.height_min,
-							"height_max": e.height_max,
-							"weight_min": e.weight_min,
-							"weight_max": e.weight_max,
-							"notes": e.notes,
-						}
-						for e in entry_map.get(c.id, [])
-					]
-					if include_entries
-					else [],
+					"entries": jsonable_encoder(entry_map.get(c.id, [])) if include_entries else [],
 				}
 				for c in charts
 			]
