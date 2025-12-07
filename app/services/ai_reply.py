@@ -2439,18 +2439,13 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 							break
 				if not selected and stock_list:
 					selected = stock_list[0]
-				# Fiyat: öncelikle product default_price, yoksa stok fiyatı
+				# Fiyat: sadece product default_price (varyant fiyatı kullanma)
 				price_val = None
 				try:
 					if upsell_entry.get("default_price") is not None:
 						price_val = float(upsell_entry.get("default_price"))
 				except Exception:
 					price_val = None
-				if price_val is None and selected and selected.get("price") is not None:
-					try:
-						price_val = float(selected.get("price"))
-					except Exception:
-						price_val = None
 				# Renk: görsel varyantı varsa önce onu kullan, yoksa product default_color, yoksa stok rengi
 				image_variant = None
 				try:
