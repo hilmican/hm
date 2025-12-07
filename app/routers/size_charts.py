@@ -313,7 +313,9 @@ def upsert_grid(chart_id: int, body: SizeChartGridUpsert):
 		w_ranges = _ranges(wb)
 
 		# Build new entries; only proceed if there is at least one non-empty cell
+		# Use a set to avoid duplicates when same cell value is repeated
 		new_entries: list[SizeChartEntry] = []
+		seen_keys = set()
 		for w_idx, w_range in enumerate(w_ranges):
 			for h_idx, h_range in enumerate(h_ranges):
 				val_raw = body.grid[w_idx][h_idx]
@@ -322,14 +324,25 @@ def upsert_grid(chart_id: int, body: SizeChartGridUpsert):
 				val = str(val_raw).strip()
 				if not val:
 					continue
+				key = (
+					chart_id,
+					val,
+					h_range[0],
+					h_range[1],
+					w_range[0],
+					w_range[1],
+				)
+				if key in seen_keys:
+					continue
+				seen_keys.add(key)
 				new_entries.append(
 					SizeChartEntry(
-					size_chart_id=chart_id,
-					size_label=val,
-					height_min=h_range[0],
-					height_max=h_range[1],
-					weight_min=w_range[0],
-					weight_max=w_range[1],
+						size_chart_id=chart_id,
+						size_label=val,
+						height_min=h_range[0],
+						height_max=h_range[1],
+						weight_min=w_range[0],
+						weight_max=w_range[1],
 					)
 				)
 		if not new_entries:
