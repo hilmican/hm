@@ -157,6 +157,38 @@ def delete_size_chart(chart_id: int):
 		return {"status": "ok"}
 
 
+@router.post("/{chart_id}/clone")
+def clone_size_chart(chart_id: int):
+	with get_session() as session:
+		chart = session.exec(select(SizeChart).where(SizeChart.id == chart_id)).first()
+		if not chart:
+			raise HTTPException(status_code=404, detail="Size chart not found")
+		base_name = chart.name or "Kopya"
+		new_name = f"{base_name} (kopya)"
+		# ensure unique name
+		suffix = 1
+		while session.exec(select(SizeChart).where(SizeChart.name == new_name)).first():
+			suffix += 1
+			new_name = f"{base_name} (kopya {suffix})"
+		new_chart = SizeChart(name=new_name, description=chart.description)
+		session.add(new_chart)
+		session.flush()
+		entries = session.exec(select(SizeChartEntry).where(SizeChartEntry.size_chart_id == chart_id)).all()
+		for e in entries:
+			session.add(
+				SizeChartEntry(
+					size_chart_id=new_chart.id,
+					size_label=e.size_label,
+					height_min=e.height_min,
+					height_max=e.height_max,
+					weight_min=e.weight_min,
+					weight_max=e.weight_max,
+					notes=e.notes,
+				)
+			)
+		return {"status": "ok", "id": new_chart.id, "name": new_chart.name}
+
+
 @router.get("/{chart_id}")
 def get_size_chart(chart_id: int):
 	with get_session() as session:

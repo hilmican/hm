@@ -39,6 +39,7 @@
       <div style="display:flex; gap:8px; align-items:center;">
         <button class="saveChart" data-id="{{ chart.id }}" style="background:#10b981;color:#fff;border:none;">Kaydet</button>
         <button class="deleteChart" data-id="{{ chart.id }}" style="background:#ef4444;color:#fff;border:none;">Sil</button>
+        <button class="cloneChart" data-id="{{ chart.id }}" style="background:#6366f1;color:#fff;border:none;">Tabloyu Kopyala</button>
       </div>
     </div>
     <div class="row" style="margin:10px 0;">
@@ -142,6 +143,17 @@ for (const btn of document.querySelectorAll('.deleteChart')) {
       await fetchJSON(`/size-charts/${id}`, { method:'DELETE' });
       location.reload();
     } catch (err) { alert('Silme hatasi'); }
+  });
+}
+
+for (const btn of document.querySelectorAll('.cloneChart')) {
+  btn.addEventListener('click', async (e) => {
+    const id = e.target.getAttribute('data-id');
+    try {
+      const res = await fetchJSON(`/size-charts/${id}/clone`, { method:'POST' });
+      alert(`Kopya oluşturuldu: ${res.name}`);
+      location.reload();
+    } catch (err) { alert('Kopyalama hatasi: ' + err); }
   });
 }
 
