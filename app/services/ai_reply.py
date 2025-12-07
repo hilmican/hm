@@ -2415,6 +2415,20 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 	reply["state"] = _normalize_state(data.get("state"), fallback=state_payload)
 	if product_images:
 		reply["product_images"] = product_images
+
+	# Enforce upsell when hazır ama yapılmadıysa: cevabı göndermeden blokla
+	if upsell_offer_needed:
+		state_final = reply.get("state") or {}
+		upsell_done = bool(state_final.get("upsell_offered")) or any(
+			cb.get("name") == "add_cart_item" and cb.get("arguments", {}).get("is_upsell")
+			for cb in (function_callbacks or [])
+			if isinstance(cb, dict)
+		)
+		if not upsell_done:
+			reply["should_reply"] = False
+			reply["reason"] = "needs_upsell"
+			reply["notes"] = "Upsell hazır; upsell_offered=false. Teklif eklenip yeniden denenmeli."
+
 	if include_meta:
 		try:
 			debug_meta = {
