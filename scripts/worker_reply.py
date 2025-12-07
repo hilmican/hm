@@ -149,6 +149,7 @@ def _decode_escape_sequences(text: str) -> str:
 			result = text.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
 			return result
 		except Exception:
+			return text
 	return text
 
 
