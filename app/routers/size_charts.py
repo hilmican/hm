@@ -65,6 +65,41 @@ def list_size_charts(include_entries: bool = Query(default=True)):
 		}
 
 
+@router.get("/table")
+def size_charts_table(request: Request):
+	with get_session() as session:
+		charts = session.exec(select(SizeChart).order_by(SizeChart.name.asc())).all()
+		entry_map = _load_entries(session, [c.id for c in charts if c.id])
+	templates = request.app.state.templates
+	return templates.TemplateResponse(
+		"size_charts.html",
+		{
+			"request": request,
+			"charts": charts,
+			"entries": entry_map,
+		},
+	)
+
+
+@router.get("/assign")
+def product_size_chart_table(request: Request):
+	with get_session() as session:
+		products = session.exec(select(Product).order_by(Product.name.asc())).all()
+		charts = session.exec(select(SizeChart).order_by(SizeChart.name.asc())).all()
+		assignments = session.exec(select(ProductSizeChart)).all()
+	assignment_map = {a.product_id: a.size_chart_id for a in assignments if a.product_id and a.size_chart_id}
+	templates = request.app.state.templates
+	return templates.TemplateResponse(
+		"product_size_chart.html",
+		{
+			"request": request,
+			"products": products,
+			"charts": charts,
+			"assignment_map": assignment_map,
+		},
+	)
+
+
 @router.post("")
 def create_size_chart(body: SizeChartCreate):
 	if not body.name:
@@ -224,39 +259,4 @@ def assign_product(chart_id: int, body: ProductSizeChartAssign):
 			link = ProductSizeChart(product_id=body.product_id, size_chart_id=chart_id)
 			session.add(link)
 		return {"status": "ok", "product_id": body.product_id, "size_chart_id": chart_id}
-
-
-@router.get("/table")
-def size_charts_table(request: Request):
-	with get_session() as session:
-		charts = session.exec(select(SizeChart).order_by(SizeChart.name.asc())).all()
-		entry_map = _load_entries(session, [c.id for c in charts if c.id])
-	templates = request.app.state.templates
-	return templates.TemplateResponse(
-		"size_charts.html",
-		{
-			"request": request,
-			"charts": charts,
-			"entries": entry_map,
-		},
-	)
-
-
-@router.get("/assign")
-def product_size_chart_table(request: Request):
-	with get_session() as session:
-		products = session.exec(select(Product).order_by(Product.name.asc())).all()
-		charts = session.exec(select(SizeChart).order_by(SizeChart.name.asc())).all()
-		assignments = session.exec(select(ProductSizeChart)).all()
-	assignment_map = {a.product_id: a.size_chart_id for a in assignments if a.product_id and a.size_chart_id}
-	templates = request.app.state.templates
-	return templates.TemplateResponse(
-		"product_size_chart.html",
-		{
-			"request": request,
-			"products": products,
-			"charts": charts,
-			"assignment_map": assignment_map,
-		},
-	)
 
