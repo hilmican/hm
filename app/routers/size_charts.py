@@ -294,14 +294,8 @@ def upsert_grid(chart_id: int, body: SizeChartGridUpsert):
 		h_ranges = _ranges(hb)
 		w_ranges = _ranges(wb)
 
-		# clear existing entries
-		existing_entries = session.exec(
-			select(SizeChartEntry).where(SizeChartEntry.size_chart_id == chart_id)
-		).all()
-		for e in existing_entries:
-			session.delete(e)
-
-		count = 0
+		# Build new entries; only proceed if there is at least one non-empty cell
+		new_entries: list[SizeChartEntry] = []
 		for w_idx, w_range in enumerate(w_ranges):
 			for h_idx, h_range in enumerate(h_ranges):
 				val_raw = body.grid[w_idx][h_idx]
@@ -310,16 +304,29 @@ def upsert_grid(chart_id: int, body: SizeChartGridUpsert):
 				val = str(val_raw).strip()
 				if not val:
 					continue
-				entry = SizeChartEntry(
+				new_entries.append(
+					SizeChartEntry(
 					size_chart_id=chart_id,
 					size_label=val,
 					height_min=h_range[0],
 					height_max=h_range[1],
 					weight_min=w_range[0],
 					weight_max=w_range[1],
+					)
 				)
-				session.add(entry)
-				count += 1
+		if not new_entries:
+			raise HTTPException(status_code=400, detail="Grid is empty; provide at least one size cell")
+
+		# clear existing entries then insert new ones
+		existing_entries = session.exec(
+			select(SizeChartEntry).where(SizeChartEntry.size_chart_id == chart_id)
+		).all()
+		for e in existing_entries:
+			session.delete(e)
+		for entry in new_entries:
+			session.add(entry)
+
+		count = len(new_entries)
 
 		return {"status": "ok", "inserted": count}
 

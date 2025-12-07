@@ -30,7 +30,7 @@
   </div>
 
   {% for chart in charts %}
-  <div class="card" data-chart="{{ chart.id }}">
+  <div class="card" data-chart="{{ chart.id }}" data-entries='{{ entries.get(chart.id, []) | tojson }}'>
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
       <div>
         <div style="font-weight:600;">{{ chart.name }}</div>
@@ -87,7 +87,7 @@
         </div>
         <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
           <label style="font-size:12px; color:#475569;">Boy bantları</label>
-          <input class="hbInput" data-chart="{{ chart.id }}" placeholder="150,160,170,180,190" style="width:200px;" />
+      <input class="hbInput" data-chart="{{ chart.id }}" placeholder="150,160,170,180,190" style="width:200px;" />
           <label style="font-size:12px; color:#475569;">Kilo bantları</label>
           <input class="wbInput" data-chart="{{ chart.id }}" placeholder="50,60,70,80,90,100,110" style="width:220px;" />
           <button class="buildMatrix" data-chart="{{ chart.id }}" style="background:#2563eb;color:#fff;border:none;">Matris Oluştur</button>
@@ -223,6 +223,7 @@ document.querySelectorAll('.buildMatrix').forEach(btn => {
     const wb = parseBands(wbInput.value || '');
     if (!hb.length || !wb.length) { alert('Boy ve kilo bantlarını girin'); return; }
     renderMatrix(chartId, hb, wb);
+    populateExisting(chartId, hb, wb);
   });
 });
 
@@ -257,6 +258,40 @@ document.querySelectorAll('.saveMatrix').forEach(btn => {
       location.reload();
     } catch (err) { alert('Matris kaydedilemedi: ' + err); }
   });
+});
+
+function populateExisting(chartId, hb, wb) {
+  let entries = [];
+  const card = document.querySelector(`.card[data-chart="${chartId}"]`);
+  if (!card) return;
+  try { entries = JSON.parse(card.dataset.entries || "[]"); } catch (e) { entries = []; }
+  if (!entries.length) return;
+  const area = document.querySelector(`.matrixArea[data-chart="${chartId}"]`);
+  if (!area) return;
+  entries.forEach(e => {
+    const h = e.height_min;
+    const w = e.weight_min;
+    if (h == null || w == null) return;
+    const inp = area.querySelector(`input[data-cell][data-h="${h}"][data-w="${w}"]`);
+    if (inp) inp.value = e.size_label || "";
+  });
+}
+
+// Auto-build matrix from existing entries if possible
+document.querySelectorAll('.card[data-chart]').forEach(card => {
+  const chartId = card.getAttribute('data-chart');
+  let entries = [];
+  try { entries = JSON.parse(card.dataset.entries || "[]"); } catch (e) { entries = []; }
+  if (!entries.length) return;
+  const hb = parseBands(entries.map(e => e.height_min).join(','));
+  const wb = parseBands(entries.map(e => e.weight_min).join(','));
+  if (!hb.length || !wb.length) return;
+  const hbInput = document.querySelector(`.hbInput[data-chart="${chartId}"]`);
+  const wbInput = document.querySelector(`.wbInput[data-chart="${chartId}"]`);
+  if (hbInput) hbInput.value = hb.join(',');
+  if (wbInput) wbInput.value = wb.join(',');
+  renderMatrix(chartId, hb, wb);
+  populateExisting(chartId, hb, wb);
 });
 </script>
 </body>
