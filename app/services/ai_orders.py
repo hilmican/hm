@@ -118,7 +118,17 @@ def _serialize_candidate(candidate: AiOrderCandidate) -> Dict[str, Any]:
 	}
 
 
-def _update_candidate(conversation_id: int, status: str, *, note: Optional[str], payload: Optional[Dict[str, Any]] = None, metadata: Optional[Dict[str, Any]] = None, mark_placed: bool = False) -> Dict[str, Any]:
+def _update_candidate(
+	conversation_id: int,
+	status: str,
+	*,
+	note: Optional[str],
+	payload: Optional[Dict[str, Any]] = None,
+	metadata: Optional[Dict[str, Any]] = None,
+	mark_placed: bool = False,
+	last_detected_at: Optional[dt.datetime] = None,
+	last_detected_message_ts_ms: Optional[int] = None,
+) -> Dict[str, Any]:
 	if status not in ALLOWED_STATUSES:
 		raise ValueError(f"Unsupported AI order candidate status: {status}")
 	
@@ -183,6 +193,11 @@ def _update_candidate(conversation_id: int, status: str, *, note: Optional[str],
 					candidate.placed_at = now
 		elif status != STATUS_PLACED:
 			candidate.placed_at = None
+		# Detection bookkeeping (optional)
+		if last_detected_at:
+			candidate.last_detected_at = last_detected_at
+		if last_detected_message_ts_ms is not None:
+			candidate.last_detected_message_ts_ms = last_detected_message_ts_ms
 		_append_history(candidate, status, note, _sanitize_value(extra) if extra else None, ts=now)
 		session.add(candidate)
 		session.commit()
