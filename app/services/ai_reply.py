@@ -2118,7 +2118,7 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 	if upsell_offer_needed:
 		agent_user_prompt += (
 			"\n=== ZORUNLU UPSELL (force_upsell=true) ===\n"
-			"- Cevabın içinde tek paragraf upsell önerisi ekle; ürün/renk/beden/fiyatı upsell_config'ten seç. Eğer upsell_ready=false ise teklif yapma.\n"
+			"- Cevabın içinde tek paragraf upsell önerisi ekle; ürün/renk/beden/fiyatı upsell_config'ten seç (upsell_ready zaten true durumda gelirsin).\n"
 			"- Teklif yaptıysan state.upsell_offered=true olarak döndür; müşteri EVET derse add_cart_item ile is_upsell=true ekle ve state.upsell_accepted=true yap.\n"
 		)
 	if function_callbacks:
