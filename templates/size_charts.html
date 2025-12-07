@@ -46,6 +46,25 @@
       <input class="chartName" data-id="{{ chart.id }}" value="{{ chart.name }}" />
       <input class="chartDesc" data-id="{{ chart.id }}" value="{{ chart.description or '' }}" placeholder="Açıklama" style="min-width:200px; flex:1;" />
     </div>
+    <div style="margin-top:12px; padding:10px; border:1px dashed #cbd5e1; border-radius:10px;">
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:600;">Matris Modu</div>
+          <div class="muted" style="font-size:12px;">Boy aralıklarını (cm) ve kilo aralıklarını (kg) virgülle girin, matriste kesişime beden yazın.</div>
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+          <label style="font-size:12px; color:#475569;">Boy bantları</label>
+      <input class="hbInput" data-chart="{{ chart.id }}" placeholder="150,160,170,180,190" style="width:200px;" />
+          <label style="font-size:12px; color:#475569;">Kilo bantları</label>
+          <input class="wbInput" data-chart="{{ chart.id }}" placeholder="50,60,70,80,90,100,110" style="width:220px;" />
+          <button class="buildMatrix" data-chart="{{ chart.id }}" style="background:#2563eb;color:#fff;border:none;">Matris Oluştur</button>
+          <button class="saveMatrix" data-chart="{{ chart.id }}" style="background:#0ea5e9;color:#fff;border:none;">Matrisi Kaydet</button>
+        </div>
+      </div>
+      <div class="muted" style="font-size:12px; margin-top:6px;">Aralıklar soldan sağa / yukarıdan aşağı artan olmalı. Son bant üst sınırı otomatik sonsuza kadar uzar.</div>
+      <div class="matrixArea" data-chart="{{ chart.id }}" style="margin-top:12px; overflow:auto;"></div>
+    </div>
+
     <details style="margin-top:10px;">
       <summary style="font-weight:600; cursor:pointer;">Satır modunu aç/kapat (manuel)</summary>
       <table style="margin-top:8px;">
@@ -81,25 +100,6 @@
         </tbody>
       </table>
     </details>
-
-    <div style="margin-top:16px; padding:10px; border:1px dashed #cbd5e1; border-radius:10px;">
-      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-        <div>
-          <div style="font-weight:600;">Matris Modu</div>
-          <div class="muted" style="font-size:12px;">Boy aralıklarını (cm) ve kilo aralıklarını (kg) virgülle girin, matriste kesişime beden yazın.</div>
-        </div>
-        <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-          <label style="font-size:12px; color:#475569;">Boy bantları</label>
-      <input class="hbInput" data-chart="{{ chart.id }}" placeholder="150,160,170,180,190" style="width:200px;" />
-          <label style="font-size:12px; color:#475569;">Kilo bantları</label>
-          <input class="wbInput" data-chart="{{ chart.id }}" placeholder="50,60,70,80,90,100,110" style="width:220px;" />
-          <button class="buildMatrix" data-chart="{{ chart.id }}" style="background:#2563eb;color:#fff;border:none;">Matris Oluştur</button>
-          <button class="saveMatrix" data-chart="{{ chart.id }}" style="background:#0ea5e9;color:#fff;border:none;">Matrisi Kaydet</button>
-        </div>
-      </div>
-      <div class="muted" style="font-size:12px; margin-top:6px;">Aralıklar soldan sağa / yukarıdan aşağı artan olmalı. Son bant üst sınırı otomatik sonsuza kadar uzar.</div>
-      <div class="matrixArea" data-chart="{{ chart.id }}" style="margin-top:12px; overflow:auto;"></div>
-    </div>
   </div>
   {% endfor %}
 
@@ -306,6 +306,21 @@ document.querySelectorAll('.card[data-chart]').forEach(card => {
   if (wbInput) wbInput.value = wb.join(',');
   renderMatrix(chartId, hb, wb);
   populateExisting(chartId, hb, wb);
+  ensureMatrixPlaceholder(chartId);
+});
+
+function ensureMatrixPlaceholder(chartId) {
+  const area = document.querySelector(`.matrixArea[data-chart="${chartId}"]`);
+  if (area && !area.innerHTML.trim()) {
+    area.innerHTML = '<div class="muted">Boy/kilo bantlarını yazıp "Matris Oluştur" düğmesine basın.</div>';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.card[data-chart]').forEach(card => {
+    const id = card.getAttribute('data-chart');
+    ensureMatrixPlaceholder(id);
+  });
 });
 </script>
 </body>
