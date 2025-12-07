@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from ..db import get_session
@@ -373,10 +374,14 @@ def upsert_grid(chart_id: int, body: SizeChartGridUpsert):
 		).all()
 		for e in existing_entries:
 			session.delete(e)
+		# ensure deletes are flushed before inserts to avoid unique conflicts
+		session.flush()
 		for entry in new_entries:
 			session.add(entry)
 
 		count = len(new_entries)
-
-		return {"status": "ok", "inserted": count}
+		try:
+			return {"status": "ok", "inserted": count}
+		except IntegrityError:
+			raise HTTPException(status_code=400, detail="Duplicate ranges detected; please adjust height/weight bands")
 
