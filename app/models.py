@@ -549,7 +549,8 @@ class AiOrderCandidate(SQLModel, table=True):
 	placed_at: Optional[dt.datetime] = Field(default=None, index=True)
 	# Detection bookkeeping: when we last ran detection and which message timestamp was included
 	last_detected_at: Optional[dt.datetime] = Field(default=None, index=True)
-	last_detected_message_ts_ms: Optional[int] = Field(default=None, sa_column=Column(BigInteger), index=True)
+	# Use Column(BigInteger) without Field index flag to avoid SQLModel conflict
+	last_detected_message_ts_ms: Optional[int] = Field(default=None, sa_column=Column(BigInteger))
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 
