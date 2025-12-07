@@ -4,11 +4,11 @@ import datetime as dt
 import logging
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import text as _text
+from sqlalchemy import text as _text, func
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Message
+from ..models import Message, AiOrderCandidate
 from .ai import AIClient, get_ai_model_from_settings
 from .ai_orders import _update_candidate, ALLOWED_STATUSES
 from .prompts import IG_ORDER_CANDIDATE_PROMPT
@@ -206,30 +206,6 @@ def process_conversations_by_date_range(
 	
 	# Get conversation IDs from messages in date range
 	with get_session() as session:
-		if skip_processed:
-			# Exclude conversations that already have AI order candidates
-			# Note: We filter dm: conversation_ids in Python since SQLite type handling can be inconsistent
-			sql = (
-				"SELECT DISTINCT m.conversation_id FROM message m "
-				"LEFT JOIN ai_order_candidates aoc ON aoc.conversation_id = m.conversation_id "
-				"WHERE m.timestamp_ms >= :start_ms AND m.timestamp_ms < :end_ms "
-				"AND m.conversation_id IS NOT NULL "
-				"AND aoc.id IS NULL "
-				"ORDER BY m.conversation_id DESC "
-				"LIMIT :lim"
-			)
-		else:
-			# Include all conversations, even if they have candidates (for reprocessing)
-			# Note: We filter dm: conversation_ids in Python since SQLite type handling can be inconsistent
-			sql = (
-				"SELECT DISTINCT conversation_id FROM message "
-				"WHERE timestamp_ms >= :start_ms AND timestamp_ms < :end_ms "
-				"AND conversation_id IS NOT NULL "
-				"ORDER BY conversation_id DESC "
-				"LIMIT :lim"
-			)
-		rows = session.exec(_text(sql).params(start_ms=start_ms, end_ms=end_ms, lim=int(limit))).all()
-		# Handle different return types: int (direct value), object with attribute, or tuple/list
 		def _extract_conversation_id(r):
 			if isinstance(r, int):
 				return r
@@ -237,7 +213,6 @@ def process_conversations_by_date_range(
 				return r.conversation_id
 			if isinstance(r, (tuple, list)) and len(r) > 0:
 				return r[0]
-			# Try to access as Row object with index
 			try:
 				return r[0]
 			except (TypeError, IndexError):
@@ -250,18 +225,15 @@ def process_conversations_by_date_range(
 			if isinstance(cid, int):
 				return cid
 			if isinstance(cid, str):
-				# Skip dm: format strings (legacy data that should be migrated)
 				cid_str = str(cid).strip()
 				if cid_str.startswith("dm:"):
 					log.debug("Skipping dm: format conversation_id: %s", cid_str)
 					return None
-				# Try to convert to int
 				try:
 					return int(cid_str)
 				except (ValueError, TypeError) as e:
 					log.debug("Failed to convert conversation_id to int: %s (error: %s)", cid_str, str(e))
 					return None
-			# Try to convert other types
 			try:
 				cid_str = str(cid).strip()
 				if cid_str.startswith("dm:"):
@@ -272,29 +244,77 @@ def process_conversations_by_date_range(
 				log.debug("Failed to convert conversation_id to int: %s (error: %s)", cid, str(e))
 				return None
 		
-		# Extract and normalize conversation IDs, filtering out None values and ensuring they're integers
-		raw_ids = [_extract_conversation_id(r) for r in rows]
-		normalized_ids = [_normalize_conversation_id(cid) for cid in raw_ids]
-		conversation_ids = [cid for cid in normalized_ids if cid is not None and isinstance(cid, int)]
+		if skip_processed:
+			# Include already-processed conversations if they have new messages since last detection.
+			raw_rows = session.exec(
+				select(Message.conversation_id, func.max(Message.timestamp_ms).label("last_msg_ms"))
+				.where(
+					Message.timestamp_ms >= start_ms,
+					Message.timestamp_ms < end_ms,
+					Message.conversation_id.is_not(None),
+				)
+				.group_by(Message.conversation_id)
+				.order_by(func.max(Message.timestamp_ms).desc())
+				.limit(limit * 3)  # over-fetch; we filter below
+			).all()
+			
+			conversation_ids: List[int] = []
+			for conv_id, last_msg_ms in raw_rows:
+				normalized_id = _normalize_conversation_id(conv_id)
+				if normalized_id is None or last_msg_ms is None:
+					continue
+				
+				candidate = session.exec(
+					select(AiOrderCandidate).where(AiOrderCandidate.conversation_id == normalized_id).limit(1)
+				).first()
+				
+				if candidate is None:
+					conversation_ids.append(normalized_id)
+					continue
+				
+				last_processed_ms = int(candidate.updated_at.timestamp() * 1000) if candidate.updated_at else 0
+				# Re-run detection if there is any message newer than the last detection
+				if last_msg_ms > last_processed_ms:
+					conversation_ids.append(normalized_id)
+			
+			# Respect requested limit after filtering
+			conversation_ids = conversation_ids[:limit]
+			
+			# Count how many processed candidates we skipped due to no new messages
+			total_candidates_checked = len(raw_rows)
+			skipped = total_candidates_checked - len(conversation_ids)
+		else:
+			sql = (
+				"SELECT DISTINCT conversation_id FROM message "
+				"WHERE timestamp_ms >= :start_ms AND timestamp_ms < :end_ms "
+				"AND conversation_id IS NOT NULL "
+				"ORDER BY conversation_id DESC "
+				"LIMIT :lim"
+			)
+			rows = session.exec(_text(sql).params(start_ms=start_ms, end_ms=end_ms, lim=int(limit))).all()
+			raw_ids = [_extract_conversation_id(r) for r in rows]
+			normalized_ids = [_normalize_conversation_id(cid) for cid in raw_ids]
+			conversation_ids = [cid for cid in normalized_ids if cid is not None and isinstance(cid, int)]
+			
+			# If skip_processed is False, we still want to count how many would have been skipped
+			if conversation_ids:
+				existing_candidates = session.exec(
+					select(AiOrderCandidate.conversation_id).where(
+						AiOrderCandidate.conversation_id.in_(conversation_ids)
+					)
+				).all()
+				existing_ids = {_normalize_conversation_id(_extract_conversation_id(c)) for c in existing_candidates}
+				existing_ids = {cid for cid in existing_ids if cid is not None}
+				skipped = len([c for c in conversation_ids if c in existing_ids])
+			else:
+				skipped = 0
 		
 		# Log if we filtered out any invalid IDs
-		filtered_count = len(raw_ids) - len(conversation_ids)
-		if filtered_count > 0:
-			log.info("Filtered out %d invalid conversation_ids (dm: format or non-numeric)", filtered_count)
-		
-		# If skip_processed is False, we still want to count how many would have been skipped
-		if not skip_processed and conversation_ids:
-			from ..models import AiOrderCandidate
-			existing_candidates = session.exec(
-				select(AiOrderCandidate.conversation_id).where(
-					AiOrderCandidate.conversation_id.in_(conversation_ids)
-				)
-			).all()
-			# SQLModel returns integers directly for single-column selects
-			# Normalize existing IDs to ensure type consistency
-			existing_ids = {_normalize_conversation_id(_extract_conversation_id(c)) for c in existing_candidates}
-			existing_ids = {cid for cid in existing_ids if cid is not None}
-			skipped = len([c for c in conversation_ids if c in existing_ids])
+		raw_ids_for_log = locals().get("raw_ids", [])
+		if raw_ids_for_log:
+			filtered_count = len(raw_ids_for_log) - len(conversation_ids)
+			if filtered_count > 0:
+				log.info("Filtered out %d invalid conversation_ids (dm: format or non-numeric)", filtered_count)
 	
 	# Final type check: ensure all conversation_ids are integers
 	conversation_ids = [cid for cid in conversation_ids if isinstance(cid, int)]
