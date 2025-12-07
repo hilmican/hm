@@ -1284,9 +1284,10 @@ def draft_reply(
 			if score >= 2 or digits >= 6:
 				return True
 		return False
-	if "asked_payment" not in state_payload:
+	# Heuristic override: ödeme/adres sinyali geldiyse bayrakları true yap
+	if not state_payload.get("asked_payment"):
 		state_payload["asked_payment"] = _infer_payment(history)
-	if "asked_address" not in state_payload:
+	if not state_payload.get("asked_address"):
 		state_payload["asked_address"] = _infer_address(history)
 	hail_already_sent = bool(state_payload.get("hail_sent"))
 	# Offer upsell sadece adres adımı tamamlandıktan veya sipariş tamamlandıktan sonra
