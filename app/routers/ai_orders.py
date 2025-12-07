@@ -107,6 +107,9 @@ def list_ai_order_candidates(request: Request, status: Optional[str] = None, q: 
 					IGUser.username.ilike(like),
 					IGUser.contact_name.ilike(like),
 					IGUser.contact_phone.ilike(like),
+					Conversation.last_sender_username.ilike(like),
+					Conversation.last_message_text.ilike(like),
+					AiOrderCandidate.order_payload_json.ilike(like),
 				)
 			)
 		# Date filtering: Use placed_at if available (for placed orders), otherwise use conversation's last_message_at
