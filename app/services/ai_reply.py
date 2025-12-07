@@ -1289,11 +1289,10 @@ def draft_reply(
 	if "asked_address" not in state_payload:
 		state_payload["asked_address"] = _infer_address(history)
 	hail_already_sent = bool(state_payload.get("hail_sent"))
-	# Offer upsell only after main ürün akışı netleşmeye başladı (ödeme/adres aşaması veya sonrası)
+	# Offer upsell sadece adres adımı tamamlandıktan veya sipariş tamamlandıktan sonra
 	upsell_ready = (
-		bool(state_payload.get("asked_payment"))
-		or bool(state_payload.get("asked_address"))
-		or (state_payload.get("last_step") in ("awaiting_payment", "awaiting_address", "order_placed", "confirmed_by_customer"))
+		bool(state_payload.get("asked_address"))
+		or (state_payload.get("last_step") in ("order_placed", "confirmed_by_customer"))
 	)
 	upsell_offer_needed = bool(upsell_config) and upsell_ready and not bool(state_payload.get("upsell_offered"))
 	if upsell_offer_needed:
@@ -2073,7 +2072,7 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 	upsell_timing_instruction = (
 		f"=== UPSELL ZAMANLAMA KURALI (KRİTİK) ===\n"
 		f"upsell_ready = {'true' if upsell_ready else 'false'}\n"
-		"- upsell_ready false ise HİÇ upsell teklif etme.\n"
+		"- upsell_ready false ise HİÇ upsell teklif etme (adres tamamlanmadan teklif yok).\n"
 		"- upsell_ready true ve upsell_config varsa, tek sefer upsell teklif et (force_upsell true ise zorunlu).\n"
 	)
 	sys_prompt_parts.append(upsell_timing_instruction)
@@ -2439,18 +2438,30 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 							break
 				if not selected and stock_list:
 					selected = stock_list[0]
+				# Fiyat: öncelikle product default_price, yoksa stok fiyatı
 				price_val = None
-				if selected and selected.get("price") is not None:
+				try:
+					if upsell_entry.get("default_price") is not None:
+						price_val = float(upsell_entry.get("default_price"))
+				except Exception:
+					price_val = None
+				if price_val is None and selected and selected.get("price") is not None:
 					try:
 						price_val = float(selected.get("price"))
 					except Exception:
 						price_val = None
-				if price_val is None:
-					try:
-						price_val = float(upsell_entry.get("default_price"))
-					except Exception:
-						price_val = None
-				color_val = (selected or {}).get("color") or upsell_entry.get("default_color")
+				# Renk: görsel varyantı varsa önce onu kullan, yoksa product default_color, yoksa stok rengi
+				image_variant = None
+				try:
+					imgs = upsell_entry.get("images") or []
+					for img in imgs:
+						vk = (img.get("variant_key") or "").strip()
+						if vk:
+							image_variant = vk
+							break
+				except Exception:
+					image_variant = None
+				color_val = image_variant or upsell_entry.get("default_color") or (selected or {}).get("color")
 				size_val = (selected or {}).get("size") or preferred_size
 				name_val = upsell_entry.get("product_name") or "Upsell ürün"
 				price_txt = f" {price_val:.0f}₺" if price_val else ""
