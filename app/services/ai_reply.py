@@ -1261,6 +1261,33 @@ def draft_reply(
 		state_payload.setdefault("current_focus_product_id", product_id_val)
 	state_payload.setdefault("upsell_offered", False)
 	state_payload.setdefault("upsell_accepted", False)
+	# Heuristic: infer payment/address milestones from history when state lacks them
+	def _infer_payment(history: List[Dict[str, Any]]) -> bool:
+		for h in reversed(history):
+			if (h.get("dir") or "").lower() != "in":
+				continue
+			txt = (h.get("text") or "").lower()
+			if any(k in txt for k in ["kapıda", "kapida", "nakit", "kart", "kredi kart", "kapiya kart"]):
+				return True
+		return False
+	def _infer_address(history: List[Dict[str, Any]]) -> bool:
+		keywords = ["mah", "sok", "cad", "no", "il/", "ilce", "ilçe", "apt", "daire"]
+		for h in reversed(history):
+			if (h.get("dir") or "").lower() != "in":
+				continue
+			txt = (h.get("text") or "").lower()
+			score = 0
+			for kw in keywords:
+				if kw in txt:
+					score += 1
+			digits = sum(ch.isdigit() for ch in txt)
+			if score >= 2 or digits >= 6:
+				return True
+		return False
+	if "asked_payment" not in state_payload:
+		state_payload["asked_payment"] = _infer_payment(history)
+	if "asked_address" not in state_payload:
+		state_payload["asked_address"] = _infer_address(history)
 	hail_already_sent = bool(state_payload.get("hail_sent"))
 	# Offer upsell only after main ürün akışı netleşmeye başladı (ödeme/adres aşaması veya sonrası)
 	upsell_ready = (
@@ -2023,6 +2050,15 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 3. Birden fazla soruya yanıt verirken her birini ayrı satır/paragrafta cevaplayabilirsin.
 4. Geçmişte cevaplanmış mesajları tekrar etme.
 """
+	state_flag_instruction = """
+=== STATE ZORUNLULUKLARI (KRİTİK) ===
+- Ödeme sorulduysa veya müşteri ödeme şeklini verdiyse: state.asked_payment=true yaz.
+- Adres bilgisi istendi veya müşteri adresini verdiyse: state.asked_address=true yaz.
+- Akış ilerlemesine göre last_step alanını güncelle:
+  * Ödeme sorulduysa veya alındıysa: last_step='awaiting_address'
+  * Adres alındıysa ve sipariş özeti/teslimat bilgisi veriliyorsa: last_step='order_placed'
+- Bu bayrakları set etmezsen upsell/sonraki adımlar çalışmaz; mutlaka state içinde döndür.
+"""
 	upsell_force_instruction = (
 		"=== UPSELL ZORUNLULUK KURALI (KRİTİK) ===\n"
 		f"force_upsell = {'true' if upsell_offer_needed else 'false'}\n"
@@ -2033,6 +2069,7 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 		"- Teklif yaptıysan `state.upsell_offered=true` yap; müşteri kabul ederse `add_cart_item` ile is_upsell=true ekle ve `state.upsell_accepted=true` yap.\n"
 	)
 	sys_prompt_parts.append(message_order_instruction)
+	sys_prompt_parts.append(state_flag_instruction)
 	upsell_timing_instruction = (
 		f"=== UPSELL ZAMANLAMA KURALI (KRİTİK) ===\n"
 		f"upsell_ready = {'true' if upsell_ready else 'false'}\n"
