@@ -207,23 +207,23 @@ def init_db() -> None:
                             conn.exec_driver_sql("ALTER TABLE message MODIFY COLUMN referral_json LONGTEXT")
                 except Exception:
                     pass
-				# Ensure ai_order_candidates detection bookkeeping columns exist
-				try:
-					rows = conn.exec_driver_sql(
-						"""
-						SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-						WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ai_order_candidates'
-						"""
-					).fetchall()
-					have_cols = {str(r[0]).lower() for r in rows or []}
-					if 'last_detected_at' not in have_cols:
-						conn.exec_driver_sql("ALTER TABLE ai_order_candidates ADD COLUMN last_detected_at DATETIME NULL")
-						conn.exec_driver_sql("CREATE INDEX idx_ai_order_candidates_last_detected_at ON ai_order_candidates(last_detected_at)")
-					if 'last_detected_message_ts_ms' not in have_cols:
-						conn.exec_driver_sql("ALTER TABLE ai_order_candidates ADD COLUMN last_detected_message_ts_ms BIGINT NULL")
-						conn.exec_driver_sql("CREATE INDEX idx_ai_order_candidates_last_detected_msg ON ai_order_candidates(last_detected_message_ts_ms)")
-				except Exception:
-					pass
+                # Ensure ai_order_candidates detection bookkeeping columns exist
+                try:
+                    rows = conn.exec_driver_sql(
+                        """
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ai_order_candidates'
+                        """
+                    ).fetchall()
+                    have_cols = {str(r[0]).lower() for r in rows or []}
+                    if 'last_detected_at' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE ai_order_candidates ADD COLUMN last_detected_at DATETIME NULL")
+                        conn.exec_driver_sql("CREATE INDEX idx_ai_order_candidates_last_detected_at ON ai_order_candidates(last_detected_at)")
+                    if 'last_detected_message_ts_ms' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE ai_order_candidates ADD COLUMN last_detected_message_ts_ms BIGINT NULL")
+                        conn.exec_driver_sql("CREATE INDEX idx_ai_order_candidates_last_detected_msg ON ai_order_candidates(last_detected_message_ts_ms)")
+                except Exception:
+                    pass
                 # Ensure new ad metadata columns exist (MySQL)
                 try:
                     rows = conn.exec_driver_sql(
