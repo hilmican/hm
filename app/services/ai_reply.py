@@ -178,9 +178,118 @@ def _shadow_system_prompt(base_extra: Optional[str] = None) -> str:
 	return base_extra or ""
 
 
+def _load_product_stock(product_id: int) -> List[Dict[str, Any]]:
+	"""
+	Load stock (items) for a given product_id.
+	
+	Returns a list of stock entries: [{"sku":..., "name":..., "color":..., "size":..., "price":...}, ...]
+	"""
+	if not product_id:
+		return []
+	stock: List[Dict[str, Any]] = []
+	try:
+		with get_session() as session:
+			# Get product to check default price
+			product = session.exec(select(Product).where(Product.id == product_id).limit(1)).first()
+			product_default_price: Optional[float] = None
+			if product and product.default_price:
+				try:
+					product_default_price = float(product.default_price)
+				except (ValueError, TypeError):
+					pass
+			
+			# Load all items for this product
+			items = session.exec(
+				select(Item).where(Item.product_id == product_id).limit(200)
+			).all()
+			
+			for item in items:
+				try:
+					sku = item.sku
+					if not isinstance(sku, str):
+						continue
+					price = item.price
+					if price is None and product_default_price is not None:
+						price = product_default_price
+					stock.append(
+						{
+							"sku": sku,
+							"name": item.name,
+							"color": item.color,
+							"size": item.size,
+							"price": price,
+						}
+					)
+				except Exception:
+					continue
+			
+			# If no stock found, create a placeholder entry
+			if not stock and product:
+				stock.append(
+					{
+						"sku": f"product:{product_id}",
+						"name": product.name,
+						"color": None,
+						"size": None,
+						"price": product_default_price,
+					}
+				)
+	except Exception as exc:
+		try:
+			log.warning("_load_product_stock failed product_id=%s error=%s", product_id, str(exc)[:200])
+		except Exception:
+			pass
+	return stock
+
+
+def _load_product_info(product_id: int) -> Dict[str, Any]:
+	"""
+	Load product information (name, price, default_color, etc.) and images for a given product_id.
+	
+	Returns: {
+		"product_id": int,
+		"product_name": str,
+		"default_price": float|None,
+		"default_color": str|None,
+		"images": [{"id": int, "url": str, "variant_key": str|None}, ...]
+	}
+	"""
+	if not product_id:
+		return {}
+	product_info: Dict[str, Any] = {
+		"product_id": product_id,
+		"product_name": None,
+		"default_price": None,
+		"default_color": None,
+		"images": [],
+	}
+	try:
+		with get_session() as session:
+			product = session.exec(select(Product).where(Product.id == product_id).limit(1)).first()
+			if product:
+				product_info["product_name"] = product.name
+				if product.default_price:
+					try:
+						product_info["default_price"] = float(product.default_price)
+					except (ValueError, TypeError):
+						pass
+				product_info["default_color"] = product.default_color
+			
+			# Load product images
+			product_images = _select_product_images_for_reply(product_id, variant_key=None)
+			product_info["images"] = product_images
+	except Exception as exc:
+		try:
+			log.warning("_load_product_info failed product_id=%s error=%s", product_id, str(exc)[:200])
+		except Exception:
+			pass
+	return product_info
+
+
 def _load_manual_upsells(product_id: int) -> Dict[int, Dict[str, Any]]:
 	"""
 	Load manually configured upsells for a product (if any).
+	Includes stock information for each upsell product.
 	"""
 	if not product_id:
 		return {}
@@ -204,6 +313,14 @@ def _load_manual_upsells(product_id: int) -> Dict[int, Dict[str, Any]]:
 			if not upsell_prod or not upsell_prod.id:
 				continue
 			copy_text = (getattr(pu, "copy_text", None) or getattr(pu, "copy", None) or "").strip() or (upsell_prod.name or f"Ürün {upsell_prod.id}")
+			
+			# Load stock information for this upsell product
+			upsell_stock = _load_product_stock(upsell_prod.id)
+			upsell_stock_compact = _compact_stock_list(upsell_stock)
+			
+			# Load product info (name, price, images, etc.)
+			upsell_product_info = _load_product_info(upsell_prod.id)
+			
 			upsell_map[upsell_prod.id] = {
 				"product_id": upsell_prod.id,
 				"product_name": upsell_prod.name,
@@ -211,6 +328,11 @@ def _load_manual_upsells(product_id: int) -> Dict[int, Dict[str, Any]]:
 				"cooccurrence_count": None,
 				"source": "manual",
 				"position": pu.position,
+				"stock": upsell_stock,  # Full stock list
+				"stock_compact": upsell_stock_compact,  # Compact format (colors, sizes, price_range)
+				"default_price": upsell_product_info.get("default_price"),
+				"default_color": upsell_product_info.get("default_color"),
+				"images": upsell_product_info.get("images", []),  # Product images for AI to send
 			}
 		return upsell_map
 	except Exception as exc:
@@ -351,11 +473,23 @@ def _calculate_upsell_recommendations(product_id: int, limit_orders: int = 100, 
 					
 					copy_text = f"Bununla birlikte {copy_parts[0]} de almak ister misin?"
 					
+					# Load stock information for this upsell product
+					upsell_stock = _load_product_stock(other_pid)
+					upsell_stock_compact = _compact_stock_list(upsell_stock)
+					
+					# Load product info (name, price, images, etc.)
+					upsell_product_info = _load_product_info(other_pid)
+					
 					upsell_map[other_pid] = {
 						"product_id": other_pid,
 						"product_name": product_name,
 						"copy": copy_text,
 						"cooccurrence_count": count,
+						"stock": upsell_stock,  # Full stock list
+						"stock_compact": upsell_stock_compact,  # Compact format (colors, sizes, price_range)
+						"default_price": upsell_product_info.get("default_price"),
+						"default_color": upsell_product_info.get("default_color"),
+						"images": upsell_product_info.get("images", []),  # Product images for AI to send
 					}
 			
 			# Sort by cooccurrence count (descending) and limit to top 3
@@ -1362,7 +1496,7 @@ def draft_reply(
 			"type": "function",
 			"function": {
 				"name": "add_cart_item",
-				"description": "Sepete yeni ürün satırı ekle.",
+				"description": "Sepete yeni ürün satırı ekle. Upsell ürünleri için: upsell_config.by_product_id[upsell_product_id].stock listesinden uygun SKU, color, size, unit_price bilgilerini kullan. Eğer müşteri renk/beden belirtmediyse, stock listesindeki ilk uygun varyantı seç veya default değerleri kullan.",
 				"parameters": {
 					"type": "object",
 					"properties": {
@@ -1450,12 +1584,12 @@ def draft_reply(
 			"type": "function",
 			"function": {
 				"name": "send_product_image_to_customer",
-				"description": "Müşterinin talep ettiği ürün/renk için uygun görseli müşteriye gönder.",
+				"description": "Müşterinin talep ettiği ürün/renk için uygun görseli müşteriye gönder. Ana ürün için `product_focus.id` kullan, upsell ürünleri için `upsell_config.by_product_id[upsell_product_id].images` listesindeki görselleri kullanabilirsin. Upsell ürünü için fotoğraf göndermek istersen bu fonksiyonu çağır.",
 				"parameters": {
 					"type": "object",
 					"properties": {
-						"product_id": {"type": "integer"},
-						"color": {"type": "string", "description": "İstenen renk (örn. 'MAVİ', 'BEYAZ')"},
+						"product_id": {"type": "integer", "description": "Ana ürün için product_focus.id, upsell ürünü için upsell_config.by_product_id[upsell_product_id].product_id"},
+						"color": {"type": "string", "description": "İstenen renk (örn. 'MAVİ', 'BEYAZ'). Upsell ürünü için upsell_config.by_product_id[upsell_product_id].default_color kullanabilirsin."},
 						"view_type": {
 							"type": "string",
 							"enum": ["front", "back", "detail", "full_body"],
@@ -1905,8 +2039,15 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 		"  - Satış akışı dışı konu, doğrudan değişim/iade talebi, memnuniyetsizlik/🤦 tonu,\n"
 		"    aynı cevabı defalarca vermen gerekirse, farklı ürün alternatifi isteği, ofis ziyareti isteği.\n\n"
 		"=== UPSELL VE ÇOKLU ÜRÜN KURALLARI ===\n"
-		"- Upsell ürünleri ve metni `upsell_config` içinden gelir; uydurma yapma.\n"
+		"- Upsell ürünleri ve metni `upsell_config.by_product_id[upsell_product_id]` içinden gelir; uydurma yapma.\n"
+		"- Upsell ürünü için stock bilgileri `upsell_config.by_product_id[upsell_product_id].stock` listesinde bulunur.\n"
+		"- Upsell ürünü için fotoğraflar `upsell_config.by_product_id[upsell_product_id].images` listesinde bulunur.\n"
+		"- Upsell ürünü için genel bilgiler: `default_price`, `default_color`, `product_name` alanlarında mevcuttur.\n"
+		"- Müşteri upsell ürünün fotoğrafını veya bilgilerini isterse: `upsell_config.by_product_id[upsell_product_id].images` listesinden uygun fotoğrafı `send_product_image_to_customer` ile gönder veya ürün bilgilerini (fiyat, renk, beden seçenekleri) paylaş.\n"
+		"- Upsell ürünü sepete eklerken: `upsell_config.by_product_id[upsell_product_id].stock` listesinden uygun SKU, color, size, price bilgilerini kullan.\n"
+		"- Eğer müşteri upsell ürünü için renk/beden belirtmediyse, stock listesindeki ilk uygun varyantı seç veya default değerleri kullan.\n"
 		"- Ana ürün beden+renk tamamlandıysa ve upsell_offered=false ise ödeme öncesi tek sefer upsell teklif et.\n"
+		"- Müşteri sipariş tamamlandıktan sonra ek ürün isterse (örn: 'jogger pantolon da ekle'), upsell ürününü `add_cart_item` ile sepete ekle.\n"
 		"- 'ikisinide istiyorum' gibi ifadeler çoklu satın alma demektir; her renk/ürün için ayrı `add_cart_item` satırı ekle.\n"
 	)
 	if function_callbacks:
