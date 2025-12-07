@@ -1242,14 +1242,6 @@ def draft_reply(
 				except Exception:
 					pass
 	
-	# Offer upsell only after main ürün akışı netleşmeye başladı (ödeme/adres aşaması veya sonrası)
-	upsell_ready = (
-		bool(state_payload.get("asked_payment"))
-		or bool(state_payload.get("asked_address"))
-		or (state_payload.get("last_step") in ("awaiting_payment", "awaiting_address", "order_placed", "confirmed_by_customer"))
-	)
-	upsell_offer_needed = bool(upsell_config) and upsell_ready and not bool(state_payload.get("upsell_offered"))
-
 	user_payload: Dict[str, Any] = {
 		"store": store_conf,
 		"product_focus": product_focus_data,
@@ -1263,8 +1255,6 @@ def draft_reply(
 		user_payload["matching_qas"] = matching_qas
 	if upsell_config:
 		user_payload["upsell_config"] = upsell_config
-	if upsell_offer_needed:
-		user_payload["force_upsell"] = True
 	state_payload = dict(state or {})
 	# Seed essential state flags so prompt conditions (e.g., upsell) work deterministically
 	if product_id_val:
@@ -1272,6 +1262,15 @@ def draft_reply(
 	state_payload.setdefault("upsell_offered", False)
 	state_payload.setdefault("upsell_accepted", False)
 	hail_already_sent = bool(state_payload.get("hail_sent"))
+	# Offer upsell only after main ürün akışı netleşmeye başladı (ödeme/adres aşaması veya sonrası)
+	upsell_ready = (
+		bool(state_payload.get("asked_payment"))
+		or bool(state_payload.get("asked_address"))
+		or (state_payload.get("last_step") in ("awaiting_payment", "awaiting_address", "order_placed", "confirmed_by_customer"))
+	)
+	upsell_offer_needed = bool(upsell_config) and upsell_ready and not bool(state_payload.get("upsell_offered"))
+	if upsell_offer_needed:
+		user_payload["force_upsell"] = True
 	# Detect if this is a first message (no previous AI replies in history)
 	is_first_message = not hail_already_sent and len([h for h in history if h.get("dir") == "out"]) == 0
 	user_payload["state"] = state_payload
@@ -2064,6 +2063,7 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 		"- Upsell ürünü için stock bilgileri `upsell_config.by_product_id[upsell_product_id].stock` listesinde bulunur.\n"
 		"- Upsell ürünü için fotoğraflar `upsell_config.by_product_id[upsell_product_id].images` listesinde bulunur.\n"
 		"- Upsell ürünü için genel bilgiler: `default_price`, `default_color`, `product_name` alanlarında mevcuttur.\n"
+		"- Eğer parsed.size_suggestion varsa upsell ürününde bu bedeni bulmaya çalış; yoksa en yakın bedeni veya stocktaki ilk uygun varyantı seçtiğini belirt.\n"
 		"- Müşteri upsell ürünün fotoğrafını veya bilgilerini isterse: `upsell_config.by_product_id[upsell_product_id].images` listesinden uygun fotoğrafı `send_product_image_to_customer` ile gönder veya ürün bilgilerini (fiyat, renk, beden seçenekleri) paylaş.\n"
 		"- Upsell ürünü sepete eklerken: `upsell_config.by_product_id[upsell_product_id].stock` listesinden uygun SKU, color, size, price bilgilerini kullan.\n"
 		"- Eğer müşteri upsell ürünü için renk/beden belirtmediyse, stock listesindeki ilk uygun varyantı seç veya default değerleri kullan.\n"
