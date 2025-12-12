@@ -1,9 +1,9 @@
-from typing import Optional
+from typing import Optional, List
 import datetime as dt
 
 from fastapi import APIRouter, Request, Query, Form
 from fastapi.responses import RedirectResponse
-from sqlmodel import select
+from sqlmodel import select, delete
 
 from ..db import get_session
 from ..models import Cost, CostType, Account
@@ -47,6 +47,10 @@ def costs_page(
 		).all()
 		type_map = {t.id: t.name for t in types if t.id is not None}
 		account_map = {a.id: a.name for a in accounts if a.id is not None}
+
+		# Calculate total amount
+		total_amount = sum(float(r.amount or 0) for r in rows)
+
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"costs.html",
@@ -60,6 +64,7 @@ def costs_page(
 				"type_map": type_map,
 				"account_map": account_map,
 				"today": today,
+				"total_amount": total_amount,
 			},
 		)
 
@@ -127,6 +132,29 @@ def add_cost(
 		except Exception:
 			# best-effort insert; ignore on error
 			pass
+	url = "/costs"
+	if start or end:
+		params = []
+		if start:
+			params.append(f"start={start}")
+		if end:
+			params.append(f"end={end}")
+		url = f"/costs?{'&'.join(params)}"
+	return RedirectResponse(url=url, status_code=303)
+
+
+@router.post("/delete")
+def delete_costs(
+	cost_ids: List[int] = Form(..., alias="cost_ids"),
+	start: Optional[str] = Form(default=None),
+	end: Optional[str] = Form(default=None),
+):
+	with get_session() as session:
+		if cost_ids:
+			# Delete the selected costs
+			session.exec(delete(Cost).where(Cost.id.in_(cost_ids)))
+			session.commit()
+
 	url = "/costs"
 	if start or end:
 		params = []

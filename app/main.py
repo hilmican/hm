@@ -38,7 +38,9 @@ def create_app() -> FastAPI:
 
 	app.mount("/static", StaticFiles(directory="static"), name="static")
 
-	templates = Jinja2Templates(directory="templates")
+	# Configure templates with absolute path for robustness
+	template_dir = Path(__file__).resolve().parent.parent / "templates"
+	templates = Jinja2Templates(directory=str(template_dir))
 	app.state.templates = templates
 	# Register Jinja helpers for translations
 	try:

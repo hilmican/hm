@@ -21,6 +21,7 @@
       .field { display:block; }
       .field label { display:block; font-size:12px; color:#374151; margin-bottom:4px; }
       .muted { color:#6b7280; font-size:12px; }
+      input[type="checkbox"] { margin: 0; }
     </style>
   </head>
   <body>
@@ -107,9 +108,22 @@
     <div class="card" style="margin-top:18px;">
       <h2>Geçmiş Maliyetler</h2>
       <div class="body" style="padding:0">
+        <div style="padding:12px 16px; border-bottom:1px solid #e5e7eb; background:#f8fafc;">
+          <form method="post" action="/costs/delete" id="bulkDeleteForm" style="display:inline;">
+            {% if start %}<input type="hidden" name="start" value="{{ start }}"/>{% endif %}
+            {% if end %}<input type="hidden" name="end" value="{{ end }}"/>{% endif %}
+            <button type="button" onclick="selectAll()" class="btn" style="background:#6b7280; margin-right:8px;">Tümünü Seç</button>
+            <button type="button" onclick="deselectAll()" class="btn" style="background:#6b7280; margin-right:8px;">Seçimi Temizle</button>
+            <button type="submit" class="btn" style="background:#dc2626;" onclick="return confirmDelete()">Seçilenleri Sil</button>
+          </form>
+          <div style="margin-top:8px; font-weight:600;">
+            Toplam: {{ '%.2f'|format(total_amount) }} ₺ ({{ rows|length }} kayıt)
+          </div>
+        </div>
         <table>
           <thead>
             <tr>
+              <th style="width:40px;"><input type="checkbox" onclick="toggleAll(this)"></th>
               <th>Tarih</th>
               <th>Tür</th>
               <th>Tutar</th>
@@ -120,6 +134,7 @@
           <tbody>
             {% for r in rows %}
             <tr>
+              <td><input type="checkbox" name="cost_ids" value="{{ r.id }}" form="bulkDeleteForm"></td>
               <td>{{ r.date }}</td>
               <td>{{ type_map.get(r.type_id) or r.type_id }}</td>
               <td>{{ '%.2f'|format(r.amount or 0) }} ₺</td>
@@ -131,6 +146,34 @@
         </table>
       </div>
     </div>
+
+    <script>
+      function toggleAll(source) {
+        const checkboxes = document.querySelectorAll('input[name="cost_ids"]');
+        checkboxes.forEach(cb => cb.checked = source.checked);
+      }
+
+      function selectAll() {
+        const checkboxes = document.querySelectorAll('input[name="cost_ids"]');
+        checkboxes.forEach(cb => cb.checked = true);
+        document.querySelector('thead input[type="checkbox"]').checked = true;
+      }
+
+      function deselectAll() {
+        const checkboxes = document.querySelectorAll('input[name="cost_ids"]');
+        checkboxes.forEach(cb => cb.checked = false);
+        document.querySelector('thead input[type="checkbox"]').checked = false;
+      }
+
+      function confirmDelete() {
+        const selected = document.querySelectorAll('input[name="cost_ids"]:checked');
+        if (selected.length === 0) {
+          alert('Lütfen en az bir maliyet seçin.');
+          return false;
+        }
+        return confirm(selected.length + ' adet maliyeti silmek istediğinizden emin misiniz?');
+      }
+    </script>
   </body>
 </html>
 
