@@ -1,0 +1,228 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cari Detay: {{ supplier.name }}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      h1 { margin-bottom: 12px; }
+      .btn { background:#2563eb; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; text-decoration:none; display:inline-block; }
+      .btn-secondary { background:#6b7280; }
+      .btn-success { background:#10b981; }
+      .btn-danger { background:#dc2626; }
+      input[type=date], input[type=text], input[type=number], select { padding:6px 8px; border:1px solid #ddd; border-radius:6px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+      th, td { padding: 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+      th { background: #fafafa; position: sticky; top: 0; font-weight: 600; }
+      .card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background:#fff; margin-bottom: 18px; }
+      .card h2 { margin: 0; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
+      .card .body { padding: 12px 16px; }
+      .row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+      .field { display:block; }
+      .field label { display:block; font-size:12px; color:#374151; margin-bottom:4px; }
+      .muted { color:#6b7280; font-size:12px; }
+      .positive { color:#10b981; font-weight:600; }
+      .negative { color:#dc2626; font-weight:600; }
+      .neutral { color:#6b7280; }
+      .summary { display:flex; gap:24px; margin:16px 0; padding:16px; background:#f9fafb; border-radius:8px; }
+      .summary-item { flex:1; }
+      .summary-label { font-size:12px; color:#6b7280; margin-bottom:4px; }
+      .summary-value { font-size:20px; font-weight:600; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <div style="margin-bottom:16px;">
+      <a href="/suppliers" class="btn btn-secondary">← Cari Listesi</a>
+    </div>
+    <h1>{{ supplier.name }}</h1>
+
+    <div class="card">
+      <h2>Cari Bilgileri</h2>
+      <div class="body">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:16px;">
+          <div>
+            <div class="muted" style="margin-bottom:4px;">İsim</div>
+            <div><strong>{{ supplier.name }}</strong></div>
+          </div>
+          {% if supplier.phone %}
+          <div>
+            <div class="muted" style="margin-bottom:4px;">Telefon</div>
+            <div>{{ supplier.phone }}</div>
+          </div>
+          {% endif %}
+          {% if supplier.address %}
+          <div>
+            <div class="muted" style="margin-bottom:4px;">Adres</div>
+            <div>{{ supplier.address }}</div>
+          </div>
+          {% endif %}
+          {% if supplier.tax_id %}
+          <div>
+            <div class="muted" style="margin-bottom:4px;">Vergi No</div>
+            <div>{{ supplier.tax_id }}</div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="summary">
+      <div class="summary-item">
+        <div class="summary-label">Toplam Borç</div>
+        <div class="summary-value negative">{{ '%.2f'|format(total_debt) }} ₺</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">Toplam Ödeme</div>
+        <div class="summary-value positive">{{ '%.2f'|format(total_payment) }} ₺</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">Kalan Borç</div>
+        <div class="summary-value {% if remaining_debt > 0 %}negative{% elif remaining_debt < 0 %}positive{% else %}neutral{% endif %}">
+          {{ '%.2f'|format(remaining_debt) }} ₺
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Yeni Ödeme Ekle</h2>
+      <div class="body">
+        <form method="post" action="/suppliers/{{ supplier.id }}/add-payment" class="row">
+          <div class="field">
+            <label>Tutar <span style="color:red;">*</span></label>
+            <input type="number" step="0.01" name="amount" required />
+          </div>
+          <div class="field">
+            <label>Tarih</label>
+            <input type="date" name="date" />
+          </div>
+          <div class="field">
+            <label>Hesap (Opsiyonel)</label>
+            <select name="account_id">
+              <option value="">Hesap seçilmedi</option>
+              {% for acc in accounts %}
+                <option value="{{ acc.id }}">{{ acc.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field" style="min-width:280px; flex:1">
+            <label>Detay</label>
+            <input type="text" name="details" placeholder="Ödeme açıklaması" />
+          </div>
+          <div style="align-self:flex-end">
+            <button class="btn btn-success" type="submit">Ödeme Ekle</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Ürün Alım Geçmişi</h2>
+      <div class="body" style="padding:0">
+        {% if purchase_history %}
+        <table>
+          <thead>
+            <tr>
+              <th>Tarih</th>
+              <th>Ürün</th>
+              <th>Adet</th>
+              <th>Birim Fiyat</th>
+              <th>Toplam</th>
+              <th>Detay</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for purchase in purchase_history %}
+            <tr>
+              <td>{{ purchase.date }}</td>
+              <td>{{ purchase.product.name }}</td>
+              <td>{{ purchase.quantity }}</td>
+              <td>{{ '%.2f'|format(purchase.unit_price) }} ₺</td>
+              <td><strong>{{ '%.2f'|format(purchase.total) }} ₺</strong></td>
+              <td>{{ purchase.details or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div style="padding:24px; text-align:center; color:#6b7280;">
+          Henüz ürün alımı kaydı yok.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Borçlar (MERTER MAL ALIM)</h2>
+      <div class="body" style="padding:0">
+        {% if debts %}
+        <table>
+          <thead>
+            <tr>
+              <th>Tarih</th>
+              <th>Tür</th>
+              <th>Tutar</th>
+              <th>Ürün</th>
+              <th>Adet</th>
+              <th>Detay</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for debt in debts %}
+            <tr>
+              <td>{{ debt.date }}</td>
+              <td>{{ type_map.get(debt.type_id, debt.type_id) }}</td>
+              <td class="negative">{{ '%.2f'|format(debt.amount or 0) }} ₺</td>
+              <td>
+                {% if debt.product_id and debt.product_id in product_map %}
+                  {{ product_map[debt.product_id].name }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td>{{ debt.quantity or '-' }}</td>
+              <td>{{ debt.details or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div style="padding:24px; text-align:center; color:#6b7280;">
+          Henüz borç kaydı yok.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Ödemeler</h2>
+      <div class="body" style="padding:0">
+        {% if payments %}
+        <table>
+          <thead>
+            <tr>
+              <th>Tarih</th>
+              <th>Tutar</th>
+              <th>Detay</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for payment in payments %}
+            <tr>
+              <td>{{ payment.date }}</td>
+              <td class="positive">{{ '%.2f'|format(payment.amount or 0) }} ₺</td>
+              <td>{{ payment.details or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div style="padding:24px; text-align:center; color:#6b7280;">
+          Henüz ödeme kaydı yok.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </body>
+</html>
+

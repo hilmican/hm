@@ -612,10 +612,25 @@ class CostType(SQLModel, table=True):
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 
 
+class Supplier(SQLModel, table=True):
+	"""Supplier (Cari) model for tracking vendors and their debts."""
+	id: Optional[int] = Field(default=None, primary_key=True)
+	name: str = Field(index=True, description="Supplier name (required)")
+	phone: Optional[str] = Field(default=None, description="Phone number")
+	address: Optional[str] = Field(default=None, description="Address")
+	tax_id: Optional[str] = Field(default=None, description="Tax ID")
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
 class Cost(SQLModel, table=True):
 	id: Optional[int] = Field(default=None, primary_key=True)
 	type_id: int = Field(foreign_key="costtype.id", index=True)
 	account_id: Optional[int] = Field(default=None, foreign_key="account.id", index=True, description="Account from which expense was paid")
+	supplier_id: Optional[int] = Field(default=None, foreign_key="supplier.id", index=True, description="Supplier (Cari) this cost is associated with")
+	product_id: Optional[int] = Field(default=None, foreign_key="product.id", index=True, description="Product purchased (for MERTER MAL ALIM type)")
+	quantity: Optional[int] = Field(default=None, description="Quantity purchased (for MERTER MAL ALIM type)")
+	is_payment_to_supplier: bool = Field(default=False, index=True, description="True if this is a payment to supplier, False if it's a debt")
 	amount: float
 	date: Optional[dt.date] = Field(default=None, index=True)
 	details: Optional[str] = Field(default=None, sa_column=Column(Text))

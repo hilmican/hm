@@ -22,6 +22,7 @@ from .routers import stories
 from .routers import posts
 from .routers import noc
 from .routers import costs
+from .routers import suppliers
 from .routers import accounts
 from .routers import income
 from .routers import ai_orders
@@ -240,6 +241,7 @@ def create_app() -> FastAPI:
 	app.include_router(reports.router, prefix="/reports", tags=["reports"]) 
 	app.include_router(noc.router)
 	app.include_router(costs.router, prefix="/costs", tags=["costs"])
+	app.include_router(suppliers.router, prefix="/suppliers", tags=["suppliers"])
 	app.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
 	app.include_router(income.router, prefix="/income", tags=["income"])
 	app.include_router(ai_orders.router)

@@ -121,9 +121,18 @@ def daily_report(
 				total_cost += acc
 
 		# Add overhead/operational costs from Cost table within the period
+		# Exclude payments to suppliers and MERTER MAL ALIM (type_id=9) costs
 		try:
 			extra_costs_row = session.exec(
-				text("SELECT SUM(COALESCE(amount,0)) FROM cost WHERE date IS NOT NULL AND date >= :s AND date <= :e").bindparams(
+				text("""
+					SELECT SUM(COALESCE(amount,0)) 
+					FROM cost 
+					WHERE date IS NOT NULL 
+					AND date >= :s 
+					AND date <= :e
+					AND (is_payment_to_supplier = FALSE OR is_payment_to_supplier IS NULL)
+					AND (type_id != 9 OR type_id IS NULL)
+				""").bindparams(
 					s=start_date, e=end_date
 				)
 			).first()

@@ -64,6 +64,33 @@
               <input type="date" name="date" value="{{ today }}" />
             </div>
             <div class="field">
+              <label>Cari (Opsiyonel)</label>
+              <select name="supplier_id" id="supplier_id">
+                <option value="">Cari seçilmedi</option>
+                {% if general_supplier %}
+                  <option value="{{ general_supplier.id }}" selected>Genel Giderler</option>
+                {% endif %}
+                {% for sup in suppliers %}
+                  {% if not general_supplier or sup.id != general_supplier.id %}
+                    <option value="{{ sup.id }}">{{ sup.name }}</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field" id="product_field" style="display:none;">
+              <label>Ürün <span style="color:red;">*</span></label>
+              <select name="product_id" id="product_id">
+                <option value="">Ürün seçin</option>
+                {% for prod in products %}
+                  <option value="{{ prod.id }}">{{ prod.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field" id="quantity_field" style="display:none;">
+              <label>Adet <span style="color:red;">*</span></label>
+              <input type="number" name="quantity" id="quantity" min="1" step="1" />
+            </div>
+            <div class="field">
               <label>Hesap (Opsiyonel)</label>
               <select name="account_id">
                 <option value="">Hesap seçilmedi</option>
@@ -127,6 +154,7 @@
               <th>Tarih</th>
               <th>Tür</th>
               <th>Tutar</th>
+              <th>Cari</th>
               <th>Hesap</th>
               <th>Detay</th>
             </tr>
@@ -138,8 +166,25 @@
               <td>{{ r.date }}</td>
               <td>{{ type_map.get(r.type_id) or r.type_id }}</td>
               <td>{{ '%.2f'|format(r.amount or 0) }} ₺</td>
+              <td>
+                {% if r.supplier_id %}
+                  {{ supplier_map.get(r.supplier_id, '-') }}
+                  {% if r.is_payment_to_supplier %}
+                    <span style="color:#10b981; font-size:11px;">(Ödeme)</span>
+                  {% endif %}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
               <td>{{ account_map.get(r.account_id, '-') if r.account_id else '-' }}</td>
-              <td>{{ r.details or '' }}</td>
+              <td>
+                {{ r.details or '' }}
+                {% if r.type_id == 9 and r.product_id and r.quantity %}
+                  <br/><span style="color:#6b7280; font-size:12px;">
+                    {{ product_map.get(r.product_id, 'Ürün') }} × {{ r.quantity }} adet
+                  </span>
+                {% endif %}
+              </td>
             </tr>
             {% endfor %}
           </tbody>
@@ -173,6 +218,68 @@
         }
         return confirm(selected.length + ' adet maliyeti silmek istediğinizden emin misiniz?');
       }
+
+      // Handle MERTER MAL ALIM (type_id=9) form changes
+      document.addEventListener('DOMContentLoaded', function() {
+        const typeSelect = document.querySelector('select[name="type_id"]');
+        const supplierSelect = document.getElementById('supplier_id');
+        const productField = document.getElementById('product_field');
+        const quantityField = document.getElementById('quantity_field');
+        const productSelect = document.getElementById('product_id');
+        const quantityInput = document.getElementById('quantity');
+        const form = document.querySelector('form[action="/costs/add"]');
+
+        function updateFormFields() {
+          const selectedTypeId = parseInt(typeSelect.value);
+          const isMerterMalAlim = selectedTypeId === 9;
+
+          if (isMerterMalAlim) {
+            // Show product and quantity fields
+            productField.style.display = 'block';
+            quantityField.style.display = 'block';
+            // Make supplier required
+            supplierSelect.required = true;
+            productSelect.required = true;
+            quantityInput.required = true;
+          } else {
+            // Hide product and quantity fields
+            productField.style.display = 'none';
+            quantityField.style.display = 'none';
+            // Make supplier optional
+            supplierSelect.required = false;
+            productSelect.required = false;
+            quantityInput.required = false;
+            // Clear values
+            productSelect.value = '';
+            quantityInput.value = '';
+          }
+        }
+
+        typeSelect.addEventListener('change', updateFormFields);
+        updateFormFields(); // Initial check
+
+        // Form validation
+        form.addEventListener('submit', function(e) {
+          const selectedTypeId = parseInt(typeSelect.value);
+          if (selectedTypeId === 9) {
+            if (!supplierSelect.value) {
+              e.preventDefault();
+              alert('MERTER MAL ALIM için cari seçimi zorunludur.');
+              return false;
+            }
+            if (!productSelect.value) {
+              e.preventDefault();
+              alert('MERTER MAL ALIM için ürün seçimi zorunludur.');
+              return false;
+            }
+            if (!quantityInput.value || parseInt(quantityInput.value) <= 0) {
+              e.preventDefault();
+              alert('MERTER MAL ALIM için adet bilgisi zorunludur ve 0\'dan büyük olmalıdır.');
+              return false;
+            }
+          }
+        });
+      });
     </script>
   </body>
 </html>

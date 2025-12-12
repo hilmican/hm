@@ -1283,6 +1283,110 @@ def init_db() -> None:
                 except Exception:
                     pass
 
+                # Ensure supplier table exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'supplier'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql(
+                            """
+                            CREATE TABLE supplier (
+                                id INT PRIMARY KEY AUTO_INCREMENT,
+                                name VARCHAR(255) NOT NULL,
+                                phone VARCHAR(255) NULL,
+                                address TEXT NULL,
+                                tax_id VARCHAR(255) NULL,
+                                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                INDEX idx_supplier_name (name)
+                            )
+                            """
+                        )
+                except Exception:
+                    pass
+
+                # Ensure cost.supplier_id exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cost' AND COLUMN_NAME = 'supplier_id'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE cost ADD COLUMN supplier_id INT NULL")
+                        conn.exec_driver_sql("CREATE INDEX idx_cost_supplier ON cost(supplier_id)")
+                        conn.exec_driver_sql(
+                            "ALTER TABLE cost ADD CONSTRAINT fk_cost_supplier FOREIGN KEY (supplier_id) REFERENCES supplier(id) ON DELETE SET NULL"
+                        )
+                except Exception:
+                    pass
+
+                # Ensure cost.product_id exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cost' AND COLUMN_NAME = 'product_id'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE cost ADD COLUMN product_id INT NULL")
+                        conn.exec_driver_sql("CREATE INDEX idx_cost_product ON cost(product_id)")
+                        conn.exec_driver_sql(
+                            "ALTER TABLE cost ADD CONSTRAINT fk_cost_product FOREIGN KEY (product_id) REFERENCES product(id) ON DELETE SET NULL"
+                        )
+                except Exception:
+                    pass
+
+                # Ensure cost.quantity exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cost' AND COLUMN_NAME = 'quantity'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE cost ADD COLUMN quantity INT NULL")
+                except Exception:
+                    pass
+
+                # Ensure cost.is_payment_to_supplier exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cost' AND COLUMN_NAME = 'is_payment_to_supplier'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE cost ADD COLUMN is_payment_to_supplier BOOLEAN NOT NULL DEFAULT FALSE")
+                        conn.exec_driver_sql("CREATE INDEX idx_cost_payment_to_supplier ON cost(is_payment_to_supplier)")
+                except Exception:
+                    pass
+
+                # Ensure "Genel Giderler" supplier exists
+                try:
+                    from sqlmodel import select
+                    from app.models import Supplier
+                    with Session(engine) as session:
+                        existing = session.exec(select(Supplier).where(Supplier.name == "Genel Giderler")).first()
+                        if not existing:
+                            session.add(Supplier(name="Genel Giderler"))
+                            session.commit()
+                except Exception:
+                    pass
+
                 return
         except Exception as e:
             last_err = e
