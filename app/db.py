@@ -62,7 +62,7 @@ def init_db() -> None:
     last_err: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            # Handle concurrent DDL (e.g., table creation) gracefully: MySQL error 1684
+            # Handle concurrent DDL (e.g., table creation) gracefully: MySQL error 1684 (concurrent DDL) and 1050 (table already exists)
             for _ in range(3):
                 try:
                     SQLModel.metadata.create_all(engine)
@@ -74,8 +74,12 @@ def init_db() -> None:
                     except Exception:
                         code = None
                     if code == 1684:
+                        # Concurrent DDL operation - retry after delay
                         time.sleep(2.0)
                         continue
+                    elif code == 1050:
+                        # Table already exists - this is fine, continue with initialization
+                        break
                     raise
             else:
                 # If we exhaust retries without break, re-raise last error
@@ -1389,29 +1393,21 @@ def init_db() -> None:
 
                 # Ensure supplier_payment_allocation table exists
                 try:
-                    row = conn.exec_driver_sql(
+                    conn.exec_driver_sql(
                         """
-                        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
-                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'supplierpaymentallocation'
-                        LIMIT 1
-                        """
-                    ).fetchone()
-                    if row is None:
-                        conn.exec_driver_sql(
-                            """
-                            CREATE TABLE supplierpaymentallocation (
-                                id INT PRIMARY KEY AUTO_INCREMENT,
-                                payment_cost_id INT NOT NULL,
-                                debt_cost_id INT NOT NULL,
-                                amount DOUBLE NOT NULL,
-                                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                                INDEX idx_payment_allocation_payment (payment_cost_id),
-                                INDEX idx_payment_allocation_debt (debt_cost_id),
-                                FOREIGN KEY (payment_cost_id) REFERENCES cost(id) ON DELETE CASCADE,
-                                FOREIGN KEY (debt_cost_id) REFERENCES cost(id) ON DELETE CASCADE
-                            )
-                            """
+                        CREATE TABLE IF NOT EXISTS supplierpaymentallocation (
+                            id INT PRIMARY KEY AUTO_INCREMENT,
+                            payment_cost_id INT NOT NULL,
+                            debt_cost_id INT NOT NULL,
+                            amount DOUBLE NOT NULL,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            INDEX idx_payment_allocation_payment (payment_cost_id),
+                            INDEX idx_payment_allocation_debt (debt_cost_id),
+                            FOREIGN KEY (payment_cost_id) REFERENCES cost(id) ON DELETE CASCADE,
+                            FOREIGN KEY (debt_cost_id) REFERENCES cost(id) ON DELETE CASCADE
                         )
+                        """
+                    )
                 except Exception:
                     pass
 
