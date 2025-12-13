@@ -47,6 +47,7 @@
     <div class="toolbar">
         <a href="/products/table">← Ürünlere Dön</a>
         <span class="pill">{{ qas|length }} Q&A</span>
+        <a href="/products/qas/import" class="primary" style="padding: 6px 12px; border-radius: 6px; background: #2563eb; color: #fff; text-decoration: none;">📥 Konuşmalardan İçe Aktar</a>
         <select id="filterActive" style="margin-left: auto;">
             <option value="">Tümü</option>
             <option value="true" {% if is_active == True %}selected{% endif %}>Sadece Aktifler</option>

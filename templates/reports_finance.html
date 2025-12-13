@@ -23,8 +23,14 @@
       .balance-zero { color: #6b7280; }
       .leak-warning { background: #fef2f2; border-left: 4px solid #ef4444; padding: 12px; margin: 8px 0; }
       .leak-warning strong { color: #dc2626; }
+      .pagination { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+      .pagination a, .pagination span { padding: 6px 12px; border: 1px solid #e5e7eb; border-radius: 4px; text-decoration: none; color: #374151; }
+      .pagination a:hover { background: #f3f4f6; }
+      .pagination .current { background: #2563eb; color: #fff; border-color: #2563eb; }
+      .pagination .disabled { color: #9ca3af; cursor: not-allowed; }
       a { color: #2563eb; text-decoration: none; }
       a:hover { text-decoration: underline; }
+      .muted { color: #6b7280; font-size: 13px; margin-bottom: 8px; }
     </style>
   </head>
   <body>
@@ -43,6 +49,9 @@
       <div>
         <button class="btn" type="submit">Uygula</button>
       </div>
+      <!-- Preserve pagination when changing dates (will reset to page 1) -->
+      <input type="hidden" name="leaks_page" value="1" />
+      <input type="hidden" name="leaks_per_page" value="{{ leaks_per_page }}" />
     </form>
 
     <div class="grid" style="margin-top: 18px;">
@@ -103,19 +112,88 @@
       </div>
     </div>
 
-    {% if leaks %}
+    {% if leaks or total_leaks > 0 %}
     <div class="card" style="margin-top: 18px;">
       <h2>⚠️ Ödenmemiş Siparişler (Nakit Sızıntısı)</h2>
-      <div class="body">
-        <p class="muted">7 günden eski ve henüz tahsil edilmemiş siparişler:</p>
-        {% for leak in leaks %}
-        <div class="leak-warning">
-          <strong>Sipariş #{{ leak.order_id }}</strong> - Takip: {{ leak.tracking_no or '-' }}<br>
-          Beklenen Ödeme: <strong>{{ '%.2f'|format(leak.expected_payment) }} ₺</strong><br>
-          Toplam: {{ '%.2f'|format(leak.total_amount or 0) }} ₺ | 
-          Tarih: {{ leak.shipment_date or leak.data_date or '-' }}
+      <div class="body" style="padding:0">
+        <div style="padding: 12px 16px;">
+          <p class="muted">7 günden eski ve henüz tahsil edilmemiş siparişler: <strong>{{ total_leaks }}</strong> adet</p>
         </div>
-        {% endfor %}
+        {% if leaks %}
+        <table>
+          <thead>
+            <tr>
+              <th>Sipariş #</th>
+              <th>Takip No</th>
+              <th>Tarih</th>
+              <th>Toplam</th>
+              <th>Beklenen Ödeme</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for leak in leaks %}
+            <tr>
+              <td><a href="/orders/{{ leak.order_id }}">#{{ leak.order_id }}</a></td>
+              <td>{{ leak.tracking_no or '-' }}</td>
+              <td>{{ leak.shipment_date or leak.data_date or '-' }}</td>
+              <td>{{ '%.2f'|format(leak.total_amount or 0) }} ₺</td>
+              <td class="balance-negative"><strong>{{ '%.2f'|format(leak.expected_payment) }} ₺</strong></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        
+        {% if total_pages > 1 or leaks_per_page != 50 %}
+        <div style="padding: 12px 16px; border-top: 1px solid #e5e7eb;">
+          <div class="pagination">
+            {% if leaks_page > 1 %}
+            <a href="?start={{ start }}&end={{ end }}&leaks_page={{ leaks_page - 1 }}&leaks_per_page={{ leaks_per_page }}">« Önceki</a>
+            {% else %}
+            <span class="disabled">« Önceki</span>
+            {% endif %}
+            
+            {% if total_pages > 1 %}
+              {% for page in range(1, total_pages + 1) %}
+                {% if page == leaks_page %}
+                <span class="current">{{ page }}</span>
+                {% elif page == 1 or page == total_pages or (page >= leaks_page - 2 and page <= leaks_page + 2) %}
+                <a href="?start={{ start }}&end={{ end }}&leaks_page={{ page }}&leaks_per_page={{ leaks_per_page }}">{{ page }}</a>
+                {% elif page == leaks_page - 3 or page == leaks_page + 3 %}
+                <span>...</span>
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+            
+            {% if leaks_page < total_pages %}
+            <a href="?start={{ start }}&end={{ end }}&leaks_page={{ leaks_page + 1 }}&leaks_per_page={{ leaks_per_page }}">Sonraki »</a>
+            {% else %}
+            <span class="disabled">Sonraki »</span>
+            {% endif %}
+            
+            <span style="margin-left: auto; color: #6b7280; font-size: 13px; margin-right: 12px;">
+              Sayfa {{ leaks_page }} / {{ total_pages }} ({{ total_leaks }} toplam)
+            </span>
+            
+            <form method="get" action="/reports/finance" style="display: inline-flex; gap: 4px; align-items: center;">
+              <input type="hidden" name="start" value="{{ start }}" />
+              <input type="hidden" name="end" value="{{ end }}" />
+              <input type="hidden" name="leaks_page" value="1" />
+              <label style="font-size: 13px; color: #6b7280;">Sayfa başına:</label>
+              <select name="leaks_per_page" onchange="this.form.submit()" style="padding: 4px 8px; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 13px;">
+                <option value="25" {% if leaks_per_page == 25 %}selected{% endif %}>25</option>
+                <option value="50" {% if leaks_per_page == 50 %}selected{% endif %}>50</option>
+                <option value="100" {% if leaks_per_page == 100 %}selected{% endif %}>100</option>
+                <option value="200" {% if leaks_per_page == 200 %}selected{% endif %}>200</option>
+              </select>
+            </form>
+          </div>
+        </div>
+        {% endif %}
+        {% else %}
+        <div style="padding: 12px 16px; color: #6b7280;">
+          Bu sayfada gösterilecek ödenmemiş sipariş bulunmuyor.
+        </div>
+        {% endif %}
       </div>
     </div>
     {% endif %}

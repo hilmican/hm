@@ -1,0 +1,335 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>{% if product %}Q&A İçe Aktarma - {{ product.name }}{% else %}Q&A İçe Aktarma - Tüm Ürünler{% endif %}</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        h1 { margin-bottom: 12px; }
+        h2 { margin-top: 24px; margin-bottom: 12px; font-size: 18px; }
+        .toolbar { margin: 12px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+        th { background: #fafafa; position: sticky; top: 0; font-weight: 600; }
+        input, textarea, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-family: inherit; }
+        a { color: #2563eb; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        button { padding: 6px 10px; border-radius: 6px; border: 1px solid #ddd; background: #f9fafb; cursor: pointer; font-family: inherit; }
+        button:hover { background: #f3f4f6; }
+        button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+        button.primary:hover { background: #1d4ed8; }
+        button.success { background: #10b981; color: #fff; border-color: #10b981; }
+        button.success:hover { background: #059669; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .card { padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 14px; background: #fff; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-weight: 500; margin-bottom: 4px; font-size: 13px; }
+        .form-row { display: flex; gap: 12px; align-items: flex-start; }
+        .form-row > div { flex: 1; }
+        .meta { color: #6b7280; font-size: 12px; }
+        .warning { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; margin: 12px 0; border-radius: 4px; }
+        .info { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px; margin: 12px 0; border-radius: 4px; }
+        .qa-preview { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .qa-full { white-space: pre-wrap; word-wrap: break-word; }
+        .loading { display: none; color: #6b7280; font-style: italic; }
+        .loading.active { display: inline; }
+        input[type="checkbox"] { width: auto; margin-right: 8px; }
+        .bulk-actions { display: flex; gap: 8px; margin: 12px 0; }
+        .filter-info { padding: 8px 12px; background: #f3f4f6; border-radius: 6px; margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <div class="toolbar">
+        {% if product %}
+        <a href="/products/{{ product.id }}/qas/table">← Q&A Yönetimine Dön</a>
+        <span class="meta">{{ product.name }}</span>
+        {% else %}
+        <a href="/products/qas/table">← Q&A Yönetimine Dön</a>
+        {% endif %}
+    </div>
+    
+    <h1>{% if product %}Q&A İçe Aktarma - {{ product.name }}{% else %}Q&A İçe Aktarma - Tüm Ürünler{% endif %}</h1>
+    <p class="meta">Konuşmalardan otomatik olarak soru-cevap çiftleri çıkarın ve ürün Q&A'larına ekleyin.</p>
+    
+    {% if product %}
+    <div class="warning">
+        <strong>Ürün Filtresi Aktif:</strong> Sadece bu ürüne ({{ product.name }}) ait Q&A çiftleri gösterilecektir. 
+        Diğer ürünlerle ilgili Q&A çiftleri otomatik olarak filtrelenecektir.
+    </div>
+    {% endif %}
+    
+    <div class="card">
+        <h2 style="margin-top: 0;">Tarih Aralığı Seç</h2>
+        <form id="previewForm" onsubmit="previewQA(); return false;">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="startDate">Başlangıç Tarihi</label>
+                    <input type="date" id="startDate" name="start_date" value="{{ default_start }}" required />
+                </div>
+                <div class="form-group">
+                    <label for="endDate">Bitiş Tarihi</label>
+                    <input type="date" id="endDate" name="end_date" value="{{ default_end }}" required />
+                </div>
+            </div>
+            <button type="submit" class="primary">Q&A Çiftlerini Önizle</button>
+            <span class="loading" id="previewLoading">İşleniyor...</span>
+        </form>
+    </div>
+    
+    <div id="previewSection" style="display: none;">
+        <div class="card">
+            <h2 style="margin-top: 0;">Önizleme</h2>
+            <div class="filter-info" id="filterInfo"></div>
+            
+            <div class="bulk-actions">
+                <button onclick="selectAll()">Tümünü Seç</button>
+                <button onclick="deselectAll()">Tümünü Kaldır</button>
+                <button onclick="toggleEdit()" id="editToggleBtn">Düzenleme Modu</button>
+            </div>
+            
+            <form id="importForm" onsubmit="confirmImport(); return false;">
+                <input type="hidden" id="qaPairsJson" name="qa_pairs_json" />
+                <table id="previewTable">
+                    <thead>
+                        <tr>
+                            <th style="width: 40px;"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()" /></th>
+                            <th>Konuşma ID</th>
+                            {% if not product %}
+                            <th>Ürün</th>
+                            {% endif %}
+                            <th>Soru</th>
+                            <th>Cevap</th>
+                            <th>İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody id="previewTableBody">
+                    </tbody>
+                </table>
+                
+                <div style="margin-top: 16px;">
+                    <button type="submit" class="success" id="importBtn" disabled>Seçilenleri İçe Aktar</button>
+                    <span class="meta" id="selectedCount">0 seçildi</span>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div id="successMessage" style="display: none;" class="info">
+        <strong>Başarılı!</strong> <span id="successCount"></span> Q&A çifti başarıyla içe aktarıldı.
+        {% if product %}
+        <a href="/products/{{ product.id }}/qas/table">Q&A yönetim sayfasına git →</a>
+        {% else %}
+        <a href="/products/qas/table">Q&A yönetim sayfasına git →</a>
+        {% endif %}
+    </div>
+    
+    <script>
+        let allQAPairs = [];
+        let editMode = false;
+        
+        function previewQA() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const loading = document.getElementById('previewLoading');
+            const previewSection = document.getElementById('previewSection');
+            const previewTableBody = document.getElementById('previewTableBody');
+            
+            loading.classList.add('active');
+            previewSection.style.display = 'none';
+            
+            const url = {% if product %}'/products/{{ product.id }}/qas/import/preview'{% else %}'/products/qas/import/preview'{% endif %};
+            
+            const formData = new FormData();
+            formData.append('start_date', startDate);
+            formData.append('end_date', endDate);
+            
+            fetch(url, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                loading.classList.remove('active');
+                
+                if (data.error) {
+                    alert('Hata: ' + data.error);
+                    return;
+                }
+                
+                allQAPairs = data.qa_pairs || [];
+                
+                // Show filter info
+                const filterInfo = document.getElementById('filterInfo');
+                if (data.filtered_out_count > 0) {
+                    filterInfo.innerHTML = `
+                        <strong>Filtre Bilgisi:</strong> ${data.total_count} Q&A çifti bulundu. 
+                        ${data.filtered_out_count} çift bu ürünle ilgili değil ve gösterilmiyor.
+                    `;
+                    filterInfo.style.display = 'block';
+                } else {
+                    filterInfo.style.display = 'none';
+                }
+                
+                renderPreviewTable();
+                previewSection.style.display = 'block';
+            })
+            .catch(error => {
+                loading.classList.remove('active');
+                alert('Hata oluştu: ' + error.message);
+            });
+        }
+        
+        function renderPreviewTable() {
+            const tbody = document.getElementById('previewTableBody');
+            tbody.innerHTML = '';
+            
+            if (allQAPairs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #6b7280;">Q&A çifti bulunamadı.</td></tr>';
+                return;
+            }
+            
+            allQAPairs.forEach((qa, index) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>
+                        <input type="checkbox" class="qa-checkbox" data-index="${index}" onchange="updateSelectedCount()" />
+                    </td>
+                    <td><a href="/ig/inbox/${qa.conversation_id}" target="_blank">#${qa.conversation_id}</a></td>
+                    {% if not product %}
+                    <td>${qa.product_name || 'Bilinmiyor'} ${qa.product_id ? '(ID: ' + qa.product_id + ')' : ''}</td>
+                    {% endif %}
+                    <td>
+                        <div class="qa-preview" title="${escapeHtml(qa.question)}">${escapeHtml(qa.question)}</div>
+                        <div class="qa-full" style="display: none;">${escapeHtml(qa.question)}</div>
+                    </td>
+                    <td>
+                        <div class="qa-preview" title="${escapeHtml(qa.answer)}">${escapeHtml(qa.answer)}</div>
+                        <div class="qa-full" style="display: none;">${escapeHtml(qa.answer)}</div>
+                    </td>
+                    <td>
+                        <button type="button" onclick="editQA(${index})" class="qa-edit-btn">Düzenle</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            updateSelectedCount();
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function selectAll() {
+            document.querySelectorAll('.qa-checkbox').forEach(cb => cb.checked = true);
+            document.getElementById('selectAllCheckbox').checked = true;
+            updateSelectedCount();
+        }
+        
+        function deselectAll() {
+            document.querySelectorAll('.qa-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('selectAllCheckbox').checked = false;
+            updateSelectedCount();
+        }
+        
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('selectAllCheckbox').checked;
+            document.querySelectorAll('.qa-checkbox').forEach(cb => cb.checked = selectAll);
+            updateSelectedCount();
+        }
+        
+        function updateSelectedCount() {
+            const checked = document.querySelectorAll('.qa-checkbox:checked').length;
+            document.getElementById('selectedCount').textContent = checked + ' seçildi';
+            document.getElementById('importBtn').disabled = checked === 0;
+            
+            // Update select all checkbox
+            const total = document.querySelectorAll('.qa-checkbox').length;
+            document.getElementById('selectAllCheckbox').checked = total > 0 && checked === total;
+            document.getElementById('selectAllCheckbox').indeterminate = checked > 0 && checked < total;
+        }
+        
+        function toggleEdit() {
+            editMode = !editMode;
+            const btn = document.getElementById('editToggleBtn');
+            btn.textContent = editMode ? 'Önizleme Modu' : 'Düzenleme Modu';
+            
+            // Toggle preview/full text display
+            document.querySelectorAll('.qa-preview').forEach(el => {
+                el.style.display = editMode ? 'none' : 'block';
+            });
+            document.querySelectorAll('.qa-full').forEach(el => {
+                el.style.display = editMode ? 'block' : 'none';
+            });
+        }
+        
+        function editQA(index) {
+            const qa = allQAPairs[index];
+            const newQuestion = prompt('Soruyu düzenle:', qa.question);
+            if (newQuestion !== null && newQuestion.trim()) {
+                qa.question = newQuestion.trim();
+                const newAnswer = prompt('Cevabı düzenle:', qa.answer);
+                if (newAnswer !== null && newAnswer.trim()) {
+                    qa.answer = newAnswer.trim();
+                    renderPreviewTable();
+                }
+            }
+        }
+        
+        function confirmImport() {
+            const selected = [];
+            document.querySelectorAll('.qa-checkbox:checked').forEach(cb => {
+                const index = parseInt(cb.dataset.index);
+                selected.push(allQAPairs[index]);
+            });
+            
+            if (selected.length === 0) {
+                alert('Lütfen en az bir Q&A çifti seçin.');
+                return;
+            }
+            
+            if (!confirm(`Seçilen ${selected.length} Q&A çiftini içe aktarmak istediğinize emin misiniz?`)) {
+                return;
+            }
+            
+            // Update hidden input
+            document.getElementById('qaPairsJson').value = JSON.stringify(selected);
+            
+            const url = {% if product %}'/products/{{ product.id }}/qas/import/confirm'{% else %}'/products/qas/import/confirm'{% endif %};
+            const formData = new FormData(document.getElementById('importForm'));
+            
+            fetch(url, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Hata: ' + data.error);
+                    return;
+                }
+                
+                const successMsg = document.getElementById('successMessage');
+                const successCount = document.getElementById('successCount');
+                successCount.textContent = data.created_count || selected.length;
+                successMsg.style.display = 'block';
+                
+                // Scroll to success message
+                successMsg.scrollIntoView({ behavior: 'smooth' });
+                
+                // Hide preview after 3 seconds
+                setTimeout(() => {
+                    document.getElementById('previewSection').style.display = 'none';
+                }, 3000);
+            })
+            .catch(error => {
+                alert('İçe aktarma hatası: ' + error.message);
+            });
+        }
+    </script>
+</body>
+</html>
+

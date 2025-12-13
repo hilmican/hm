@@ -437,7 +437,13 @@ def recalculate_costs(
 
 
 @router.get("/finance")
-def finance_report(request: Request, start: Optional[str] = Query(default=None), end: Optional[str] = Query(default=None)):
+def finance_report(
+	request: Request, 
+	start: Optional[str] = Query(default=None), 
+	end: Optional[str] = Query(default=None),
+	leaks_page: int = Query(default=1, ge=1, alias="leaks_page"),
+	leaks_per_page: int = Query(default=50, ge=10, le=200, alias="leaks_per_page")
+):
 	"""Financial overview: account balances, income vs expenses, unpaid orders (cash leaks)."""
 	today = dt.date.today()
 	default_start = today - dt.timedelta(days=29)
@@ -488,8 +494,15 @@ def finance_report(request: Request, start: Optional[str] = Query(default=None),
 					expense_by_account[acc_id] = 0.0
 				expense_by_account[acc_id] += float(exp.amount)
 		
-		# Detect payment leaks
-		leaks = detect_payment_leaks(session, min_days_old=7)
+		# Detect payment leaks with pagination
+		all_leaks = detect_payment_leaks(session, min_days_old=7)
+		total_leaks = len(all_leaks)
+		
+		# Apply pagination
+		start_idx = (leaks_page - 1) * leaks_per_page
+		end_idx = start_idx + leaks_per_page
+		leaks = all_leaks[start_idx:end_idx]
+		total_pages = (total_leaks + leaks_per_page - 1) // leaks_per_page if total_leaks > 0 else 1
 		
 		# Recent transactions (last 20) - optimize to avoid N+1 queries
 		# Batch load all account IDs first
@@ -541,6 +554,10 @@ def finance_report(request: Request, start: Optional[str] = Query(default=None),
 				"income_by_account": income_by_account,
 				"expense_by_account": expense_by_account,
 				"leaks": leaks,
+				"total_leaks": total_leaks,
+				"leaks_page": leaks_page,
+				"leaks_per_page": leaks_per_page,
+				"total_pages": total_pages,
 				"recent_transactions": recent_transactions,
 			},
 		)

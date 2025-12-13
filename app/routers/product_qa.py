@@ -15,6 +15,11 @@ from ..services.embeddings import (
 	search_all_product_qas,
 	search_product_qas,
 )
+from ..services.conversation_qa_extractor import (
+	extract_qa_from_conversations,
+	filter_qa_by_product,
+	ExtractedQA,
+)
 
 router = APIRouter(prefix="/products", tags=["product_qa"])
 
@@ -374,4 +379,275 @@ def product_qa_table(request: Request, product_id: int):
 			"product_qa.html",
 			{"request": request, "product": product, "qas": qas},
 		)
+
+
+@router.get("/{product_id}/qas/import")
+def product_qa_import_page(request: Request, product_id: int):
+	"""Render Q&A import page for a specific product."""
+	with get_session() as session:
+		product = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not product:
+			raise HTTPException(status_code=404, detail="Product not found")
+		
+		# Default to last 7 days
+		today = dt.date.today()
+		default_start = today - dt.timedelta(days=7)
+		
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"product_qa_import.html",
+			{
+				"request": request,
+				"product": product,
+				"product_id": product_id,
+				"default_start": default_start,
+				"default_end": today,
+			},
+		)
+
+
+@router.get("/qas/import")
+def all_qa_import_page(request: Request):
+	"""Render Q&A import page for all products."""
+	# Default to last 7 days
+	today = dt.date.today()
+	default_start = today - dt.timedelta(days=7)
+	
+	templates = request.app.state.templates
+	return templates.TemplateResponse(
+		"product_qa_import.html",
+		{
+			"request": request,
+			"product": None,
+			"product_id": None,
+			"default_start": default_start,
+			"default_end": today,
+		},
+	)
+
+
+@router.post("/{product_id}/qas/import/preview")
+def preview_qa_import(
+	product_id: int,
+	start_date: str = Form(...),
+	end_date: str = Form(...),
+):
+	"""Preview Q&A pairs extracted from conversations in date range."""
+	with get_session() as session:
+		product = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not product:
+			raise HTTPException(status_code=404, detail="Product not found")
+		
+		try:
+			start = dt.date.fromisoformat(start_date)
+			end = dt.date.fromisoformat(end_date)
+		except ValueError:
+			raise HTTPException(status_code=400, detail="Invalid date format")
+		
+		# Extract Q&A pairs
+		all_qa_pairs = extract_qa_from_conversations(
+			session,
+			start_date=start,
+			end_date=end,
+			product_id_filter=product_id,  # Filter by product
+		)
+		
+		# Also get filtered out pairs for info
+		all_qa_pairs_unfiltered = extract_qa_from_conversations(
+			session,
+			start_date=start,
+			end_date=end,
+			product_id_filter=None,  # Get all
+		)
+		_, filtered_out = filter_qa_by_product(all_qa_pairs_unfiltered, product_id)
+		
+		return {
+			"product_id": product_id,
+			"start_date": start_date,
+			"end_date": end_date,
+			"qa_pairs": [
+				{
+					"conversation_id": qa.conversation_id,
+					"question": qa.question,
+					"answer": qa.answer,
+					"product_id": qa.product_id,
+					"product_name": qa.product_name,
+				}
+				for qa in all_qa_pairs
+			],
+			"filtered_out_count": len(filtered_out),
+			"total_count": len(all_qa_pairs),
+		}
+
+
+@router.post("/qas/import/preview")
+def preview_all_qa_import(
+	start_date: str = Form(...),
+	end_date: str = Form(...),
+):
+	"""Preview Q&A pairs extracted from conversations in date range (all products)."""
+	with get_session() as session:
+		try:
+			start = dt.date.fromisoformat(start_date)
+			end = dt.date.fromisoformat(end_date)
+		except ValueError:
+			raise HTTPException(status_code=400, detail="Invalid date format")
+		
+		# Extract Q&A pairs (no product filter)
+		all_qa_pairs = extract_qa_from_conversations(
+			session,
+			start_date=start,
+			end_date=end,
+			product_id_filter=None,
+		)
+		
+		return {
+			"product_id": None,
+			"start_date": start_date,
+			"end_date": end_date,
+			"qa_pairs": [
+				{
+					"conversation_id": qa.conversation_id,
+					"question": qa.question,
+					"answer": qa.answer,
+					"product_id": qa.product_id,
+					"product_name": qa.product_name,
+				}
+				for qa in all_qa_pairs
+			],
+			"total_count": len(all_qa_pairs),
+		}
+
+
+@router.post("/{product_id}/qas/import/confirm")
+def confirm_qa_import(
+	product_id: int,
+	qa_pairs_json: str = Form(...),
+):
+	"""Confirm and create ProductQA entries from extracted Q&A pairs."""
+	with get_session() as session:
+		product = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not product:
+			raise HTTPException(status_code=404, detail="Product not found")
+		
+		try:
+			qa_pairs_data = json.loads(qa_pairs_json)
+			if not isinstance(qa_pairs_data, list):
+				raise HTTPException(status_code=400, detail="qa_pairs_json must be a JSON array")
+		except json.JSONDecodeError:
+			raise HTTPException(status_code=400, detail="Invalid JSON in qa_pairs_json")
+		
+		created_count = 0
+		errors = []
+		
+		for qa_data in qa_pairs_data:
+			try:
+				question = qa_data.get("question", "").strip()
+				answer = qa_data.get("answer", "").strip()
+				
+				if not question or not answer:
+					continue
+				
+				# Check if similar Q&A already exists (simple duplicate check)
+				existing = session.exec(
+					select(ProductQA)
+					.where(ProductQA.product_id == product_id)
+					.where(ProductQA.question == question)
+					.where(ProductQA.answer == answer)
+				).first()
+				
+				if existing:
+					continue  # Skip duplicates
+				
+				# Generate embedding
+				embedding = generate_embedding(question)
+				embedding_json = embedding_to_json(embedding)
+				
+				qa = ProductQA(
+					product_id=product_id,
+					question=question,
+					answer=answer,
+					embedding_json=embedding_json,
+					is_active=True,
+				)
+				
+				session.add(qa)
+				created_count += 1
+			except Exception as e:
+				errors.append(str(e))
+		
+		session.commit()
+		
+		return {
+			"status": "ok",
+			"created_count": created_count,
+			"errors": errors if errors else None,
+		}
+
+
+@router.post("/qas/import/confirm")
+def confirm_all_qa_import(
+	qa_pairs_json: str = Form(...),
+):
+	"""Confirm and create ProductQA entries from extracted Q&A pairs (with product IDs from extraction)."""
+	with get_session() as session:
+		try:
+			qa_pairs_data = json.loads(qa_pairs_json)
+			if not isinstance(qa_pairs_data, list):
+				raise HTTPException(status_code=400, detail="qa_pairs_json must be a JSON array")
+		except json.JSONDecodeError:
+			raise HTTPException(status_code=400, detail="Invalid JSON in qa_pairs_json")
+		
+		created_count = 0
+		errors = []
+		
+		for qa_data in qa_pairs_data:
+			try:
+				product_id = qa_data.get("product_id")
+				question = qa_data.get("question", "").strip()
+				answer = qa_data.get("answer", "").strip()
+				
+				if not product_id or not question or not answer:
+					continue
+				
+				# Verify product exists
+				product = session.exec(select(Product).where(Product.id == product_id)).first()
+				if not product:
+					continue
+				
+				# Check if similar Q&A already exists
+				existing = session.exec(
+					select(ProductQA)
+					.where(ProductQA.product_id == product_id)
+					.where(ProductQA.question == question)
+					.where(ProductQA.answer == answer)
+				).first()
+				
+				if existing:
+					continue  # Skip duplicates
+				
+				# Generate embedding
+				embedding = generate_embedding(question)
+				embedding_json = embedding_to_json(embedding)
+				
+				qa = ProductQA(
+					product_id=product_id,
+					question=question,
+					answer=answer,
+					embedding_json=embedding_json,
+					is_active=True,
+				)
+				
+				session.add(qa)
+				created_count += 1
+			except Exception as e:
+				errors.append(str(e))
+		
+		session.commit()
+		
+		return {
+			"status": "ok",
+			"created_count": created_count,
+			"errors": errors if errors else None,
+		}
 
