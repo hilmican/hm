@@ -5,6 +5,7 @@ metadata:
   namespace: hm
 spec:
   restartPolicy: Never
+  nodeName: mediatriplem4
   securityContext:
     fsGroup: 1000
     fsGroupChangePolicy: OnRootMismatch

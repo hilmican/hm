@@ -13,6 +13,7 @@ spec:
       labels:
         app: hm-redis
     spec:
+      nodeName: mediatriplem4
       containers:
         - name: redis
           image: redis:7-alpine

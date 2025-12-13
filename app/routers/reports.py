@@ -491,24 +491,37 @@ def finance_report(request: Request, start: Optional[str] = Query(default=None),
 		# Detect payment leaks
 		leaks = detect_payment_leaks(session, min_days_old=7)
 		
-		# Recent transactions (last 20)
+		# Recent transactions (last 20) - optimize to avoid N+1 queries
+		# Batch load all account IDs first
+		account_ids = set()
+		for inc in incomes[:20]:
+			if inc.account_id:
+				account_ids.add(inc.account_id)
+		for exp in expenses[:20]:
+			if exp.account_id:
+				account_ids.add(exp.account_id)
+		
+		# Load all accounts in one query
+		account_map = {}
+		if account_ids:
+			accounts_batch = session.exec(select(Account).where(Account.id.in_(account_ids))).all()
+			account_map = {acc.id: acc.name for acc in accounts_batch if acc.id is not None}
+		
 		recent_transactions = []
 		for inc in incomes[:20]:
-			account = session.exec(select(Account).where(Account.id == inc.account_id)).first()
 			recent_transactions.append({
 				"type": "income",
 				"date": inc.date,
 				"amount": inc.amount,
-				"account": account.name if account else f"Account {inc.account_id}",
+				"account": account_map.get(inc.account_id) if inc.account_id else f"Account {inc.account_id}",
 				"description": f"{inc.source} - {inc.reference or ''}",
 			})
 		for exp in expenses[:20]:
-			account = session.exec(select(Account).where(Account.id == exp.account_id)).first() if exp.account_id else None
 			recent_transactions.append({
 				"type": "expense",
 				"date": exp.date,
 				"amount": -exp.amount,
-				"account": account.name if account else "No account",
+				"account": account_map.get(exp.account_id) if exp.account_id else "No account",
 				"description": exp.details or "",
 			})
 		recent_transactions.sort(key=lambda x: x["date"] or dt.date.min, reverse=True)
