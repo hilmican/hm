@@ -637,6 +637,15 @@ class Cost(SQLModel, table=True):
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 
 
+class SupplierPaymentAllocation(SQLModel, table=True):
+	"""Tracks which debts are closed by which payments."""
+	id: Optional[int] = Field(default=None, primary_key=True)
+	payment_cost_id: int = Field(foreign_key="cost.id", index=True, description="Payment cost entry")
+	debt_cost_id: int = Field(foreign_key="cost.id", index=True, description="Debt cost entry being closed")
+	amount: float = Field(description="Amount allocated from payment to this debt")
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
 class Account(SQLModel, table=True):
 	"""Company bank accounts, physical safes, and other money storage locations."""
 	id: Optional[int] = Field(default=None, primary_key=True)

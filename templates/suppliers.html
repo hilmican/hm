@@ -67,6 +67,7 @@
               <th>Telefon</th>
               <th>Adres</th>
               <th>Toplam Borç</th>
+              <th>Kapatılan</th>
               <th>Toplam Ödeme</th>
               <th>Kalan Borç</th>
               <th>İşlemler</th>
@@ -79,6 +80,7 @@
               <td>{{ data.supplier.phone or '-' }}</td>
               <td>{{ data.supplier.address or '-' }}</td>
               <td class="negative">{{ '%.2f'|format(data.total_debt) }} ₺</td>
+              <td class="positive">{{ '%.2f'|format(data.total_closed) }} ₺</td>
               <td class="positive">{{ '%.2f'|format(data.total_payment) }} ₺</td>
               <td class="{% if data.remaining_debt > 0 %}negative{% elif data.remaining_debt < 0 %}positive{% else %}neutral{% endif %}">
                 {{ '%.2f'|format(data.remaining_debt) }} ₺
@@ -90,7 +92,7 @@
             {% endfor %}
             {% if not supplier_data %}
             <tr>
-              <td colspan="7" style="text-align:center; color:#6b7280; padding:24px;">
+              <td colspan="8" style="text-align:center; color:#6b7280; padding:24px;">
                 Henüz cari hesap eklenmemiş.
               </td>
             </tr>

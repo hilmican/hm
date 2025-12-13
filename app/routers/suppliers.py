@@ -7,7 +7,7 @@ from sqlmodel import select
 from sqlalchemy import func, and_
 
 from ..db import get_session
-from ..models import Supplier, Cost, Product, CostType, Account
+from ..models import Supplier, Cost, Product, CostType, Account, SupplierPaymentAllocation
 
 router = APIRouter()
 
@@ -31,11 +31,19 @@ def suppliers_page(request: Request):
 				.where(Cost.supplier_id == supplier.id)
 			).all()
 			
-			# Calculate debts (MERTER MAL ALIM costs, not payments)
-			total_debt = sum(
-				float(c.amount or 0) for c in costs
-				if not c.is_payment_to_supplier and c.type_id == 9
-			)
+			# Get debts (MERTER MAL ALIM costs, not payments)
+			debts = [c for c in costs if not c.is_payment_to_supplier and c.type_id == 9]
+			total_debt = sum(float(c.amount or 0) for c in debts)
+			
+			# Get payment allocations
+			debt_ids = [d.id for d in debts if d.id is not None]
+			total_closed = 0.0
+			if debt_ids:
+				allocs = session.exec(
+					select(SupplierPaymentAllocation)
+					.where(SupplierPaymentAllocation.debt_cost_id.in_(debt_ids))
+				).all()
+				total_closed = sum(float(a.amount or 0) for a in allocs)
 			
 			# Calculate payments
 			total_payment = sum(
@@ -43,12 +51,13 @@ def suppliers_page(request: Request):
 				if c.is_payment_to_supplier
 			)
 			
-			# Remaining debt
-			remaining_debt = total_debt - total_payment
+			# Remaining debt (based on closed amounts, not just payments)
+			remaining_debt = total_debt - total_closed
 			
 			supplier_data.append({
 				"supplier": supplier,
 				"total_debt": total_debt,
+				"total_closed": total_closed,
 				"total_payment": total_payment,
 				"remaining_debt": remaining_debt,
 			})
@@ -95,10 +104,36 @@ def supplier_detail(
 		# Get accounts for payment form
 		accounts = session.exec(select(Account).where(Account.is_active == True).order_by(Account.name.asc())).all()
 		
+		# Get payment allocations to calculate closed amounts per debt
+		all_debt_ids = [d.id for d in debts if d.id is not None]
+		allocations = {}
+		if all_debt_ids:
+			allocs = session.exec(
+				select(SupplierPaymentAllocation)
+				.where(SupplierPaymentAllocation.debt_cost_id.in_(all_debt_ids))
+			).all()
+			for alloc in allocs:
+				if alloc.debt_cost_id not in allocations:
+					allocations[alloc.debt_cost_id] = 0.0
+				allocations[alloc.debt_cost_id] += float(alloc.amount or 0)
+		
+		# Calculate remaining debt per entry and totals
+		debt_details = []
+		for debt in debts:
+			closed_amount = allocations.get(debt.id, 0.0)
+			debt_amount = float(debt.amount or 0)
+			remaining = debt_amount - closed_amount
+			debt_details.append({
+				"debt": debt,
+				"closed_amount": closed_amount,
+				"remaining": remaining,
+			})
+		
 		# Calculate totals
 		total_debt = sum(float(c.amount or 0) for c in debts)
+		total_closed = sum(d["closed_amount"] for d in debt_details)
 		total_payment = sum(float(c.amount or 0) for c in payments)
-		remaining_debt = total_debt - total_payment
+		remaining_debt = total_debt - total_closed
 		
 		# Get purchase history (MERTER MAL ALIM with product info)
 		purchase_history = []
@@ -120,12 +155,14 @@ def supplier_detail(
 				"request": request,
 				"supplier": supplier,
 				"debts": debts,
+				"debt_details": debt_details,
 				"payments": payments,
 				"purchase_history": purchase_history,
 				"product_map": product_map,
 				"type_map": type_map,
 				"accounts": accounts,
 				"total_debt": total_debt,
+				"total_closed": total_closed,
 				"total_payment": total_payment,
 				"remaining_debt": remaining_debt,
 			},
@@ -171,12 +208,15 @@ def add_payment_to_supplier(
 	date: Optional[str] = Form(default=None),
 	account_id: Optional[int] = Form(default=None),
 	details: Optional[str] = Form(default=None),
+	debt_allocations: Optional[str] = Form(default=None),  # JSON string: {debt_id: amount}
 ):
-	"""Add a payment to supplier (creates a cost with is_payment_to_supplier=True)."""
+	"""Add a payment to supplier and allocate it to specific debts."""
 	try:
 		when = dt.date.fromisoformat(date) if date else dt.date.today()
 	except Exception:
 		when = dt.date.today()
+	
+	import json
 	
 	with get_session() as session:
 		# Verify supplier exists
@@ -186,10 +226,18 @@ def add_payment_to_supplier(
 		
 		try:
 			# Create a cost entry as payment
-			# We need a type_id - use a default or find/create one
-			# For now, we'll use type_id=1 as default (should be handled better in production)
-			c = Cost(
-				type_id=1,  # Default type - should be improved
+			# Find or use default cost type for payments
+			from ..models import CostType
+			payment_type = session.exec(select(CostType).where(CostType.name == "Ödeme")).first()
+			if not payment_type:
+				# Try to find any type, or use first one
+				first_type = session.exec(select(CostType).limit(1)).first()
+				type_id = first_type.id if first_type and first_type.id else 1
+			else:
+				type_id = payment_type.id
+			
+			payment_cost = Cost(
+				type_id=type_id,
 				amount=float(amount),
 				date=when,
 				details=(details or "").strip() or None,
@@ -197,10 +245,101 @@ def add_payment_to_supplier(
 				supplier_id=supplier_id,
 				is_payment_to_supplier=True,
 			)
-			session.add(c)
+			session.add(payment_cost)
+			session.flush()  # Get the ID
+			
+			# Parse debt allocations if provided
+			if debt_allocations:
+				try:
+					allocations = json.loads(debt_allocations)
+					remaining_payment = float(amount)
+					
+					# Get all debts for this supplier
+					debts = session.exec(
+						select(Cost)
+						.where(Cost.supplier_id == supplier_id)
+						.where(Cost.is_payment_to_supplier == False)
+						.where(Cost.type_id == 9)
+						.order_by(Cost.date.asc(), Cost.id.asc())  # FIFO: oldest first
+					).all()
+					
+					# Get existing allocations to calculate remaining debt per entry
+					debt_ids = [d.id for d in debts if d.id is not None]
+					existing_allocations = {}
+					if debt_ids:
+						existing = session.exec(
+							select(SupplierPaymentAllocation)
+							.where(SupplierPaymentAllocation.debt_cost_id.in_(debt_ids))
+						).all()
+						for alloc in existing:
+							if alloc.debt_cost_id not in existing_allocations:
+								existing_allocations[alloc.debt_cost_id] = 0.0
+							existing_allocations[alloc.debt_cost_id] += float(alloc.amount or 0)
+					
+					# Allocate payment to debts
+					for debt in debts:
+						if remaining_payment <= 0:
+							break
+						if debt.id is None:
+							continue
+						
+						debt_amount = float(debt.amount or 0)
+						already_closed = existing_allocations.get(debt.id, 0.0)
+						remaining_debt = debt_amount - already_closed
+						
+						if remaining_debt <= 0:
+							continue
+						
+						# Check if this debt is in the allocations dict
+						alloc_amount = 0.0
+						if allocations and str(debt.id) in allocations:
+							alloc_amount = float(allocations[str(debt.id)])
+						elif not allocations:
+							# Auto-allocate: use remaining payment up to remaining debt
+							alloc_amount = min(remaining_payment, remaining_debt)
+						
+						if alloc_amount > 0 and alloc_amount <= remaining_payment:
+							# Don't allocate more than remaining debt
+							alloc_amount = min(alloc_amount, remaining_debt)
+							
+							allocation = SupplierPaymentAllocation(
+								payment_cost_id=payment_cost.id,  # type: ignore
+								debt_cost_id=debt.id,
+								amount=alloc_amount,
+							)
+							session.add(allocation)
+							remaining_payment -= alloc_amount
+					
+					# If there's remaining payment and no specific allocations, auto-allocate to oldest debts
+					if remaining_payment > 0 and not allocations:
+						for debt in debts:
+							if remaining_payment <= 0:
+								break
+							if debt.id is None:
+								continue
+							
+							debt_amount = float(debt.amount or 0)
+							already_closed = existing_allocations.get(debt.id, 0.0)
+							remaining_debt = debt_amount - already_closed
+							
+							if remaining_debt > 0:
+								alloc_amount = min(remaining_payment, remaining_debt)
+								allocation = SupplierPaymentAllocation(
+									payment_cost_id=payment_cost.id,  # type: ignore
+									debt_cost_id=debt.id,
+									amount=alloc_amount,
+								)
+								session.add(allocation)
+								remaining_payment -= alloc_amount
+					
+				except Exception as e:
+					# If allocation fails, still save the payment
+					pass
+			
 			session.commit()
 		except Exception:
 			# best-effort insert; ignore on error
+			session.rollback()
 			pass
 	
 	return RedirectResponse(url=f"/suppliers/{supplier_id}", status_code=303)

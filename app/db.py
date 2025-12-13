@@ -1387,6 +1387,34 @@ def init_db() -> None:
                 except Exception:
                     pass
 
+                # Ensure supplier_payment_allocation table exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'supplierpaymentallocation'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql(
+                            """
+                            CREATE TABLE supplierpaymentallocation (
+                                id INT PRIMARY KEY AUTO_INCREMENT,
+                                payment_cost_id INT NOT NULL,
+                                debt_cost_id INT NOT NULL,
+                                amount DOUBLE NOT NULL,
+                                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                INDEX idx_payment_allocation_payment (payment_cost_id),
+                                INDEX idx_payment_allocation_debt (debt_cost_id),
+                                FOREIGN KEY (payment_cost_id) REFERENCES cost(id) ON DELETE CASCADE,
+                                FOREIGN KEY (debt_cost_id) REFERENCES cost(id) ON DELETE CASCADE
+                            )
+                            """
+                        )
+                except Exception:
+                    pass
+
                 return
         except Exception as e:
             last_err = e

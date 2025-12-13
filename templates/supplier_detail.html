@@ -73,6 +73,10 @@
         <div class="summary-value negative">{{ '%.2f'|format(total_debt) }} ₺</div>
       </div>
       <div class="summary-item">
+        <div class="summary-label">Kapatılan</div>
+        <div class="summary-value positive">{{ '%.2f'|format(total_closed) }} ₺</div>
+      </div>
+      <div class="summary-item">
         <div class="summary-label">Toplam Ödeme</div>
         <div class="summary-value positive">{{ '%.2f'|format(total_payment) }} ₺</div>
       </div>
@@ -87,10 +91,10 @@
     <div class="card">
       <h2>Yeni Ödeme Ekle</h2>
       <div class="body">
-        <form method="post" action="/suppliers/{{ supplier.id }}/add-payment" class="row">
+        <form method="post" action="/suppliers/{{ supplier.id }}/add-payment" id="paymentForm" class="row">
           <div class="field">
             <label>Tutar <span style="color:red;">*</span></label>
-            <input type="number" step="0.01" name="amount" required />
+            <input type="number" step="0.01" name="amount" id="paymentAmount" required />
           </div>
           <div class="field">
             <label>Tarih</label>
@@ -112,7 +116,46 @@
           <div style="align-self:flex-end">
             <button class="btn btn-success" type="submit">Ödeme Ekle</button>
           </div>
+          <input type="hidden" name="debt_allocations" id="debtAllocations" />
         </form>
+        {% if debt_details %}
+        <div style="margin-top:16px; padding:12px; background:#f9fafb; border-radius:6px;">
+          <div style="font-weight:600; margin-bottom:8px;">Borçları Kapat:</div>
+          <div style="max-height:200px; overflow-y:auto;">
+            {% for detail in debt_details %}
+            {% if detail.remaining > 0 %}
+            <div style="display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid #e5e7eb;">
+              <input type="checkbox" class="debt-checkbox" data-debt-id="{{ detail.debt.id }}" 
+                     data-debt-amount="{{ detail.debt.amount }}" data-remaining="{{ detail.remaining }}" />
+              <div style="flex:1; font-size:13px;">
+                <strong>{{ detail.debt.date }}</strong> - 
+                {% if detail.debt.product_id and detail.debt.product_id in product_map %}
+                  {{ product_map[detail.debt.product_id].name }}
+                {% else %}
+                  {{ type_map.get(detail.debt.type_id, 'Borç') }}
+                {% endif %}
+                <br/>
+                <span style="color:#6b7280; font-size:12px;">
+                  Toplam: {{ '%.2f'|format(detail.debt.amount) }} ₺ | 
+                  Kapatılan: {{ '%.2f'|format(detail.closed_amount) }} ₺ | 
+                  Kalan: <strong>{{ '%.2f'|format(detail.remaining) }} ₺</strong>
+                </span>
+              </div>
+              <div>
+                <input type="number" step="0.01" min="0" max="{{ detail.remaining }}" 
+                       class="debt-amount-input" data-debt-id="{{ detail.debt.id }}" 
+                       placeholder="0.00" style="width:100px; padding:4px 6px;" />
+              </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+          </div>
+          <div style="margin-top:8px; font-size:12px; color:#6b7280;">
+            <button type="button" onclick="autoAllocate()" class="btn btn-secondary" style="font-size:12px; padding:4px 8px;">Otomatik Dağıt</button>
+            <span id="allocationTotal" style="margin-left:12px;"></span>
+          </div>
+        </div>
+        {% endif %}
       </div>
     </div>
 
@@ -161,18 +204,25 @@
             <tr>
               <th>Tarih</th>
               <th>Tür</th>
-              <th>Tutar</th>
+              <th>Toplam Tutar</th>
+              <th>Kapatılan</th>
+              <th>Kalan</th>
               <th>Ürün</th>
               <th>Adet</th>
               <th>Detay</th>
             </tr>
           </thead>
           <tbody>
-            {% for debt in debts %}
+            {% for detail in debt_details %}
+            {% set debt = detail.debt %}
             <tr>
               <td>{{ debt.date }}</td>
               <td>{{ type_map.get(debt.type_id, debt.type_id) }}</td>
               <td class="negative">{{ '%.2f'|format(debt.amount or 0) }} ₺</td>
+              <td class="positive">{{ '%.2f'|format(detail.closed_amount) }} ₺</td>
+              <td class="{% if detail.remaining > 0 %}negative{% else %}neutral{% endif %}">
+                <strong>{{ '%.2f'|format(detail.remaining) }} ₺</strong>
+              </td>
               <td>
                 {% if debt.product_id and debt.product_id in product_map %}
                   {{ product_map[debt.product_id].name }}
@@ -223,6 +273,119 @@
         {% endif %}
       </div>
     </div>
+
+    <script>
+      function updateAllocationTotal() {
+        const inputs = document.querySelectorAll('.debt-amount-input');
+        let total = 0;
+        inputs.forEach(input => {
+          const val = parseFloat(input.value) || 0;
+          total += val;
+        });
+        const paymentAmount = parseFloat(document.getElementById('paymentAmount').value) || 0;
+        const totalEl = document.getElementById('allocationTotal');
+        if (totalEl) {
+          if (total > paymentAmount) {
+            totalEl.textContent = `Toplam: ${total.toFixed(2)} ₺ (Ödeme tutarını aşıyor!)`;
+            totalEl.style.color = '#dc2626';
+          } else {
+            totalEl.textContent = `Toplam: ${total.toFixed(2)} ₺ / ${paymentAmount.toFixed(2)} ₺`;
+            totalEl.style.color = total === paymentAmount ? '#10b981' : '#6b7280';
+          }
+        }
+      }
+
+      function autoAllocate() {
+        const paymentAmount = parseFloat(document.getElementById('paymentAmount').value) || 0;
+        if (paymentAmount <= 0) {
+          alert('Lütfen önce ödeme tutarını girin.');
+          return;
+        }
+
+        const checkboxes = document.querySelectorAll('.debt-checkbox');
+        let remaining = paymentAmount;
+        
+        checkboxes.forEach(checkbox => {
+          const input = document.querySelector(`.debt-amount-input[data-debt-id="${checkbox.dataset.debtId}"]`);
+          const remainingDebt = parseFloat(checkbox.dataset.remaining);
+          
+          if (remaining > 0 && remainingDebt > 0) {
+            checkbox.checked = true;
+            const allocate = Math.min(remaining, remainingDebt);
+            if (input) {
+              input.value = allocate.toFixed(2);
+            }
+            remaining -= allocate;
+          } else {
+            checkbox.checked = false;
+            if (input) {
+              input.value = '';
+            }
+          }
+        });
+        
+        updateAllocationTotal();
+      }
+
+      document.addEventListener('DOMContentLoaded', function() {
+        const paymentAmountInput = document.getElementById('paymentAmount');
+        const debtInputs = document.querySelectorAll('.debt-amount-input');
+        const checkboxes = document.querySelectorAll('.debt-checkbox');
+
+        paymentAmountInput.addEventListener('input', updateAllocationTotal);
+        
+        debtInputs.forEach(input => {
+          input.addEventListener('input', function() {
+            const val = parseFloat(this.value) || 0;
+            const remaining = parseFloat(this.dataset.remaining);
+            const checkbox = document.querySelector(`.debt-checkbox[data-debt-id="${this.dataset.debtId}"]`);
+            
+            if (val > 0 && val <= remaining) {
+              if (checkbox) checkbox.checked = true;
+            } else if (val > remaining) {
+              this.value = remaining.toFixed(2);
+              if (checkbox) checkbox.checked = true;
+            } else {
+              if (checkbox) checkbox.checked = false;
+            }
+            
+            updateAllocationTotal();
+          });
+        });
+
+        checkboxes.forEach(checkbox => {
+          checkbox.addEventListener('change', function() {
+            const input = document.querySelector(`.debt-amount-input[data-debt-id="${this.dataset.debtId}"]`);
+            if (!this.checked && input) {
+              input.value = '';
+            }
+            updateAllocationTotal();
+          });
+        });
+
+        const form = document.getElementById('paymentForm');
+        form.addEventListener('submit', function(e) {
+          const allocations = {};
+          const inputs = document.querySelectorAll('.debt-amount-input');
+          let hasAllocation = false;
+          
+          inputs.forEach(input => {
+            const val = parseFloat(input.value) || 0;
+            if (val > 0) {
+              allocations[input.dataset.debtId] = val;
+              hasAllocation = true;
+            }
+          });
+
+          const allocationInput = document.getElementById('debtAllocations');
+          if (hasAllocation) {
+            allocationInput.value = JSON.stringify(allocations);
+          } else {
+            allocationInput.value = '';
+          }
+        });
+      });
+    </script>
   </body>
 </html>
 
