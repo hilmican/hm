@@ -359,6 +359,8 @@ class Message(SQLModel, table=True):
     product_id: Optional[int] = Field(default=None, foreign_key="product.id", index=True, description="Product focus at the time this message was sent/received")
     # Message categorization for bulk processing and analysis
     message_category: Optional[str] = Field(default=None, index=True, description="Category: greeting|information|haggle|sale|address|personal_details|size|color|payment|upsell|follow_up|other")
+    # Sender type detection (AI vs human agent)
+    sender_type: Optional[str] = Field(default=None, index=True, description="Sender type: ai|human|unknown - detected based on ai_status, timing, and content patterns")
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 

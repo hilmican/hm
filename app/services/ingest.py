@@ -72,6 +72,157 @@ def _contains_manual_escalation_marker(text_val: Optional[str]) -> bool:
 	return False
 
 
+def _detect_sender_type(
+	session,
+	conversation_id: Optional[int],
+	direction: str,
+	text: Optional[str],
+	timestamp_ms: Optional[int],
+	ig_message_id: Optional[str],
+) -> str:
+	"""
+	Detect if an outbound message (received via webhook) was sent by AI or human agent.
+	Returns: "ai", "human", or "unknown"
+	
+	Detection strategies:
+	1. Check if message already exists with ai_status="sent" → AI
+	2. Check for recently sent AI messages with matching text/timing → AI
+	3. Check timing patterns (AI messages often sent in quick succession)
+	4. Default to "human" for outbound messages that don't match AI patterns
+	"""
+	if direction != "out":
+		# Inbound messages are always from customers (not AI)
+		return "unknown"
+	
+	if not conversation_id:
+		return "unknown"
+	
+	# Strategy 1: Check if message already exists with AI metadata
+	if ig_message_id:
+		try:
+			existing = session.exec(
+				text("SELECT ai_status, ai_json FROM message WHERE ig_message_id = :mid LIMIT 1")
+			).params(mid=str(ig_message_id)).first()
+			if existing:
+				ai_status = existing[0] if isinstance(existing, (list, tuple)) else (getattr(existing, "ai_status", None) if hasattr(existing, "ai_status") else None)
+				ai_json_str = existing[1] if isinstance(existing, (list, tuple)) else (getattr(existing, "ai_json", None) if hasattr(existing, "ai_json") else None)
+				if ai_status == "sent":
+					# Check if it has auto_sent flag
+					if ai_json_str:
+						try:
+							ai_data = json.loads(ai_json_str)
+							if isinstance(ai_data, dict) and ai_data.get("auto_sent"):
+								return "ai"
+						except Exception:
+							pass
+					return "ai"
+		except Exception:
+			pass
+	
+	# Strategy 2: Check for recently sent AI messages with matching text/timing
+	# Look for AI messages sent in the last 5 minutes with similar text
+	if text and timestamp_ms:
+		try:
+			# Search window: 5 minutes before and 2 minutes after (to account for webhook delay)
+			time_window_start = int(timestamp_ms) - (5 * 60 * 1000)  # 5 minutes before
+			time_window_end = int(timestamp_ms) + (2 * 60 * 1000)   # 2 minutes after
+			
+			# Look for AI messages with matching text (fuzzy match - check if text contains or is contained)
+			recent_ai = session.exec(
+				text("""
+					SELECT id, text, timestamp_ms, ai_json
+					FROM message
+					WHERE conversation_id = :cid
+					  AND direction = 'out'
+					  AND ai_status = 'sent'
+					  AND timestamp_ms BETWEEN :start AND :end
+					ORDER BY timestamp_ms DESC
+					LIMIT 10
+				""")
+			).params(
+				cid=int(conversation_id),
+				start=time_window_start,
+				end=time_window_end
+			).all()
+			
+			text_normalized = (text or "").strip().lower()
+			for ai_msg in recent_ai:
+				ai_text = ai_msg[1] if isinstance(ai_msg, (list, tuple)) else (getattr(ai_msg, "text", None) if hasattr(ai_msg, "text") else None)
+				if ai_text:
+					ai_text_normalized = ai_text.strip().lower()
+					# Check if texts match (exact or one contains the other)
+					if (text_normalized == ai_text_normalized or
+						text_normalized in ai_text_normalized or
+						ai_text_normalized in text_normalized):
+						# Also check ai_json for auto_sent flag
+						ai_json_str = ai_msg[3] if isinstance(ai_msg, (list, tuple)) else (getattr(ai_msg, "ai_json", None) if hasattr(ai_msg, "ai_json") else None)
+						if ai_json_str:
+							try:
+								ai_data = json.loads(ai_json_str)
+								if isinstance(ai_data, dict) and ai_data.get("auto_sent"):
+									return "ai"
+							except Exception:
+								pass
+						return "ai"
+		except Exception:
+			pass
+	
+	# Strategy 3: Check timing patterns - AI messages often sent in quick succession
+	# If there are multiple outbound messages in quick succession (within 10 seconds), likely AI
+	if timestamp_ms:
+		try:
+			time_window = int(timestamp_ms) - (10 * 1000)  # 10 seconds before
+			recent_outbound_count = session.exec(
+				text("""
+					SELECT COUNT(*) as cnt
+					FROM message
+					WHERE conversation_id = :cid
+					  AND direction = 'out'
+					  AND timestamp_ms BETWEEN :start AND :end
+				""")
+			).params(
+				cid=int(conversation_id),
+				start=time_window,
+				end=int(timestamp_ms)
+			).first()
+			
+			count = 0
+			if recent_outbound_count:
+				if isinstance(recent_outbound_count, (list, tuple)):
+					count = int(recent_outbound_count[0] or 0)
+				elif hasattr(recent_outbound_count, "cnt"):
+					count = int(getattr(recent_outbound_count, "cnt", 0) or 0)
+				elif hasattr(recent_outbound_count, "__getitem__"):
+					try:
+						count = int(recent_outbound_count[0] or 0)
+					except (IndexError, TypeError, ValueError):
+						count = 0
+			if count and count > 1:  # Multiple messages in quick succession suggests AI
+				# But verify at least one is marked as AI
+				has_ai = session.exec(
+					text("""
+						SELECT 1 
+						FROM message
+						WHERE conversation_id = :cid
+						  AND direction = 'out'
+						  AND ai_status = 'sent'
+						  AND timestamp_ms BETWEEN :start AND :end
+						LIMIT 1
+					""")
+				).params(
+					cid=int(conversation_id),
+					start=time_window,
+					end=int(timestamp_ms)
+				).first()
+				if has_ai:
+					return "ai"
+		except Exception:
+			pass
+	
+	# Default: If we can't determine, assume human (since AI messages should be tracked)
+	return "human"
+
+
 def _categorize_inbound_message(text: Optional[str], direction: str) -> str:
 	"""
 	Categorize an inbound customer message based on content heuristics.
@@ -1137,6 +1288,18 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		# Categorize inbound message based on content
 		message_category = _categorize_inbound_message(text_val, direction)
 		
+		# Detect sender type (AI vs human) for outbound messages
+		sender_type = "unknown"
+		if direction == "out":
+			sender_type = _detect_sender_type(
+				session,
+				conversation_pk,
+				direction,
+				text_val,
+				int(timestamp_ms) if isinstance(timestamp_ms, (int, float, str)) and str(timestamp_ms).isdigit() else None,
+				str(mid) if mid else None,
+			)
+		
 		# Create Message object for return value
 		row = Message(
 			id=message_id,
@@ -1151,6 +1314,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 			direction=direction,
 			product_id=product_id_for_message,  # Store product focus for this message
 			message_category=message_category,  # Categorize message for bulk processing
+			sender_type=sender_type,  # Detect if message was sent by AI or human
 			story_id=story_id,
 			story_url=story_url,
 			ad_id=ad_id,
@@ -2378,6 +2542,18 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 	# Categorize inbound message based on content
 	message_category = _categorize_inbound_message(text_val, direction)
 	
+	# Detect sender type (AI vs human) for outbound messages
+	sender_type = "unknown"
+	if direction == "out":
+		sender_type = _detect_sender_type(
+			session,
+			conversation_pk,
+			direction,
+			text_val,
+			int(ts_ms) if ts_ms is not None else None,
+			str(mid) if mid else None,
+		)
+	
 	row = Message(
 		ig_sender_id=str(sender_id) if sender_id is not None else None,
 		ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
@@ -2390,6 +2566,7 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		direction=direction,
 		product_id=product_id_for_message,  # Store product focus for this message
 		message_category=message_category,  # Categorize message for bulk processing
+		sender_type=sender_type,  # Detect if message was sent by AI or human
 		sender_username=sender_username,
 		story_id=story_id,
 		story_url=story_url,

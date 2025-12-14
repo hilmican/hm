@@ -1134,6 +1134,7 @@ def main() -> None:
 											conversation_id=int(cid),
 											direction="out",
 											ai_status="sent",
+											sender_type="ai",  # Explicitly mark as AI-generated
 											product_id=current_focus_pid,  # Store product focus for this message
 											message_category=message_category,  # Categorize message for bulk processing
 											ai_json=json.dumps(

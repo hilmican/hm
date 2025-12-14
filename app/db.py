@@ -255,6 +255,10 @@ def init_db() -> None:
                     if 'message_category' not in have_cols:
                         conn.exec_driver_sql("ALTER TABLE message ADD COLUMN message_category VARCHAR(32) NULL")
                         conn.exec_driver_sql("ALTER TABLE message ADD INDEX idx_message_category (message_category)")
+                    # Ensure sender_type column exists for AI vs human detection
+                    if 'sender_type' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE message ADD COLUMN sender_type VARCHAR(16) NULL")
+                        conn.exec_driver_sql("ALTER TABLE message ADD INDEX idx_message_sender_type (sender_type)")
                 except Exception:
                     pass
                 # Ensure order.notes is LONGTEXT to prevent overflow from appended notes
