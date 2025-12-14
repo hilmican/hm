@@ -1256,6 +1256,9 @@ def draft_reply(
 	if upsell_config:
 		user_payload["upsell_config"] = upsell_config
 	state_payload = dict(state or {})
+	# Ensure cart is always a list, never None or other types
+	if "cart" not in state_payload or not isinstance(state_payload.get("cart"), list):
+		state_payload["cart"] = []
 	# Seed essential state flags so prompt conditions (e.g., upsell) work deterministically
 	if product_id_val:
 		state_payload.setdefault("current_focus_product_id", product_id_val)
@@ -1562,10 +1565,41 @@ def draft_reply(
 			"unit_price": _clean_float(args.get("unit_price")),
 			"is_upsell": bool(args.get("is_upsell")),
 		}
+		# Ensure cart is always a list
 		state_cart = state_payload.get("cart")
 		if not isinstance(state_cart, list):
 			state_cart = []
-		state_cart.append(item)
+		
+		# Check for duplicate item (same product_id, sku, color, size)
+		# If found, merge quantities instead of adding duplicate entry
+		item_key = (item.get("product_id"), item.get("sku"), item.get("color"), item.get("size"))
+		merged = False
+		for existing_item in state_cart:
+			existing_key = (
+				existing_item.get("product_id"),
+				existing_item.get("sku"),
+				existing_item.get("color"),
+				existing_item.get("size"),
+			)
+			if existing_key == item_key:
+				# Merge quantities
+				existing_qty = _clean_int(existing_item.get("quantity"), default=1)
+				new_qty = _clean_int(item.get("quantity"), default=1)
+				existing_item["quantity"] = existing_qty + new_qty
+				# Update unit_price if provided (use the new one)
+				if item.get("unit_price") is not None:
+					existing_item["unit_price"] = item.get("unit_price")
+				# Preserve is_upsell flag if either is True
+				if item.get("is_upsell"):
+					existing_item["is_upsell"] = True
+				merged = True
+				item = existing_item  # Use merged item for result
+				break
+		
+		# If not merged, append new item
+		if not merged:
+			state_cart.append(item)
+		
 		state_payload["cart"] = state_cart
 		if item.get("is_upsell"):
 			state_payload["upsell_offered"] = True
@@ -1573,13 +1607,197 @@ def draft_reply(
 			state_payload["upsell_product_id"] = item.get("product_id")
 		if not state_payload.get("last_step"):
 			state_payload["last_step"] = "awaiting_payment"
-		result = {"added": item}
+		
+		result = {"added": item, "merged": merged, "cart_total_items": len(state_cart)}
 		callback_entry = {"name": "add_cart_item", "arguments": args, "result": result}
 		function_callbacks.append(callback_entry)
 		_log_function_callback(conversation_id, "add_cart_item", args, result)
 		return json.dumps(result, ensure_ascii=False)
 
 	tool_handlers["add_cart_item"] = _handle_add_cart_item
+
+	# Remove cart item
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "remove_cart_item",
+				"description": "Sepetten belirli bir ürünü kaldır. product_id, sku, color, size ile eşleşen ürünü bulup kaldırır.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"product_id": {"type": "integer"},
+						"sku": {"type": "string"},
+						"color": {"type": "string"},
+						"size": {"type": "string"},
+					},
+					"required": ["product_id", "sku", "color", "size"],
+				},
+			},
+		}
+	)
+
+	def _handle_remove_cart_item(args: Dict[str, Any]) -> str:
+		product_id = _clean_positive_int(args.get("product_id"))
+		sku = _clean_tool_str(args.get("sku"))
+		color = _clean_tool_str(args.get("color"))
+		size = _clean_tool_str(args.get("size"))
+		
+		state_cart = state_payload.get("cart")
+		if not isinstance(state_cart, list):
+			state_cart = []
+		
+		item_key = (product_id, sku, color, size)
+		removed = False
+		new_cart = []
+		for existing_item in state_cart:
+			existing_key = (
+				existing_item.get("product_id"),
+				existing_item.get("sku"),
+				existing_item.get("color"),
+				existing_item.get("size"),
+			)
+			if existing_key == item_key:
+				removed = True
+			else:
+				new_cart.append(existing_item)
+		
+		state_payload["cart"] = new_cart
+		result = {"removed": removed, "cart_total_items": len(new_cart)}
+		callback_entry = {"name": "remove_cart_item", "arguments": args, "result": result}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, "remove_cart_item", args, result)
+		return json.dumps(result, ensure_ascii=False)
+
+	tool_handlers["remove_cart_item"] = _handle_remove_cart_item
+
+	# Update cart item
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "update_cart_item",
+				"description": "Sepetteki bir ürünün miktarını güncelle. product_id, sku, color, size ile eşleşen ürünü bulup quantity'sini günceller.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"product_id": {"type": "integer"},
+						"sku": {"type": "string"},
+						"color": {"type": "string"},
+						"size": {"type": "string"},
+						"quantity": {"type": "integer", "minimum": 1},
+					},
+					"required": ["product_id", "sku", "color", "size", "quantity"],
+				},
+			},
+		}
+	)
+
+	def _handle_update_cart_item(args: Dict[str, Any]) -> str:
+		product_id = _clean_positive_int(args.get("product_id"))
+		sku = _clean_tool_str(args.get("sku"))
+		color = _clean_tool_str(args.get("color"))
+		size = _clean_tool_str(args.get("size"))
+		quantity = _clean_int(args.get("quantity"), default=1)
+		
+		state_cart = state_payload.get("cart")
+		if not isinstance(state_cart, list):
+			state_cart = []
+		
+		item_key = (product_id, sku, color, size)
+		updated = False
+		for existing_item in state_cart:
+			existing_key = (
+				existing_item.get("product_id"),
+				existing_item.get("sku"),
+				existing_item.get("color"),
+				existing_item.get("size"),
+			)
+			if existing_key == item_key:
+				existing_item["quantity"] = quantity
+				updated = True
+				break
+		
+		state_payload["cart"] = state_cart
+		result = {"updated": updated, "quantity": quantity, "cart_total_items": len(state_cart)}
+		callback_entry = {"name": "update_cart_item", "arguments": args, "result": result}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, "update_cart_item", args, result)
+		return json.dumps(result, ensure_ascii=False)
+
+	tool_handlers["update_cart_item"] = _handle_update_cart_item
+
+	# Clear cart
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "clear_cart",
+				"description": "Sepeti tamamen temizle, tüm ürünleri kaldır.",
+				"parameters": {
+					"type": "object",
+					"properties": {},
+					"required": [],
+				},
+			},
+		}
+	)
+
+	def _handle_clear_cart(args: Dict[str, Any]) -> str:
+		state_cart = state_payload.get("cart")
+		if not isinstance(state_cart, list):
+			state_cart = []
+		
+		items_count = len(state_cart)
+		state_payload["cart"] = []
+		result = {"cleared": True, "items_removed": items_count}
+		callback_entry = {"name": "clear_cart", "arguments": args, "result": result}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, "clear_cart", args, result)
+		return json.dumps(result, ensure_ascii=False)
+
+	tool_handlers["clear_cart"] = _handle_clear_cart
+
+	# Get cart
+	tools.append(
+		{
+			"type": "function",
+			"function": {
+				"name": "get_cart",
+				"description": "Sepetin mevcut içeriğini al. Tüm ürünleri, miktarları ve toplam fiyatı döndürür.",
+				"parameters": {
+					"type": "object",
+					"properties": {},
+					"required": [],
+				},
+			},
+		}
+	)
+
+	def _handle_get_cart(args: Dict[str, Any]) -> str:
+		state_cart = state_payload.get("cart")
+		if not isinstance(state_cart, list):
+			state_cart = []
+		
+		# Calculate total price
+		total_price = 0.0
+		for item in state_cart:
+			qty = _clean_int(item.get("quantity"), default=1)
+			price = _clean_float(item.get("unit_price"), default=0.0)
+			total_price += qty * price
+		
+		result = {
+			"items": state_cart,
+			"total_items": len(state_cart),
+			"total_quantity": sum(_clean_int(item.get("quantity"), default=1) for item in state_cart),
+			"total_price": round(total_price, 2),
+		}
+		callback_entry = {"name": "get_cart", "arguments": args, "result": result}
+		function_callbacks.append(callback_entry)
+		_log_function_callback(conversation_id, "get_cart", args, result)
+		return json.dumps(result, ensure_ascii=False)
+
+	tool_handlers["get_cart"] = _handle_get_cart
 
 	# Customer image analysis
 	tools.append(

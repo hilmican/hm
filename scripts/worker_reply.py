@@ -420,18 +420,24 @@ def _set_status(conversation_id: int, status: str, *, state_json: Optional[str] 
 
 
 def _coerce_state(raw: Any, fallback: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+	result: dict[str, Any] = {}
 	if isinstance(raw, dict):
-		return raw
-	if isinstance(raw, str) and raw.strip():
+		result = raw
+	elif isinstance(raw, str) and raw.strip():
 		try:
 			parsed = json.loads(raw)
 			if isinstance(parsed, dict):
-				return parsed  # type: ignore[return-value]
+				result = parsed  # type: ignore[assignment]
 		except Exception:
 			return fallback or {}
-	if raw is None:
+	else:
 		return fallback or {}
-	return fallback or {}
+	
+	# Ensure cart is always a list
+	if "cart" not in result or not isinstance(result.get("cart"), list):
+		result["cart"] = []
+	
+	return result
 
 
 def main() -> None:
@@ -702,6 +708,10 @@ def main() -> None:
 							log.warning("admin_notification persist error cid=%s err=%s", cid, notify_err)
 						except Exception:
 							pass
+				# Ensure cart is always a list before saving state
+				if isinstance(new_state, dict):
+					if "cart" not in new_state or not isinstance(new_state.get("cart"), list):
+						new_state["cart"] = []
 				state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
 				# Block when conversation isn't linked to a product/ad
 				if data.get("missing_product_context"):
@@ -1053,6 +1063,9 @@ def main() -> None:
 									new_state["images_sent_product_ids"] = sorted(images_sent_products)
 								except Exception:
 									new_state["images_sent_product_ids"] = list(images_sent_products)
+								# Ensure cart is always a list before saving
+								if "cart" not in new_state or not isinstance(new_state.get("cart"), list):
+									new_state["cart"] = []
 							state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
 							try:
 								with get_session() as session:
@@ -1176,6 +1189,9 @@ def main() -> None:
 							new_state["images_sent_product_ids"] = sorted(images_sent_products)
 						except Exception:
 							new_state["images_sent_product_ids"] = list(images_sent_products)
+						# Ensure cart is always a list before saving
+						if "cart" not in new_state or not isinstance(new_state.get("cart"), list):
+							new_state["cart"] = []
 					state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
 				
 				try:
