@@ -354,7 +354,11 @@ class Message(SQLModel, table=True):
     ad_title: Optional[str] = Field(default=None)
     ad_image_url: Optional[str] = Field(default=None)
     ad_name: Optional[str] = Field(default=None)
-    referral_json: Optional[str] = Field(default=None)
+    referral_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+    # Product focus tracking (per-message for conversation flow analysis)
+    product_id: Optional[int] = Field(default=None, foreign_key="product.id", index=True, description="Product focus at the time this message was sent/received")
+    # Message categorization for bulk processing and analysis
+    message_category: Optional[str] = Field(default=None, index=True, description="Category: greeting|information|haggle|sale|address|personal_details|size|color|payment|upsell|follow_up|other")
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 

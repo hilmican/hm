@@ -32,6 +32,75 @@ ORDER_STATUS_TOOL_NAMES = {
 CRITICAL_ORDER_STEPS = {"awaiting_payment", "awaiting_address", "confirmed_by_customer", "ready_to_ship"}
 
 
+def _categorize_outbound_message(
+	state: Optional[dict[str, Any]],
+	function_callbacks: list[dict[str, Any]],
+	reply_text: str,
+) -> str:
+	"""
+	Categorize an outbound AI message based on conversation state and content.
+	Returns one of: greeting|information|haggle|sale|address|personal_details|size|color|payment|upsell|follow_up|other
+	"""
+	if not state:
+		state = {}
+	
+	state_last_step = str(state.get("last_step") or "").strip().lower()
+	hail_sent = bool(state.get("hail_sent"))
+	asked_payment = bool(state.get("asked_payment"))
+	asked_address = bool(state.get("asked_address"))
+	upsell_offered = bool(state.get("upsell_offered"))
+	
+	# Check function callbacks for specific actions
+	tool_names = {cb.get("name") for cb in function_callbacks if isinstance(cb, dict)}
+	
+	# Greeting - first message, introducing product
+	if not hail_sent or "greeting" in reply_text.lower()[:50] or "merhaba" in reply_text.lower()[:50]:
+		return "greeting"
+	
+	# Upsell - explicitly offering upsell products
+	if upsell_offered or "upsell" in str(tool_names).lower():
+		return "upsell"
+	
+	# Payment - discussing payment methods
+	if asked_payment or state_last_step == "awaiting_payment" or "ödeme" in reply_text.lower() or "nakit" in reply_text.lower() or "kart" in reply_text.lower():
+		return "payment"
+	
+	# Address - asking for or confirming address
+	if asked_address or state_last_step == "awaiting_address" or "adres" in reply_text.lower():
+		return "address"
+	
+	# Personal details - asking for name, phone, etc.
+	if "isim" in reply_text.lower() or "telefon" in reply_text.lower() or "numara" in reply_text.lower():
+		return "personal_details"
+	
+	# Size - discussing sizes
+	if state_last_step == "awaiting_size" or "beden" in reply_text.lower() or "boy" in reply_text.lower() or "kilo" in reply_text.lower():
+		return "size"
+	
+	# Color - discussing colors
+	if state_last_step == "awaiting_color" or "renk" in reply_text.lower():
+		return "color"
+	
+	# Sale - confirming order, order placed
+	if state_last_step in ("confirmed_by_customer", "ready_to_ship", "order_placed") or "sipariş" in reply_text.lower():
+		return "sale"
+	
+	# Haggle - price negotiation, discount
+	if "indirim" in reply_text.lower() or "ucuz" in reply_text.lower() or "fiyat" in reply_text.lower() and ("düş" in reply_text.lower() or "azalt" in reply_text.lower()):
+		return "haggle"
+	
+	# Information - providing product info, answering questions
+	if "fiyat" in reply_text.lower() or "özellik" in reply_text.lower() or "detay" in reply_text.lower() or len(reply_text) > 50:
+		return "information"
+	
+	# Follow-up - checking in, follow-up messages
+	if "nasıl" in reply_text.lower() or "durum" in reply_text.lower() or "ne zaman" in reply_text.lower():
+		return "follow_up"
+	
+	# Default
+	return "other"
+
+
 def _fetch_last_inbound_message(conversation_id: int) -> Optional[dict[str, Any]]:
 	with get_session() as session:
 		try:
@@ -1052,6 +1121,9 @@ def main() -> None:
 												session.add(existing)
 											continue
 
+										# Categorize message based on state and content
+										message_category = _categorize_outbound_message(new_state, function_callbacks, msg_text)
+										
 										# Insert new row
 										msg = Message(
 											ig_sender_id=str(entity_id),
@@ -1062,6 +1134,8 @@ def main() -> None:
 											conversation_id=int(cid),
 											direction="out",
 											ai_status="sent",
+											product_id=current_focus_pid,  # Store product focus for this message
+											message_category=message_category,  # Categorize message for bulk processing
 											ai_json=json.dumps(
 												{
 													"auto_sent": True,
@@ -1090,6 +1164,18 @@ def main() -> None:
 						# Fall back to suggested status if send fails
 						status_to_set = "suggested"
 						should_auto_send = False
+				
+				# Mark images as suggested (even if not sent) to prevent re-suggesting them
+				# Only update if images weren't already marked as sent (to avoid duplicate updates)
+				if (auto_image_urls or requested_image_urls) and not images_were_sent:
+					images_sent_products.update(auto_image_product_ids)
+					images_sent_products.update(requested_image_pids)
+					if isinstance(new_state, dict):
+						try:
+							new_state["images_sent_product_ids"] = sorted(images_sent_products)
+						except Exception:
+							new_state["images_sent_product_ids"] = list(images_sent_products)
+					state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
 				
 				try:
 					# Build json_meta with debug_meta and function_callbacks

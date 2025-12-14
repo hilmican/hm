@@ -246,6 +246,15 @@ def init_db() -> None:
                         conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ai_status VARCHAR(16) NULL")
                     if 'ai_json' not in have_cols:
                         conn.exec_driver_sql("ALTER TABLE message ADD COLUMN ai_json LONGTEXT NULL")
+                    # Ensure product_id column exists for per-message product focus tracking
+                    if 'product_id' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE message ADD COLUMN product_id INT NULL")
+                        conn.exec_driver_sql("ALTER TABLE message ADD INDEX idx_message_product_id (product_id)")
+                        conn.exec_driver_sql("ALTER TABLE message ADD FOREIGN KEY (product_id) REFERENCES product(id) ON DELETE SET NULL")
+                    # Ensure message_category column exists for message categorization
+                    if 'message_category' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE message ADD COLUMN message_category VARCHAR(32) NULL")
+                        conn.exec_driver_sql("ALTER TABLE message ADD INDEX idx_message_category (message_category)")
                 except Exception:
                     pass
                 # Ensure order.notes is LONGTEXT to prevent overflow from appended notes

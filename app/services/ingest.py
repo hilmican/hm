@@ -72,6 +72,61 @@ def _contains_manual_escalation_marker(text_val: Optional[str]) -> bool:
 	return False
 
 
+def _categorize_inbound_message(text: Optional[str], direction: str) -> str:
+	"""
+	Categorize an inbound customer message based on content heuristics.
+	Returns one of: greeting|information|haggle|sale|address|personal_details|size|color|payment|upsell|follow_up|other
+	"""
+	if not text or direction != "in":
+		return "other"
+	
+	text_lower = text.lower()
+	
+	# Greeting
+	if any(word in text_lower[:30] for word in ["merhaba", "selam", "iyi günler", "günaydın", "iyi akşamlar"]):
+		return "greeting"
+	
+	# Address - contains address keywords
+	address_keywords = ["mah", "sok", "cad", "no", "il/", "ilce", "ilçe", "apt", "daire", "adres"]
+	if sum(1 for kw in address_keywords if kw in text_lower) >= 2:
+		return "address"
+	
+	# Payment - discussing payment
+	if any(word in text_lower for word in ["kapıda", "kapida", "nakit", "kart", "kredi kart", "kapiya kart", "ödeme"]):
+		return "payment"
+	
+	# Personal details - providing name/phone
+	if ("isim" in text_lower or "adım" in text_lower) and ("telefon" in text_lower or "numara" in text_lower):
+		return "personal_details"
+	
+	# Size - asking about sizes
+	if any(word in text_lower for word in ["beden", "kaç beden", "hangi beden", "boy", "kilo", "ölçü"]):
+		return "size"
+	
+	# Color - asking about colors
+	if any(word in text_lower for word in ["renk", "hangi renk", "ne renk", "rengi"]):
+		return "color"
+	
+	# Haggle - price negotiation
+	if any(word in text_lower for word in ["indirim", "ucuz", "daha ucuz", "fiyat düş", "fiyat azalt", "kampanya", "promosyon"]):
+		return "haggle"
+	
+	# Sale - confirming purchase
+	if any(word in text_lower for word in ["alıyorum", "alacağım", "sipariş", "istiyorum", "evet al", "tamam al"]):
+		return "sale"
+	
+	# Information - asking questions
+	if any(word in text_lower for word in ["nedir", "nasıl", "ne", "hakkında", "fiyat", "kaç", "var mı"]):
+		return "information"
+	
+	# Follow-up - checking status
+	if any(word in text_lower for word in ["durum", "ne zaman", "geldi mi", "gönderildi mi", "hazır mı"]):
+		return "follow_up"
+	
+	# Default
+	return "other"
+
+
 def _auto_escalate_conversation_from_agent(
 	conversation_id: Optional[int],
 	message_id: Optional[int],
@@ -847,6 +902,28 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 	# Resolve or create canonical Conversation row (internal integer id)
 	conversation_pk = _get_or_create_conversation_id(session, page_id, user_id)
 	
+	# Get current product focus from ai_shadow_state if available (for inbound messages)
+	product_id_for_message: Optional[int] = None
+	if conversation_pk and direction == "in":
+		try:
+			state_row = session.exec(
+				text("SELECT state_json FROM ai_shadow_state WHERE conversation_id = :cid LIMIT 1")
+			).params(cid=int(conversation_pk)).first()
+			if state_row:
+				state_json_str = state_row[0] if isinstance(state_row, (list, tuple)) else (getattr(state_row, "state_json", None) if hasattr(state_row, "state_json") else None)
+				if state_json_str:
+					state_data = json.loads(state_json_str)
+					if isinstance(state_data, dict):
+						focus_pid = state_data.get("current_focus_product_id")
+						if focus_pid:
+							try:
+								product_id_for_message = int(focus_pid)
+							except (ValueError, TypeError):
+								pass
+		except Exception:
+			# Best-effort; don't fail message creation if state lookup fails
+			pass
+	
 	# Extract Graph conversation ID for hydration
 	# First, check if webhook payload contains conversation/thread ID directly
 	graph_conversation_id = None
@@ -1057,6 +1134,9 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 			# Best-effort; don't fail if update fails
 			pass
 		
+		# Categorize inbound message based on content
+		message_category = _categorize_inbound_message(text_val, direction)
+		
 		# Create Message object for return value
 		row = Message(
 			id=message_id,
@@ -1069,6 +1149,8 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 			raw_json=raw_json_data,
 			conversation_id=int(conversation_pk) if conversation_pk is not None else None,
 			direction=direction,
+			product_id=product_id_for_message,  # Store product focus for this message
+			message_category=message_category,  # Categorize message for bulk processing
 			story_id=story_id,
 			story_url=story_url,
 			ad_id=ad_id,
@@ -2192,6 +2274,29 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 	
 	# Resolve or create Conversation row using (page_id, user_id)
 	conversation_pk = _get_or_create_conversation_id(session, page_id, user_id)
+	
+	# Get current product focus from ai_shadow_state if available (for inbound messages)
+	product_id_for_message: Optional[int] = None
+	if conversation_pk and direction == "in":
+		try:
+			state_row = session.exec(
+				text("SELECT state_json FROM ai_shadow_state WHERE conversation_id = :cid LIMIT 1")
+			).params(cid=int(conversation_pk)).first()
+			if state_row:
+				state_json_str = state_row[0] if isinstance(state_row, (list, tuple)) else (getattr(state_row, "state_json", None) if hasattr(state_row, "state_json") else None)
+				if state_json_str:
+					state_data = json.loads(state_json_str)
+					if isinstance(state_data, dict):
+						focus_pid = state_data.get("current_focus_product_id")
+						if focus_pid:
+							try:
+								product_id_for_message = int(focus_pid)
+							except (ValueError, TypeError):
+								pass
+		except Exception:
+			# Best-effort; don't fail message creation if state lookup fails
+			pass
+	
 	# If Graph conversation id is known, persist mapping on the Conversation row
 	if conversation_pk is not None and graph_cid:
 		try:
@@ -2270,6 +2375,9 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		# Never break ingestion because of debug logging
 		pass
 
+	# Categorize inbound message based on content
+	message_category = _categorize_inbound_message(text_val, direction)
+	
 	row = Message(
 		ig_sender_id=str(sender_id) if sender_id is not None else None,
 		ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
@@ -2280,6 +2388,8 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 		raw_json=json.dumps(event, ensure_ascii=False),
 		conversation_id=int(conversation_pk) if conversation_pk is not None else None,
 		direction=direction,
+		product_id=product_id_for_message,  # Store product focus for this message
+		message_category=message_category,  # Categorize message for bulk processing
 		sender_username=sender_username,
 		story_id=story_id,
 		story_url=story_url,
