@@ -13,7 +13,7 @@ from sqlmodel import select
 
 from app.services.ai_reply import draft_reply, _sanitize_reply_text, _select_product_images_for_reply
 from app.services.instagram_api import send_message
-from app.services.ai_orders import get_candidate_snapshot
+from app.services.ai_orders import get_candidate_snapshot, submit_candidate_order, mark_candidate_very_interested
 from app.models import SystemSetting, Product
 from app.services.admin_notifications import create_admin_notification
 
@@ -670,29 +670,75 @@ def main() -> None:
 					for cb in function_callbacks
 					if isinstance(cb, dict) and cb.get("name") in ORDER_STATUS_TOOL_NAMES
 				]
-				if (
-					not candidate_tools_called
-					and (asked_payment or asked_address or state_last_step in CRITICAL_ORDER_STEPS)
-				):
+
+				def _persist_candidate_from_state() -> bool:
+					"""Best-effort fallback: if state shows order progress but no tool call happened, persist."""
+					if not isinstance(new_state, dict):
+						return False
+					# Promote to placed if conversation reached order_placed/confirmed/ready_to_ship
+					placed_like = state_last_step in ("order_placed", "ready_to_ship", "confirmed_by_customer")
+					very_interested_like = asked_payment or asked_address or state_last_step in CRITICAL_ORDER_STEPS
+					if not (placed_like or very_interested_like):
+						return False
+					# Build minimal payload from state
+					order_payload: dict[str, Any] = {}
+					state_cart = new_state.get("cart") if isinstance(new_state.get("cart"), list) else []
+					if state_cart:
+						first = state_cart[0] if isinstance(state_cart[0], dict) else {}
+						product_payload = {
+							"name": first.get("product_name") or first.get("name"),
+							"sku": first.get("sku"),
+							"color": first.get("color"),
+							"size": first.get("size"),
+							"quantity": first.get("quantity"),
+							"unit_price": first.get("unit_price"),
+						}
+						product_payload = {k: v for k, v in product_payload.items() if v is not None}
+						if product_payload:
+							order_payload["product"] = product_payload
+						# keep full cart snapshot for debugging/analytics
+						order_payload["cart"] = state_cart
+					customer_payload = new_state.get("customer")
+					if isinstance(customer_payload, dict) and customer_payload:
+						order_payload["customer"] = customer_payload
+					notes_val = new_state.get("notes") or new_state.get("order_notes")
+					if notes_val:
+						order_payload["notes"] = notes_val
 					try:
-						candidate_snapshot = get_candidate_snapshot(int(cid))
-					except Exception as snapshot_err:
-						candidate_snapshot = None
+						if placed_like:
+							submit_candidate_order(int(cid), order_payload or {"state": new_state}, note="auto-marked from ai_shadow state")
+						else:
+							mark_candidate_very_interested(int(cid), note="auto-marked from ai_shadow state")
+						return True
+					except Exception as persist_err:
 						try:
-							log.warning("ai_shadow: candidate snapshot lookup failed cid=%s err=%s", cid, snapshot_err)
+							log.warning("ai_shadow: auto-persist candidate failed cid=%s err=%s", cid, persist_err)
 						except Exception:
 							pass
-					if candidate_snapshot is None:
+						return False
+
+				if not candidate_tools_called and (asked_payment or asked_address or state_last_step in CRITICAL_ORDER_STEPS):
+					auto_persisted = _persist_candidate_from_state()
+					if not auto_persisted:
 						try:
-							log.warning(
-								"ai_shadow: missing order status tool call cid=%s last_step=%s asked_payment=%s asked_address=%s",
-								cid,
-								state_last_step or "unknown",
-								asked_payment,
-								asked_address,
-							)
-						except Exception:
-							pass
+							candidate_snapshot = get_candidate_snapshot(int(cid))
+						except Exception as snapshot_err:
+							candidate_snapshot = None
+							try:
+								log.warning("ai_shadow: candidate snapshot lookup failed cid=%s err=%s", cid, snapshot_err)
+							except Exception:
+								pass
+						if candidate_snapshot is None:
+							try:
+								log.warning(
+									"ai_shadow: missing order status tool call cid=%s last_step=%s asked_payment=%s asked_address=%s",
+									cid,
+									state_last_step or "unknown",
+									asked_payment,
+									asked_address,
+								)
+							except Exception:
+								pass
 				if admin_escalation_requested:
 					if not isinstance(new_state, dict):
 						new_state = {}
