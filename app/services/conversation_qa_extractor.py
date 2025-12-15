@@ -253,28 +253,51 @@ def extract_qa_from_conversations(
 	]
 	if category_filter:
 		msg_filters.append(Message.message_category == category_filter)
-	base_convo_query = select(Message.conversation_id).where(and_(*msg_filters))
-	convo_ids = [cid for cid, in session.exec(base_convo_query.group_by(Message.conversation_id)).all()]
+	base_convo_query = select(Message.conversation_id).where(and_(*msg_filters)).distinct()
+	rows = session.exec(base_convo_query).all()
+	# Extract conversation_id values - handle both tuple/Row objects and direct values
+	convo_ids = []
+	for row in rows:
+		if isinstance(row, (tuple, list)) and len(row) > 0:
+			convo_ids.append(row[0])
+		elif hasattr(row, '__getitem__'):
+			try:
+				convo_ids.append(row[0])
+			except (IndexError, TypeError):
+				convo_ids.append(row)
+		else:
+			convo_ids.append(row)
 	# Optionally narrow down by product mapping using the conversation's last linked ad/post
 	if product_id_filter is not None and convo_ids:
-		convo_ids = [
-			cid for cid, in session.exec(
-				select(Conversation.id)
-				.where(Conversation.id.in_(convo_ids))
-				.where(
-					text(
-						"""
-						EXISTS (
-							SELECT 1 FROM ads_products ap
-							WHERE ap.ad_id = COALESCE(Conversation.last_link_id, Conversation.last_ad_id)
-							  AND ap.link_type = COALESCE(Conversation.last_link_type, 'ad')
-							  AND ap.product_id = :pid
-						)
-						"""
+		rows = session.exec(
+			select(Conversation.id)
+			.where(Conversation.id.in_(convo_ids))
+			.where(
+				text(
+					"""
+					EXISTS (
+						SELECT 1 FROM ads_products ap
+						WHERE ap.ad_id = COALESCE(Conversation.last_link_id, Conversation.last_ad_id)
+						  AND ap.link_type = COALESCE(Conversation.last_link_type, 'ad')
+						  AND ap.product_id = :pid
 					)
+					"""
 				)
-			).params(pid=product_id_filter).all()
-		]
+			)
+		).params(pid=product_id_filter).all()
+		# Extract conversation IDs - handle both tuple/Row objects and direct values
+		filtered_convo_ids = []
+		for row in rows:
+			if isinstance(row, (tuple, list)) and len(row) > 0:
+				filtered_convo_ids.append(row[0])
+			elif hasattr(row, '__getitem__'):
+				try:
+					filtered_convo_ids.append(row[0])
+				except (IndexError, TypeError):
+					filtered_convo_ids.append(row)
+			else:
+				filtered_convo_ids.append(row)
+		convo_ids = filtered_convo_ids
 	
 	all_qa_pairs: List[ExtractedQA] = []
 	
