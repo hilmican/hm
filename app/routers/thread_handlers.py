@@ -1934,8 +1934,9 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
             try:
                 from sqlalchemy import text as _text
                 row = session.exec(
-                    _text("SELECT id, igba_id, ig_user_id, graph_conversation_id FROM conversations WHERE id=:cid LIMIT 1")
-                ).params(cid=int(conversation_id)).first()
+                    _text("SELECT id, igba_id, ig_user_id, graph_conversation_id FROM conversations WHERE id=:cid LIMIT 1"),
+                    {"cid": int(conversation_id)}
+                ).first()
                 if row:
                     igba_id_raw = getattr(row, "igba_id", None) or (row[1] if len(row) > 1 else None)
                     other_id_raw = getattr(row, "ig_user_id", None) or (row[2] if len(row) > 2 else None)
@@ -1965,8 +1966,9 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
             try:
                 from sqlalchemy import text as _text
                 row = session.exec(
-                    _text("SELECT igba_id, ig_user_id, graph_conversation_id FROM conversations WHERE convo_id=:cid LIMIT 1")
-                ).params(cid=str(conversation_id)).first()
+                    _text("SELECT igba_id, ig_user_id, graph_conversation_id FROM conversations WHERE convo_id=:cid LIMIT 1"),
+                    {"cid": str(conversation_id)}
+                ).first()
                 if row:
                     igba_id = str(getattr(row, "igba_id", None) or (row[0] if len(row) > 0 else "") or "")
                     other_id = str(getattr(row, "ig_user_id", None) or (row[1] if len(row) > 1 else "") or "")
@@ -1979,8 +1981,9 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
                 try:
                     from sqlalchemy import text as _text
                     rowg = session.exec(
-                        _text("SELECT igba_id, ig_user_id, graph_conversation_id FROM conversations WHERE graph_conversation_id=:gc LIMIT 1")
-                    ).params(gc=str(conversation_id)).first()
+                        _text("SELECT igba_id, ig_user_id, graph_conversation_id FROM conversations WHERE graph_conversation_id=:gc LIMIT 1"),
+                        {"gc": str(conversation_id)}
+                    ).first()
                     if rowg:
                         igba_id = str(getattr(rowg, "igba_id", None) or (rowg[0] if len(rowg) > 0 else "") or "")
                         other_id = str(getattr(rowg, "ig_user_id", None) or (rowg[1] if len(rowg) > 1 else "") or "")
@@ -2001,8 +2004,9 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
                 # Use database ID if numeric, otherwise try conversation_id as string
                 lookup_cid = int(conversation_id) if is_db_id else str(conversation_id)
                 rmsg = session.exec(
-                    _text("SELECT ig_sender_id, ig_recipient_id FROM message WHERE conversation_id=:cid ORDER BY timestamp_ms DESC, id DESC LIMIT 1")
-                ).params(cid=lookup_cid).first()
+                    _text("SELECT ig_sender_id, ig_recipient_id FROM message WHERE conversation_id=:cid ORDER BY timestamp_ms DESC, id DESC LIMIT 1"),
+                    {"cid": lookup_cid}
+                ).first()
                 if rmsg:
                     sid = getattr(rmsg, "ig_sender_id", None) if hasattr(rmsg, "ig_sender_id") else (rmsg[0] if len(rmsg) > 0 else None)
                     rid = getattr(rmsg, "ig_recipient_id", None) if hasattr(rmsg, "ig_recipient_id") else (rmsg[1] if len(rmsg) > 1 else None)
@@ -2025,8 +2029,9 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
                                  str(conversation_id), lookup_cid, is_db_id)
                         # Also log how many messages exist for this conversation_id
                         msg_count = session.exec(
-                            _text("SELECT COUNT(*) FROM message WHERE conversation_id=:cid")
-                        ).params(cid=lookup_cid).first()
+                            _text("SELECT COUNT(*) FROM message WHERE conversation_id=:cid"),
+                            {"cid": lookup_cid}
+                        ).first()
                         if msg_count:
                             count = getattr(msg_count, "COUNT(*)", None) or (msg_count[0] if len(msg_count) > 0 else None) or 0
                             _log.info("hydrate.infer_message: message count for conversation_id=%s is %s", lookup_cid, count)
