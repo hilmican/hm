@@ -34,6 +34,7 @@ def extract_qa_from_conversation(
 	start_timestamp_ms: Optional[int] = None,
 	end_timestamp_ms: Optional[int] = None,
 	category_filter: Optional[str] = None,
+	product_hint: Optional[Tuple[Optional[int], Optional[str]]] = None,
 ) -> List[ExtractedQA]:
 	"""
 	Extract Q&A pairs from a conversation.
@@ -111,9 +112,12 @@ def extract_qa_from_conversation(
 			# Only include if both meet minimum length requirements
 			if len(question_text) >= min_question_length and len(answer_text) >= min_answer_length:
 				# Detect product focus at the time of the question
-				product_id, product_name = _detect_product_focus_at_timestamp(
-					session, conversation_id, question_start_ts
-				)
+				if product_hint is not None:
+					product_id, product_name = product_hint
+				else:
+					product_id, product_name = _detect_product_focus_at_timestamp(
+						session, conversation_id, question_start_ts
+					)
 				
 				qa_pairs.append(ExtractedQA(
 					conversation_id=conversation_id,
@@ -238,34 +242,53 @@ def extract_qa_from_conversations(
 	start_timestamp_ms = int(start_datetime.timestamp() * 1000)
 	end_timestamp_ms = int(end_datetime.timestamp() * 1000)
 	
-	# Find conversations with messages in the date range
-	# We use last_message_at as a filter, then check actual message timestamps
-	conversations = session.exec(
-		select(Conversation)
-		.where(Conversation.last_message_at.is_not(None))
-		.where(
-			and_(
-				Conversation.last_message_at >= start_datetime,
-				Conversation.last_message_at <= end_datetime,
-			)
-		)
-	).all()
+	# First collect candidate conversation ids via messages to avoid scanning all conversations
+	msg_filters = [
+		Message.timestamp_ms >= start_timestamp_ms,
+		Message.timestamp_ms <= end_timestamp_ms,
+		Message.direction.is_not(None),
+		Message.direction.in_(["in", "out"]),
+		Message.text.is_not(None),
+		Message.text != "",
+	]
+	if category_filter:
+		msg_filters.append(Message.message_category == category_filter)
+	base_convo_query = select(Message.conversation_id).where(and_(*msg_filters))
+	convo_ids = [cid for cid, in session.exec(base_convo_query.group_by(Message.conversation_id)).all()]
+	# Optionally narrow down by product mapping using the conversation's last linked ad/post
+	if product_id_filter is not None and convo_ids:
+		convo_ids = [
+			cid for cid, in session.exec(
+				select(Conversation.id)
+				.where(Conversation.id.in_(convo_ids))
+				.where(
+					text(
+						"""
+						EXISTS (
+							SELECT 1 FROM ads_products ap
+							WHERE ap.ad_id = COALESCE(Conversation.last_link_id, Conversation.last_ad_id)
+							  AND ap.link_type = COALESCE(Conversation.last_link_type, 'ad')
+							  AND ap.product_id = :pid
+						)
+						"""
+					)
+				)
+			).params(pid=product_id_filter).all()
+		]
 	
 	all_qa_pairs: List[ExtractedQA] = []
 	
-	for conv in conversations:
-		if conv.id is None:
-			continue
-		
+	for cid in convo_ids:
 		try:
 			qa_pairs = extract_qa_from_conversation(
 				session,
-				conv.id,
+				cid,
 				min_question_length=min_question_length,
 				min_answer_length=min_answer_length,
 				start_timestamp_ms=start_timestamp_ms,
 				end_timestamp_ms=end_timestamp_ms,
 				category_filter=category_filter,
+				product_hint=(product_id_filter, None) if product_id_filter is not None else None,
 			)
 			
 			# Apply product filter if specified
