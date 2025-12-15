@@ -431,6 +431,7 @@ def preview_qa_import(
 	product_id: int,
 	start_date: str = Form(...),
 	end_date: str = Form(...),
+	category: Optional[str] = Form(None),
 ):
 	"""Preview Q&A pairs extracted from conversations in date range."""
 	with get_session() as session:
@@ -444,12 +445,16 @@ def preview_qa_import(
 		except ValueError:
 			raise HTTPException(status_code=400, detail="Invalid date format")
 		
+		# Normalize category filter (empty string -> None)
+		category_filter = category.strip() if category and category.strip() else None
+		
 		# Extract Q&A pairs
 		all_qa_pairs = extract_qa_from_conversations(
 			session,
 			start_date=start,
 			end_date=end,
 			product_id_filter=product_id,  # Filter by product
+			category_filter=category_filter,
 		)
 		
 		# Also get filtered out pairs for info
@@ -484,6 +489,7 @@ def preview_qa_import(
 def preview_all_qa_import(
 	start_date: str = Form(...),
 	end_date: str = Form(...),
+	category: Optional[str] = Form(None),
 ):
 	"""Preview Q&A pairs extracted from conversations in date range (all products)."""
 	with get_session() as session:
@@ -493,12 +499,16 @@ def preview_all_qa_import(
 		except ValueError:
 			raise HTTPException(status_code=400, detail="Invalid date format")
 		
+		# Normalize category filter (empty string -> None)
+		category_filter = category.strip() if category and category.strip() else None
+		
 		# Extract Q&A pairs (no product filter)
 		all_qa_pairs = extract_qa_from_conversations(
 			session,
 			start_date=start,
 			end_date=end,
 			product_id_filter=None,
+			category_filter=category_filter,
 		)
 		
 		return {

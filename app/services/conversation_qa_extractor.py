@@ -33,6 +33,7 @@ def extract_qa_from_conversation(
 	min_answer_length: int = 5,
 	start_timestamp_ms: Optional[int] = None,
 	end_timestamp_ms: Optional[int] = None,
+	category_filter: Optional[str] = None,
 ) -> List[ExtractedQA]:
 	"""
 	Extract Q&A pairs from a conversation.
@@ -47,6 +48,7 @@ def extract_qa_from_conversation(
 		min_answer_length: Minimum length for answer text to be included
 		start_timestamp_ms: Optional start timestamp filter (only include messages after this)
 		end_timestamp_ms: Optional end timestamp filter (only include messages before this)
+		category_filter: Optional message category filter (only include Q&As where question messages have this category)
 		
 	Returns:
 		List of ExtractedQA pairs found in the conversation
@@ -76,15 +78,33 @@ def extract_qa_from_conversation(
 	qa_pairs: List[ExtractedQA] = []
 	current_question_parts: List[str] = []
 	current_answer_parts: List[str] = []
+	current_question_messages: List[Message] = []  # Track question messages for category filtering
 	current_direction: Optional[str] = None
 	question_start_ts: Optional[int] = None
 	current_answer_end_ts: Optional[int] = None
 	
 	def flush_qa():
 		"""Flush current question-answer pair if valid."""
-		nonlocal current_question_parts, current_answer_parts, question_start_ts, current_answer_end_ts
+		nonlocal current_question_parts, current_answer_parts, question_start_ts, current_answer_end_ts, current_question_messages
 		
 		if current_question_parts and current_answer_parts:
+			# Apply category filter if specified
+			if category_filter is not None:
+				# Check if any question message has the specified category
+				has_matching_category = any(
+					msg.message_category == category_filter
+					for msg in current_question_messages
+					if msg.message_category
+				)
+				if not has_matching_category:
+					# Reset and skip this Q&A pair
+					current_question_parts = []
+					current_answer_parts = []
+					current_question_messages = []
+					question_start_ts = None
+					current_answer_end_ts = None
+					return
+			
 			question_text = " ".join(current_question_parts).strip()
 			answer_text = " ".join(current_answer_parts).strip()
 			
@@ -108,6 +128,7 @@ def extract_qa_from_conversation(
 		# Reset for next pair
 		current_question_parts = []
 		current_answer_parts = []
+		current_question_messages = []
 		question_start_ts = None
 		current_answer_end_ts = None
 	
@@ -129,6 +150,7 @@ def extract_qa_from_conversation(
 			if not current_question_parts:
 				question_start_ts = msg.timestamp_ms
 			current_question_parts.append(msg_text)
+			current_question_messages.append(msg)  # Track message for category filtering
 			current_direction = "in"
 		
 		elif msg_direction == "out":
@@ -191,6 +213,7 @@ def extract_qa_from_conversations(
 	product_id_filter: Optional[int] = None,
 	min_question_length: int = 5,
 	min_answer_length: int = 5,
+	category_filter: Optional[str] = None,
 ) -> List[ExtractedQA]:
 	"""
 	Extract Q&A pairs from conversations within a date range.
@@ -202,6 +225,7 @@ def extract_qa_from_conversations(
 		product_id_filter: If provided, only include Q&A pairs for this product
 		min_question_length: Minimum length for question text
 		min_answer_length: Minimum length for answer text
+		category_filter: Optional message category filter (only include Q&As where question messages have this category)
 		
 	Returns:
 		List of ExtractedQA pairs from all matching conversations
@@ -241,6 +265,7 @@ def extract_qa_from_conversations(
 				min_answer_length=min_answer_length,
 				start_timestamp_ms=start_timestamp_ms,
 				end_timestamp_ms=end_timestamp_ms,
+				category_filter=category_filter,
 			)
 			
 			# Apply product filter if specified

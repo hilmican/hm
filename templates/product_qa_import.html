@@ -71,6 +71,24 @@
                     <label for="endDate">Bitiş Tarihi</label>
                     <input type="date" id="endDate" name="end_date" value="{{ default_end }}" required />
                 </div>
+                <div class="form-group">
+                    <label for="categoryFilter">Mesaj Kategorisi (Opsiyonel)</label>
+                    <select id="categoryFilter" name="category">
+                        <option value="">Tüm Kategoriler</option>
+                        <option value="greeting">Selamlaşma (greeting)</option>
+                        <option value="information">Bilgi (information)</option>
+                        <option value="haggle">Pazarlık (haggle)</option>
+                        <option value="sale">Satış (sale)</option>
+                        <option value="address">Adres (address)</option>
+                        <option value="personal_details">Kişisel Bilgiler (personal_details)</option>
+                        <option value="size">Beden (size)</option>
+                        <option value="color">Renk (color)</option>
+                        <option value="payment">Ödeme (payment)</option>
+                        <option value="upsell">Ek Satış (upsell)</option>
+                        <option value="follow_up">Takip (follow_up)</option>
+                        <option value="other">Diğer (other)</option>
+                    </select>
+                </div>
             </div>
             <button type="submit" class="primary">Q&A Çiftlerini Önizle</button>
             <span class="loading" id="previewLoading">İşleniyor...</span>
@@ -131,6 +149,7 @@
         function previewQA() {
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
+            const categoryFilter = document.getElementById('categoryFilter').value;
             const loading = document.getElementById('previewLoading');
             const previewSection = document.getElementById('previewSection');
             const previewTableBody = document.getElementById('previewTableBody');
@@ -143,6 +162,9 @@
             const formData = new FormData();
             formData.append('start_date', startDate);
             formData.append('end_date', endDate);
+            if (categoryFilter) {
+                formData.append('category', categoryFilter);
+            }
             
             fetch(url, {
                 method: 'POST',
@@ -161,11 +183,24 @@
                 
                 // Show filter info
                 const filterInfo = document.getElementById('filterInfo');
+                const categoryFilter = document.getElementById('categoryFilter').value;
+                let filterTexts = [];
+                
+                if (categoryFilter) {
+                    const categoryLabel = document.getElementById('categoryFilter').options[document.getElementById('categoryFilter').selectedIndex].text;
+                    filterTexts.push(`Kategori: ${categoryLabel}`);
+                }
+                
                 if (data.filtered_out_count > 0) {
-                    filterInfo.innerHTML = `
-                        <strong>Filtre Bilgisi:</strong> ${data.total_count} Q&A çifti bulundu. 
-                        ${data.filtered_out_count} çift bu ürünle ilgili değil ve gösterilmiyor.
-                    `;
+                    filterTexts.push(`${data.filtered_out_count} çift bu ürünle ilgili değil ve gösterilmiyor`);
+                }
+                
+                if (filterTexts.length > 0 || data.total_count > 0) {
+                    let infoText = `<strong>Filtre Bilgisi:</strong> ${data.total_count} Q&A çifti bulundu.`;
+                    if (filterTexts.length > 0) {
+                        infoText += ' ' + filterTexts.join('. ') + '.';
+                    }
+                    filterInfo.innerHTML = infoText;
                     filterInfo.style.display = 'block';
                 } else {
                     filterInfo.style.display = 'none';
