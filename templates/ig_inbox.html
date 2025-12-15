@@ -30,6 +30,13 @@
           <option value="yes" {% if has_ad == 'yes' %}selected{% endif %}>Reklamlı konuşmalar</option>
           <option value="unlinked" {% if has_ad == 'unlinked' %}selected{% endif %}>Ürüne bağlanmamış reklamlar</option>
         </select>
+        <select name="ad_product" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;min-width:220px;">
+          <option value="" {% if not ad_product %}selected{% endif %}>Tüm ürünler</option>
+          <option value="any" {% if ad_product == 'any' %}selected{% endif %}>Ürün bağlı konuşmalar</option>
+          {% for prod in ad_product_options or [] %}
+            <option value="{{ prod.id }}" {% if ad_product and (ad_product|string) == (prod.id|string) %}selected{% endif %}>{{ prod.name }}{% if prod.id %} · #{{ prod.id }}{% endif %}</option>
+          {% endfor %}
+        </select>
         <button type="submit">Ara</button>
         <a href="/ig/inbox" class="meta" style="margin-left:6px">Temizle</a>
       </form>

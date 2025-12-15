@@ -19,6 +19,7 @@ async def inbox(
     limit: int = 25,
     q: str | None = None,
     has_ad: str | None = None,
+    ad_product: str | None = None,
 ):
     with get_session() as session:
         # Use unified conversations table as single source for inbox list
@@ -57,6 +58,8 @@ async def inbox(
                   ON u.ig_user_id = c.ig_user_id
                 LEFT JOIN ads_products ap
                   ON ap.ad_id = COALESCE(c.last_link_id, c.last_ad_id) AND ap.link_type = COALESCE(c.last_link_type, 'ad')
+                LEFT JOIN product p
+                  ON p.id = ap.product_id
             """
         else:
             # Fallback for databases that haven't run migration yet
@@ -82,6 +85,8 @@ async def inbox(
                   ON u.ig_user_id = c.ig_user_id
                 LEFT JOIN ads_products ap
                   ON ap.ad_id = c.last_ad_id AND (ap.link_type = 'ad' OR ap.link_type IS NULL)
+                LEFT JOIN product p
+                  ON p.id = ap.product_id
             """
         where_parts: list[str] = []
         params: dict[str, object] = {}
@@ -115,6 +120,27 @@ async def inbox(
                 where_parts.append("(c.last_link_id IS NOT NULL OR c.last_ad_id IS NOT NULL) AND ap.product_id IS NULL")
             else:
                 where_parts.append("c.last_ad_id IS NOT NULL AND ap.product_id IS NULL")
+        # Optional filter: restrict to a specific ad-linked product (by id, name, or SKU)
+        ad_product_s = (ad_product or "").strip()
+        if ad_product_s:
+            if ad_product_s.lower() in ("any", "*", "linked"):
+                where_parts.append("ap.product_id IS NOT NULL")
+            else:
+                ad_product_id = None
+                try:
+                    ad_product_id = int(ad_product_s)
+                except Exception:
+                    ad_product_id = None
+                where_parts.append("""
+                    ap.product_id IS NOT NULL AND (
+                        LOWER(COALESCE(p.name, '')) LIKE :ad_prod_like
+                        OR LOWER(COALESCE(ap.sku, '')) LIKE :ad_prod_like
+                        {extra_match}
+                    )
+                """.format(extra_match="OR ap.product_id = :ad_prod_id" if ad_product_id is not None else ""))
+                params["ad_prod_like"] = f"%{ad_product_s.lower()}%"
+                if ad_product_id is not None:
+                    params["ad_prod_id"] = ad_product_id
         sample_n = max(50, min(int(limit or 25) * 4, 200))
         bind = session.get_bind()
         dialect_name = ""
@@ -332,6 +358,24 @@ async def inbox(
             except Exception:
                 # best-effort; ignore product enrichment errors
                 pass
+        # Build selectable list of products that have ad links for quick filtering
+        ad_product_options: list[dict[str, object]] = []
+        try:
+            rows_prod = session.exec(_text("""
+                SELECT DISTINCT ap.product_id, COALESCE(p.name, CONCAT('Ürün ', ap.product_id)) AS product_name
+                FROM ads_products ap
+                LEFT JOIN product p ON ap.product_id = p.id
+                WHERE ap.product_id IS NOT NULL
+                ORDER BY product_name ASC
+                LIMIT 200
+            """)).all()
+            for r in rows_prod:
+                pid = getattr(r, "product_id", None) if hasattr(r, "product_id") else (r[0] if len(r) > 0 else None)
+                pname = getattr(r, "product_name", None) if hasattr(r, "product_name") else (r[1] if len(r) > 1 else None)
+                if pid:
+                    ad_product_options.append({"id": pid, "name": pname or f"Ürün {pid}"})
+        except Exception:
+            ad_product_options = []
         # For backward compatibility, set labels to display_names
         labels = display_names
         
@@ -417,6 +461,9 @@ async def inbox(
             "ad_map": ad_map,
             "escalation_map": escalation_map,
             "q": (q or ""),
+            "has_ad": has_ad_s,
+            "ad_product": ad_product_s,
+            "ad_product_options": ad_product_options,
             "admin_messages": admin_messages,
         })
 
@@ -507,6 +554,9 @@ async def ai_replied_messages(
                 "ad_map": {},
                 "q": "",
                 "title": "AI Cevaplanan Mesajlar",
+                "has_ad": "",
+                "ad_product": "",
+                "ad_product_options": [],
             },
         )
 
