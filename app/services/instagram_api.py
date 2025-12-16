@@ -118,18 +118,63 @@ async def fetch_messages(conversation_id: str, limit: int = 50) -> List[Dict[str
         "}"
     )
     path = f"/{conversation_id}/messages"
-    params = {"access_token": token, "limit": limit, "fields": fields}
+    # Use max limit per page (100 is Graph API max for messages)
+    page_limit = min(limit, 100) if limit > 0 else 100
+    params = {"access_token": token, "limit": page_limit, "fields": fields}
     # Ensure Instagram platform is selected; without this Graph may return only bare ids
     params["platform"] = "instagram"
+    
+    all_msgs: List[Dict[str, Any]] = []
+    next_url: Optional[str] = None
+    max_pages = 50  # Safety limit to prevent infinite loops
+    page_count = 0
+    
     async with httpx.AsyncClient() as client:
-        data = await _get(client, base + path, params)
-        msgs = data.get("data", []) or []
-        # Annotate each message with the Graph conversation id so downstream ingestion
-        # can persist Message.conversation_id using this stable identifier.
-        for m in msgs:
-            if isinstance(m, dict):
-                m["__graph_conversation_id"] = str(conversation_id)
-        return msgs
+        while page_count < max_pages:
+            if next_url:
+                # Use the pagination URL directly
+                try:
+                    data = await _get(client, next_url, {})
+                except Exception as e:
+                    try:
+                        _log.warning("fetch_messages pagination failed url=%s err=%s", next_url[:100], str(e)[:200])
+                    except Exception:
+                        pass
+                    break
+            else:
+                # First request
+                data = await _get(client, base + path, params)
+            
+            msgs = data.get("data", []) or []
+            # Annotate each message with the Graph conversation id so downstream ingestion
+            # can persist Message.conversation_id using this stable identifier.
+            for m in msgs:
+                if isinstance(m, dict):
+                    m["__graph_conversation_id"] = str(conversation_id)
+            all_msgs.extend(msgs)
+            
+            # Check for pagination
+            paging = data.get("paging", {})
+            next_url = paging.get("next")
+            if not next_url:
+                break
+            
+            # If limit was specified and we've reached it, stop
+            if limit > 0 and len(all_msgs) >= limit:
+                all_msgs = all_msgs[:limit]
+                break
+            
+            page_count += 1
+            # Small delay to avoid rate limiting
+            await asyncio.sleep(0.2)
+        
+        if page_count >= max_pages:
+            try:
+                _log.warning("fetch_messages hit max_pages limit conv_id=%s total_msgs=%s", str(conversation_id)[:50], len(all_msgs))
+            except Exception:
+                pass
+        
+        return all_msgs
 
 
 async def fetch_message_details(message_id: str, include_referral: bool = True) -> Dict[str, Any]:
