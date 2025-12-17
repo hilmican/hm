@@ -101,7 +101,7 @@ with get_session() as session:
                 """).bindparams(aid=story_key, pid=int(product_id), sku=(sku or None))
             )
             session.commit()
-            print(f"✅ Created ads_products entry (SQLite mode)!")
+            print("✅ Created ads_products entry!")
         except Exception as e2:
             session.rollback()
             print(f"❌ Failed: {e2}")

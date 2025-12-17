@@ -383,7 +383,7 @@ def trigger_debug_conversation(conversation_id: int):
                     run_id = int(getattr(rid_row, "id", rid_row[0]))
             except Exception:
                 pass
-            # SQLite fallback
+            # Backend fallback
             if run_id is None:
                 try:
                     rid_row = session.exec(_text("SELECT last_insert_rowid() AS id")).first()
@@ -2269,12 +2269,14 @@ def enqueue_hydrate(conversation_id: str, max_messages: int = 200):
         with get_session() as session:
             conv_key = f"{str(igba_id)}:{str(other_id)}"
             try:
-                session.exec(_text("INSERT OR IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count) VALUES (:cv, :g, :u, CURRENT_TIMESTAMP, 0)")).params(cv=conv_key, g=str(igba_id), u=str(other_id))
+                session.exec(
+                    _text(
+                        "INSERT IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count) "
+                        "VALUES (:cv, :g, :u, CURRENT_TIMESTAMP, 0)"
+                    )
+                ).params(cv=conv_key, g=str(igba_id), u=str(other_id))
             except Exception:
-                try:
-                    session.exec(_text("INSERT IGNORE INTO conversations(convo_id, igba_id, ig_user_id, last_message_at, unread_count) VALUES (:cv, :g, :u, CURRENT_TIMESTAMP, 0)")).params(cv=conv_key, g=str(igba_id), u=str(other_id))
-                except Exception:
-                    pass
+                pass
             try:
                 session.exec(_text("UPDATE conversations SET graph_conversation_id=:gc WHERE convo_id=:cv")).params(gc=str(conversation_id), cv=conv_key)
             except Exception:

@@ -30,7 +30,6 @@
     "health_json": "Sağlık (JSON)",
     "version_json": "Sürüm (JSON)",
     "fix_message_ts": "Mesaj Zaman Düzelt",
-    "reimport_raw_json": "Mesaj Raw JSON Yeniden Al",
     "jobs_ingest": "İşler (ingest)",
     "attachments_json": "Ekler (JSON)",
     "conversations_json": "Sohbetler (JSON)",

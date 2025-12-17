@@ -30,7 +30,6 @@
     "health_json": "Health (JSON)",
     "version_json": "Version (JSON)",
     "fix_message_ts": "Fix Message Timestamps",
-    "reimport_raw_json": "Re-import Message Raw JSON",
     "jobs_ingest": "Jobs (ingest)",
     "attachments_json": "Attachments (JSON)",
     "conversations_json": "Conversations (JSON)",

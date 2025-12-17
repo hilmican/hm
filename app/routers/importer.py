@@ -27,18 +27,6 @@ BIZIM_DIR = PROJECT_ROOT / "bizimexcellerimiz"
 KARGO_DIR = PROJECT_ROOT / "kargocununexcelleri"
 IADE_DIR = PROJECT_ROOT / "iadeler"
 
-def _is_sqlite_backend() -> bool:
-	try:
-		backend = getattr(engine.url, "get_backend_name", lambda: "")()
-	except Exception:
-		backend = ""
-	return backend == "sqlite"
-
-
-
-def _backup_db_snapshot(tag: str | None = None) -> None:
-	"""No-op DB snapshot placeholder (SQLite backups disabled in MySQL deployment)."""
-	return
 def parse_item_details(text: str | None) -> tuple[str, int | None, int | None, list[str]]:
 	"""Extract base item name, height(cm), weight(kg), and extra notes.
 
@@ -363,12 +351,6 @@ def import_map(source: str, filename: str, request: Request):
 def commit_import(body: dict, request: Request):
 	if not request.session.get("uid"):
 		raise HTTPException(status_code=401, detail="Unauthorized")
-	# Always take a DB snapshot before a commit run (SQLite only)
-	try:
-		if _is_sqlite_backend():
-			_backup_db_snapshot(tag="commit")
-	except Exception:
-		pass
 	source = body.get("source")
 	filename = body.get("filename")
 	filenames = body.get("filenames")
@@ -822,7 +804,7 @@ def commit_import(body: dict, request: Request):
 def reset_database(request: Request, preserve_mappings: bool = False):
 	if not request.session.get("uid"):
 		raise HTTPException(status_code=401, detail="Unauthorized")
-	# Full DB reset is no longer supported now that SQLite-based reset has been removed.
+	# Full DB reset is intentionally disabled in this deployment.
 	# Keep the route to avoid breaking old links, but fail explicitly.
 	raise HTTPException(status_code=501, detail="Database reset is disabled in this deployment")
 
@@ -841,12 +823,6 @@ async def upload_excel(
 		raise HTTPException(status_code=400, detail="source must be 'bizim', 'kargo' or 'returns'")
 	folder = BIZIM_DIR if source == "bizim" else (KARGO_DIR if source == "kargo" else IADE_DIR)
 	folder.mkdir(parents=True, exist_ok=True)
-	# DB snapshot before accepting new import files (SQLite only)
-	try:
-		if _is_sqlite_backend():
-			_backup_db_snapshot(tag="upload")
-	except Exception:
-		pass
 
 	# unify inputs: accept either 'files' (multiple) or single 'file'
 	uploads: List[UploadFile] = []

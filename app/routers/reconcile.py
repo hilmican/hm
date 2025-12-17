@@ -146,7 +146,7 @@ def search_orders(q: str, limit: int = 20):
     """Search recent orders by client phone or name.
 
     - q: free text. If it contains >=3 digits, match phone contains those digits.
-         Otherwise, match client name contains text (case-insensitive by SQLite collation).
+         Otherwise, match client name contains text (case-insensitive).
     - Returns at most `limit` orders, newest first, across matched clients.
     """
     q = (q or "").strip()

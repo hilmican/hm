@@ -39,7 +39,6 @@ from .ai_orders import (
 )
 from .ai_utils import parse_height_weight, calculate_size_suggestion, detect_color_count
 from .prompts import get_global_system_prompt, get_serializer_prompt
-from ..utils.normalize import TURKISH_MAP
 
 
 MAX_AI_IMAGES_PER_REPLY = int(os.getenv("AI_MAX_PRODUCT_IMAGES", "3"))
@@ -122,8 +121,7 @@ def _sanitize_reply_text(text: str) -> str:
 	Strategy:
 	- Drop ASCII control chars (except tabs/newlines) that break rendering
 	- Normalize to NFKC to collapse oddities
-	- Transliterate well-known Turkish letters via TURKISH_MAP
-	- Strip combining marks to fall back to ASCII when needed
+	- Keep original Turkish characters (IG DM supports UTF-8); do not force ASCII
 	"""
 	if not isinstance(text, str):
 		return ""
@@ -138,12 +136,8 @@ def _sanitize_reply_text(text: str) -> str:
 	cleaned = "".join(filtered_chars)
 	if not cleaned:
 		return ""
-	# Normalize and transliterate Turkish-specific letters
+	# Normalize to collapse oddities while preserving Turkish characters
 	cleaned = unicodedata.normalize("NFKC", cleaned)
-	cleaned = cleaned.translate(TURKISH_MAP)
-	cleaned = unicodedata.normalize("NFKD", cleaned)
-	# Drop combining marks (accents) to fall back to ASCII
-	cleaned = "".join(ch for ch in cleaned if not unicodedata.combining(ch))
 	# Collapse Windows-style newlines and excess whitespace
 	cleaned = cleaned.replace("\r\n", "\n").replace("\r", "\n")
 	lines = [" ".join(part for part in line.split() if part) for line in cleaned.split("\n")]
@@ -1663,7 +1657,9 @@ def draft_reply(
 	hail_already_sent = bool(state_payload.get("hail_sent"))
 	# Offer upsell sadece adres adımı tamamlandıktan veya sipariş tamamlandıktan sonra
 	upsell_ready = (
-		bool(state_payload.get("asked_address"))
+		# Require both payment + address to be known/handled before upsell,
+		# unless the order is already placed/confirmed.
+		(bool(state_payload.get("asked_address")) and bool(state_payload.get("asked_payment")))
 		or (state_payload.get("last_step") in ("order_placed", "confirmed_by_customer"))
 	)
 	upsell_offer_needed = bool(upsell_config) and upsell_ready and not bool(state_payload.get("upsell_offered"))
@@ -2690,7 +2686,7 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 	upsell_timing_instruction = (
 		f"=== UPSELL ZAMANLAMA KURALI (KRİTİK) ===\n"
 		f"upsell_ready = {'true' if upsell_ready else 'false'}\n"
-		"- upsell_ready false ise HİÇ upsell teklif etme (adres tamamlanmadan teklif yok).\n"
+		"- upsell_ready false ise HİÇ upsell teklif etme (ödeme+adres netleşmeden teklif yok).\n"
 		"- upsell_ready true ve upsell_config varsa, tek sefer upsell teklif et (force_upsell true ise zorunlu).\n"
 	)
 	sys_prompt_parts.append(upsell_timing_instruction)

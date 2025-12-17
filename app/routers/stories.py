@@ -86,12 +86,9 @@ def save_story_mapping(story_id: str, sku: Optional[str] = Form(default=None), p
 	with get_session() as session:
 		# Ensure story exists
 		try:
-			session.exec(_text("INSERT OR IGNORE INTO stories(story_id, url, updated_at) VALUES (:id, NULL, CURRENT_TIMESTAMP)")).params(id=str(story_id))
+			session.exec(_text("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES (:id, NULL, CURRENT_TIMESTAMP)")).params(id=str(story_id))
 		except Exception:
-			try:
-				session.exec(_text("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES (:id, NULL, CURRENT_TIMESTAMP)")).params(id=str(story_id))
-			except Exception:
-				pass
+			pass
 		try:
 			row_story = session.exec(_text("SELECT url FROM stories WHERE story_id=:id LIMIT 1")).params(id=str(story_id)).first()
 		except Exception:
@@ -107,40 +104,32 @@ def save_story_mapping(story_id: str, sku: Optional[str] = Form(default=None), p
 		try:
 			session.exec(
 				_text(
-					"INSERT OR REPLACE INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json) VALUES(:id, :pid, :sku, 0, NULL, NULL)"
+					"""
+					INSERT INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json)
+					VALUES(:id, :pid, :sku, 0, NULL, NULL)
+					ON DUPLICATE KEY UPDATE
+						product_id=VALUES(product_id),
+						sku=VALUES(sku),
+						auto_linked=0,
+						confidence=NULL,
+						ai_result_json=NULL
+					"""
 				)
 			).params(id=str(story_id), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
 		except Exception:
-			# MySQL: emulate replace with insert/update
-			try:
+			rowm = session.exec(_text("SELECT story_id FROM stories_products WHERE story_id=:id")).params(id=str(story_id)).first()
+			if rowm:
 				session.exec(
 					_text(
-						"""
-						INSERT INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json)
-						VALUES(:id, :pid, :sku, 0, NULL, NULL)
-						ON DUPLICATE KEY UPDATE
-							product_id=VALUES(product_id),
-							sku=VALUES(sku),
-							auto_linked=0,
-							confidence=NULL,
-							ai_result_json=NULL
-						"""
+						"UPDATE stories_products SET product_id=:pid, sku=:sku, auto_linked=0, confidence=NULL, ai_result_json=NULL WHERE story_id=:id"
 					)
 				).params(id=str(story_id), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
-			except Exception:
-				rowm = session.exec(_text("SELECT story_id FROM stories_products WHERE story_id=:id")).params(id=str(story_id)).first()
-				if rowm:
-					session.exec(
-						_text(
-							"UPDATE stories_products SET product_id=:pid, sku=:sku, auto_linked=0, confidence=NULL, ai_result_json=NULL WHERE story_id=:id"
-						)
-					).params(id=str(story_id), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
-				else:
-					session.exec(
-						_text(
-							"INSERT INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json) VALUES(:id, :pid, :sku, 0, NULL, NULL)"
-						)
-					).params(id=str(story_id), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
+			else:
+				session.exec(
+					_text(
+						"INSERT INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json) VALUES(:id, :pid, :sku, 0, NULL, NULL)"
+					)
+				).params(id=str(story_id), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
 		if story_key:
 			try:
 				session.exec(
@@ -158,18 +147,11 @@ def save_story_mapping(story_id: str, sku: Optional[str] = Form(default=None), p
 					)
 				).params(id=str(story_key), name=f"Story {story_id}", url=story_url)
 			except Exception:
-				try:
-					session.exec(
-						_text(
-							"INSERT OR REPLACE INTO ads(ad_id, link_type, name, image_url, link, updated_at) VALUES(:id, 'story', :name, :url, :url, CURRENT_TIMESTAMP)"
-						)
-					).params(id=str(story_key), name=f"Story {story_id}", url=story_url)
-				except Exception:
-					session.exec(
-						_text(
-							"UPDATE ads SET link_type='story', name=COALESCE(:name,name), image_url=COALESCE(:url,image_url), link=COALESCE(:url,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id"
-						)
-					).params(id=str(story_key), name=f"Story {story_id}", url=story_url)
+				session.exec(
+					_text(
+						"UPDATE ads SET link_type='story', name=COALESCE(:name,name), image_url=COALESCE(:url,image_url), link=COALESCE(:url,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id"
+					)
+				).params(id=str(story_key), name=f"Story {story_id}", url=story_url)
 			try:
 				session.exec(
 					_text(
@@ -185,18 +167,11 @@ def save_story_mapping(story_id: str, sku: Optional[str] = Form(default=None), p
 					)
 				).params(id=str(story_key), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
 			except Exception:
-				try:
-					session.exec(
-						_text(
-							"INSERT OR REPLACE INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, 'story', :pid, :sku, 0)"
-						)
-					).params(id=str(story_key), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
-				except Exception:
-					session.exec(
-						_text(
-							"UPDATE ads_products SET product_id=:pid, sku=:sku, auto_linked=0, link_type='story' WHERE ad_id=:id"
-						)
-					).params(id=str(story_key), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
+			session.exec(
+				_text(
+					"UPDATE ads_products SET product_id=:pid, sku=:sku, auto_linked=0, link_type='story' WHERE ad_id=:id"
+				)
+			).params(id=str(story_key), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
 		
 		# Update conversations that have messages with this story_id
 		# This ensures _detect_focus_product can find the product

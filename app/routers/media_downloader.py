@@ -213,19 +213,7 @@ def create_attachment_records(session, message_id: int, ig_message_id: str, atta
                     mime=mime_type or None
                 ))
             except Exception as e:
-                # SQLite fallback
                 try:
-                    session.exec(text("""
-                        INSERT OR IGNORE INTO attachments(message_id, ig_message_id, position, kind, graph_id, mime, fetch_status)
-                        VALUES (:mid, :ig_mid, :pos, :kind, :gid, :mime, 'pending')
-                    """).params(
-                        mid=message_id,
-                        ig_mid=ig_message_id,
-                        pos=idx,
-                        kind=kind,
-                        gid=graph_id,
-                        mime=mime_type or None
-                    ))
                     session.exec(text("""
                         UPDATE attachments SET
                           kind=COALESCE(:kind, kind),

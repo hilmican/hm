@@ -508,26 +508,20 @@ def _ensure_story_cached_in_ads(session, story_id: str, story_url: Optional[str]
 		session.exec(stmt)
 	except Exception:
 		try:
-			stmt_alt = _sql_text(
-				"INSERT OR IGNORE INTO ads(ad_id, link_type, name, image_url, link, updated_at) VALUES (:id, 'story', :name, :url, :url, CURRENT_TIMESTAMP)"
-			).bindparams(id=str(key), name=label, url=story_url)
-			session.exec(stmt_alt)
+			stmt_sel = _sql_text("SELECT ad_id FROM ads WHERE ad_id=:id").bindparams(id=str(key))
+			row = session.exec(stmt_sel).first()
+			if row:
+				stmt_update = _sql_text(
+					"UPDATE ads SET link_type='story', name=COALESCE(:name,name), image_url=COALESCE(:url,image_url), link=COALESCE(:url,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id"
+				).bindparams(id=str(key), name=label, url=story_url)
+				session.exec(stmt_update)
+			else:
+				stmt_insert = _sql_text(
+					"INSERT INTO ads(ad_id, link_type, name, image_url, link, updated_at) VALUES (:id, 'story', :name, :url, :url, CURRENT_TIMESTAMP)"
+				).bindparams(id=str(key), name=label, url=story_url)
+				session.exec(stmt_insert)
 		except Exception:
-			try:
-				stmt_sel = _sql_text("SELECT ad_id FROM ads WHERE ad_id=:id").bindparams(id=str(key))
-				row = session.exec(stmt_sel).first()
-				if row:
-					stmt_update = _sql_text(
-						"UPDATE ads SET link_type='story', name=COALESCE(:name,name), image_url=COALESCE(:url,image_url), link=COALESCE(:url,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id"
-					).bindparams(id=str(key), name=label, url=story_url)
-					session.exec(stmt_update)
-				else:
-					stmt_insert = _sql_text(
-						"INSERT INTO ads(ad_id, link_type, name, image_url, link, updated_at) VALUES (:id, 'story', :name, :url, :url, CURRENT_TIMESTAMP)"
-					).bindparams(id=str(key), name=label, url=story_url)
-					session.exec(stmt_insert)
-			except Exception:
-				pass
+			pass
 
 # MySQL-only backend
 
@@ -1645,20 +1639,12 @@ def _auto_link_story_reply(message_id: int, story_id: Optional[str], story_url: 
 							try:
 								session.exec(
 									_sql_text(
-										"INSERT OR REPLACE INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:aid, 'story', :pid, :sku, 0)"
+										"UPDATE ads_products SET product_id=:pid, link_type='story', sku=:sku WHERE ad_id=:aid"
 									).bindparams(aid=str(story_key), pid=int(existing_pid), sku=(existing_sku or None))
 								)
 								session.commit()
 							except Exception:
-								try:
-									session.exec(
-										_sql_text(
-											"UPDATE ads_products SET product_id=:pid, link_type='story', sku=:sku WHERE ad_id=:aid"
-										).bindparams(aid=str(story_key), pid=int(existing_pid), sku=(existing_sku or None))
-									)
-									session.commit()
-								except Exception:
-									session.rollback()
+								session.rollback()
 					else:
 						# Entry exists - ensure product_id matches (in case story was relinked)
 						ad_pid = ad_product_check[0] if isinstance(ad_product_check, (list, tuple)) else getattr(ad_product_check, 'product_id', None)
@@ -1825,12 +1811,6 @@ def _auto_link_story_reply(message_id: int, story_id: Optional[str], story_url: 
 			try:
 				session.exec(
 					_sql_text(
-						"INSERT OR REPLACE INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json) VALUES(:sid, :pid, NULL, 1, :conf, :raw)"
-					).bindparams(sid=str(story_id), pid=int(product_id), conf=float(confidence_float), raw=ai_result_json)
-				)
-			except Exception:
-				session.exec(
-					_sql_text(
 						"UPDATE stories_products SET product_id=:pid, auto_linked=1, confidence=:conf, ai_result_json=:raw WHERE story_id=:sid"
 					).bindparams(sid=str(story_id), pid=int(product_id), conf=float(confidence_float), raw=ai_result_json)
 				)
@@ -1849,12 +1829,6 @@ def _auto_link_story_reply(message_id: int, story_id: Optional[str], story_url: 
 			)
 		except Exception:
 			try:
-				session.exec(
-					_sql_text(
-						"INSERT OR REPLACE INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:aid, 'story', :pid, NULL, 1)"
-					).bindparams(aid=str(story_key), pid=int(product_id))
-				)
-			except Exception:
 				session.exec(
 					_sql_text(
 						"UPDATE ads_products SET product_id=:pid, link_type='story', auto_linked=1 WHERE ad_id=:aid"
@@ -2183,36 +2157,26 @@ def _auto_link_ad(ad_id: str, ad_title: Optional[str], ad_name: Optional[str]) -
 				)
 				session.exec(stmt_upsert_mysql)
 			except Exception:
-				try:
-					stmt_upsert_sqlite = _sql_text(
-						"INSERT OR REPLACE INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, 'ad', :pid, :sku, 1)"
+				stmt_sel = _sql_text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
+				rowm = session.exec(stmt_sel).first()
+				if rowm:
+					stmt_update = _sql_text(
+						"UPDATE ads_products SET link_type='ad', product_id=:pid, sku=:sku, auto_linked=1 WHERE ad_id=:id"
 					).bindparams(
 						id=str(ad_id),
 						pid=int(product_id),
 						sku=None,
 					)
-					session.exec(stmt_upsert_sqlite)
-				except Exception:
-					stmt_sel = _sql_text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
-					rowm = session.exec(stmt_sel).first()
-					if rowm:
-						stmt_update = _sql_text(
-							"UPDATE ads_products SET link_type='ad', product_id=:pid, sku=:sku, auto_linked=1 WHERE ad_id=:id"
-						).bindparams(
-							id=str(ad_id),
-							pid=int(product_id),
-							sku=None,
-						)
-						session.exec(stmt_update)
-					else:
-						stmt_insert = _sql_text(
-							"INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, 'ad', :pid, :sku, 1)"
-						).bindparams(
-							id=str(ad_id),
-							pid=int(product_id),
-							sku=None,
-						)
-						session.exec(stmt_insert)
+					session.exec(stmt_update)
+				else:
+					stmt_insert = _sql_text(
+						"INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, 'ad', :pid, :sku, 1)"
+					).bindparams(
+						id=str(ad_id),
+						pid=int(product_id),
+						sku=None,
+					)
+					session.exec(stmt_insert)
 
 		_log.info(
 			"ingest: auto-linked ad %s to product %s (confidence: %.2f)",

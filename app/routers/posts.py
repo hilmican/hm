@@ -234,7 +234,7 @@ def link_post_to_product(message_id: int, product_id: Optional[int] = Form(defau
             )
             session.exec(stmt_upsert)
         except Exception:
-            # Fallback for SQLite
+            # Backend fallback
             try:
                 stmt_sel = _text("SELECT post_id FROM posts WHERE post_id=:pid").bindparams(pid=str(post_id))
                 existing = session.exec(stmt_sel).first()
@@ -277,7 +277,7 @@ def link_post_to_product(message_id: int, product_id: Optional[int] = Form(defau
             )
             session.exec(stmt_link)
         except Exception:
-            # Fallback for SQLite
+            # Backend fallback
             try:
                 stmt_sel = _text("SELECT post_id FROM posts_products WHERE post_id=:pid").bindparams(pid=str(post_id))
                 existing = session.exec(stmt_sel).first()
@@ -453,7 +453,7 @@ def ai_link_post(message_id: int, request: Request):
             )
             session.exec(stmt_upsert)
         except Exception:
-            # SQLite fallback
+            # Backend fallback
             stmt_sel = _text("SELECT post_id FROM posts WHERE post_id=:pid").bindparams(pid=str(post_id))
             existing = session.exec(stmt_sel).first()
             if existing:
@@ -492,7 +492,7 @@ def ai_link_post(message_id: int, request: Request):
             )
             session.exec(stmt_link)
         except Exception:
-            # SQLite fallback
+            # Backend fallback
             stmt_sel = _text("SELECT post_id FROM posts_products WHERE post_id=:pid").bindparams(pid=str(post_id))
             existing = session.exec(stmt_sel).first()
             if existing:
@@ -653,7 +653,7 @@ def batch_ai_link(request: Request, limit: int = 50):
                     )
                     session.exec(stmt_upsert)
                 except Exception:
-                    # SQLite fallback
+                    # Backend fallback
                     stmt_sel = _text("SELECT post_id FROM posts WHERE post_id=:pid").bindparams(pid=str(post_id))
                     existing_post = session.exec(stmt_sel).first()
                     if existing_post:
@@ -692,7 +692,7 @@ def batch_ai_link(request: Request, limit: int = 50):
                     )
                     session.exec(stmt_link)
                 except Exception:
-                    # SQLite fallback
+                    # Backend fallback
                     stmt_sel = _text("SELECT post_id FROM posts_products WHERE post_id=:pid").bindparams(pid=str(post_id))
                     existing_link = session.exec(stmt_sel).first()
                     if existing_link:

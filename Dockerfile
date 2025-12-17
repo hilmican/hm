@@ -5,8 +5,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Minimal tooling (curl, sqlite, ping via busybox-extras)
-RUN apk add --no-cache curl sqlite busybox-extras
+# Minimal tooling (curl, ping via busybox-extras)
+RUN apk add --no-cache curl busybox-extras
 
 # Copy requirements and install
 COPY requirements.txt ./
@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project
 COPY . .
 
-# Ensure data dir exists for SQLite
+# Ensure data dir exists for media/thumbs, etc.
 RUN mkdir -p /app/data
 
 EXPOSE 8388

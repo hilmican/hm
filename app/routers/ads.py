@@ -213,52 +213,40 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 				pid = None
 		# Upsert mapping (manual save clears auto_linked flag, sets link_type correctly)
 		try:
-			stmt_upsert_sqlite = _text(
-				"INSERT OR REPLACE INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, :lt, :pid, :sku, 0)"
+			stmt_upsert_mysql = _text(
+				"INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, :lt, :pid, :sku, 0) "
+				"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku), link_type=VALUES(link_type), auto_linked=0"
 			).bindparams(
 				id=str(ad_id),
 				lt=str(link_type_val),
 				pid=(int(pid) if pid is not None else None),
 				sku=(sku_clean or None),
 			)
-			session.exec(stmt_upsert_sqlite)
+			session.exec(stmt_upsert_mysql)
 		except Exception:
-			# Fallback for MySQL: emulate replace with insert/update
-			try:
-				stmt_upsert_mysql = _text(
-					"INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, :lt, :pid, :sku, 0) "
-					"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku), link_type=VALUES(link_type), auto_linked=0"
+			# Last resort: try separate update/insert
+			stmt_sel = _text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
+			rowm = session.exec(stmt_sel).first()
+			if rowm:
+				stmt_update = _text(
+					"UPDATE ads_products SET product_id=:pid, sku=:sku, link_type=:lt, auto_linked=0 WHERE ad_id=:id"
 				).bindparams(
 					id=str(ad_id),
 					lt=str(link_type_val),
 					pid=(int(pid) if pid is not None else None),
 					sku=(sku_clean or None),
 				)
-				session.exec(stmt_upsert_mysql)
-			except Exception:
-				# Last resort: try separate update/insert
-				stmt_sel = _text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
-				rowm = session.exec(stmt_sel).first()
-				if rowm:
-					stmt_update = _text(
-						"UPDATE ads_products SET product_id=:pid, sku=:sku, link_type=:lt, auto_linked=0 WHERE ad_id=:id"
-					).bindparams(
-						id=str(ad_id),
-						lt=str(link_type_val),
-						pid=(int(pid) if pid is not None else None),
-						sku=(sku_clean or None),
-					)
-					session.exec(stmt_update)
-				else:
-					stmt_insert = _text(
-						"INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, :lt, :pid, :sku, 0)"
-					).bindparams(
-						id=str(ad_id),
-						lt=str(link_type_val),
-						pid=(int(pid) if pid is not None else None),
-						sku=(sku_clean or None),
-					)
-					session.exec(stmt_insert)
+				session.exec(stmt_update)
+			else:
+				stmt_insert = _text(
+					"INSERT INTO ads_products(ad_id, link_type, product_id, sku, auto_linked) VALUES(:id, :lt, :pid, :sku, 0)"
+				).bindparams(
+					id=str(ad_id),
+					lt=str(link_type_val),
+					pid=(int(pid) if pid is not None else None),
+					sku=(sku_clean or None),
+				)
+				session.exec(stmt_insert)
 		
 		# If this is a story ad (ad_id starts with "story:"), also sync stories_products table
 		if ad_id.startswith("story:") and pid is not None:
@@ -269,65 +257,49 @@ def save_ad_mapping(ad_id: str, sku: Optional[str] = Form(default=None), product
 					_text("INSERT IGNORE INTO stories(story_id, url, updated_at) VALUES(:id, NULL, CURRENT_TIMESTAMP)")
 				).bindparams(id=str(story_id))
 			except Exception:
-				try:
-					session.exec(
-						_text("INSERT OR IGNORE INTO stories(story_id, url, updated_at) VALUES(:id, NULL, CURRENT_TIMESTAMP)")
-					).bindparams(id=str(story_id))
-				except Exception:
-					pass  # Story might already exist, continue anyway
+				pass  # Story might already exist, continue anyway
 			
 			# Sync stories_products entry
 			try:
-				stmt_sp_sqlite = _text(
-					"INSERT OR REPLACE INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json) VALUES(:sid, :pid, :sku, 0, NULL, NULL)"
+				stmt_sp_mysql = _text(
+					"""
+					INSERT INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json)
+					VALUES(:sid, :pid, :sku, 0, NULL, NULL)
+					ON DUPLICATE KEY UPDATE
+						product_id=VALUES(product_id),
+						sku=VALUES(sku),
+						auto_linked=0,
+						confidence=NULL,
+						ai_result_json=NULL
+					"""
 				).bindparams(
 					sid=str(story_id),
 					pid=int(pid),
 					sku=(sku_clean or None),
 				)
-				session.exec(stmt_sp_sqlite)
+				session.exec(stmt_sp_mysql)
 			except Exception:
-				# MySQL fallback
-				try:
-					stmt_sp_mysql = _text(
-						"""
-						INSERT INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json)
-						VALUES(:sid, :pid, :sku, 0, NULL, NULL)
-						ON DUPLICATE KEY UPDATE
-							product_id=VALUES(product_id),
-							sku=VALUES(sku),
-							auto_linked=0,
-							confidence=NULL,
-							ai_result_json=NULL
-						"""
+				# Last resort: update/insert
+				stmt_sp_sel = _text("SELECT story_id FROM stories_products WHERE story_id=:sid").bindparams(sid=str(story_id))
+				sp_row = session.exec(stmt_sp_sel).first()
+				if sp_row:
+					stmt_sp_update = _text(
+						"UPDATE stories_products SET product_id=:pid, sku=:sku, auto_linked=0, confidence=NULL, ai_result_json=NULL WHERE story_id=:sid"
 					).bindparams(
 						sid=str(story_id),
 						pid=int(pid),
 						sku=(sku_clean or None),
 					)
-					session.exec(stmt_sp_mysql)
-				except Exception:
-					# Last resort: update/insert
-					stmt_sp_sel = _text("SELECT story_id FROM stories_products WHERE story_id=:sid").bindparams(sid=str(story_id))
-					sp_row = session.exec(stmt_sp_sel).first()
-					if sp_row:
-						stmt_sp_update = _text(
-							"UPDATE stories_products SET product_id=:pid, sku=:sku, auto_linked=0, confidence=NULL, ai_result_json=NULL WHERE story_id=:sid"
-						).bindparams(
-							sid=str(story_id),
-							pid=int(pid),
-							sku=(sku_clean or None),
-						)
-						session.exec(stmt_sp_update)
-					else:
-						stmt_sp_insert = _text(
-							"INSERT INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json) VALUES(:sid, :pid, :sku, 0, NULL, NULL)"
-						).bindparams(
-							sid=str(story_id),
-							pid=int(pid),
-							sku=(sku_clean or None),
-						)
-						session.exec(stmt_sp_insert)
+					session.exec(stmt_sp_update)
+				else:
+					stmt_sp_insert = _text(
+						"INSERT INTO stories_products(story_id, product_id, sku, auto_linked, confidence, ai_result_json) VALUES(:sid, :pid, :sku, 0, NULL, NULL)"
+					).bindparams(
+						sid=str(story_id),
+						pid=int(pid),
+						sku=(sku_clean or None),
+					)
+					session.exec(stmt_sp_insert)
 		session.commit()
 	# Redirect back to edit page
 	return RedirectResponse(url=f"/ads/{ad_id}/edit", status_code=HTTP_303_SEE_OTHER)
@@ -471,48 +443,37 @@ def ai_suggest_product_for_ad(request: Request, ad_id: str, auto_save: bool = Tr
 				# Save the mapping (same logic as save_ad_mapping)
 				pid = int(product_id)
 				try:
-					stmt_upsert_sqlite = _text(
-						"INSERT OR REPLACE INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
+					stmt_upsert_mysql = _text(
+						"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku) "
+						"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku)"
 					).bindparams(
 						id=str(ad_id),
 						pid=pid,
 						sku=None,
 					)
-					save_session.exec(stmt_upsert_sqlite)
+					save_session.exec(stmt_upsert_mysql)
 				except Exception:
-					# Fallback for MySQL
-					try:
-						stmt_upsert_mysql = _text(
-							"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku) "
-							"ON DUPLICATE KEY UPDATE product_id=VALUES(product_id), sku=VALUES(sku)"
+					# Last resort: try separate update/insert
+					stmt_sel = _text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
+					rowm = save_session.exec(stmt_sel).first()
+					if rowm:
+						stmt_update = _text(
+							"UPDATE ads_products SET product_id=:pid, sku=:sku WHERE ad_id=:id"
 						).bindparams(
 							id=str(ad_id),
 							pid=pid,
 							sku=None,
 						)
-						save_session.exec(stmt_upsert_mysql)
-					except Exception:
-						# Last resort: try separate update/insert
-						stmt_sel = _text("SELECT ad_id FROM ads_products WHERE ad_id=:id").bindparams(id=str(ad_id))
-						rowm = save_session.exec(stmt_sel).first()
-						if rowm:
-							stmt_update = _text(
-								"UPDATE ads_products SET product_id=:pid, sku=:sku WHERE ad_id=:id"
-							).bindparams(
-								id=str(ad_id),
-								pid=pid,
-								sku=None,
-							)
-							save_session.exec(stmt_update)
-						else:
-							stmt_insert = _text(
-								"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
-							).bindparams(
-								id=str(ad_id),
-								pid=pid,
-								sku=None,
-							)
-							save_session.exec(stmt_insert)
+						save_session.exec(stmt_update)
+					else:
+						stmt_insert = _text(
+							"INSERT INTO ads_products(ad_id, product_id, sku) VALUES(:id, :pid, :sku)"
+						).bindparams(
+							id=str(ad_id),
+							pid=pid,
+							sku=None,
+						)
+						save_session.exec(stmt_insert)
 				save_session.commit()
 				saved = True
 			except Exception as e:

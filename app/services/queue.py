@@ -3,7 +3,6 @@ import json
 import datetime as dt
 from typing import Any, Optional, Tuple
 import time
-import sqlite3
 
 from redis import Redis
 from redis.exceptions import TimeoutError as RedisTimeoutError, ConnectionError as RedisConnectionError
@@ -39,35 +38,20 @@ def _get_redis() -> Redis:
 def _ensure_job(kind: str, key: str, payload: Optional[dict] = None, max_attempts: int = 8) -> int:
 	"""Insert into jobs table idempotently (UNIQUE(kind,key)) and return job id."""
 	with get_session() as session:
-		# Dialect-aware idempotent insert
-		try:
-			dialect = str(session.get_bind().dialect.name)
-		except Exception:
-			dialect = ""
-		if dialect == "mysql":
-			stmt = text(
-				"""
-				INSERT INTO `jobs`(`kind`, `key`, `run_after`, `attempts`, `max_attempts`, `payload`)
-				VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
-				ON DUPLICATE KEY UPDATE id = id
-				"""
-			)
-		else:
-			stmt = text(
-				"""
-				INSERT OR IGNORE INTO jobs(kind, key, run_after, attempts, max_attempts, payload)
-				VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
-				"""
-			)
+		stmt = text(
+			"""
+			INSERT INTO `jobs`(`kind`, `key`, `run_after`, `attempts`, `max_attempts`, `payload`)
+			VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
+			ON DUPLICATE KEY UPDATE id = id
+			"""
+		)
 		# Execute insert, with MySQL-specific self-heal for missing AUTO_INCREMENT on id
 		try:
 			session.exec(stmt.params(kind=kind, key=key, max_attempts=max_attempts, payload=json.dumps(payload or {})))
 		except OperationalError as e:
 			msg = str(e).lower()
 			needs_auto_inc = (
-				(dialect == "mysql") and (
-					"doesn't have a default value" in msg or "does not have a default value" in msg
-				)
+				"doesn't have a default value" in msg or "does not have a default value" in msg
 			)
 			if needs_auto_inc:
 				# Best-effort MySQL fixups to ensure jobs.id is AUTO_INCREMENT primary key
@@ -86,40 +70,26 @@ def _ensure_job(kind: str, key: str, payload: Optional[dict] = None, max_attempt
 			else:
 				raise
 		# Lookup inserted row by unique key
-		if dialect == "mysql":
-			sel = text("SELECT `id` FROM `jobs` WHERE `kind`=:kind AND `key`=:key")
-		else:
-			sel = text("SELECT id FROM jobs WHERE kind=:kind AND key=:key")
+		sel = text("SELECT `id` FROM `jobs` WHERE `kind`=:kind AND `key`=:key")
 		row = session.exec(sel.params(kind=kind, key=key)).first()
 		if not row:
 			# As a fallback, create a new unique key by appending timestamp
 			sfx = dt.datetime.utcnow().timestamp()
-			if dialect == "mysql":
-				ins2 = text(
-					"""
-					INSERT INTO `jobs`(`kind`, `key`, `run_after`, `attempts`, `max_attempts`, `payload`)
-					VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
-					"""
-				)
-			else:
-				ins2 = text(
-					"""
-					INSERT INTO jobs(kind, key, run_after, attempts, max_attempts, payload)
-					VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
-					"""
-				)
+			ins2 = text(
+				"""
+				INSERT INTO `jobs`(`kind`, `key`, `run_after`, `attempts`, `max_attempts`, `payload`)
+				VALUES (:kind, :key, CURRENT_TIMESTAMP, 0, :max_attempts, :payload)
+				"""
+			)
 			session.exec(ins2.params(kind=kind, key=f"{key}:{sfx}", max_attempts=max_attempts, payload=json.dumps(payload or {})))
 			# Try get id in a backend-agnostic way
-			if dialect == "mysql":
-				row = session.exec(text("SELECT `id` FROM `jobs` WHERE `kind`=:kind AND `key`=:key").params(kind=kind, key=f"{key}:{sfx}")).first()
-			else:
-				row = session.exec(text("SELECT id FROM jobs WHERE kind=:kind AND key=:key").params(kind=kind, key=f"{key}:{sfx}")).first()
+			row = session.exec(text("SELECT `id` FROM `jobs` WHERE `kind`=:kind AND `key`=:key").params(kind=kind, key=f"{key}:{sfx}")).first()
 		# Normalize id
 		return int(row.id if hasattr(row, "id") else row[0])  # type: ignore
 
 
 def enqueue(kind: str, key: str, payload: Optional[dict] = None, max_attempts: int = 8) -> int:
-	# Robust against transient SQLite writer locks
+	# Robust against transient MySQL lock waits / deadlocks
 	attempts = 0
 	backoff = 0.2
 	last_err: Exception | None = None
@@ -139,7 +109,7 @@ def enqueue(kind: str, key: str, payload: Optional[dict] = None, max_attempts: i
 		except Exception as e:
 			last_err = e
 			msg = str(e).lower()
-			is_locked = isinstance(e, sqlite3.OperationalError) or ("database is locked" in msg)
+			is_locked = ("lock wait timeout" in msg) or ("deadlock" in msg) or ("try restarting transaction" in msg)
 			if not is_locked:
 				raise
 			attempts += 1

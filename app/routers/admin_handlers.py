@@ -34,7 +34,7 @@ def backfill_ai_conversations(limit: int = 1000):
                     continue
                 session.exec(
                     _text(
-                        "INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)"
+                        "INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)"
                     ).params(cid=str(cid))
                 )
                 created += 1
@@ -91,8 +91,7 @@ def backfill_ads():
 					session.exec(_text("INSERT IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, NULL, :lnk, CURRENT_TIMESTAMP)")).params(id=str(aid), n=(title or None), lnk=(lnk or ("https://www.facebook.com/ads/library/?id=" + str(aid))))
 					created += 1
 				except Exception:
-					# fallback for SQLite
-					session.exec(_text("INSERT OR IGNORE INTO ads(ad_id, name, image_url, link, updated_at) VALUES (:id, :n, NULL, :lnk, CURRENT_TIMESTAMP)")).params(id=str(aid), n=(title or None), lnk=(lnk or ("https://www.facebook.com/ads/library/?id=" + str(aid))))
+					pass
 				try:
 					rc = session.exec(_text("UPDATE ads SET name=COALESCE(:n,name), link=COALESCE(:lnk,link), updated_at=CURRENT_TIMESTAMP WHERE ad_id=:id")).params(id=str(aid), n=(title or None), lnk=(lnk or ("https://www.facebook.com/ads/library/?id=" + str(aid))))
 					updated += int(getattr(rc, "rowcount", 0) or 0)
@@ -159,10 +158,10 @@ def reset_instagram_data():
         run("DELETE FROM ig_accounts", key="ig_accounts")
         # Conversations (IG cache)
         run("DELETE FROM conversations", key="conversations")
-        # Ads / Stories caches (tables exist in both SQLite/MySQL with same names)
+        # Ads / Stories caches
         run("DELETE FROM ads", key="ads")
         run("DELETE FROM stories", key="stories")
-        # Optional mapping tables (MySQL-only); ignore errors on SQLite
+        # Optional mapping tables
         run("DELETE FROM ads_products", key="ads_products")
         run("DELETE FROM stories_products", key="stories_products")
         # AI run history
@@ -278,8 +277,7 @@ def merge_to_graph_conversation_ids(limit: int = 5000):
                         session.exec(_text("UPDATE `order` SET ig_conversation_id=:g WHERE ig_conversation_id=:d").params(g=str(graph_id), d=str(dm_id)))
                     except Exception:
                         pass
-                # ai_conversations upsert copy
-                # SQLite path
+                # ai_conversations upsert copy (MySQL)
                 try:
                     session.exec(
                         _text(
@@ -287,47 +285,23 @@ def merge_to_graph_conversation_ids(limit: int = 5000):
                             INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at)
                             SELECT :g, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at
                             FROM ai_conversations WHERE convo_id=:d
-                            ON CONFLICT(convo_id) DO UPDATE SET
-                              last_message_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_id ELSE ai_conversations.last_message_id END,
-                              last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), excluded.last_message_timestamp_ms),
-                              last_message_text=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_text ELSE ai_conversations.last_message_text END,
-                              last_message_direction=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_direction ELSE ai_conversations.last_message_direction END,
-                              last_sender_username=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_sender_username ELSE ai_conversations.last_sender_username END,
-                              ig_sender_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_sender_id ELSE ai_conversations.ig_sender_id END,
-                              ig_recipient_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_recipient_id ELSE ai_conversations.ig_recipient_id END,
-                              last_ad_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_id ELSE ai_conversations.last_ad_id END,
-                              last_ad_link=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_link ELSE ai_conversations.last_ad_link END,
-                              last_ad_title=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_title ELSE ai_conversations.last_ad_title END,
-                              hydrated_at=COALESCE(ai_conversations.hydrated_at, excluded.hydrated_at)
+                            ON DUPLICATE KEY UPDATE
+                              last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
+                              last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
+                              last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
+                              last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
+                              last_sender_username=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_sender_username), ai_conversations.last_sender_username),
+                              ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
+                              ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
+                              last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
+                              last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
+                              last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title),
+                              hydrated_at=COALESCE(ai_conversations.hydrated_at, VALUES(hydrated_at))
                             """
                         ).params(g=str(graph_id), d=str(dm_id))
                     )
                 except Exception:
-                    # MySQL path
-                    try:
-                        session.exec(
-                            _text(
-                                """
-                                INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at)
-                                SELECT :g, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title, hydrated_at
-                                FROM ai_conversations WHERE convo_id=:d
-                                ON DUPLICATE KEY UPDATE
-                                  last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
-                                  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
-                                  last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
-                                  last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
-                                  last_sender_username=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_sender_username), ai_conversations.last_sender_username),
-                                  ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
-                                  ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
-                                  last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
-                                  last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
-                                  last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title),
-                                  hydrated_at=COALESCE(ai_conversations.hydrated_at, VALUES(hydrated_at))
-                                """
-                            ).params(g=str(graph_id), d=str(dm_id))
-                        )
-                    except Exception:
-                        pass
+                    pass
                 # Remove old dm row if exists
                 try:
                     session.exec(_text("DELETE FROM ai_conversations WHERE convo_id=:d").params(d=str(dm_id)))
@@ -415,12 +389,9 @@ def backfill_ai_latest(limit: int = 50000):
                 atitle = getattr(rm, "ad_title", None) if hasattr(rm, "ad_title") else (rm[9] if len(rm) > 9 else None)
                 # ensure ai_conversations row exists
                 try:
-                    session.exec(_text("INSERT OR IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(cid))
+                    session.exec(_text("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(cid))
                 except Exception:
-                    try:
-                        session.exec(_text("INSERT IGNORE INTO ai_conversations(convo_id) VALUES (:cid)")).params(cid=str(cid))
-                    except Exception:
-                        pass
+                    pass
                 # migrate hydrated_at best-effort from conversations where ig_user_id matches dm:<id>
                 try:
                     dm_id = None
@@ -438,24 +409,24 @@ def backfill_ai_latest(limit: int = 50000):
                             session.exec(_text("UPDATE ai_conversations SET hydrated_at=COALESCE(hydrated_at, :h) WHERE convo_id=:cid")).params(cid=str(cid), h=hyd_at)
                 except Exception:
                     pass
-                # upsert last-* fields (SQLite then MySQL)
+                # upsert last-* fields (MySQL)
                 try:
                     session.exec(
                         _text(
                             """
                             INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
                             VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
-                            ON CONFLICT(convo_id) DO UPDATE SET
-                              last_message_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_id ELSE ai_conversations.last_message_id END,
-                              last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), excluded.last_message_timestamp_ms),
-                              last_message_text=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_text ELSE ai_conversations.last_message_text END,
-                              last_message_direction=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_message_direction ELSE ai_conversations.last_message_direction END,
-                              last_sender_username=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_sender_username ELSE ai_conversations.last_sender_username END,
-                              ig_sender_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_sender_id ELSE ai_conversations.ig_sender_id END,
-                              ig_recipient_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.ig_recipient_id ELSE ai_conversations.ig_recipient_id END,
-                              last_ad_id=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_id ELSE ai_conversations.last_ad_id END,
-                              last_ad_link=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_link ELSE ai_conversations.last_ad_link END,
-                              last_ad_title=CASE WHEN excluded.last_message_timestamp_ms >= COALESCE(ai_conversations.last_message_timestamp_ms,0) THEN excluded.last_ad_title ELSE ai_conversations.last_ad_title END
+                            ON DUPLICATE KEY UPDATE
+                              last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
+                              last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
+                              last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
+                              last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
+                              last_sender_username=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_sender_username), ai_conversations.last_sender_username),
+                              ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
+                              ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
+                              last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
+                              last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
+                              last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title)
                             """
                         ).params(
                             cid=str(cid),
@@ -473,41 +444,7 @@ def backfill_ai_latest(limit: int = 50000):
                     )
                     updated += 1
                 except Exception:
-                    try:
-                        session.exec(
-                            _text(
-                                """
-                                INSERT INTO ai_conversations(convo_id, last_message_id, last_message_timestamp_ms, last_message_text, last_message_direction, last_sender_username, ig_sender_id, ig_recipient_id, last_ad_id, last_ad_link, last_ad_title)
-                                VALUES (:cid, :mid, :ts, :txt, :dir, :sun, :sid, :rid, :adid, :alink, :atitle)
-                                ON DUPLICATE KEY UPDATE
-                                  last_message_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_id), ai_conversations.last_message_id),
-                                  last_message_timestamp_ms=GREATEST(COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_timestamp_ms)),
-                                  last_message_text=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_text), ai_conversations.last_message_text),
-                                  last_message_direction=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_message_direction), ai_conversations.last_message_direction),
-                                  last_sender_username=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_sender_username), ai_conversations.last_sender_username),
-                                  ig_sender_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_sender_id), ai_conversations.ig_sender_id),
-                                  ig_recipient_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(ig_recipient_id), ai_conversations.ig_recipient_id),
-                                  last_ad_id=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_id), ai_conversations.last_ad_id),
-                                  last_ad_link=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_link), ai_conversations.last_ad_link),
-                                  last_ad_title=IF(VALUES(last_message_timestamp_ms) >= COALESCE(ai_conversations.last_message_timestamp_ms,0), VALUES(last_ad_title), ai_conversations.last_ad_title)
-                                """
-                            ).params(
-                                cid=str(cid),
-                                mid=int(mid) if mid is not None else None,
-                                ts=int(ts) if ts is not None else None,
-                                txt=(txt or ""),
-                                dir=(dirn or "in"),
-                                sun=(sun or None),
-                                sid=(str(sid) if sid is not None else None),
-                                rid=(str(rid) if rid is not None else None),
-                                adid=(str(adid) if adid is not None else None),
-                                alink=alink,
-                                atitle=atitle,
-                            )
-                        )
-                        updated += 1
-                    except Exception:
-                        pass
+                    pass
             except Exception:
                 continue
     return {"status": "ok", "updated": int(updated), "considered": int(considered)}
@@ -515,69 +452,39 @@ def backfill_ai_latest(limit: int = 50000):
 
 @router.post("/admin/backfill/latest")
 def backfill_latest_messages(limit: int = 50000):
-	# Populate latest_messages from message table (MySQL/SQLite compatible)
+	# Populate latest_messages from message table (MySQL)
 	from sqlalchemy import text as _text
 	created = 0
 	try:
 		with get_session() as session:
-			# MySQL 8 and SQLite both support CTE; but also provide fallback
-			sql_cte = """
-				WITH lm AS (
-					SELECT conversation_id, MAX(COALESCE(timestamp_ms,0)) AS ts
-					FROM message
-					WHERE conversation_id IS NOT NULL
-					GROUP BY conversation_id
+			sql_mysql = """
+				INSERT INTO latest_messages(convo_id, message_id, timestamp_ms, text, sender_username, direction, ig_sender_id, ig_recipient_id, ad_link, ad_title)
+				SELECT t.conversation_id, t.id, t.ts, t.text, t.sender_username, t.direction, t.ig_sender_id, t.ig_recipient_id, t.ad_link, t.ad_title
+				FROM (
+					SELECT m.conversation_id, m.id, COALESCE(m.timestamp_ms,0) AS ts, m.text, m.sender_username, m.direction, m.ig_sender_id, m.ig_recipient_id, m.ad_link, m.ad_title
+					FROM message m
+					JOIN (
+						SELECT conversation_id, MAX(COALESCE(timestamp_ms,0)) AS ts
+						FROM message
+						WHERE conversation_id IS NOT NULL
+						GROUP BY conversation_id
+					) lm ON lm.conversation_id = m.conversation_id AND lm.ts = COALESCE(m.timestamp_ms,0)
 					ORDER BY ts DESC
 					LIMIT :n
-				)
-				INSERT INTO latest_messages(convo_id, message_id, timestamp_ms, text, sender_username, direction, ig_sender_id, ig_recipient_id, ad_link, ad_title)
-				SELECT m.conversation_id, m.id, COALESCE(m.timestamp_ms,0), m.text, m.sender_username, m.direction, m.ig_sender_id, m.ig_recipient_id, m.ad_link, m.ad_title
-				FROM message m
-				JOIN lm ON lm.conversation_id = m.conversation_id AND lm.ts = COALESCE(m.timestamp_ms,0)
-				ON CONFLICT(convo_id) DO UPDATE SET
-				  message_id=excluded.message_id,
-				  timestamp_ms=excluded.timestamp_ms,
-				  text=excluded.text,
-				  sender_username=excluded.sender_username,
-				  direction=excluded.direction,
-				  ig_sender_id=excluded.ig_sender_id,
-				  ig_recipient_id=excluded.ig_recipient_id,
-				  ad_link=excluded.ad_link,
-				  ad_title=excluded.ad_title
+				) AS t
+				ON DUPLICATE KEY UPDATE
+				  message_id=VALUES(message_id),
+				  timestamp_ms=VALUES(timestamp_ms),
+				  text=VALUES(text),
+				  sender_username=VALUES(sender_username),
+				  direction=VALUES(direction),
+				  ig_sender_id=VALUES(ig_sender_id),
+				  ig_recipient_id=VALUES(ig_recipient_id),
+				  ad_link=VALUES(ad_link),
+				  ad_title=VALUES(ad_title)
 			"""
-			try:
-				res = session.exec(_text(sql_cte).params(n=int(max(1000, min(limit, 200000)))) )
-				created = int(getattr(res, "rowcount", 0) or 0)
-			except Exception:
-				# MySQL fallback using ON DUPLICATE KEY UPDATE without CTE
-				sql_mysql = """
-					INSERT INTO latest_messages(convo_id, message_id, timestamp_ms, text, sender_username, direction, ig_sender_id, ig_recipient_id, ad_link, ad_title)
-					SELECT t.conversation_id, t.id, t.ts, t.text, t.sender_username, t.direction, t.ig_sender_id, t.ig_recipient_id, t.ad_link, t.ad_title
-					FROM (
-						SELECT m.conversation_id, m.id, COALESCE(m.timestamp_ms,0) AS ts, m.text, m.sender_username, m.direction, m.ig_sender_id, m.ig_recipient_id, m.ad_link, m.ad_title
-						FROM message m
-						JOIN (
-							SELECT conversation_id, MAX(COALESCE(timestamp_ms,0)) AS ts
-							FROM message
-							WHERE conversation_id IS NOT NULL
-							GROUP BY conversation_id
-						) lm ON lm.conversation_id = m.conversation_id AND lm.ts = COALESCE(m.timestamp_ms,0)
-						ORDER BY ts DESC
-						LIMIT :n
-					) AS t
-					ON DUPLICATE KEY UPDATE
-					  message_id=VALUES(message_id),
-					  timestamp_ms=VALUES(timestamp_ms),
-					  text=VALUES(text),
-					  sender_username=VALUES(sender_username),
-					  direction=VALUES(direction),
-					  ig_sender_id=VALUES(ig_sender_id),
-					  ig_recipient_id=VALUES(ig_recipient_id),
-					  ad_link=VALUES(ad_link),
-					  ad_title=VALUES(ad_title)
-				"""
-				res = session.exec(_text(sql_mysql).params(n=int(max(1000, min(limit, 200000)))) )
-				created = int(getattr(res, "rowcount", 0) or 0)
+			res = session.exec(_text(sql_mysql).params(n=int(max(1000, min(limit, 200000)))) )
+			created = int(getattr(res, "rowcount", 0) or 0)
 	except Exception:
 		created = 0
 	return {"status": "ok", "upserted": created}

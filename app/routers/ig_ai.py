@@ -316,7 +316,7 @@ def start_process(body: dict):
                 run_id = int(getattr(rid_row, "id", rid_row[0]))
         except Exception:
             pass
-        # Fallback to SQLite-style
+        # Backend fallback
         if run_id is None:
             try:
                 rid_row = session.exec(text("SELECT last_insert_rowid() AS id")).first()

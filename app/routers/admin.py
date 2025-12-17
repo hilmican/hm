@@ -1,6 +1,5 @@
 import os
 import json
-import sqlite3
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -87,60 +86,6 @@ def _check_redis() -> Dict[str, Any]:
 		return {"ok": bool(pong)}
 	except Exception as e:
 		return {"ok": False, "error": str(e)}
-
-
-def _find_latest_sqlite_backup() -> Optional[str]:
-	"""Search common locations for latest valid SQLite backup file.
-
-	Order: $SQLITE_BACKUP_DIR, data/backups, backups, data
-	Valid extensions: .db, .sqlite, .sqlite3
-	Per-candidate validation: PRAGMA integrity_check; presence of message table optional.
-	"""
-	try:
-		candidates: list[str] = []
-		seen: set[str] = set()
-		def _gather(dirpath: str) -> None:
-			if not dirpath or not os.path.isdir(dirpath):
-				return
-			for root, _dirs, files in os.walk(dirpath):
-				for fn in files:
-					low = fn.lower()
-					if low.endswith((".db", ".sqlite", ".sqlite3")):
-						full = os.path.join(root, fn)
-						if full not in seen:
-							seen.add(full)
-							candidates.append(full)
-		# search roots
-		for d in [(os.getenv("SQLITE_BACKUP_DIR") or "dbbackups"), "/app/dbbackups", "data/backups", "backups", "data", "/app/data/backups", "/app/data"]:
-			if d:
-				_gather(d)
-		# sort by mtime desc
-		candidates.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0, reverse=True)
-		# validate
-		for p in candidates:
-			try:
-				con = sqlite3.connect(p)
-				try:
-					con.execute("PRAGMA integrity_check;")
-					# quick smoke query best-effort
-					try:
-						con.execute("SELECT 1 FROM message LIMIT 1")
-					except Exception:
-						pass
-					con.close()
-					return p
-				except Exception:
-					try:
-						con.close()
-					except Exception:
-						pass
-					continue
-			except Exception:
-				# connection or integrity check failed; try next candidate
-				continue
-		return None
-	except Exception:
-		return None
 
 
 @router.get("/version")
@@ -286,7 +231,7 @@ def debug_jobs(kind: str, limit: int = 50):
 def debug_attachments(limit: int = 50):
     with get_session() as session:
         safe_n = max(1, min(int(limit or 50), 1000))
-        # SQLite has quirks with bound params in LIMIT; embed sanitized value
+        # Embed sanitized value in LIMIT (avoid parameterizing LIMIT across drivers)
         rows = session.exec(text(f"SELECT id, message_id, kind, fetch_status, fetched_at FROM attachments ORDER BY id DESC LIMIT {safe_n}")) .all()
         out = []
         for r in rows:
@@ -475,7 +420,7 @@ def debug_backfill_usernames(limit: int = 2000):
                     seen.add(uid); uniq.append(uid)
             for uid in uniq[: max(1, min(int(limit or 2000), len(uniq)) )]:
                 try:
-                    session.exec(text("INSERT OR IGNORE INTO ig_users(ig_user_id) VALUES(:id)").params(id=uid))
+                    session.exec(text("INSERT IGNORE INTO ig_users(ig_user_id) VALUES(:id)").params(id=uid))
                     created_users += 1
                 except Exception:
                     pass
@@ -580,135 +525,3 @@ def fix_message_timestamps(request: Request):
 		"errors": errors[:50],
 	}
 	return templates.TemplateResponse("admin_fix_timestamps.html", {"request": request, **ctx})
-
-
-@router.get("/reimport/raw-json")
-def reimport_raw_json(request: Request, sqlite_path: str | None = None):
-	templates = request.app.state.templates
-	scanned = 0
-	updated = 0
-	missing = 0
-	errors: list[dict[str, Any]] = []
-	path = sqlite_path or os.getenv("SQLITE_PATH", "data/app.db")
-	try:
-		if not os.path.exists(path):
-			alt = _find_latest_sqlite_backup()
-			if not alt:
-				raise FileNotFoundError(f"SQLite not found: {path}")
-			path = alt
-		with get_session() as session:
-			# Ensure MySQL column types before updates (idempotent)
-			try:
-				# raw_json -> LONGTEXT
-				try:
-					row = session.exec(text(
-						"""
-						SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
-						FROM INFORMATION_SCHEMA.COLUMNS
-						WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'raw_json'
-						"""
-					)).first()
-					if row is not None:
-						dtype = str((row[0] if isinstance(row, (list, tuple)) else row)).lower()
-						if dtype in ("varchar", "char", "text", "tinytext", "mediumtext"):
-							session.exec(text("ALTER TABLE message MODIFY COLUMN raw_json LONGTEXT"))
-				except Exception:
-					pass
-				# timestamp_ms -> BIGINT
-				try:
-					row = session.exec(text(
-						"""
-						SELECT DATA_TYPE
-						FROM INFORMATION_SCHEMA.COLUMNS
-						WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message' AND COLUMN_NAME = 'timestamp_ms'
-						"""
-					)).first()
-					if row is not None:
-						dtype = str((row[0] if isinstance(row, (list, tuple)) else row)).lower()
-						if dtype != "bigint":
-							session.exec(text("ALTER TABLE message MODIFY COLUMN timestamp_ms BIGINT"))
-				except Exception:
-					pass
-			except Exception as e:
-				errors.append({"id": None, "error": f"ensure types: {e}"})
-
-			# Open SQLite and stream rows
-			# try main path; if malformed, try latest backup
-			con = None
-			try:
-				con = sqlite3.connect(path)
-				con.row_factory = sqlite3.Row
-				# integrity check
-				try:
-					con.execute("PRAGMA integrity_check;")
-				except Exception as e_ic:
-					raise e_ic
-			except Exception as e:
-				# fallback to latest backup
-				alt = _find_latest_sqlite_backup()
-				if alt:
-					try:
-						path = alt
-						con = sqlite3.connect(alt)
-						con.row_factory = sqlite3.Row
-					except Exception as e2:
-						errors.append({"id": None, "error": f"sqlite fallback open: {e2}"})
-				else:
-					errors.append({"id": None, "error": f"sqlite open: {e}"})
-					ctx = {"scanned": scanned, "updated": updated, "missing": missing, "error_count": len(errors), "errors": errors[:50], "sqlite_path": path}
-					return templates.TemplateResponse("admin_reimport_raw_json.html", {"request": request, **ctx})
-
-			with con:
-				cur = con.cursor()
-				cur.execute("SELECT ig_message_id, raw_json FROM message WHERE raw_json IS NOT NULL")
-				while True:
-					rows = cur.fetchmany(1000)
-					if not rows:
-						break
-					for r in rows:
-						igid = r["ig_message_id"]
-						raw = r["raw_json"]
-						if not igid or not raw:
-							continue
-						scanned += 1
-						# compute timestamp ms from raw
-						try:
-							obj = json.loads(raw)
-							ts = None
-							if isinstance(obj, dict):
-								val = obj.get("timestamp") or ((obj.get("message") or {}).get("timestamp"))
-								if isinstance(val, (int, float)):
-									ts = int(val if val >= 10_000_000_000 else val * 1000)
-								else:
-									try:
-										num = float(str(val))
-										ival = int(num)
-										ts = int(ival if ival >= 10_000_000_000 else ival * 1000)
-									except Exception:
-										ts = None
-						except Exception:
-							ts = None
-						try:
-							if ts is not None:
-								session.exec(text("UPDATE message SET raw_json=:raw, timestamp_ms=:ts WHERE ig_message_id=:igid").params(raw=raw, ts=int(ts), igid=str(igid)))
-							else:
-								session.exec(text("UPDATE message SET raw_json=:raw WHERE ig_message_id=:igid").params(raw=raw, igid=str(igid)))
-							updated += 1
-						except Exception as e:
-							# check if row exists
-							try:
-								row = session.exec(text("SELECT 1 FROM message WHERE ig_message_id=:igid LIMIT 1").params(igid=str(igid))).first()
-								if not row:
-									missing += 1
-								else:
-									errors.append({"id": str(igid), "error": str(e)})
-							except Exception:
-								errors.append({"id": str(igid), "error": str(e)})
-			try:
-				con.close()
-			except Exception:
-				pass
-	except Exception as e:
-		errors.append({"id": None, "error": str(e)})
-	ctx = {"scanned": scanned, "updated": updated, "missing": missing, "error_count": len(errors), "errors": errors[:50], "sqlite_path": path}
-	return templates.TemplateResponse("admin_reimport_raw_json.html", {"request": request, **ctx})

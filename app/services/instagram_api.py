@@ -422,21 +422,13 @@ async def sync_latest_conversations(limit: int = 25) -> int:
     """
     Best-effort background sync of latest conversations from Graph.
 
-    For MySQL/SQLite backends this uses dialect-specific *idempotent* inserts
-    (`INSERT IGNORE` / `INSERT OR IGNORE`) so that concurrent webhook ingestion
+    Uses MySQL *idempotent* inserts (`INSERT IGNORE`) so that concurrent webhook ingestion
     or other sync jobs do not raise duplicate-key errors on `ig_message_id`.
     """
     conversations = await fetch_conversations(limit=limit)
     saved = 0
     with get_session() as session:
         from .ingest import _get_or_create_conversation_id as _get_conv_id
-
-        # Detect backend once per session to choose the appropriate INSERT style
-        try:
-            bind = session.get_bind()
-            backend = getattr(bind.dialect, "name", "") or ""
-        except Exception:
-            backend = ""
 
         for conv in conversations:
             cid = str(conv.get("id"))
@@ -491,56 +483,30 @@ async def sync_latest_conversations(limit: int = 25) -> int:
                     "sender_username": frm_username,
                 }
 
-                # Use idempotent insert based on backend to avoid duplicate-key errors
-                if backend == "mysql":
-                    stmt = _text(
-                        """
-                        INSERT IGNORE INTO message (
-                            ig_sender_id,
-                            ig_recipient_id,
-                            ig_message_id,
-                            text,
-                            timestamp_ms,
-                            conversation_id,
-                            direction,
-                            sender_username
-                        ) VALUES (
-                            :ig_sender_id,
-                            :ig_recipient_id,
-                            :ig_message_id,
-                            :text,
-                            :timestamp_ms,
-                            :conversation_id,
-                            :direction,
-                            :sender_username
-                        )
-                        """
+                # Use MySQL idempotent insert to avoid duplicate-key errors
+                stmt = _text(
+                    """
+                    INSERT IGNORE INTO message (
+                        ig_sender_id,
+                        ig_recipient_id,
+                        ig_message_id,
+                        text,
+                        timestamp_ms,
+                        conversation_id,
+                        direction,
+                        sender_username
+                    ) VALUES (
+                        :ig_sender_id,
+                        :ig_recipient_id,
+                        :ig_message_id,
+                        :text,
+                        :timestamp_ms,
+                        :conversation_id,
+                        :direction,
+                        :sender_username
                     )
-                else:
-                    # SQLite / others: best-effort ignore on duplicates
-                    stmt = _text(
-                        """
-                        INSERT OR IGNORE INTO message (
-                            ig_sender_id,
-                            ig_recipient_id,
-                            ig_message_id,
-                            text,
-                            timestamp_ms,
-                            conversation_id,
-                            direction,
-                            sender_username
-                        ) VALUES (
-                            :ig_sender_id,
-                            :ig_recipient_id,
-                            :ig_message_id,
-                            :text,
-                            :timestamp_ms,
-                            :conversation_id,
-                            :direction,
-                            :sender_username
-                        )
-                        """
-                    )
+                    """
+                )
 
                 try:
                     result = session.exec(stmt.params(**params))
