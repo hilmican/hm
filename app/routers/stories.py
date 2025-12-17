@@ -167,11 +167,11 @@ def save_story_mapping(story_id: str, sku: Optional[str] = Form(default=None), p
 					)
 				).params(id=str(story_key), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
 			except Exception:
-			session.exec(
-				_text(
-					"UPDATE ads_products SET product_id=:pid, sku=:sku, auto_linked=0, link_type='story' WHERE ad_id=:id"
-				)
-			).params(id=str(story_key), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
+				session.exec(
+					_text(
+						"UPDATE ads_products SET product_id=:pid, sku=:sku, auto_linked=0, link_type='story' WHERE ad_id=:id"
+					)
+				).params(id=str(story_key), pid=(int(pid) if pid is not None else None), sku=(sku_clean or None))
 		
 		# Update conversations that have messages with this story_id
 		# This ensures _detect_focus_product can find the product
