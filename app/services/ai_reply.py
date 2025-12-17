@@ -45,6 +45,46 @@ MAX_AI_IMAGES_PER_REPLY = int(os.getenv("AI_MAX_PRODUCT_IMAGES", "3"))
 log = logging.getLogger("ai.reply")
 
 
+def _has_any_human_agent_outbound(conversation_id: int) -> bool:
+	"""
+	Return True if this conversation contains any outbound message that appears to be sent
+	by a human agent (not AI).
+
+	Rationale:
+	- Human + AI mixed histories can confuse downstream prompting and can lead to
+	  contradictory replies. If a human agent has participated, we avoid relying on
+	  that conversation for automated replies.
+
+	Heuristics:
+	- direction='out' AND sender_type in ('human','unknown') -> treat as human-agent
+	- direction='out' AND sender_type IS NULL AND ai_status IS NULL (or not 'sent') -> likely manual
+	- direction='out' AND ai_status='sent' is assumed AI-generated even if sender_type is NULL (legacy rows)
+	"""
+	try:
+		with get_session() as session:
+			# Use raw SQL for speed and to avoid ORM edge cases with optional fields.
+			from sqlalchemy import text as _text
+
+			row = session.exec(
+				_text(
+					"""
+					SELECT 1
+					FROM message
+					WHERE conversation_id=:cid
+					  AND direction='out'
+					  AND (
+							sender_type IN ('human','unknown')
+							OR (sender_type IS NULL AND (ai_status IS NULL OR ai_status != 'sent'))
+					  )
+					LIMIT 1
+					"""
+				).params(cid=int(conversation_id))
+			).first()
+			return bool(row)
+	except Exception:
+		return False
+
+
 def _log_function_callback(
 	conversation_id: int,
 	name: str,
@@ -1340,6 +1380,22 @@ def draft_reply(
 	  - reason: str         (short explanation for debugging)
 	  - notes: str|null
 	"""
+	# Hard safety: once a human agent participates, avoid mixing human+AI histories.
+	# We intentionally do not attempt to "continue" the AI in such threads.
+	if _has_any_human_agent_outbound(int(conversation_id)):
+		out: Dict[str, Any] = {
+			"should_reply": False,
+			"reply_text": "",
+			"confidence": 0.0,
+			"reason": "human_agent_present",
+			"notes": "Human agent outbound detected in this conversation; AI will not rely on this thread for automated replies.",
+			"model": "system",
+			"conversation_id": int(conversation_id),
+		}
+		if include_meta:
+			out["meta"] = {"human_agent_present": True}
+		return out
+
 	client = AIClient(model=get_ai_shadow_model_from_settings())
 	if not client.enabled:
 		raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")

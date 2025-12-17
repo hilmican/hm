@@ -793,6 +793,12 @@ def main() -> None:
 					continue
 				# Decide whether we should actually propose a reply
 				should_reply = bool(data.get("should_reply", True))
+				# If a human agent has participated, never auto-reply from AI to avoid mixing/contradictions.
+				force_needs_admin = str(data.get("reason") or "").strip().lower() in (
+					"human_agent_present",
+				)
+				if force_needs_admin:
+					should_reply = False
 				if admin_escalation_requested:
 					should_reply = False
 					if not data.get("reason"):
@@ -880,7 +886,7 @@ def main() -> None:
 								)
 							)
 							# Mark state as paused or needs_admin based on decision
-							next_status = "needs_admin" if admin_escalation_requested else "paused"
+							next_status = "needs_admin" if (admin_escalation_requested or force_needs_admin) else "paused"
 							session.exec(
 								_text(
 									"UPDATE ai_shadow_state SET status=:status, state_json=:state, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
@@ -892,7 +898,7 @@ def main() -> None:
 							log.warning("persist no-reply decision error cid=%s err=%s", cid, pe)
 						except Exception:
 							pass
-					_set_status(cid, "needs_admin" if admin_escalation_requested else "paused", state_json=state_json_dump)
+					_set_status(cid, "needs_admin" if (admin_escalation_requested or force_needs_admin) else "paused", state_json=state_json_dump)
 					continue
 				# Persist draft
 				actions: list[dict[str, Any]] = []
