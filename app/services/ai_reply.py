@@ -1129,6 +1129,206 @@ def _has_any_ai_sent_outbound(conversation_id: int) -> bool:
 		return False
 
 
+def _compute_history_timing(history: List[Dict[str, Any]]) -> Dict[str, Any]:
+	"""Compute timing metadata from history entries (expects timestamp_ms epoch ms, ascending or not)."""
+	import time as _time
+
+	now_ms = int(_time.time() * 1000)
+
+	def _safe_ts(v: Any) -> Optional[int]:
+		try:
+			if v is None:
+				return None
+			ts = int(v)
+			return ts if ts > 0 else None
+		except Exception:
+			return None
+
+	first_ts = None
+	last_ts = None
+	last_in_ts = None
+	last_out_ts = None
+	for h in history or []:
+		ts = _safe_ts((h or {}).get("timestamp_ms"))
+		if ts is None:
+			continue
+		if first_ts is None or ts < first_ts:
+			first_ts = ts
+		if last_ts is None or ts > last_ts:
+			last_ts = ts
+		dirv = ((h or {}).get("dir") or "").lower()
+		if dirv == "in":
+			if last_in_ts is None or ts > last_in_ts:
+				last_in_ts = ts
+		elif dirv == "out":
+			if last_out_ts is None or ts > last_out_ts:
+				last_out_ts = ts
+
+	def _hours(delta_ms: Optional[int]) -> Optional[float]:
+		try:
+			if delta_ms is None:
+				return None
+			return round(float(delta_ms) / 3600000.0, 3)
+		except Exception:
+			return None
+
+	def _days(delta_ms: Optional[int]) -> Optional[float]:
+		try:
+			if delta_ms is None:
+				return None
+			return round(float(delta_ms) / 86400000.0, 3)
+		except Exception:
+			return None
+
+	gap_in_out_ms = (last_in_ts - last_out_ts) if (last_in_ts and last_out_ts) else None
+
+	return {
+		"now_ms": now_ms,
+		"first_ts_ms": first_ts,
+		"last_ts_ms": last_ts,
+		"last_inbound_ts_ms": last_in_ts,
+		"last_outbound_ts_ms": last_out_ts,
+		"hours_since_last_inbound": _hours((now_ms - last_in_ts) if last_in_ts else None),
+		"hours_since_last_outbound": _hours((now_ms - last_out_ts) if last_out_ts else None),
+		"gap_inbound_after_outbound_hours": _hours(gap_in_out_ms),
+		"conversation_age_days": _days((now_ms - first_ts) if first_ts else None),
+	}
+
+
+def _detect_aftersales_escalation(
+	*,
+	state_payload: Dict[str, Any],
+	last_customer_message: str,
+	timing: Dict[str, Any],
+) -> Dict[str, Any]:
+	"""Heuristic: detect post-order aftersales (memnuniyet/iade/değişim) → should escalate."""
+	text = (last_customer_message or "").strip().lower()
+	last_step = str(state_payload.get("last_step") or "").strip()
+
+	# Keyword-based: direct aftersales / complaints / return-exchange intents
+	kw = [
+		"iade",
+		"değişim",
+		"degisim",
+		"değiştir",
+		"degistir",
+		"iptal",
+		"şikayet",
+		"sikayet",
+		"memnun",
+		"memnun değil",
+		"memnun degil",
+		"sorun",
+		"problem",
+		"kusur",
+		"defolu",
+		"yırtık",
+		"yirtik",
+		"leke",
+		"küçük geldi",
+		"kucuk geldi",
+		"büyük geldi",
+		"buyuk geldi",
+		"beden uymadı",
+		"beden uymadi",
+		"kargo gelmedi",
+		"gelmedi",
+		"teslim",
+		"takip",
+	]
+	kw_hit = next((k for k in kw if k in text), None)
+
+	# Timing-based: if we are in an order-completed state and a new inbound arrives long after last outbound,
+	# treat it as aftersales (customer likely following up / asking changes).
+	try:
+		gap_hours = float(timing.get("gap_inbound_after_outbound_hours")) if timing.get("gap_inbound_after_outbound_hours") is not None else None
+	except Exception:
+		gap_hours = None
+
+	aftersales_gap_h = float(os.getenv("AI_AFTERSALES_GAP_HOURS", "12"))
+	order_completed = last_step in ("order_placed", "confirmed_by_customer")
+	timing_hit = bool(order_completed and gap_hours is not None and gap_hours >= max(1.0, aftersales_gap_h))
+
+	should_escalate = bool(kw_hit or timing_hit)
+	reason = None
+	if kw_hit:
+		reason = f"keyword:{kw_hit}"
+	elif timing_hit:
+		reason = f"timing_gap_hours:{gap_hours}"
+
+	return {
+		"should_escalate": should_escalate,
+		"reason": reason,
+		"order_completed": order_completed,
+		"gap_hours": gap_hours,
+	}
+
+
+def _create_aftersales_admin_notification(
+	*,
+	conversation_id: int,
+	aftersales: Dict[str, Any],
+	last_customer_message: str,
+	timing: Dict[str, Any],
+	state_payload: Dict[str, Any],
+) -> None:
+	"""Idempotent-ish admin notification for aftersales. Best-effort dedupe by trigger ts."""
+	try:
+		from .admin_notifications import create_admin_notification
+		from sqlalchemy import text as _text
+	except Exception:
+		return
+
+	trigger_ts = timing.get("last_inbound_ts_ms")
+	try:
+		with get_session() as session:
+			# If we've already created an auto aftersales notification for this exact inbound timestamp, skip.
+			if trigger_ts:
+				row = session.exec(
+					_text(
+						"""
+						SELECT id FROM admin_message
+						WHERE conversation_id=:cid
+						  AND metadata_json LIKE '%"auto_aftersales": true%'
+						  AND metadata_json LIKE :ts_like
+						ORDER BY id DESC
+						LIMIT 1
+						"""
+					).params(cid=int(conversation_id), ts_like=f'%\"trigger_ts_ms\": {int(trigger_ts)}%')
+				).first()
+				if row:
+					return
+	except Exception:
+		# If dedupe fails, still try to notify once (better than silent).
+		pass
+
+	reason = (aftersales or {}).get("reason") or "unknown"
+	preview = (last_customer_message or "").strip()
+	if len(preview) > 400:
+		preview = preview[:397] + "..."
+
+	msg = (
+		"[AUTO] Sipariş sonrası mesaj şüphesi: otomatik eskalasyon.\n"
+		f"- reason: {reason}\n"
+		f"- last_step: {state_payload.get('last_step')}\n"
+		f"- last_inbound_ts_ms: {timing.get('last_inbound_ts_ms')}\n"
+		f"- last_outbound_ts_ms: {timing.get('last_outbound_ts_ms')}\n"
+		f"- gap_in_after_out_hours: {timing.get('gap_inbound_after_outbound_hours')}\n\n"
+		f"Müşteri mesajı: {preview}"
+	)
+
+	create_admin_notification(
+		int(conversation_id),
+		msg,
+		message_type="warning",
+		metadata={
+			"auto_aftersales": True,
+			"reason": reason,
+			"trigger_ts_ms": timing.get("last_inbound_ts_ms"),
+		},
+	)
+
+
 def draft_reply(
 	conversation_id: int,
 	*,
@@ -1166,6 +1366,7 @@ def draft_reply(
 		}
 	history, last_customer_message = _load_history(int(conversation_id), limit=limit)
 	conversation_flags = _detect_conversation_flags(history, product_info)
+	timing = _compute_history_timing(history)
 
 	# Analyze conversation history only for BASIC info and only when AI has not spoken yet.
 	# Rationale: if AI already sent messages, we expect contact/payment/address to be tracked via tools/state,
@@ -1365,6 +1566,7 @@ def draft_reply(
 		"transcript": transcript,
 		"product_images": product_images,
 		"customer": customer_info,
+		"timing": timing,
 	}
 	if matching_qas:
 		user_payload["matching_qas"] = matching_qas
@@ -1430,6 +1632,34 @@ def draft_reply(
 		# Update last_step if we're stuck at awaiting_contact but have all info
 		if state_payload.get("last_step") == "awaiting_contact":
 			state_payload["last_step"] = "awaiting_payment" if not state_payload.get("asked_payment") else "awaiting_address"
+
+	# If conversation looks like aftersales (order already placed + time gap, or iade/değişim etc),
+	# do NOT auto-reply; directly escalate to admins.
+	aftersales = _detect_aftersales_escalation(
+		state_payload=state_payload,
+		last_customer_message=last_customer_message,
+		timing=timing,
+	)
+	if aftersales.get("should_escalate"):
+		try:
+			_create_aftersales_admin_notification(
+				conversation_id=int(conversation_id),
+				aftersales=aftersales,
+				last_customer_message=last_customer_message,
+				timing=timing,
+				state_payload=state_payload,
+			)
+		except Exception:
+			pass
+		return {
+			"should_reply": False,
+			"reply_text": "",
+			"confidence": 0.0,
+			"reason": "aftersales_escalation",
+			"notes": "Sipariş sonrası mesaj (iade/değişim/memnuniyet/şikayet) şüphesi: konuşma yöneticilere eskale edildi.",
+			"timing": timing,
+			"aftersales": aftersales,
+		}
 	hail_already_sent = bool(state_payload.get("hail_sent"))
 	# Offer upsell sadece adres adımı tamamlandıktan veya sipariş tamamlandıktan sonra
 	upsell_ready = (
@@ -2404,8 +2634,10 @@ HITAP KURALLARI:
 	message_order_instruction = """
 === MESAJ SIRASI VE YANIT KURALI (KRİTİK) ===
 Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş mesajlarına yanıt ver.
-1. History mesajları timestamp_ms sıralıdır.
-2. Son AI OUT mesajından sonraki TÜM IN mesajlarına tek yanıtta cevap ver.
+1. context.history mesajları `timestamp_ms` alanına göre sıralıdır (epoch ms). Her eleman: {dir: 'in|out', text: '...', timestamp_ms: 123}.
+2. context.transcript aynı veriden üretilmiş okunabilir dökümdür (timestamp_ms + yön + metin).
+3. History, pratikte "cevaplanmamış son müşteri bloğuna kadar" kırpılmış olabilir; bu yüzden yalnızca son IN mesajı değil, son AI OUT'tan sonraki tüm IN'leri birlikte yanıtlamalısın.
+4. Son AI OUT mesajından sonraki TÜM IN mesajlarına tek yanıtta cevap ver.
 3. Birden fazla soruya yanıt verirken her birini ayrı satır/paragrafta cevaplayabilirsin.
 4. Geçmişte cevaplanmış mesajları tekrar etme.
 """
@@ -2433,9 +2665,16 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
 - İlk mesaj yazmadan ÖNCE mutlaka tüm konuşma geçmişini oku ve analiz et
 - context.history içinde tüm önceki mesajlar var
 - context.history_analysis içinde extract edilen bilgiler var
+- context.timing içinde zaman damgası özetleri var (now_ms, last_inbound_ts_ms, last_outbound_ts_ms, gap_inbound_after_outbound_hours, vb.)
 - ÖNCE durumu değerlendir, SONRA mesaj yaz
 - Müşterinin daha önce verdiği tüm bilgileri görmezden gelme
 - Tekrar tekrar aynı soruları sorma
+
+=== SİPARİŞ SONRASI (AFTERSALES) ESKALASYON KURALI (KRİTİK) ===
+- Eğer state.last_step 'order_placed' / 'confirmed_by_customer' ise ve müşteri tekrar yazıyorsa:
+  - Bu çoğunlukla memnuniyet/memnuniyetsizlik, iade/değişim, teslimat sorunu, takip/iptal gibi "satış sonrası" konudur.
+  - Böyle durumlarda satış akışına dönme; `yoneticiye_bildirim_gonder` çağır ve müşteri mesajına otomatik cevap yazma (should_reply=false).
+- Müşteri mesajında iade/değişim/şikayet/teslim/kargo/takip gibi kelimeler geçiyorsa direkt eskale et.
 """
 	upsell_force_instruction = (
 		"=== UPSELL ZORUNLULUK KURALI (KRİTİK) ===\n"
