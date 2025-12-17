@@ -815,11 +815,13 @@ def _select_product_images_for_reply(
 
 
 def _load_customer_info(conversation_id: int) -> Dict[str, Any]:
-	"""Load customer information (username, name, contact_name) from IGUser."""
+	"""Load customer information (username, name, contact_name, contact_phone, contact_address) from IGUser."""
 	customer_info = {
 		"username": None,
 		"name": None,
 		"contact_name": None,
+		"contact_phone": None,
+		"contact_address": None,
 	}
 	try:
 		with get_session() as session:
@@ -835,7 +837,9 @@ def _load_customer_info(conversation_id: int) -> Dict[str, Any]:
 				if ig_user:
 					customer_info["username"] = ig_user.username
 					customer_info["name"] = ig_user.name
-					customer_info["contact_name"] = ig_user.contact_name
+					customer_info["contact_name"] = getattr(ig_user, "contact_name", None)
+					customer_info["contact_phone"] = getattr(ig_user, "contact_phone", None)
+					customer_info["contact_address"] = getattr(ig_user, "contact_address", None)
 	except Exception:
 		pass
 	return customer_info
@@ -1019,6 +1023,83 @@ def _detect_conversation_flags(history: List[Dict[str, Any]], product_info: Opti
 	return flags
 
 
+def _analyze_conversation_history_basic(history: List[Dict[str, Any]]) -> Dict[str, Any]:
+	"""
+	Analyze conversation history to extract information that might have been provided earlier.
+	NOTE: This is intentionally **basic-only** (name/phone/address/payment).
+	We do NOT infer product variants (color/size) from history here because
+	a conversation may involve multiple products/variants and this can be misleading.
+	"""
+	import re
+	found_info: Dict[str, Any] = {
+		"name": None,
+		"phone": None,
+		"address": None,
+		"payment_method": None,
+	}
+	
+	# Combine all inbound messages for analysis
+	all_text = " ".join([
+		(h.get("text") or "") 
+		for h in history 
+		if (h.get("dir") or "").lower() == "in"
+	]).lower()
+	
+	# Extract phone number (Turkish phone patterns: 05XX XXX XX XX, 05XXXXXXXXX, etc.)
+	phone_patterns = [
+		r"\b05\d{2}\s?\d{3}\s?\d{2}\s?\d{2}\b",  # 05XX XXX XX XX
+		r"\b05\d{9}\b",  # 05XXXXXXXXX
+		r"\b0\d{3}\s?\d{3}\s?\d{2}\s?\d{2}\b",  # 0XXX XXX XX XX
+		r"\b\+90\s?5\d{2}\s?\d{3}\s?\d{2}\s?\d{2}\b",  # +90 5XX XXX XX XX
+	]
+	for pattern in phone_patterns:
+		match = re.search(pattern, all_text.replace("-", " ").replace(".", " "))
+		if match:
+			phone = re.sub(r"\s+", "", match.group(0))
+			if len(phone) >= 10:
+				found_info["phone"] = phone
+				break
+	
+	# Extract address (look for address keywords)
+	address_keywords = ["mah", "sok", "cad", "cadde", "sokak", "mahalle", "no", "numara", "apt", "apartman", "daire", "ilçe", "ilce", "il/", "il /"]
+	address_score = sum(1 for kw in address_keywords if kw in all_text)
+	if address_score >= 2:
+		# Try to extract address text (look for lines with multiple keywords)
+		for h in reversed(history):
+			if (h.get("dir") or "").lower() != "in":
+				continue
+			text = (h.get("text") or "").lower()
+			line_score = sum(1 for kw in address_keywords if kw in text)
+			digits = sum(ch.isdigit() for ch in text)
+			if line_score >= 2 or (line_score >= 1 and digits >= 6):
+				found_info["address"] = h.get("text") or ""
+				break
+	
+	# Extract name (look for patterns like "isim: X", "adım X", etc.)
+	name_patterns = [
+		r"(?:isim|adım|adı|ad\s+soyad)\s*[:\-]?\s*([a-zçğıöşü]{2,}\s+[a-zçğıöşü]{2,})",
+		r"(?:ben\s+)?([A-ZÇĞIİÖŞÜ][a-zçğıöşü]+\s+[A-ZÇĞIİÖŞÜ][a-zçğıöşü]+)",
+	]
+	for pattern in name_patterns:
+		match = re.search(pattern, all_text, re.IGNORECASE)
+		if match:
+			name = match.group(1).strip()
+			if len(name.split()) >= 2:  # At least first and last name
+				found_info["name"] = name.title()
+				break
+	
+	# Extract payment method
+	if any(word in all_text for word in ["kapıda", "kapida", "kapıda ödeme", "kapida odeme"]):
+		if "nakit" in all_text or "nakit" in all_text:
+			found_info["payment_method"] = "cod_cash"
+		elif "kart" in all_text or "kredi" in all_text:
+			found_info["payment_method"] = "cod_card"
+		else:
+			found_info["payment_method"] = "cod"
+	
+	return found_info
+
+
 def _normalize_state(value: Any, *, fallback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 	if isinstance(value, dict):
 		return value  # type: ignore[return-value]
@@ -1030,6 +1111,22 @@ def _normalize_state(value: Any, *, fallback: Optional[Dict[str, Any]] = None) -
 		except Exception:
 			return fallback or {}
 	return fallback or {}
+
+
+def _has_any_ai_sent_outbound(conversation_id: int) -> bool:
+	"""True if we have at least one outbound message that was sent by AI (ai_status='sent')."""
+	try:
+		with get_session() as session:
+			row = session.exec(
+				select(Message.id)
+				.where(Message.conversation_id == int(conversation_id))
+				.where(Message.direction == "out")
+				.where(Message.ai_status == "sent")
+				.limit(1)
+			).first()
+			return bool(row)
+	except Exception:
+		return False
 
 
 def draft_reply(
@@ -1069,6 +1166,20 @@ def draft_reply(
 		}
 	history, last_customer_message = _load_history(int(conversation_id), limit=limit)
 	conversation_flags = _detect_conversation_flags(history, product_info)
+
+	# Analyze conversation history only for BASIC info and only when AI has not spoken yet.
+	# Rationale: if AI already sent messages, we expect contact/payment/address to be tracked via tools/state,
+	# and history parsing can become noisy (especially with multi-product/variant conversations).
+	history_analysis: Dict[str, Any] = {}
+	try:
+		ai_has_spoken = _has_any_ai_sent_outbound(int(conversation_id))
+	except Exception:
+		ai_has_spoken = False
+	if not ai_has_spoken:
+		manual_out_count = len([h for h in history if (h.get("dir") or "").lower() == "out"])
+		min_manual_out = int(os.getenv("AI_HISTORY_ANALYSIS_MIN_MANUAL_OUT", "5"))
+		if manual_out_count >= max(1, min_manual_out):
+			history_analysis = _analyze_conversation_history_basic(history)
 	transcript = _format_transcript(
 		[
 			{"direction": h.get("dir"), "timestamp_ms": h.get("timestamp_ms"), "text": h.get("text")}
@@ -1242,6 +1353,9 @@ def draft_reply(
 				except Exception:
 					pass
 	
+	# Load customer info and add to context
+	customer_info = _load_customer_info(int(conversation_id))
+	
 	user_payload: Dict[str, Any] = {
 		"store": store_conf,
 		"product_focus": product_focus_data,
@@ -1250,6 +1364,7 @@ def draft_reply(
 		"last_customer_message": last_customer_message,
 		"transcript": transcript,
 		"product_images": product_images,
+		"customer": customer_info,
 	}
 	if matching_qas:
 		user_payload["matching_qas"] = matching_qas
@@ -1287,11 +1402,34 @@ def draft_reply(
 			if score >= 2 or digits >= 6:
 				return True
 		return False
+	# Load customer info to check existing contact information
+	customer_info_for_check = _load_customer_info(int(conversation_id))
+	has_contact_name = bool(customer_info_for_check.get("contact_name"))
+	has_contact_phone = bool(customer_info_for_check.get("contact_phone"))
+	has_contact_address = bool(customer_info_for_check.get("contact_address"))
+	
 	# Heuristic override: ödeme/adres sinyali geldiyse bayrakları true yap
+	# Also (optionally) check basic history analysis for previously provided information
+	has_name_in_history = bool(history_analysis.get("name")) if isinstance(history_analysis, dict) else False
+	has_phone_in_history = bool(history_analysis.get("phone")) if isinstance(history_analysis, dict) else False
+	has_address_in_history = bool(history_analysis.get("address")) if isinstance(history_analysis, dict) else False
+	has_payment_in_history = bool(history_analysis.get("payment_method")) if isinstance(history_analysis, dict) else False
+	
 	if not state_payload.get("asked_payment"):
-		state_payload["asked_payment"] = _infer_payment(history)
+		state_payload["asked_payment"] = _infer_payment(history) or has_payment_in_history
 	if not state_payload.get("asked_address"):
-		state_payload["asked_address"] = _infer_address(history)
+		state_payload["asked_address"] = _infer_address(history) or has_contact_address or has_address_in_history
+	
+	# If we already have contact info (from DB or history), don't ask again
+	has_all_contact_info = (
+		(has_contact_name or has_name_in_history) and
+		(has_contact_phone or has_phone_in_history) and
+		(has_contact_address or has_address_in_history)
+	)
+	if has_all_contact_info:
+		# Update last_step if we're stuck at awaiting_contact but have all info
+		if state_payload.get("last_step") == "awaiting_contact":
+			state_payload["last_step"] = "awaiting_payment" if not state_payload.get("asked_payment") else "awaiting_address"
 	hail_already_sent = bool(state_payload.get("hail_sent"))
 	# Offer upsell sadece adres adımı tamamlandıktan veya sipariş tamamlandıktan sonra
 	upsell_ready = (
@@ -1318,6 +1456,9 @@ def draft_reply(
 			log.info("draft_reply parsed_payload conversation_id=%s data=%s", conversation_id, parsed_data)
 		except Exception:
 			pass
+	# Add history analysis only when enabled (basic info + only when AI hasn't spoken yet)
+	if history_analysis:
+		user_payload["history_analysis"] = history_analysis
 	function_callbacks: List[Dict[str, Any]] = []
 	tools: List[Dict[str, Any]] = []
 	tool_handlers: Dict[str, Callable[[Dict[str, Any]], str]] = {}
@@ -2276,6 +2417,25 @@ Mesaj sırası ÇOK ÖNEMLİDİR. Her zaman kullanıcının cevap verilmemiş me
   * Ödeme sorulduysa veya alındıysa: last_step='awaiting_address'
   * Adres alındıysa ve sipariş özeti/teslimat bilgisi veriliyorsa: last_step='order_placed'
 - Bu bayrakları set etmezsen upsell/sonraki adımlar çalışmaz; mutlaka state içinde döndür.
+
+=== CONTACT BİLGİLERİ KONTROLÜ (KRİTİK) ===
+- context.customer içinde müşterinin mevcut contact bilgileri var: contact_name, contact_phone, contact_address
+- context.history_analysis (varsa) sadece temel bilgiler içindir: name, phone, address, payment_method
+- ÖNEMLİ: Mesaj yazmadan ÖNCE mutlaka bu iki kaynağı kontrol et:
+  1. context.customer - Veritabanında kayıtlı bilgiler
+  2. context.history_analysis - Geçmiş mesajlardan extract edilen bilgiler
+- EĞER bilgiler zaten mevcutsa (customer VEYA history_analysis'te varsa), TEKRAR SORMA
+- Sadece gerçekten eksik olan bilgiyi sor
+- Müşteri zaten bilgileri vermişse (geçmiş mesajlarda veya DB'de), state'i güncelle (asked_address=true, asked_payment=true) ve tekrar sorma
+- Tüm bilgiler mevcutsa direkt sipariş özetine geç
+
+=== KONUŞMA GEÇMİŞİ DEĞERLENDİRME (KRİTİK) ===
+- İlk mesaj yazmadan ÖNCE mutlaka tüm konuşma geçmişini oku ve analiz et
+- context.history içinde tüm önceki mesajlar var
+- context.history_analysis içinde extract edilen bilgiler var
+- ÖNCE durumu değerlendir, SONRA mesaj yaz
+- Müşterinin daha önce verdiği tüm bilgileri görmezden gelme
+- Tekrar tekrar aynı soruları sorma
 """
 	upsell_force_instruction = (
 		"=== UPSELL ZORUNLULUK KURALI (KRİTİK) ===\n"

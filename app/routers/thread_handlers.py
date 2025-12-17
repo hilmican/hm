@@ -421,7 +421,7 @@ def trigger_debug_conversation(conversation_id: int):
 
 
 @router.get("/inbox/{conversation_id}")
-def thread(request: Request, conversation_id: int, limit: int = 100):
+def thread(request: Request, conversation_id: int, limit: int = 500):
     with get_session() as session:
         from sqlmodel import select
         # Load conversation row (for basic metadata) and messages for this internal id
