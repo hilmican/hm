@@ -1814,6 +1814,12 @@ def _auto_link_story_reply(message_id: int, story_id: Optional[str], story_url: 
 						"UPDATE stories_products SET product_id=:pid, auto_linked=1, confidence=:conf, ai_result_json=:raw WHERE story_id=:sid"
 					).bindparams(sid=str(story_id), pid=int(product_id), conf=float(confidence_float), raw=ai_result_json)
 				)
+			except Exception:
+				# Best-effort fallback; do not fail ingest on mapping write issues
+				try:
+					session.rollback()
+				except Exception:
+					pass
 		try:
 			session.exec(
 				_sql_text(
@@ -1834,6 +1840,12 @@ def _auto_link_story_reply(message_id: int, story_id: Optional[str], story_url: 
 						"UPDATE ads_products SET product_id=:pid, link_type='story', auto_linked=1 WHERE ad_id=:aid"
 					).bindparams(aid=str(story_key), pid=int(product_id))
 				)
+			except Exception:
+				# Best-effort fallback; do not fail ingest on mapping write issues
+				try:
+					session.rollback()
+				except Exception:
+					pass
 	try:
 		_log.info(
 			"ingest: auto-linked story %s (message_id=%s) to product %s (confidence=%.2f)",
