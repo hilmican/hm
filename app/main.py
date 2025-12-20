@@ -37,12 +37,48 @@ from .routers import i18n as i18n_router
 def create_app() -> FastAPI:
 	app = FastAPI(title="Kargo Importer & Management", docs_url=None, redoc_url=None, openapi_url=None)
 
-	app.mount("/static", StaticFiles(directory="static"), name="static")
+	# Pick directories robustly (some deploys copy only `app/`, others copy project root)
+	def _pick_existing_dir(candidates: list[Path], fallback: Path) -> Path:
+		for p in candidates:
+			try:
+				if p.exists() and p.is_dir():
+					return p
+			except Exception:
+				continue
+		return fallback
 
-	# Configure templates with absolute path for robustness
-	template_dir = Path(__file__).resolve().parent.parent / "templates"
+	app_dir = Path(__file__).resolve().parent           # .../app
+	project_root = app_dir.parent                      # .../
+
+	# Static
+	static_dir = _pick_existing_dir(
+		[
+			project_root / "static",
+			app_dir / "static",
+			Path.cwd() / "static",
+			Path.cwd() / "app" / "static",
+		],
+		fallback=project_root / "static",
+	)
+	if static_dir.exists():
+		app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+	else:
+		print(f"[static] directory not found; looked for: {static_dir}")
+
+	# Templates
+	template_dir = _pick_existing_dir(
+		[
+			project_root / "templates",
+			app_dir / "templates",
+			Path.cwd() / "templates",
+			Path.cwd() / "app" / "templates",
+		],
+		fallback=project_root / "templates",
+	)
 	templates = Jinja2Templates(directory=str(template_dir))
 	app.state.templates = templates
+	app.state.template_dir = str(template_dir)
+	print(f"[templates] using directory: {template_dir}")
 	# Register Jinja helpers for translations
 	try:
 		templates.env.globals["t"] = _i18n.t
