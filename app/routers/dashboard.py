@@ -131,7 +131,7 @@ def dashboard(request: Request, days: int = 30):
 				"  AND merged_into_order_id IS NULL\n"
 				"  AND (COALESCE(shipment_date, data_date) IS NULL OR COALESCE(shipment_date, data_date) >= :since)\n"
 				"GROUP BY status"
-			), {"since": since_date}).all()
+			).params(since=since_date)).all()
 			for st, cnt in rows_explicit:
 				if st in ("refunded", "switched", "stitched"):
 					base[str(st)] = int(cnt or 0)
@@ -152,7 +152,7 @@ def dashboard(request: Request, days: int = 30):
 				"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')\n"
 				"  AND o.merged_into_order_id IS NULL\n"
 				"  AND (COALESCE(o.shipment_date, o.data_date) IS NULL OR COALESCE(o.shipment_date, o.data_date) >= :since)"
-			), {"since": since_date}).first() or [0, 0, 0, 0]
+			).params(since=since_date)).first() or [0, 0, 0, 0]
 			base["tamamlandi"] = int(row_buckets[0] or 0)
 			base["dagitimda"] = int(row_buckets[1] or 0)
 			base["gecikmede"] = int(row_buckets[2] or 0)
@@ -202,7 +202,7 @@ def dashboard(request: Request, days: int = 30):
 				"WHERE status = 'stitched'\n"
 				"  AND merged_into_order_id IS NULL\n"
 				"  AND (COALESCE(shipment_date, data_date) IS NULL OR COALESCE(shipment_date, data_date) >= :since)"
-			), {"since": since_date}).first()
+			).params(since=since_date)).first()
 			base["stitched"] = int(rows_stitched[0] or 0) if rows_stitched else 0
 			# derived buckets for ongoing (excluding tamamlandi, refunded, switched, and merged orders)
 			row_buckets = session.exec(text(
@@ -219,7 +219,7 @@ def dashboard(request: Request, days: int = 30):
 				"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')\n"
 				"  AND o.merged_into_order_id IS NULL\n"
 				"  AND (COALESCE(o.shipment_date, o.data_date) IS NULL OR COALESCE(o.shipment_date, o.data_date) >= :since)"
-			), {"since": since_date}).first() or [0, 0, 0]
+			).params(since=since_date)).first() or [0, 0, 0]
 			base["dagitimda"] = int(row_buckets[0] or 0)
 			base["gecikmede"] = int(row_buckets[1] or 0)
 			base["sorunlu"] = int(row_buckets[2] or 0)
@@ -357,7 +357,7 @@ def dashboard(request: Request, days: int = 30):
 				") p ON p.order_id = o.id\n"
 				"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')\n"
 				"  AND o.data_date >= :since"
-			), {"since": since_date}).first() or [0, 0, 0, 0, 0, 0]
+			).params(since=since_date)).first() or [0, 0, 0, 0, 0, 0]
 			return [
 				{"bucket": "0-3", "count": int(row_buckets[0] or 0)},
 				{"bucket": "4-6", "count": int(row_buckets[1] or 0)},
