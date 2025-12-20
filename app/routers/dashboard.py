@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, HTTPException
 from sqlmodel import select
 from sqlalchemy import text, func, or_, not_
 import os
+import datetime as dt
 
 from ..db import get_session
 from ..models import Client, Item, Order, Payment, ImportRow, ImportRun, StockMovement
@@ -12,19 +13,27 @@ router = APIRouter()
 
 
 @router.get("/dashboard")
-def dashboard(request: Request):
+def dashboard(request: Request, days: int = 30):
 	# require login
 	uid = request.session.get("uid")
 	if not uid:
 		templates = request.app.state.templates
 		return templates.TemplateResponse("login.html", {"request": request, "error": None})
 	# pull small samples for quick display
+	try:
+		days = int(days)
+	except Exception:
+		days = 30
+	days = max(1, min(days, 365))
+	since_date = dt.date.today() - dt.timedelta(days=days)
 	
 	with get_session() as session:
 		# Fast aggregates with short-lived cache
 		ttl = int(os.getenv("CACHE_TTL_DASHBOARD", "60"))
 		# detect dialect for cross-db SQL where needed
 		backend = session.get_bind().dialect.name if session.get_bind() is not None else "mysql"
+		order_base_date = func.coalesce(Order.shipment_date, Order.data_date)
+		payment_base_date = func.coalesce(Payment.payment_date, Payment.date)
 		def _scalar(sel):
 			res = session.exec(sel).one_or_none()
 			if res is None:
@@ -39,23 +48,31 @@ def dashboard(request: Request):
 		def _agg():
 			# Only count primary orders (exclude merged orders)
 			# For partial payment groups, use primary order's total_amount
+			# Window: last N days by order base date (shipment_date or data_date). Include NULL base dates.
+			_recent_orders = or_(order_base_date.is_(None), order_base_date >= since_date)
+			_recent_payments = payment_base_date >= since_date
 			return {
 				"total_sales": _scalar(select(func.coalesce(func.sum(Order.total_amount), 0)).where(
 					Order.merged_into_order_id.is_(None),
+					_recent_orders,
 					or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"])) )
 				)),
-				"net_collected": _scalar(select(func.coalesce(func.sum(Payment.net_amount), 0))),
-				"fee_kom": _scalar(select(func.coalesce(func.sum(Payment.fee_komisyon), 0))),
-				"fee_hiz": _scalar(select(func.coalesce(func.sum(Payment.fee_hizmet), 0))),
-				"fee_iad": _scalar(select(func.coalesce(func.sum(Payment.fee_iade), 0))),
-				"fee_eok": _scalar(select(func.coalesce(func.sum(Payment.fee_erken_odeme), 0))),
+				"net_collected": _scalar(select(func.coalesce(func.sum(Payment.net_amount), 0)).where(_recent_payments)),
+				"fee_kom": _scalar(select(func.coalesce(func.sum(Payment.fee_komisyon), 0)).where(_recent_payments)),
+				"fee_hiz": _scalar(select(func.coalesce(func.sum(Payment.fee_hizmet), 0)).where(_recent_payments)),
+				"fee_iad": _scalar(select(func.coalesce(func.sum(Payment.fee_iade), 0)).where(_recent_payments)),
+				"fee_eok": _scalar(select(func.coalesce(func.sum(Payment.fee_erken_odeme), 0)).where(_recent_payments)),
 				"fee_kar": _scalar(select(func.coalesce(func.sum(Order.shipping_fee), 0)).where(
 					Order.merged_into_order_id.is_(None),
+					_recent_orders,
 					or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"])) )
 				)),
-				"linked_gross_paid": _scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.order_id.is_not(None))),
+				"linked_gross_paid": _scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(
+					_recent_payments,
+					Payment.order_id.is_not(None),
+				)),
 			}
-		agg = cached_json("dash:totals", ttl, _agg)
+		agg = cached_json(f"dash:totals:{days}", ttl, _agg)
 		total_sales = float(agg.get("total_sales", 0.0))
 		net_collected = float(agg.get("net_collected", 0.0))
 		fee_kom = float(agg.get("fee_kom", 0.0))
@@ -77,11 +94,48 @@ def dashboard(request: Request):
 		# Plus explicit statuses: refunded, switched, stitched
 		def _compute_status_counts():
 			base = {"tamamlandi": 0, "dagitimda": 0, "gecikmede": 0, "sorunlu": 0, "refunded": 0, "switched": 0, "stitched": 0}
-			# explicit statuses
-			rows_explicit = session.exec(text("SELECT status, COUNT(*) FROM `order` WHERE status IN ('refunded','switched','stitched') GROUP BY status")).all()
+			if backend.startswith("sqlite"):
+				# SQLite fallback: compute in Python (sufficient for local/dev DB sizes)
+				orders = session.exec(select(Order).where(
+					Order.merged_into_order_id.is_(None),
+					or_(order_base_date.is_(None), order_base_date >= since_date),
+				)).all()
+				paid_by_order = dict(session.exec(text("SELECT order_id, COALESCE(SUM(amount),0) FROM payment WHERE order_id IS NOT NULL GROUP BY order_id")).all())
+				today = dt.date.today()
+				for o in orders:
+					st = (o.status or "").strip()
+					if st in ("refunded", "switched", "stitched"):
+						base[st] += 1
+						continue
+					total_amt = float(o.total_amount or 0.0)
+					paid = float(paid_by_order.get(o.id, 0.0)) if o.id is not None else 0.0
+					if total_amt > 0 and paid >= total_amt:
+						base["tamamlandi"] += 1
+						continue
+					bd = o.shipment_date or o.data_date
+					age = (today - bd).days if bd else 0
+					if age <= 7:
+						base["dagitimda"] += 1
+					elif age <= 17:
+						base["gecikmede"] += 1
+					else:
+						base["sorunlu"] += 1
+				order = ["tamamlandi", "dagitimda", "gecikmede", "sorunlu", "refunded", "switched", "stitched"]
+				return [{"status": k, "count": int(base.get(k, 0))} for k in order]
+
+			# MySQL/MariaDB: explicit statuses
+			rows_explicit = session.exec(text(
+				"SELECT status, COUNT(*)\n"
+				"FROM `order`\n"
+				"WHERE status IN ('refunded','switched','stitched')\n"
+				"  AND merged_into_order_id IS NULL\n"
+				"  AND (COALESCE(shipment_date, data_date) IS NULL OR COALESCE(shipment_date, data_date) >= :since)\n"
+				"GROUP BY status"
+			), {"since": since_date}).all()
 			for st, cnt in rows_explicit:
 				if st in ("refunded", "switched", "stitched"):
 					base[str(st)] = int(cnt or 0)
+
 			# derived buckets for others (exclude merged orders)
 			row_buckets = session.exec(text(
 				"SELECT\n"
@@ -96,8 +150,9 @@ def dashboard(request: Request):
 				"FROM `order` o\n"
 				"LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n"
 				"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')\n"
-				"  AND o.merged_into_order_id IS NULL"
-			)).first() or [0, 0, 0, 0]
+				"  AND o.merged_into_order_id IS NULL\n"
+				"  AND (COALESCE(o.shipment_date, o.data_date) IS NULL OR COALESCE(o.shipment_date, o.data_date) >= :since)"
+			), {"since": since_date}).first() or [0, 0, 0, 0]
 			base["tamamlandi"] = int(row_buckets[0] or 0)
 			base["dagitimda"] = int(row_buckets[1] or 0)
 			base["gecikmede"] = int(row_buckets[2] or 0)
@@ -106,13 +161,48 @@ def dashboard(request: Request):
 			order = ["tamamlandi", "dagitimda", "gecikmede", "sorunlu", "refunded", "switched", "stitched"]
 			return [{"status": k, "count": base.get(k, 0)} for k in order]
 
-		status_counts = cached_json("dash:status_counts", ttl, _compute_status_counts)
+		status_counts = cached_json(f"dash:status_counts:{days}", ttl, _compute_status_counts)
 
 		# Ongoing status counts (excluding tamamlandi, refunded, switched)
 		def _compute_ongoing_status_counts():
 			base = {"dagitimda": 0, "gecikmede": 0, "sorunlu": 0, "stitched": 0}
+			if backend.startswith("sqlite"):
+				orders = session.exec(select(Order).where(
+					Order.merged_into_order_id.is_(None),
+					or_(order_base_date.is_(None), order_base_date >= since_date),
+				)).all()
+				paid_by_order = dict(session.exec(text("SELECT order_id, COALESCE(SUM(amount),0) FROM payment WHERE order_id IS NOT NULL GROUP BY order_id")).all())
+				today = dt.date.today()
+				for o in orders:
+					if (o.status or "").strip() == "stitched":
+						base["stitched"] += 1
+						continue
+					st = (o.status or "").strip()
+					if st in ("refunded", "switched"):
+						continue
+					total_amt = float(o.total_amount or 0.0)
+					paid = float(paid_by_order.get(o.id, 0.0)) if o.id is not None else 0.0
+					if total_amt > 0 and paid >= total_amt:
+						continue
+					bd = o.shipment_date or o.data_date
+					age = (today - bd).days if bd else 0
+					if age <= 7:
+						base["dagitimda"] += 1
+					elif age <= 17:
+						base["gecikmede"] += 1
+					else:
+						base["sorunlu"] += 1
+				order = ["dagitimda", "gecikmede", "sorunlu", "stitched"]
+				return [{"status": k, "count": int(base.get(k, 0))} for k in order]
+
 			# explicit stitched status
-			rows_stitched = session.exec(text("SELECT COUNT(*) FROM `order` WHERE status = 'stitched'")).first()
+			rows_stitched = session.exec(text(
+				"SELECT COUNT(*)\n"
+				"FROM `order`\n"
+				"WHERE status = 'stitched'\n"
+				"  AND merged_into_order_id IS NULL\n"
+				"  AND (COALESCE(shipment_date, data_date) IS NULL OR COALESCE(shipment_date, data_date) >= :since)"
+			), {"since": since_date}).first()
 			base["stitched"] = int(rows_stitched[0] or 0) if rows_stitched else 0
 			# derived buckets for ongoing (excluding tamamlandi, refunded, switched, and merged orders)
 			row_buckets = session.exec(text(
@@ -127,8 +217,9 @@ def dashboard(request: Request):
 				"FROM `order` o\n"
 				"LEFT JOIN (SELECT order_id, SUM(amount) AS paid FROM payment GROUP BY order_id) p ON p.order_id = o.id\n"
 				"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')\n"
-				"  AND o.merged_into_order_id IS NULL"
-			)).first() or [0, 0, 0]
+				"  AND o.merged_into_order_id IS NULL\n"
+				"  AND (COALESCE(o.shipment_date, o.data_date) IS NULL OR COALESCE(o.shipment_date, o.data_date) >= :since)"
+			), {"since": since_date}).first() or [0, 0, 0]
 			base["dagitimda"] = int(row_buckets[0] or 0)
 			base["gecikmede"] = int(row_buckets[1] or 0)
 			base["sorunlu"] = int(row_buckets[2] or 0)
@@ -136,7 +227,7 @@ def dashboard(request: Request):
 			order = ["dagitimda", "gecikmede", "sorunlu", "stitched"]
 			return [{"status": k, "count": base.get(k, 0)} for k in order]
 
-		ongoing_status_counts = cached_json("dash:ongoing_status_counts", ttl, _compute_ongoing_status_counts)
+		ongoing_status_counts = cached_json(f"dash:ongoing_status_counts:{days}", ttl, _compute_ongoing_status_counts)
 
 		# Order lifecycle distribution (bizim orders: bizim excel date to payment date)
 		def _compute_lifecycle_distribution():
@@ -144,11 +235,76 @@ def dashboard(request: Request):
 			# Use o.data_date as the bizim order creation date (from bizim Excel filename or shipment_date)
 			# Use COALESCE(MAX(payment_date), MAX(date)) to get the actual payment date (from kargo Excel filename)
 			# Buckets: 0-3, 4-6, 7-9, 10-12, 13-15, 16+ days
+			if backend.startswith("sqlite"):
+				# Lightweight SQLite fallback: compute distribution in Python
+				orders = session.exec(select(Order).where(
+					Order.merged_into_order_id.is_(None),
+					Order.source == "bizim",
+					Order.data_date.is_not(None),
+					Order.data_date >= since_date,
+					or_(Order.status.is_(None), not_(Order.status.in_(["refunded", "switched", "stitched"]))),
+				)).all()
+				paid_and_max = dict(session.exec(text(
+					"SELECT order_id, COALESCE(SUM(amount),0) AS paid, COALESCE(MAX(payment_date), MAX(date)) AS completion_payment_date "
+					"FROM payment WHERE order_id IS NOT NULL GROUP BY order_id"
+				)).all())
+				buckets = {"0-3": 0, "4-6": 0, "7-9": 0, "10-12": 0, "13-15": 0, "16+": 0}
+				for o in orders:
+					if o.id is None or o.data_date is None:
+						continue
+					row = paid_and_max.get(o.id)
+					if not row:
+						continue
+					paid, comp_dt = row[0], row[1]
+					try:
+						paid = float(paid or 0.0)
+					except Exception:
+						paid = 0.0
+					total_amt = float(o.total_amount or 0.0)
+					if not (total_amt > 0 and paid >= total_amt):
+						continue
+					if not comp_dt:
+						continue
+					# sqlite returns str for dates sometimes
+					if isinstance(comp_dt, str):
+						try:
+							comp_dt = dt.date.fromisoformat(comp_dt)
+						except Exception:
+							continue
+					if isinstance(comp_dt, dt.datetime):
+						comp_dt = comp_dt.date()
+					if not isinstance(comp_dt, dt.date):
+						continue
+					delta = (comp_dt - o.data_date).days
+					if delta < 0:
+						continue
+					if delta <= 3:
+						buckets["0-3"] += 1
+					elif delta <= 6:
+						buckets["4-6"] += 1
+					elif delta <= 9:
+						buckets["7-9"] += 1
+					elif delta <= 12:
+						buckets["10-12"] += 1
+					elif delta <= 15:
+						buckets["13-15"] += 1
+					else:
+						buckets["16+"] += 1
+				return [
+					{"bucket": "0-3", "count": buckets["0-3"]},
+					{"bucket": "4-6", "count": buckets["4-6"]},
+					{"bucket": "7-9", "count": buckets["7-9"]},
+					{"bucket": "10-12", "count": buckets["10-12"]},
+					{"bucket": "13-15", "count": buckets["13-15"]},
+					{"bucket": "16+", "count": buckets["16+"]},
+				]
+
 			row_buckets = session.exec(text(
 				"SELECT\n"
 				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 				"           AND o.source = 'bizim'\n"
 				"           AND o.data_date IS NOT NULL\n"
+				"           AND o.data_date >= :since\n"
 				"           AND p.completion_payment_date IS NOT NULL\n"
 				"           AND o.merged_into_order_id IS NULL\n"
 				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 0\n"
@@ -156,6 +312,7 @@ def dashboard(request: Request):
 				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 				"           AND o.source = 'bizim'\n"
 				"           AND o.data_date IS NOT NULL\n"
+				"           AND o.data_date >= :since\n"
 				"           AND p.completion_payment_date IS NOT NULL\n"
 				"           AND o.merged_into_order_id IS NULL\n"
 				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 4\n"
@@ -163,6 +320,7 @@ def dashboard(request: Request):
 				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 				"           AND o.source = 'bizim'\n"
 				"           AND o.data_date IS NOT NULL\n"
+				"           AND o.data_date >= :since\n"
 				"           AND p.completion_payment_date IS NOT NULL\n"
 				"           AND o.merged_into_order_id IS NULL\n"
 				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 7\n"
@@ -170,6 +328,7 @@ def dashboard(request: Request):
 				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 				"           AND o.source = 'bizim'\n"
 				"           AND o.data_date IS NOT NULL\n"
+				"           AND o.data_date >= :since\n"
 				"           AND p.completion_payment_date IS NOT NULL\n"
 				"           AND o.merged_into_order_id IS NULL\n"
 				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 10\n"
@@ -177,6 +336,7 @@ def dashboard(request: Request):
 				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 				"           AND o.source = 'bizim'\n"
 				"           AND o.data_date IS NOT NULL\n"
+				"           AND o.data_date >= :since\n"
 				"           AND p.completion_payment_date IS NOT NULL\n"
 				"           AND o.merged_into_order_id IS NULL\n"
 				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 13\n"
@@ -184,6 +344,7 @@ def dashboard(request: Request):
 				"  SUM(CASE WHEN COALESCE(p.paid,0) >= COALESCE(o.total_amount,0) AND COALESCE(o.total_amount,0) > 0\n"
 				"           AND o.source = 'bizim'\n"
 				"           AND o.data_date IS NOT NULL\n"
+				"           AND o.data_date >= :since\n"
 				"           AND p.completion_payment_date IS NOT NULL\n"
 				"           AND o.merged_into_order_id IS NULL\n"
 				"           AND DATEDIFF(p.completion_payment_date, o.data_date) >= 16 THEN 1 ELSE 0 END) AS days_16_plus\n"
@@ -194,8 +355,9 @@ def dashboard(request: Request):
 				"  WHERE order_id IS NOT NULL\n"
 				"  GROUP BY order_id\n"
 				") p ON p.order_id = o.id\n"
-				"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')"
-			)).first() or [0, 0, 0, 0, 0, 0]
+				"WHERE COALESCE(o.status, '') NOT IN ('refunded','switched','stitched')\n"
+				"  AND o.data_date >= :since"
+			), {"since": since_date}).first() or [0, 0, 0, 0, 0, 0]
 			return [
 				{"bucket": "0-3", "count": int(row_buckets[0] or 0)},
 				{"bucket": "4-6", "count": int(row_buckets[1] or 0)},
@@ -205,7 +367,7 @@ def dashboard(request: Request):
 				{"bucket": "16+", "count": int(row_buckets[5] or 0)},
 			]
 
-		lifecycle_distribution = cached_json("dash:lifecycle_distribution", ttl, _compute_lifecycle_distribution)
+		lifecycle_distribution = cached_json(f"dash:lifecycle_distribution:{days}", ttl, _compute_lifecycle_distribution)
 
 		# Best-selling low stock: all-time best sellers with on-hand <= 5, top 10
 		from ..services.inventory import compute_all_time_sold_map, get_stock_map
@@ -233,6 +395,8 @@ def dashboard(request: Request):
 			"dashboard.html",
 			{
 				"request": request,
+				"days": days,
+				"since_date": since_date,
 				"total_sales": total_sales,
 				"total_collected": net_collected,
 				"total_to_collect": total_to_collect,

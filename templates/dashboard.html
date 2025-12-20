@@ -25,6 +25,11 @@
 	<body>
 		{% include "_nav.html" %}
 		<h1>{{ t(request, 'dashboard.heading') }}</h1>
+		<div class="caption">
+			{% if days and since_date %}
+				Son {{ days }} gün ({{ since_date }}) verisi gösteriliyor.
+			{% endif %}
+		</div>
 		<div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 18px 0;">
 			<div class="card" style="padding:8px 12px;">
 				<strong>{{ t(request, 'dashboard.total_sales') }}:</strong> {{ '%.2f'|format(total_sales or 0) }}
