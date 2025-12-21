@@ -253,6 +253,7 @@
             <tr>
               <th>Tarih</th>
               <th>Tutar</th>
+              <th>Hesap</th>
               <th>Detay</th>
             </tr>
           </thead>
@@ -261,6 +262,7 @@
             <tr>
               <td>{{ payment.date }}</td>
               <td class="positive">{{ '%.2f'|format(payment.amount or 0) }} ₺</td>
+              <td>{{ account_map.get(payment.account_id, '-') if payment.account_id else '-' }}</td>
               <td>{{ payment.details or '-' }}</td>
             </tr>
             {% endfor %}
@@ -285,12 +287,15 @@
         const paymentAmount = parseFloat(document.getElementById('paymentAmount').value) || 0;
         const totalEl = document.getElementById('allocationTotal');
         if (totalEl) {
-          if (total > paymentAmount) {
+          // Use small epsilon for floating point comparison (0.01 for currency)
+          const epsilon = 0.01;
+          if (total > paymentAmount + epsilon) {
             totalEl.textContent = `Toplam: ${total.toFixed(2)} ₺ (Ödeme tutarını aşıyor!)`;
             totalEl.style.color = '#dc2626';
           } else {
             totalEl.textContent = `Toplam: ${total.toFixed(2)} ₺ / ${paymentAmount.toFixed(2)} ₺`;
-            totalEl.style.color = total === paymentAmount ? '#10b981' : '#6b7280';
+            // Check if approximately equal (within epsilon)
+            totalEl.style.color = Math.abs(total - paymentAmount) < epsilon ? '#10b981' : '#6b7280';
           }
         }
       }
@@ -368,14 +373,25 @@
           const allocations = {};
           const inputs = document.querySelectorAll('.debt-amount-input');
           let hasAllocation = false;
+          let totalAllocation = 0;
           
           inputs.forEach(input => {
             const val = parseFloat(input.value) || 0;
             if (val > 0) {
               allocations[input.dataset.debtId] = val;
+              totalAllocation += val;
               hasAllocation = true;
             }
           });
+
+          // Validate total allocation doesn't exceed payment (with epsilon for floating point)
+          const paymentAmount = parseFloat(document.getElementById('paymentAmount').value) || 0;
+          const epsilon = 0.01;
+          if (hasAllocation && totalAllocation > paymentAmount + epsilon) {
+            e.preventDefault();
+            alert(`Toplam tahsisat (${totalAllocation.toFixed(2)} ₺) ödeme tutarını (${paymentAmount.toFixed(2)} ₺) aşıyor. Lütfen düzeltin.`);
+            return false;
+          }
 
           const allocationInput = document.getElementById('debtAllocations');
           if (hasAllocation) {

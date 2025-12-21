@@ -103,6 +103,7 @@ def supplier_detail(
 		
 		# Get accounts for payment form
 		accounts = session.exec(select(Account).where(Account.is_active == True).order_by(Account.name.asc())).all()
+		account_map = {a.id: a.name for a in accounts if a.id is not None}
 		
 		# Get payment allocations to calculate closed amounts per debt
 		all_debt_ids = [d.id for d in debts if d.id is not None]
@@ -160,6 +161,7 @@ def supplier_detail(
 				"purchase_history": purchase_history,
 				"product_map": product_map,
 				"type_map": type_map,
+				"account_map": account_map,
 				"accounts": accounts,
 				"total_debt": total_debt,
 				"total_closed": total_closed,
@@ -252,7 +254,8 @@ def add_payment_to_supplier(
 			if debt_allocations:
 				try:
 					allocations = json.loads(debt_allocations)
-					remaining_payment = float(amount)
+					payment_amount = float(amount)
+					remaining_payment = payment_amount
 					
 					# Get all debts for this supplier
 					debts = session.exec(
@@ -276,39 +279,56 @@ def add_payment_to_supplier(
 								existing_allocations[alloc.debt_cost_id] = 0.0
 							existing_allocations[alloc.debt_cost_id] += float(alloc.amount or 0)
 					
-					# Allocate payment to debts
-					for debt in debts:
-						if remaining_payment <= 0:
-							break
-						if debt.id is None:
-							continue
-						
-						debt_amount = float(debt.amount or 0)
-						already_closed = existing_allocations.get(debt.id, 0.0)
-						remaining_debt = debt_amount - already_closed
-						
-						if remaining_debt <= 0:
-							continue
-						
-						# Check if this debt is in the allocations dict
-						alloc_amount = 0.0
-						if allocations and str(debt.id) in allocations:
-							alloc_amount = float(allocations[str(debt.id)])
-						elif not allocations:
-							# Auto-allocate: use remaining payment up to remaining debt
-							alloc_amount = min(remaining_payment, remaining_debt)
-						
-						if alloc_amount > 0 and alloc_amount <= remaining_payment:
-							# Don't allocate more than remaining debt
-							alloc_amount = min(alloc_amount, remaining_debt)
+					# Calculate total allocation amount first to validate
+					total_allocation = 0.0
+					if allocations:
+						for debt in debts:
+							if debt.id is None:
+								continue
+							if str(debt.id) in allocations:
+								alloc_val = float(allocations[str(debt.id)])
+								total_allocation += alloc_val
+					
+					# Validate total allocation doesn't exceed payment (with small epsilon for floating point)
+					epsilon = 0.01
+					if total_allocation > payment_amount + epsilon:
+						# Skip allocations if total exceeds payment
+						pass
+					else:
+						# Allocate payment to debts
+						for debt in debts:
+							if remaining_payment <= 0:
+								break
+							if debt.id is None:
+								continue
 							
-							allocation = SupplierPaymentAllocation(
-								payment_cost_id=payment_cost.id,  # type: ignore
-								debt_cost_id=debt.id,
-								amount=alloc_amount,
-							)
-							session.add(allocation)
-							remaining_payment -= alloc_amount
+							debt_amount = float(debt.amount or 0)
+							already_closed = existing_allocations.get(debt.id, 0.0)
+							remaining_debt = debt_amount - already_closed
+							
+							if remaining_debt <= 0:
+								continue
+							
+							# Check if this debt is in the allocations dict
+							alloc_amount = 0.0
+							if allocations and str(debt.id) in allocations:
+								alloc_amount = float(allocations[str(debt.id)])
+							elif not allocations:
+								# Auto-allocate: use remaining payment up to remaining debt
+								alloc_amount = min(remaining_payment, remaining_debt)
+							
+							# Use epsilon for floating point comparison
+							if alloc_amount > 0 and alloc_amount <= remaining_payment + epsilon:
+								# Don't allocate more than remaining debt
+								alloc_amount = min(alloc_amount, remaining_debt)
+								
+								allocation = SupplierPaymentAllocation(
+									payment_cost_id=payment_cost.id,  # type: ignore
+									debt_cost_id=debt.id,
+									amount=alloc_amount,
+								)
+								session.add(allocation)
+								remaining_payment -= alloc_amount
 					
 					# If there's remaining payment and no specific allocations, auto-allocate to oldest debts
 					if remaining_payment > 0 and not allocations:
