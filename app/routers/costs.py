@@ -384,10 +384,10 @@ def update_cost(
 	amount: Optional[float] = Form(default=None),
 	date: Optional[str] = Form(default=None),
 	details: Optional[str] = Form(default=None),
-	account_id: Optional[int] = Form(default=None),
-	supplier_id: Optional[int] = Form(default=None),
-	product_id: Optional[int] = Form(default=None),
-	quantity: Optional[int] = Form(default=None),
+	account_id: Optional[str] = Form(default=None),
+	supplier_id: Optional[str] = Form(default=None),
+	product_id: Optional[str] = Form(default=None),
+	quantity: Optional[str] = Form(default=None),
 	is_payment_to_supplier: Optional[bool] = Form(default=None),
 	start: Optional[str] = Form(default=None),
 	end: Optional[str] = Form(default=None),
@@ -401,26 +401,36 @@ def update_cost(
 		# Store old data for logging
 		old_data = _cost_to_dict(cost)
 		
+		# Helper function to parse optional int from string
+		def parse_optional_int(value: Optional[str]) -> Optional[int]:
+			if value is None or value == "":
+				return None
+			try:
+				return int(value)
+			except (ValueError, TypeError):
+				return None
+		
 		# Update fields if provided
 		if type_id is not None:
 			cost.type_id = int(type_id)
 		if amount is not None:
 			cost.amount = float(amount)
-		if date is not None:
+		if date is not None and date != "":
 			try:
 				cost.date = dt.date.fromisoformat(date)
 			except Exception:
 				pass
 		if details is not None:
 			cost.details = details.strip() if details else None
+		# Handle optional int fields - convert empty strings to None
 		if account_id is not None:
-			cost.account_id = int(account_id) if account_id else None
+			cost.account_id = parse_optional_int(account_id)
 		if supplier_id is not None:
-			cost.supplier_id = int(supplier_id) if supplier_id else None
+			cost.supplier_id = parse_optional_int(supplier_id)
 		if product_id is not None:
-			cost.product_id = int(product_id) if product_id else None
+			cost.product_id = parse_optional_int(product_id)
 		if quantity is not None:
-			cost.quantity = int(quantity) if quantity else None
+			cost.quantity = parse_optional_int(quantity)
 		if is_payment_to_supplier is not None:
 			cost.is_payment_to_supplier = is_payment_to_supplier
 		
