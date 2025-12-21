@@ -1282,6 +1282,38 @@ def init_db() -> None:
                 except Exception:
                     pass
 
+                # Ensure incomehistorylog table exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'incomehistorylog'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql(
+                            """
+                            CREATE TABLE incomehistorylog (
+                                id INT PRIMARY KEY AUTO_INCREMENT,
+                                income_id INT NOT NULL,
+                                action VARCHAR(32) NOT NULL,
+                                old_data_json TEXT NULL,
+                                new_data_json TEXT NULL,
+                                user_id INT NULL,
+                                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                INDEX idx_incomehistorylog_income (income_id),
+                                INDEX idx_incomehistorylog_action (action),
+                                INDEX idx_incomehistorylog_user (user_id),
+                                INDEX idx_incomehistorylog_created (created_at),
+                                FOREIGN KEY (income_id) REFERENCES income(id) ON DELETE CASCADE,
+                                FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE SET NULL
+                            )
+                            """
+                        )
+                except Exception:
+                    pass
+
                 # Ensure cost.account_id exists
                 try:
                     row = conn.exec_driver_sql(

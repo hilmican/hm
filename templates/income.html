@@ -30,6 +30,13 @@
       .summary { background: #f0f9ff; padding: 12px; border-radius: 6px; margin-top: 12px; }
       .summary strong { color: #1e40af; }
       #searchBox { width: 100%; max-width: 400px; }
+      .btn-sm { font-size: 12px; padding: 4px 8px; }
+      .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+      .modal-content { background: #fff; margin: 5% auto; padding: 20px; border-radius: 8px; width: 90%; max-width: 600px; }
+      .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+      .modal-header h3 { margin: 0; }
+      .close { font-size: 28px; font-weight: bold; cursor: pointer; color: #aaa; }
+      .close:hover { color: #000; }
     </style>
   </head>
   <body>
@@ -136,17 +143,22 @@
               <th>Tutar</th>
               <th>Referans</th>
               <th>Notlar</th>
+              <th>İşlemler</th>
             </tr>
           </thead>
           <tbody>
             {% for inc in income_entries %}
-            <tr>
+            <tr id="income-row-{{ inc.id }}">
               <td>{{ inc.date }}</td>
               <td>{{ account_map.get(inc.account_id, inc.account_id) }}</td>
               <td>{{ inc.source }}</td>
               <td>{{ '%.2f'|format(inc.amount) }} ₺</td>
               <td>{{ inc.reference or '-' }}</td>
               <td>{{ inc.notes or '-' }}</td>
+              <td>
+                <button class="btn btn-sm" onclick="editIncome({{ inc.id }})" style="padding:4px 8px; font-size:12px; margin-right:4px;">Düzenle</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteIncome({{ inc.id }})" style="padding:4px 8px; font-size:12px;">Sil</button>
+              </td>
             </tr>
             {% endfor %}
           </tbody>
@@ -290,7 +302,125 @@
           loadUnpaidOrders();
         }
       });
+
+      // Edit income entry
+      async function editIncome(incomeId) {
+        try {
+          const res = await fetch(`/income/${incomeId}`);
+          const data = await res.json();
+          
+          // Populate edit form
+          document.getElementById('editIncomeId').value = data.id;
+          document.getElementById('editAccountId').value = data.account_id;
+          document.getElementById('editAmount').value = data.amount;
+          document.getElementById('editDate').value = data.date || '';
+          document.getElementById('editSource').value = data.source;
+          document.getElementById('editReference').value = data.reference || '';
+          document.getElementById('editNotes').value = data.notes || '';
+          
+          // Show modal
+          document.getElementById('editModal').style.display = 'block';
+        } catch (e) {
+          console.error('Failed to load income:', e);
+          alert('Gelir bilgisi yüklenemedi');
+        }
+      }
+
+      // Delete income entry
+      async function deleteIncome(incomeId) {
+        if (!confirm('Bu gelir kaydını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz ve bağlı sipariş tahsilat kayıtları da silinecektir.')) {
+          return;
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        
+        try {
+          const url = `/income/${incomeId}?${params.toString()}`;
+          const res = await fetch(url, {
+            method: 'DELETE',
+          });
+
+          if (res.ok) {
+            alert('Gelir kaydı başarıyla silindi.');
+            location.reload();
+          } else {
+            const data = await res.json();
+            alert('Hata: ' + (data.detail || 'Silme işlemi başarısız'));
+          }
+        } catch (e) {
+          console.error('Failed to delete income:', e);
+          alert('Silme işlemi başarısız');
+        }
+      }
+
+      // Close modal
+      function closeEditModal() {
+        document.getElementById('editModal').style.display = 'none';
+      }
+
+      // Close modal when clicking outside
+      window.onclick = function(event) {
+        const modal = document.getElementById('editModal');
+        if (event.target == modal) {
+          modal.style.display = 'none';
+        }
+      }
     </script>
+
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Gelir Düzenle</h3>
+          <span class="close" onclick="closeEditModal()">&times;</span>
+        </div>
+        <form id="editIncomeForm" method="post" action="/income/update" class="row">
+          <input type="hidden" id="editIncomeId" name="income_id" />
+          {% if start %}<input type="hidden" name="start" value="{{ start }}"/>{% endif %}
+          {% if end %}<input type="hidden" name="end" value="{{ end }}"/>{% endif %}
+          
+          <div class="field">
+            <label>Hesap</label>
+            <select name="account_id" id="editAccountId" required>
+              <option value="">Seçiniz...</option>
+              {% for acc in accounts %}
+              {% if acc.id %}
+              <option value="{{ acc.id }}">{{ acc.name }} ({{ acc.type }})</option>
+              {% endif %}
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>Tutar</label>
+            <input type="number" step="0.01" name="amount" id="editAmount" required />
+          </div>
+          <div class="field">
+            <label>Tarih</label>
+            <input type="date" name="date" id="editDate" />
+          </div>
+          <div class="field">
+            <label>Kaynak</label>
+            <select name="source" id="editSource" required>
+              <option value="shipment_firm">Kargo Firması</option>
+              <option value="iban_customer">Müşteri IBAN</option>
+              <option value="other">Diğer</option>
+            </select>
+          </div>
+          <div class="field" style="min-width:280px; flex:1">
+            <label>Referans / Açıklama</label>
+            <input type="text" name="reference" id="editReference" placeholder="Opsiyonel" />
+          </div>
+          <div class="field" style="min-width:280px; flex:1">
+            <label>Notlar</label>
+            <input type="text" name="notes" id="editNotes" placeholder="Opsiyonel" />
+          </div>
+          <div style="display:flex; gap:8px; margin-top:12px;">
+            <button class="btn" type="submit">Kaydet</button>
+            <button class="btn" type="button" onclick="closeEditModal()">İptal</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </body>
 </html>
 

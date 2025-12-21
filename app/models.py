@@ -688,6 +688,17 @@ class OrderPayment(SQLModel, table=True):
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 
 
+class IncomeHistoryLog(SQLModel, table=True):
+	"""Audit log for income entry changes (create, update, delete)."""
+	id: Optional[int] = Field(default=None, primary_key=True)
+	income_id: int = Field(foreign_key="income.id", index=True, description="Income entry ID (may be deleted)")
+	action: str = Field(index=True, description="Action: 'create', 'update', 'delete'")
+	old_data_json: Optional[str] = Field(default=None, sa_column=Column(Text), description="Previous data as JSON (for updates/deletes)")
+	new_data_json: Optional[str] = Field(default=None, sa_column=Column(Text), description="New data as JSON (for creates/updates)")
+	user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True, description="User who made the change")
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
 class AIPretext(SQLModel, table=True):
 	"""
 	Pretext templates that can be prepended to AI system messages.

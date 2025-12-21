@@ -1,12 +1,13 @@
 from typing import Optional, List, Dict, Any
 import datetime as dt
+import json
 
-from fastapi import APIRouter, Request, Query, Form, Body
+from fastapi import APIRouter, Request, Query, Form, Body, HTTPException
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Income, Account, Order, OrderPayment, Client
+from ..models import Income, Account, Order, OrderPayment, Client, IncomeHistoryLog
 from ..services.finance import get_unpaid_orders, calculate_expected_payment, mark_orders_collected
 
 router = APIRouter()
@@ -19,6 +20,38 @@ def _parse_date_or_default(value: Optional[str], fallback: dt.date) -> dt.date:
 	except Exception:
 		pass
 	return fallback
+
+
+def _log_income_change(
+	session,
+	income_id: int,
+	action: str,
+	old_data: Optional[Dict] = None,
+	new_data: Optional[Dict] = None,
+	user_id: Optional[int] = None
+):
+	"""Log income entry changes to history."""
+	log_entry = IncomeHistoryLog(
+		income_id=income_id,
+		action=action,
+		old_data_json=json.dumps(old_data) if old_data else None,
+		new_data_json=json.dumps(new_data) if new_data else None,
+		user_id=user_id
+	)
+	session.add(log_entry)
+
+
+def _income_to_dict(income: Income) -> Dict:
+	"""Convert Income object to dictionary for logging."""
+	return {
+		"id": income.id,
+		"account_id": income.account_id,
+		"amount": income.amount,
+		"date": income.date.isoformat() if income.date else None,
+		"source": income.source,
+		"reference": income.reference,
+		"notes": income.notes,
+	}
 
 
 @router.get("")
@@ -119,6 +152,20 @@ def add_income(
 				notes=notes.strip() if notes else None,
 			)
 			session.add(income)
+			session.flush()
+			
+			# Log creation
+			if income.id:
+				user_id = None  # TODO: Get from session if auth is implemented
+				_log_income_change(
+					session,
+					income.id,
+					"create",
+					old_data=None,
+					new_data=_income_to_dict(income),
+					user_id=user_id
+				)
+			
 			session.commit()
 		except Exception:
 			session.rollback()
@@ -250,6 +297,17 @@ def bulk_collect_orders(body: Dict[str, Any] = Body(...)):
 			if income.id is None:
 				return JSONResponse({"error": "Failed to create income entry"}, status_code=500)
 			
+			# Log creation
+			user_id = None  # TODO: Get from session if auth is implemented
+			_log_income_change(
+				session,
+				income.id,
+				"create",
+				old_data=None,
+				new_data=_income_to_dict(income),
+				user_id=user_id
+			)
+			
 			# Mark orders as collected
 			collected_dict = None
 			if collected_amounts:
@@ -265,4 +323,171 @@ def bulk_collect_orders(body: Dict[str, Any] = Body(...)):
 			}
 	except Exception as e:
 		return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/{income_id}")
+def get_income(income_id: int):
+	"""Get a single income entry by ID."""
+	with get_session() as session:
+		income = session.exec(select(Income).where(Income.id == income_id)).first()
+		if not income:
+			raise HTTPException(status_code=404, detail="Income entry not found")
+		
+		account = session.exec(select(Account).where(Account.id == income.account_id)).first()
+		
+		return {
+			"id": income.id,
+			"account_id": income.account_id,
+			"account_name": account.name if account else "",
+			"amount": income.amount,
+			"date": income.date.isoformat() if income.date else None,
+			"source": income.source,
+			"reference": income.reference,
+			"notes": income.notes,
+		}
+
+
+@router.post("/update")
+def update_income(
+	request: Request,
+	income_id: int = Form(...),
+	account_id: Optional[int] = Form(default=None),
+	amount: Optional[float] = Form(default=None),
+	date: Optional[str] = Form(default=None),
+	source: Optional[str] = Form(default=None),
+	reference: Optional[str] = Form(default=None),
+	notes: Optional[str] = Form(default=None),
+	start: Optional[str] = Form(default=None),
+	end: Optional[str] = Form(default=None),
+):
+	"""Update an existing income entry."""
+	with get_session() as session:
+		income = session.exec(select(Income).where(Income.id == income_id)).first()
+		if not income:
+			raise HTTPException(status_code=404, detail="Income entry not found")
+		
+		# Store old data for logging
+		old_data = _income_to_dict(income)
+		
+		# Update fields if provided
+		if account_id is not None:
+			income.account_id = int(account_id)
+		if amount is not None:
+			income.amount = float(amount)
+		if date is not None:
+			try:
+				income.date = dt.date.fromisoformat(date)
+			except Exception:
+				pass
+		if source is not None:
+			income.source = source.strip()
+		if reference is not None:
+			income.reference = reference.strip() if reference else None
+		if notes is not None:
+			income.notes = notes.strip() if notes else None
+		
+		# Log update
+		user_id = None  # TODO: Get from session if auth is implemented
+		_log_income_change(
+			session,
+			income_id,
+			"update",
+			old_data=old_data,
+			new_data=_income_to_dict(income),
+			user_id=user_id
+		)
+		
+		session.add(income)
+		session.commit()
+	
+	url = "/income/table"
+	if start or end:
+		params = []
+		if start:
+			params.append(f"start={start}")
+		if end:
+			params.append(f"end={end}")
+		url = f"{url}?{'&'.join(params)}"
+	return RedirectResponse(url=url, status_code=303)
+
+
+@router.delete("/{income_id}")
+def delete_income(
+	income_id: int,
+	request: Request,
+	start: Optional[str] = Query(default=None),
+	end: Optional[str] = Query(default=None),
+):
+	"""Delete an income entry. Also removes associated OrderPayment records."""
+	with get_session() as session:
+		income = session.exec(select(Income).where(Income.id == income_id)).first()
+		if not income:
+			raise HTTPException(status_code=404, detail="Income entry not found")
+		
+		# Check if there are associated OrderPayment records
+		order_payments = session.exec(
+			select(OrderPayment).where(OrderPayment.income_id == income_id)
+		).all()
+		
+		# Store old data for logging
+		old_data = _income_to_dict(income)
+		
+		# Delete OrderPayment records first (they have foreign key to income)
+		for op in order_payments:
+			session.delete(op)
+		
+		# Log deletion before deleting
+		user_id = None  # TODO: Get from session if auth is implemented
+		_log_income_change(
+			session,
+			income_id,
+			"delete",
+			old_data=old_data,
+			new_data=None,
+			user_id=user_id
+		)
+		
+		# Delete income entry
+		session.delete(income)
+		session.commit()
+	
+	url = "/income/table"
+	if start or end:
+		params = []
+		if start:
+			params.append(f"start={start}")
+		if end:
+			params.append(f"end={end}")
+		url = f"{url}?{'&'.join(params)}"
+	return RedirectResponse(url=url, status_code=303)
+
+
+@router.get("/{income_id}/history")
+def get_income_history(income_id: int):
+	"""Get history log for an income entry."""
+	with get_session() as session:
+		# Verify income exists (or was deleted)
+		income = session.exec(select(Income).where(Income.id == income_id)).first()
+		
+		logs = session.exec(
+			select(IncomeHistoryLog)
+			.where(IncomeHistoryLog.income_id == income_id)
+			.order_by(IncomeHistoryLog.created_at.desc())
+		).all()
+		
+		return {
+			"income_id": income_id,
+			"income_exists": income is not None,
+			"history": [
+				{
+					"id": log.id,
+					"action": log.action,
+					"old_data": json.loads(log.old_data_json) if log.old_data_json else None,
+					"new_data": json.loads(log.new_data_json) if log.new_data_json else None,
+					"user_id": log.user_id,
+					"created_at": log.created_at.isoformat() if log.created_at else None,
+				}
+				for log in logs
+			]
+		}
 
