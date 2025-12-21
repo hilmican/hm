@@ -175,31 +175,11 @@ def add_cost(
 		when = dt.date.today()
 	
 	# Validate MERTER MAL ALIM (type_id=9) requirements
+	# Note: product_id and quantity are optional to allow recording bulk purchases
+	# without specifying individual products. Stock tracking is handled separately.
 	if type_id == 9:
 		if not supplier_id:
 			# Redirect with error - supplier required
-			url = "/costs"
-			if start or end:
-				params = []
-				if start:
-					params.append(f"start={start}")
-				if end:
-					params.append(f"end={end}")
-				url = f"/costs?{'&'.join(params)}"
-			return RedirectResponse(url=url, status_code=303)
-		if not product_id:
-			# Redirect with error - product required
-			url = "/costs"
-			if start or end:
-				params = []
-				if start:
-					params.append(f"start={start}")
-				if end:
-					params.append(f"end={end}")
-				url = f"/costs?{'&'.join(params)}"
-			return RedirectResponse(url=url, status_code=303)
-		if not quantity or quantity <= 0:
-			# Redirect with error - quantity required
 			url = "/costs"
 			if start or end:
 				params = []

@@ -86,7 +86,7 @@
               </select>
             </div>
             <div class="field" id="product_field" style="display:none;">
-              <label>Ürün <span style="color:red;">*</span></label>
+              <label>Ürün (Opsiyonel)</label>
               <select name="product_id" id="product_id">
                 <option value="">Ürün seçin</option>
                 {% for prod in products %}
@@ -95,7 +95,7 @@
               </select>
             </div>
             <div class="field" id="quantity_field" style="display:none;">
-              <label>Adet <span style="color:red;">*</span></label>
+              <label>Adet (Opsiyonel)</label>
               <input type="number" name="quantity" id="quantity" min="1" step="1" />
             </div>
             <div class="field">
@@ -247,13 +247,14 @@
           const isMerterMalAlim = selectedTypeId === 9;
 
           if (isMerterMalAlim) {
-            // Show product and quantity fields
+            // Show product and quantity fields (optional for bulk purchases)
             productField.style.display = 'block';
             quantityField.style.display = 'block';
-            // Make supplier required
+            // Make supplier required for MERTER MAL ALIM
             supplierSelect.required = true;
-            productSelect.required = true;
-            quantityInput.required = true;
+            // Product and quantity are optional - allows recording bulk purchases without product details
+            productSelect.required = false;
+            quantityInput.required = false;
           } else {
             // Hide product and quantity fields
             productField.style.display = 'none';
@@ -280,16 +281,8 @@
               alert('MERTER MAL ALIM için cari seçimi zorunludur.');
               return false;
             }
-            if (!productSelect.value) {
-              e.preventDefault();
-              alert('MERTER MAL ALIM için ürün seçimi zorunludur.');
-              return false;
-            }
-            if (!quantityInput.value || parseInt(quantityInput.value) <= 0) {
-              e.preventDefault();
-              alert('MERTER MAL ALIM için adet bilgisi zorunludur ve 0\'dan büyük olmalıdır.');
-              return false;
-            }
+            // Product and quantity are optional - allows recording bulk purchases
+            // Stock tracking is handled separately in the inventory system
           }
         });
       });
@@ -392,8 +385,9 @@
               if (isMerterMalAlim) {
                 editProductField.style.display = 'block';
                 editQuantityField.style.display = 'block';
-                editProductSelect.required = true;
-                editQuantityInput.required = true;
+                // Product and quantity are optional - allows recording bulk purchases
+                editProductSelect.required = false;
+                editQuantityInput.required = false;
               } else {
                 editProductField.style.display = 'none';
                 editQuantityField.style.display = 'none';
@@ -409,16 +403,9 @@
             editForm.addEventListener('submit', function(e) {
               const selectedTypeId = parseInt(editTypeSelect.value);
               if (selectedTypeId === 9) {
-                if (!editProductSelect.value) {
-                  e.preventDefault();
-                  alert('MERTER MAL ALIM için ürün seçimi zorunludur.');
-                  return false;
-                }
-                if (!editQuantityInput.value || parseInt(editQuantityInput.value) <= 0) {
-                  e.preventDefault();
-                  alert('MERTER MAL ALIM için adet bilgisi zorunludur ve 0\'dan büyük olmalıdır.');
-                  return false;
-                }
+                // Product and quantity are optional - allows recording bulk purchases
+                // Stock tracking is handled separately in the inventory system
+                // No validation needed here
               }
             });
           }
@@ -469,7 +456,7 @@
             </select>
           </div>
           <div class="field" id="editProductField" style="display:none;">
-            <label>Ürün <span style="color:red;">*</span></label>
+            <label>Ürün (Opsiyonel)</label>
             <select name="product_id" id="editProductId">
               <option value="">Ürün seçin</option>
               {% for prod in products %}
@@ -478,7 +465,7 @@
             </select>
           </div>
           <div class="field" id="editQuantityField" style="display:none;">
-            <label>Adet <span style="color:red;">*</span></label>
+            <label>Adet (Opsiyonel)</label>
             <input type="number" name="quantity" id="editQuantity" min="1" step="1" />
           </div>
           <div class="field">
