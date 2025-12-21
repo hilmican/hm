@@ -161,10 +161,10 @@ def add_cost(
 	amount: float = Form(...),
 	date: Optional[str] = Form(default=None),
 	details: Optional[str] = Form(default=None),
-	account_id: Optional[int] = Form(default=None),
-	supplier_id: Optional[int] = Form(default=None),
-	product_id: Optional[int] = Form(default=None),
-	quantity: Optional[int] = Form(default=None),
+	account_id: Optional[str] = Form(default=None),
+	supplier_id: Optional[str] = Form(default=None),
+	product_id: Optional[str] = Form(default=None),
+	quantity: Optional[str] = Form(default=None),
 	is_payment_to_supplier: bool = Form(default=False),
 	start: Optional[str] = Form(default=None),
 	end: Optional[str] = Form(default=None),
@@ -174,11 +174,25 @@ def add_cost(
 	except Exception:
 		when = dt.date.today()
 	
+	# Helper function to parse optional int from string
+	def parse_optional_int(value: Optional[str]) -> Optional[int]:
+		if value is None or value == "":
+			return None
+		try:
+			return int(value)
+		except (ValueError, TypeError):
+			return None
+	
+	parsed_account_id = parse_optional_int(account_id)
+	parsed_supplier_id = parse_optional_int(supplier_id)
+	parsed_product_id = parse_optional_int(product_id)
+	parsed_quantity = parse_optional_int(quantity)
+	
 	# Validate MERTER MAL ALIM (type_id=9) requirements
 	# Note: product_id and quantity are optional to allow recording bulk purchases
 	# without specifying individual products. Stock tracking is handled separately.
 	if type_id == 9:
-		if not supplier_id:
+		if not parsed_supplier_id:
 			# Redirect with error - supplier required
 			url = "/costs"
 			if start or end:
@@ -197,10 +211,10 @@ def add_cost(
 				amount=float(amount),
 				date=when,
 				details=(details or "").strip() or None,
-				account_id=int(account_id) if account_id else None,
-				supplier_id=int(supplier_id) if supplier_id else None,
-				product_id=int(product_id) if product_id else None,
-				quantity=int(quantity) if quantity else None,
+				account_id=parsed_account_id,
+				supplier_id=parsed_supplier_id,
+				product_id=parsed_product_id,
+				quantity=parsed_quantity,
 				is_payment_to_supplier=is_payment_to_supplier,
 			)
 			session.add(c)
