@@ -108,6 +108,7 @@ def supplier_detail(
 		# Get payment allocations to calculate closed amounts per debt
 		all_debt_ids = [d.id for d in debts if d.id is not None]
 		allocations = {}
+		payment_allocations = {}  # Track how much each payment has allocated
 		if all_debt_ids:
 			allocs = session.exec(
 				select(SupplierPaymentAllocation)
@@ -117,6 +118,11 @@ def supplier_detail(
 				if alloc.debt_cost_id not in allocations:
 					allocations[alloc.debt_cost_id] = 0.0
 				allocations[alloc.debt_cost_id] += float(alloc.amount or 0)
+				
+				# Track allocation per payment
+				if alloc.payment_cost_id not in payment_allocations:
+					payment_allocations[alloc.payment_cost_id] = 0.0
+				payment_allocations[alloc.payment_cost_id] += float(alloc.amount or 0)
 		
 		# Calculate remaining debt per entry and totals
 		debt_details = []
@@ -149,6 +155,18 @@ def supplier_detail(
 					"details": cost.details,
 				})
 		
+		# Calculate allocated amount for each payment
+		payment_details = []
+		for payment in payments:
+			allocated = payment_allocations.get(payment.id, 0.0) if payment.id else 0.0
+			payment_amount = float(payment.amount or 0)
+			remaining = payment_amount - allocated
+			payment_details.append({
+				"payment": payment,
+				"allocated": allocated,
+				"remaining": remaining,
+			})
+		
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"supplier_detail.html",
@@ -158,6 +176,7 @@ def supplier_detail(
 				"debts": debts,
 				"debt_details": debt_details,
 				"payments": payments,
+				"payment_details": payment_details,
 				"purchase_history": purchase_history,
 				"product_map": product_map,
 				"type_map": type_map,
@@ -361,6 +380,122 @@ def add_payment_to_supplier(
 			# best-effort insert; ignore on error
 			session.rollback()
 			pass
+	
+	return RedirectResponse(url=f"/suppliers/{supplier_id}", status_code=303)
+
+
+@router.post("/{supplier_id}/allocate-payment/{payment_id}")
+def allocate_existing_payment_to_debts(
+	supplier_id: int,
+	payment_id: int,
+	debt_allocations: Optional[str] = Form(default=None),  # JSON string: {debt_id: amount}
+):
+	"""Allocate an existing payment to specific debts."""
+	import json
+	
+	with get_session() as session:
+		# Verify supplier exists
+		supplier = session.exec(select(Supplier).where(Supplier.id == supplier_id)).first()
+		if not supplier:
+			return RedirectResponse(url="/suppliers", status_code=303)
+		
+		# Verify payment exists and belongs to this supplier
+		payment = session.exec(
+			select(Cost)
+			.where(Cost.id == payment_id)
+			.where(Cost.supplier_id == supplier_id)
+			.where(Cost.is_payment_to_supplier == True)
+		).first()
+		if not payment:
+			return RedirectResponse(url=f"/suppliers/{supplier_id}", status_code=303)
+		
+		payment_amount = float(payment.amount or 0)
+		
+		# Get existing allocations for this payment
+		existing_allocs = session.exec(
+			select(SupplierPaymentAllocation)
+			.where(SupplierPaymentAllocation.payment_cost_id == payment_id)
+		).all()
+		existing_total = sum(float(a.amount or 0) for a in existing_allocs)
+		remaining_payment = payment_amount - existing_total
+		
+		# Parse debt allocations if provided
+		if debt_allocations:
+			try:
+				allocations = json.loads(debt_allocations)
+				
+				# Get all debts for this supplier
+				debts = session.exec(
+					select(Cost)
+					.where(Cost.supplier_id == supplier_id)
+					.where(Cost.is_payment_to_supplier == False)
+					.where(Cost.type_id == 9)
+					.order_by(Cost.date.asc(), Cost.id.asc())  # FIFO: oldest first
+				).all()
+				
+				# Get existing allocations to calculate remaining debt per entry
+				debt_ids = [d.id for d in debts if d.id is not None]
+				existing_debt_allocations = {}
+				if debt_ids:
+					existing = session.exec(
+						select(SupplierPaymentAllocation)
+						.where(SupplierPaymentAllocation.debt_cost_id.in_(debt_ids))
+					).all()
+					for alloc in existing:
+						if alloc.debt_cost_id not in existing_debt_allocations:
+							existing_debt_allocations[alloc.debt_cost_id] = 0.0
+						existing_debt_allocations[alloc.debt_cost_id] += float(alloc.amount or 0)
+				
+				# Calculate total allocation amount first to validate
+				total_allocation = 0.0
+				if allocations:
+					for debt in debts:
+						if debt.id is None:
+							continue
+						if str(debt.id) in allocations:
+							alloc_val = float(allocations[str(debt.id)])
+							total_allocation += alloc_val
+				
+				# Validate total allocation doesn't exceed remaining payment (with small epsilon for floating point)
+				epsilon = 0.01
+				if total_allocation <= remaining_payment + epsilon:
+					# Allocate payment to debts
+					for debt in debts:
+						if remaining_payment <= 0:
+							break
+						if debt.id is None:
+							continue
+						
+						debt_amount = float(debt.amount or 0)
+						already_closed = existing_debt_allocations.get(debt.id, 0.0)
+						remaining_debt = debt_amount - already_closed
+						
+						if remaining_debt <= 0:
+							continue
+						
+						# Check if this debt is in the allocations dict
+						alloc_amount = 0.0
+						if allocations and str(debt.id) in allocations:
+							alloc_amount = float(allocations[str(debt.id)])
+						
+						# Use epsilon for floating point comparison
+						if alloc_amount > 0 and alloc_amount <= remaining_payment + epsilon:
+							# Don't allocate more than remaining debt
+							alloc_amount = min(alloc_amount, remaining_debt)
+							
+							allocation = SupplierPaymentAllocation(
+								payment_cost_id=payment_id,
+								debt_cost_id=debt.id,
+								amount=alloc_amount,
+							)
+							session.add(allocation)
+							remaining_payment -= alloc_amount
+				
+			except Exception as e:
+				# If allocation fails, still proceed
+				pass
+		
+		session.commit()
 	
 	return RedirectResponse(url=f"/suppliers/{supplier_id}", status_code=303)
 
