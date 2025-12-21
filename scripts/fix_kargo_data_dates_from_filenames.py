@@ -118,39 +118,29 @@ def fix_kargo_data_dates(dry_run: bool = True):
                         continue
                     
                     # Check if data_date needs fixing
-                    # For kargo orders: data_date should be from filename (when kargo Excel was imported)
-                    # For bizim orders matched by kargo: if data_date equals shipment_date, update to filename date
+                    # The bug: data_date was set to shipment_date instead of the import date from filename
+                    # Fix: Update data_date to filename date (when kargo Excel was imported)
                     
                     should_update = False
                     reason = ""
                     
-                    if order.source == "kargo":
-                        # For kargo orders, check if data_date was incorrectly set
-                        if order.data_date is None:
-                            should_update = True
-                            reason = "data_date is None"
-                        elif order.shipment_date and order.data_date == order.shipment_date:
-                            # BUG: data_date equals shipment_date (the bug we're fixing)
-                            should_update = True
-                            reason = f"data_date equals shipment_date ({order.shipment_date})"
-                        elif run.data_date and order.data_date == run.data_date:
-                            # Also check if it equals the old buggy run.data_date (which was max(shipment_date))
-                            should_update = True
-                            reason = f"data_date equals old buggy run.data_date ({run.data_date})"
-                    elif order.source == "bizim":
-                        # For bizim orders matched by kargo: if data_date equals shipment_date, it's likely wrong
-                        # Update to the kargo filename date (when payment Excel was imported)
-                        if order.data_date is None:
-                            should_update = True
-                            reason = "data_date is None"
-                        elif order.shipment_date and order.data_date == order.shipment_date:
-                            # Likely bug: data_date equals shipment_date for bizim order matched by kargo
-                            should_update = True
-                            reason = f"bizim order: data_date equals shipment_date ({order.shipment_date}), update to kargo import date"
-                        # Also update if data_date is older than filename_date (preserve the actual import date)
-                        elif filename_date and order.data_date and filename_date < order.data_date:
-                            should_update = True
-                            reason = f"bizim order: kargo import date ({filename_date}) is older than current data_date ({order.data_date})"
+                    if order.data_date is None:
+                        should_update = True
+                        reason = "data_date is None"
+                    elif order.shipment_date and order.data_date == order.shipment_date:
+                        # BUG: data_date equals shipment_date (the bug we're fixing)
+                        # This affects both kargo orders and bizim orders matched by kargo
+                        should_update = True
+                        reason = f"data_date equals shipment_date ({order.shipment_date}) - fix to kargo import date"
+                    elif order.source == "bizim" and filename_date and filename_date != order.data_date:
+                        # For bizim orders matched by kargo: update data_date to kargo import date
+                        # (this represents when the payment data was imported)
+                        should_update = True
+                        reason = f"bizim order matched by kargo: update data_date to kargo import date"
+                    elif order.source == "kargo" and run.data_date and order.data_date == run.data_date:
+                        # Also check if it equals the old buggy run.data_date (which was max(shipment_date))
+                        should_update = True
+                        reason = f"data_date equals old buggy run.data_date ({run.data_date})"
                     
                     # Always update if we have a filename_date and it's different from current data_date
                     # (This ensures we fix the date even if it matches shipment_date)
