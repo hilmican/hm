@@ -15,12 +15,34 @@
   .logout { background:#ef4444; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; }
   .debug-link { background:#f97316; color:#fff; border-radius:6px; padding:6px 14px; font-weight:600; letter-spacing:0.05em; }
   .debug-link:hover { background:#ea580c; color:#fff; }
+  
+  /* Mobile hamburger menu */
+  .mobile-menu-toggle { display:none; background:none; border:none; color:#e5e7eb; font-size:24px; cursor:pointer; padding:4px 8px; }
+  .mobile-menu-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:100; }
+  .mobile-menu { display:none; position:fixed; top:0; left:0; width:280px; max-width:85vw; height:100%; background:#0f172a; z-index:101; overflow-y:auto; padding:20px; box-shadow:2px 0 10px rgba(0,0,0,0.3); }
+  .mobile-menu.active { display:block; }
+  .mobile-menu-overlay.active { display:block; }
+  .mobile-menu-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.1); }
+  .mobile-menu-close { background:none; border:none; color:#e5e7eb; font-size:28px; cursor:pointer; padding:0; }
+  .mobile-menu-item { margin-bottom:8px; }
+  .mobile-menu-item > a { display:block; padding:10px 12px; border-radius:6px; color:#e5e7eb; }
+  .mobile-menu-item > a:hover { background:#1f2a44; }
+  .mobile-submenu { display:none; margin-left:12px; margin-top:4px; }
+  .mobile-submenu.active { display:block; }
+  .mobile-submenu a { display:block; padding:8px 12px; border-radius:6px; color:#9ca3af; font-size:13px; }
+  .mobile-submenu a:hover { background:#1f2a44; color:#e5e7eb; }
+  .mobile-menu-toggle-btn { background:none; border:none; color:#e5e7eb; padding:4px 8px; cursor:pointer; font-size:18px; }
+  
   @media (max-width: 900px){
-    .menu { flex-wrap: wrap; }
+    .menu { display:none; }
+    .mobile-menu-toggle { display:block; }
+    .spacer { display:none; }
+    .logout { margin-left:auto; }
   }
 </style>
 <nav class="topnav">
   <div class="inner">
+    <button class="mobile-menu-toggle" onclick="toggleMobileMenu()" aria-label="Menu">☰</button>
     <a class="brand" href="/dashboard">{{ t(request, 'nav.brand') }}</a>
     <div class="menu">
       <div class="menu-item">
@@ -190,6 +212,222 @@
       return false;
     }
   })();
+  
+  // Mobile menu functionality
+  function toggleMobileMenu() {
+    const overlay = document.getElementById('mobileMenuOverlay');
+    const menu = document.getElementById('mobileMenu');
+    overlay.classList.toggle('active');
+    menu.classList.toggle('active');
+    document.body.style.overflow = menu.classList.contains('active') ? 'hidden' : '';
+  }
+  
+  function closeMobileMenu() {
+    const overlay = document.getElementById('mobileMenuOverlay');
+    const menu = document.getElementById('mobileMenu');
+    overlay.classList.remove('active');
+    menu.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+  
+  function toggleMobileSubmenu(element) {
+    const submenu = element.nextElementSibling;
+    if (submenu && submenu.classList.contains('mobile-submenu')) {
+      submenu.classList.toggle('active');
+    }
+  }
+  
+  // Close mobile menu when clicking overlay
+  document.addEventListener('DOMContentLoaded', function() {
+    const overlay = document.getElementById('mobileMenuOverlay');
+    if (overlay) {
+      overlay.addEventListener('click', closeMobileMenu);
+    }
+  });
+</script>
+
+<!-- Mobile Menu Overlay -->
+<div id="mobileMenuOverlay" class="mobile-menu-overlay"></div>
+
+<!-- Mobile Menu -->
+<div id="mobileMenu" class="mobile-menu">
+  <div class="mobile-menu-header">
+    <a class="brand" href="/dashboard" onclick="closeMobileMenu()">{{ t(request, 'nav.brand') }}</a>
+    <button class="mobile-menu-close" onclick="closeMobileMenu()">&times;</button>
+  </div>
+  
+  <div class="mobile-menu-item">
+    <a href="/ig/debug/env" class="debug-link" onclick="closeMobileMenu()">DEBUG</a>
+  </div>
+  
+  <div class="mobile-menu-item">
+    <a href="#" onclick="toggleMobileSubmenu(this); return false;">{{ t(request, 'nav.data') }}</a>
+    <div class="mobile-submenu">
+      <a href="/clients/table" onclick="closeMobileMenu()">{{ t(request, 'nav.clients') }}</a>
+      <a href="/items/table" onclick="closeMobileMenu()">{{ t(request, 'nav.items') }}</a>
+      <a href="/products/table" onclick="closeMobileMenu()">{{ t(request, 'nav.products') }}</a>
+      <a href="/size-charts/table" onclick="closeMobileMenu()">Beden Tablolari</a>
+      <a href="/size-charts/assign" onclick="closeMobileMenu()">Urun Beden Tablolari</a>
+      <a href="/inventory/table" onclick="closeMobileMenu()">{{ t(request, 'nav.inventory') }}</a>
+      <a href="/inventory/movements/table" onclick="closeMobileMenu()">{{ t(request, 'nav.movements') }}</a>
+    </div>
+  </div>
+  
+  <div class="mobile-menu-item">
+    <a href="#" onclick="toggleMobileSubmenu(this); return false;">{{ t(request, 'nav.sales') }}</a>
+    <div class="mobile-submenu">
+      <a href="/orders/table" onclick="closeMobileMenu()">{{ t(request, 'nav.orders') }}</a>
+      <a href="/orders/partial-payments" onclick="closeMobileMenu()">💰 Kısmi Ödemeler</a>
+      <a href="/orders/duplicates" onclick="closeMobileMenu()">🔍 Potansiyel Çiftler</a>
+      <a href="/payments/table" onclick="closeMobileMenu()">{{ t(request, 'nav.payments') }}</a>
+    </div>
+  </div>
+  
+  <div class="mobile-menu-item">
+    <a href="#" onclick="toggleMobileSubmenu(this); return false;">{{ t(request, 'nav.instagram') }}</a>
+    <div class="mobile-submenu">
+      <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 4px;">Inbox</div>
+      <a href="/ig/inbox" onclick="closeMobileMenu()">{{ t(request, 'nav.inbox') }}</a>
+      <a href="/ig/inbox/admin-messages" onclick="closeMobileMenu()">📢 Admin Mesajları</a>
+      <a href="/ig/inbox?has_ad=yes" onclick="closeMobileMenu()">Inbox · Reklamlı</a>
+      <a href="/ig/inbox?has_ad=unlinked" onclick="closeMobileMenu()">Inbox · Reklamı Ürüne Bağla</a>
+      <a href="/ig/inbox/ai-replied" onclick="closeMobileMenu()">🤖 AI Cevaplanan Mesajlar</a>
+      <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin: 8px 0 4px 0;">İçerik & Analiz</div>
+      <a href="/ig/content/calendar" onclick="closeMobileMenu()">📅 İçerik Takvimi</a>
+      <a href="/ig/insights/dashboard" onclick="closeMobileMenu()">📊 Insights Panel</a>
+      <a href="/ig/comments/moderation" onclick="closeMobileMenu()">💬 Yorum Moderasyonu</a>
+      <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin: 8px 0 4px 0;">Bağlantılar</div>
+      <a href="/posts/unlinked" onclick="closeMobileMenu()">Gönderileri Ürüne Bağla</a>
+      <a href="/ads/auto-linked" onclick="closeMobileMenu()">🤖 Otomatik Bağlanan Reklamlar</a>
+      <a href="/posts/auto-linked" onclick="closeMobileMenu()">🤖 Otomatik Bağlanan Gönderiler</a>
+      <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin: 8px 0 4px 0;">Test & Debug</div>
+      <a href="/ig/mock-tester" onclick="closeMobileMenu()">🧪 Mock Conversation Tester</a>
+    </div>
+  </div>
+  
+  <div class="mobile-menu-item">
+    <a href="#" onclick="toggleMobileSubmenu(this); return false;">🤖 AI</a>
+    <div class="mobile-submenu">
+      <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 4px;">AI Cevaplama</div>
+      <a href="/ig/ai/process" onclick="closeMobileMenu()">{{ t(request, 'nav.ai_processing') }}</a>
+      <a href="/ig/ai/shadow/monitor" onclick="closeMobileMenu()">{{ t(request, 'nav.ai_shadow_monitor') }}</a>
+      <a href="/ig/ai/settings" onclick="closeMobileMenu()">⚙️ AI Cevap Ayarları</a>
+      <a href="/ig/ai/pretexts" onclick="closeMobileMenu()">AI Pretext Yönetimi</a>
+      <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin: 8px 0 4px 0;">AI Siparişler</div>
+      <a href="/ai/orders" onclick="closeMobileMenu()">{{ t(request, 'nav.ai_orders') }}</a>
+      <a href="/ai/orders/detect" onclick="closeMobileMenu()">🔍 Sipariş Tespiti (Tarih Aralığı)</a>
+      <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin: 8px 0 4px 0;">Ürün & Q&A</div>
+      <a href="/ig/ai/products/reviews" onclick="closeMobileMenu()">📊 Ürün AI İncelemeleri</a>
+      <a href="/products/qas/table" onclick="closeMobileMenu()">🔍 Q&A Yönetimi (Tüm Ürünler)</a>
+      <a href="/products/table" onclick="closeMobileMenu()">📝 Ürünler (Q&A eklemek için)</a>
+      <a href="/products/upsells" onclick="closeMobileMenu()">🛒 Upsell Yönetimi</a>
+      <div style="padding: 4px 8px; font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); margin: 8px 0 4px 0;">Bağlantı & Analiz</div>
+      <a href="/ig/ai/unlinked" onclick="closeMobileMenu()">{{ t(request, 'nav.unlinked_purchases') }}</a>
+      <a href="/ig/ai/link-suggest" onclick="closeMobileMenu()">{{ t(request, 'nav.link_conversation') }}</a>
+    </div>
+  </div>
+  
+  <div class="mobile-menu-item">
+    <a href="#" onclick="toggleMobileSubmenu(this); return false;">{{ t(request, 'nav.import') }}</a>
+    <div class="mobile-submenu">
+      <a href="/mappings/table" onclick="closeMobileMenu()">{{ t(request, 'nav.mapping') }}</a>
+      <a href="/import/map?source=bizim&filename=last" onclick="closeMobileMenu()">{{ t(request, 'nav.mapping_wizard') }}</a>
+      <a href="/reconcile/returns" onclick="closeMobileMenu()">{{ t(request, 'nav.returns_reconcile') }}</a>
+      <a href="/reconcile/payments" onclick="closeMobileMenu()">💰 Ödeme Düzeltme</a>
+      <a href="/excel-tracker" onclick="closeMobileMenu()">📊 Excel Dosyası Takibi</a>
+    </div>
+  </div>
+  
+  <div class="mobile-menu-item">
+    <a href="#" onclick="toggleMobileSubmenu(this); return false;">{{ t(request, 'nav.reports') }}</a>
+    <div class="mobile-submenu">
+      <a href="/reports/daily" onclick="closeMobileMenu()">{{ t(request, 'nav.daily') }}</a>
+      <a href="/costs" onclick="closeMobileMenu()">{{ t(request, 'nav.costs') }}</a>
+    </div>
+  </div>
+  
+  <div class="mobile-menu-item">
+    <a href="#" onclick="toggleMobileSubmenu(this); return false;">💰 Finans</a>
+    <div class="mobile-submenu">
+      <a href="/accounts/table" onclick="closeMobileMenu()">Hesaplar</a>
+      <a href="/income/table" onclick="closeMobileMenu()">Gelir Girişi</a>
+      <a href="/costs" onclick="closeMobileMenu()">Giderler</a>
+      <a href="/suppliers" onclick="closeMobileMenu()">Cari Hesaplar</a>
+      <a href="/reports/finance" onclick="closeMobileMenu()">Finans Raporu</a>
+    </div>
+  </div>
+  
+  <div class="mobile-menu-item">
+    <a href="#" onclick="toggleMobileSubmenu(this); return false;">{{ t(request, 'nav.admin') }}</a>
+    <div class="mobile-submenu">
+      <a href="/noc" onclick="closeMobileMenu()">{{ t(request, 'nav.noc') }}</a>
+      <a href="/admin/status" onclick="closeMobileMenu()">{{ t(request, 'nav.system_status') }}</a>
+      <a href="/admin/health" onclick="closeMobileMenu()">{{ t(request, 'nav.health_json') }}</a>
+      <a href="/admin/version" onclick="closeMobileMenu()">{{ t(request, 'nav.version_json') }}</a>
+      <a href="/admin/fix/message-timestamps" onclick="closeMobileMenu()">{{ t(request, 'nav.fix_message_ts') }}</a>
+      <a href="/admin/debug/jobs?kind=ingest" onclick="closeMobileMenu()">{{ t(request, 'nav.jobs_ingest') }}</a>
+      <a href="/admin/debug/attachments" onclick="closeMobileMenu()">{{ t(request, 'nav.attachments_json') }}</a>
+      <a href="/admin/debug/conversations" onclick="closeMobileMenu()">{{ t(request, 'nav.conversations_json') }}</a>
+      <a href="/soap-test" onclick="closeMobileMenu()">📦 SOAP Test (Surat Kargo)</a>
+      <a href="#" id="mobileInvalidateCacheLink" onclick="closeMobileMenu()">{{ t(request, 'nav.cache_invalidate') }}</a>
+    </div>
+  </div>
+  
+  <div class="mobile-menu-item">
+    <a href="#" onclick="toggleMobileSubmenu(this); return false;">{{ t(request, 'nav.legal') }}</a>
+    <div class="mobile-submenu">
+      <a href="/privacy" onclick="closeMobileMenu()">{{ t(request, 'nav.privacy') }}</a>
+      <a href="/terms" onclick="closeMobileMenu()">{{ t(request, 'nav.terms') }}</a>
+      <a href="/data_deletion" onclick="closeMobileMenu()">{{ t(request, 'nav.data_deletion') }}</a>
+    </div>
+  </div>
+  
+  <div class="mobile-menu-item">
+    <a href="#" onclick="toggleMobileSubmenu(this); return false;">{{ t(request, 'nav.language') }}</a>
+    <div class="mobile-submenu">
+      <a href="#" onclick="setLang('tr'); closeMobileMenu(); return false;">{{ t(request, 'lang.turkish') }}</a>
+      <a href="#" onclick="setLang('en'); closeMobileMenu(); return false;">{{ t(request, 'lang.english') }}</a>
+    </div>
+  </div>
+  
+  <div class="mobile-menu-item" style="margin-top:20px; padding-top:20px; border-top:1px solid rgba(255,255,255,0.1);">
+    <button id="mobileLogoutBtn" class="logout" type="button" style="width:100%;" onclick="closeMobileMenu()">{{ t(request, 'nav.logout') }}</button>
+  </div>
+</div>
+
+<script>
+  // Mobile logout handler
+  document.addEventListener('DOMContentLoaded', function() {
+    const mobileLogoutBtn = document.getElementById('mobileLogoutBtn');
+    if (mobileLogoutBtn) {
+      mobileLogoutBtn.addEventListener('click', async function() {
+        try { 
+          await fetch('/auth/logout', { method: 'POST' }); 
+          location.href = '/auth/login'; 
+        } catch(e){ 
+          alert('Çıkış hatası'); 
+        }
+      });
+    }
+    
+    const mobileInvalidateCacheLink = document.getElementById('mobileInvalidateCacheLink');
+    if (mobileInvalidateCacheLink) {
+      mobileInvalidateCacheLink.addEventListener('click', async function(e) {
+        e.preventDefault();
+        try {
+          const res = await fetch('/admin/cache/invalidate', { method: 'POST' });
+          let msg = "{{ t(request, 'nav.cache_cleared') }}";
+          try { 
+            const j = await res.json(); 
+            if (!res.ok) msg = "{{ t(request, 'nav.clear_error') }}" + ': ' + (j && (j.detail||j.error) ? (j.detail||j.error) : res.status); 
+          } catch(_e) {}
+          alert(msg);
+        } catch(e){ 
+          alert("{{ t(request, 'nav.clear_error') }}"); 
+        }
+      });
+    }
+  });
 </script>
 
 

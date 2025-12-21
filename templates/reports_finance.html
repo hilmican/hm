@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <title>Finans Raporu</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
       h1 { margin-bottom: 12px; }
@@ -31,6 +32,32 @@
       a { color: #2563eb; text-decoration: none; }
       a:hover { text-decoration: underline; }
       .muted { color: #6b7280; font-size: 13px; margin-bottom: 8px; }
+      
+      /* Mobile responsive styles */
+      @media (max-width: 768px) {
+        body { margin: 12px; }
+        h1 { font-size: 20px; }
+        .toolbar { flex-direction: column; align-items: stretch; }
+        .toolbar > div { width: 100%; }
+        .toolbar input[type="date"] { width: 100%; }
+        .grid { grid-template-columns: 1fr; gap: 12px; }
+        .stat-value { font-size: 24px; }
+        table { font-size: 12px; }
+        th, td { padding: 6px 8px; }
+        .card .body { padding: 8px 12px; }
+        .pagination { justify-content: center; }
+        .pagination a, .pagination span { padding: 4px 8px; font-size: 12px; }
+        .card { margin-top: 12px; }
+      }
+      
+      @media (max-width: 480px) {
+        body { margin: 8px; }
+        h1 { font-size: 18px; margin-bottom: 8px; }
+        table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        th, td { font-size: 11px; padding: 4px 6px; white-space: nowrap; }
+        .stat-value { font-size: 20px; }
+        .stat-label { font-size: 12px; }
+      }
     </style>
   </head>
   <body>
