@@ -50,6 +50,20 @@
           </div>
         </div>
         <div class="field">
+          <label>
+            <input type="checkbox" 
+                   name="ai_reply_intro_only_mode" 
+                   value="1" 
+                   {% if ai_reply_intro_only_mode %}checked{% endif %} />
+            Sadece İlk Tanıtım Mesajlarını Gönder (Resimler Dahil)
+          </label>
+          <div class="meta">
+            Bu seçenek aktifken AI sadece ilk tanıtım mesajlarını (resimler dahil) gönderir. 
+            Sonraki mesajlar için shadow reply üretilir ama gönderilmez. 
+            İlk mesajdan sonra müşteriden cevap geldiğinde admine bildirim gönderilir.
+          </div>
+        </div>
+        <div class="field">
           <label for="ai_model">AI Model (Gerçek Cevaplar)</label>
           <select name="ai_model" id="ai_model" style="width:100%; max-width:300px; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
             {% if model_groups %}

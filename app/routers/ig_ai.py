@@ -2138,6 +2138,14 @@ def ai_settings_page(request: Request):
         ai_shadow_temp_opt_out = False
         if temp_opt_out_setting and temp_opt_out_setting.value:
             ai_shadow_temp_opt_out = str(temp_opt_out_setting.value).strip().lower() in ("1","true","yes","on")
+        
+        # Get intro_only_mode setting
+        intro_only_setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_reply_intro_only_mode")
+        ).first()
+        intro_only_mode = False
+        if intro_only_setting and intro_only_setting.value:
+            intro_only_mode = str(intro_only_setting.value).strip().lower() in ("1","true","yes","on")
     
     templates = request.app.state.templates
     return templates.TemplateResponse(
@@ -2149,6 +2157,7 @@ def ai_settings_page(request: Request):
             "ai_shadow_model": ai_shadow_model,
             "ai_shadow_temperature": shadow_temperature,
             "ai_shadow_temp_opt_out": ai_shadow_temp_opt_out,
+            "ai_reply_intro_only_mode": intro_only_mode,
             "model_groups": model_groups,
             "model_refresh_msg": status_msg,
         },
@@ -2162,6 +2171,7 @@ def save_ai_settings(
     ai_shadow_model: str = Form(default="gpt-4o-mini"),
     ai_shadow_temperature: str = Form(default="0.1"),
     ai_shadow_temp_opt_out: str = Form(default="0"),
+    ai_reply_intro_only_mode: str = Form(default="false"),
 ):
     """Save global AI reply settings."""
     from ..models import SystemSetting
@@ -2184,10 +2194,12 @@ def save_ai_settings(
 
     shadow_temperature = _normalize_temp(ai_shadow_temperature)
     temp_opt_out = ai_shadow_temp_opt_out.lower() in ("true", "1", "yes", "on")
+    intro_only_mode = ai_reply_intro_only_mode.lower() in ("true", "1", "yes", "on")
 
     log.info(
-        "Saving AI settings enabled=%s raw_model=%s raw_shadow=%s normalized_model=%s normalized_shadow=%s temp=%.2f",
+        "Saving AI settings enabled=%s intro_only_mode=%s raw_model=%s raw_shadow=%s normalized_model=%s normalized_shadow=%s temp=%.2f",
         enabled,
+        intro_only_mode,
         raw_model,
         raw_shadow,
         ai_model,
@@ -2291,6 +2303,24 @@ def save_ai_settings(
                 description="If true, do not send temperature param (use model default)",
             )
             session.add(temp_opt_setting)
+        
+        # Save intro_only_mode setting
+        intro_only_setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_reply_intro_only_mode")
+        ).first()
+
+        intro_value = "true" if intro_only_mode else "false"
+        if intro_only_setting:
+            intro_only_setting.value = intro_value
+            intro_only_setting.updated_at = dt.datetime.utcnow()
+            session.add(intro_only_setting)
+        else:
+            intro_only_setting = SystemSetting(
+                key="ai_reply_intro_only_mode",
+                value=intro_value,
+                description="If true, only send first intro messages (with images), subsequent messages will be shadow replies only",
+            )
+            session.add(intro_only_setting)
         
         session.commit()
     

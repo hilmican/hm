@@ -339,10 +339,10 @@ AUTO_RETRY_MAX = max(
 )
 
 
-def _is_ai_reply_sending_enabled(conversation_id: int) -> tuple[bool, bool]:
+def _is_ai_reply_sending_enabled(conversation_id: int) -> tuple[bool, bool, bool]:
 	"""
 	Check if AI reply sending is enabled globally and for the product.
-	Returns (global_enabled, product_enabled).
+	Returns (global_enabled, product_enabled, intro_only_mode).
 	Shadow replies always run regardless of these settings.
 	"""
 	# Check global setting
@@ -375,7 +375,19 @@ def _is_ai_reply_sending_enabled(conversation_id: int) -> tuple[bool, bool]:
 	except Exception:
 		product_enabled = True
 	
-	return global_enabled, product_enabled
+	# Check intro_only_mode setting
+	intro_only_mode = False
+	try:
+		with get_session() as session:
+			setting = session.exec(
+				select(SystemSetting).where(SystemSetting.key == "ai_reply_intro_only_mode")
+			).first()
+			if setting:
+				intro_only_mode = setting.value.lower() in ("true", "1", "yes")
+	except Exception:
+		intro_only_mode = False
+	
+	return global_enabled, product_enabled, intro_only_mode
 
 
 def _utcnow() -> dt.datetime:
@@ -963,7 +975,7 @@ def main() -> None:
 				should_auto_send = confidence >= AUTO_SEND_CONFIDENCE_THRESHOLD
 				
 				# Check global and product settings
-				global_enabled, product_enabled = _is_ai_reply_sending_enabled(cid)
+				global_enabled, product_enabled, intro_only_mode = _is_ai_reply_sending_enabled(cid)
 				if not global_enabled or not product_enabled:
 					should_auto_send = False
 					if not global_enabled:
@@ -984,8 +996,17 @@ def main() -> None:
 				except Exception:
 					is_first_outbound = False
 				
+				# If intro_only_mode is enabled and this is not the first message, don't auto-send
+				if intro_only_mode and not is_first_outbound:
+					should_auto_send = False
+					try:
+						log.info("ai_shadow: intro_only_mode enabled, skipping auto-send for non-first message conversation_id=%s", cid)
+					except Exception:
+						pass
+				
 				first_message_override = False
 				if is_first_outbound and global_enabled and product_enabled and not should_auto_send:
+					# Override for first message (intro_only_mode doesn't block first message)
 					first_message_override = True
 					should_auto_send = True
 					try:

@@ -545,6 +545,7 @@ class AiShadowState(SQLModel, table=True):
 	status: Optional[str] = Field(default="pending", index=True, description="pending|running|suggested|paused|exhausted|error")
 	ai_images_sent: bool = Field(default=False, description="Whether AI already scheduled product images for this conversation")
 	state_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+	first_reply_notified_at: Optional[dt.datetime] = Field(default=None, description="When admin was notified about first customer reply after AI intro message")
 	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 
 

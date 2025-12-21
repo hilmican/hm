@@ -984,6 +984,19 @@ def init_db() -> None:
                         conn.exec_driver_sql("ALTER TABLE ai_shadow_reply ADD COLUMN state_json LONGTEXT NULL")
                 except Exception:
                     pass
+                # Add first_reply_notified_at column to ai_shadow_state
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ai_shadow_state' AND COLUMN_NAME = 'first_reply_notified_at'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE ai_shadow_state ADD COLUMN first_reply_notified_at DATETIME NULL")
+                except Exception:
+                    pass
                 # Create system_settings table
                 _exec_ddl(
                     """

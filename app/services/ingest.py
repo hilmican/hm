@@ -278,6 +278,157 @@ def _categorize_inbound_message(text: Optional[str], direction: str) -> str:
 	return "other"
 
 
+def _check_and_notify_first_reply(conversation_id: int) -> None:
+	"""
+	Check if this is the first customer reply after AI sent an intro message (with images).
+	If so, send admin notification.
+	"""
+	if not conversation_id:
+		return
+	
+	try:
+		with get_session() as session:
+			# Check if notification was already sent
+			shadow_state = session.exec(
+				text("SELECT first_reply_notified_at FROM ai_shadow_state WHERE conversation_id=:cid").params(cid=int(conversation_id))
+			).first()
+			if shadow_state:
+				notified_at = shadow_state.first_reply_notified_at if hasattr(shadow_state, "first_reply_notified_at") else (shadow_state[0] if len(shadow_state) > 0 else None)
+				if notified_at:
+					# Already notified
+					return
+			
+			# Find first AI greeting message
+			first_ai_greeting = session.exec(
+				text("""
+					SELECT id, timestamp_ms, ai_json, message_category
+					FROM message
+					WHERE conversation_id=:cid
+						AND direction='out'
+						AND message_category='greeting'
+						AND ai_status='sent'
+					ORDER BY timestamp_ms ASC
+					LIMIT 1
+				""").params(cid=int(conversation_id))
+			).first()
+			
+			if not first_ai_greeting:
+				# No AI greeting message found
+				return
+			
+			first_msg_id = first_ai_greeting.id if hasattr(first_ai_greeting, "id") else (first_ai_greeting[0] if len(first_ai_greeting) > 0 else None)
+			first_msg_ts = first_ai_greeting.timestamp_ms if hasattr(first_ai_greeting, "timestamp_ms") else (first_ai_greeting[1] if len(first_ai_greeting) > 1 else None)
+			first_msg_ai_json = first_ai_greeting.ai_json if hasattr(first_ai_greeting, "ai_json") else (first_ai_greeting[2] if len(first_ai_greeting) > 2 else None)
+			
+			if not first_msg_ts:
+				return
+			
+			# Count images sent with first message
+			# Method 1: Check ai_json for message_index and total_messages
+			image_count = 0
+			try:
+				if first_msg_ai_json:
+					ai_data = json.loads(first_msg_ai_json)
+					if isinstance(ai_data, dict):
+						total_messages = ai_data.get("total_messages", 1)
+						# Count non-text messages (images)
+						if total_messages > 1:
+							# Check messages in same time window (±5 seconds)
+							time_window_start = int(first_msg_ts) - 5000
+							time_window_end = int(first_msg_ts) + 5000
+							related_messages = session.exec(
+								text("""
+									SELECT ai_json, message_category
+									FROM message
+									WHERE conversation_id=:cid
+										AND direction='out'
+										AND timestamp_ms BETWEEN :start AND :end
+										AND ai_status='sent'
+									ORDER BY timestamp_ms ASC
+								""").params(cid=int(conversation_id), start=time_window_start, end=time_window_end)
+							).all()
+							
+							for msg in related_messages:
+								msg_ai_json = msg.ai_json if hasattr(msg, "ai_json") else (msg[0] if len(msg) > 0 else None)
+								if msg_ai_json:
+									try:
+										msg_data = json.loads(msg_ai_json)
+										if isinstance(msg_data, dict):
+											is_text = msg_data.get("is_text", True)
+											if not is_text:
+												image_count += 1
+									except Exception:
+										pass
+			except Exception:
+				pass
+			
+			# Method 2: Check ai_shadow_reply actions_json for send_product_images
+			if image_count == 0:
+				try:
+					shadow_reply = session.exec(
+						text("""
+							SELECT actions_json
+							FROM ai_shadow_reply
+							WHERE conversation_id=:cid
+								AND status='sent'
+								AND created_at >= DATE_SUB((SELECT created_at FROM ai_shadow_reply WHERE conversation_id=:cid AND status='sent' ORDER BY created_at ASC LIMIT 1), INTERVAL 10 SECOND)
+							ORDER BY created_at ASC
+							LIMIT 1
+						""").params(cid=int(conversation_id))
+					).first()
+					
+					if shadow_reply:
+						actions_json = shadow_reply.actions_json if hasattr(shadow_reply, "actions_json") else (shadow_reply[0] if len(shadow_reply) > 0 else None)
+						if actions_json:
+							try:
+								actions = json.loads(actions_json)
+								if isinstance(actions, list):
+									for action in actions:
+										if isinstance(action, dict) and action.get("type") == "send_product_images":
+											image_count = action.get("image_count", 0)
+											break
+							except Exception:
+								pass
+				except Exception:
+					pass
+			
+			# Send notification
+			image_text = ""
+			if image_count > 0:
+				image_text = f" ({image_count} resim ile)"
+			
+			notification_msg = f"İlk tanıtım mesajı{image_text} gönderildikten sonra müşteriden ilk cevap geldi."
+			
+			create_admin_notification(
+				int(conversation_id),
+				notification_msg,
+				message_type="info",
+				metadata={
+					"conversation_id": int(conversation_id),
+					"kind": "first_reply_after_intro",
+					"first_ai_message_id": first_msg_id,
+					"image_count": image_count,
+				},
+			)
+			
+			# Mark as notified (insert or update)
+			session.exec(
+				text("""
+					INSERT INTO ai_shadow_state (conversation_id, first_reply_notified_at, updated_at)
+					VALUES (:cid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+					ON DUPLICATE KEY UPDATE
+						first_reply_notified_at=CURRENT_TIMESTAMP,
+						updated_at=CURRENT_TIMESTAMP
+				""").params(cid=int(conversation_id))
+			)
+			session.commit()
+	except Exception as e:
+		try:
+			_log.warning("_check_and_notify_first_reply error cid=%s err=%s", conversation_id, e)
+		except Exception:
+			pass
+
+
 def _auto_escalate_conversation_from_agent(
 	conversation_id: Optional[int],
 	message_id: Optional[int],
@@ -2708,6 +2859,8 @@ def handle(raw_event_id: int) -> int:
 							int(insert_result.conversation_id),
 							int(insert_result.timestamp_ms) if insert_result.timestamp_ms is not None else None,
 						)
+						# Check and notify if this is first reply after AI intro message
+						_check_and_notify_first_reply(int(insert_result.conversation_id))
 				except Exception:
 					pass
 				try:
