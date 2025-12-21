@@ -1,12 +1,13 @@
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import datetime as dt
+import json
 
-from fastapi import APIRouter, Request, Query, Form
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Request, Query, Form, HTTPException
+from fastapi.responses import RedirectResponse, JSONResponse
 from sqlmodel import select, delete
 
 from ..db import get_session
-from ..models import Cost, CostType, Account, Supplier, Product
+from ..models import Cost, CostType, Account, Supplier, Product, CostHistoryLog
 
 
 router = APIRouter()
@@ -19,6 +20,41 @@ def _parse_date_or_default(value: Optional[str], fallback: dt.date) -> dt.date:
 	except Exception:
 		pass
 	return fallback
+
+
+def _log_cost_change(
+	session,
+	cost_id: int,
+	action: str,
+	old_data: Optional[Dict] = None,
+	new_data: Optional[Dict] = None,
+	user_id: Optional[int] = None
+):
+	"""Log cost entry changes to history."""
+	log_entry = CostHistoryLog(
+		cost_id=cost_id,
+		action=action,
+		old_data_json=json.dumps(old_data) if old_data else None,
+		new_data_json=json.dumps(new_data) if new_data else None,
+		user_id=user_id
+	)
+	session.add(log_entry)
+
+
+def _cost_to_dict(cost: Cost) -> Dict:
+	"""Convert Cost object to dictionary for logging."""
+	return {
+		"id": cost.id,
+		"type_id": cost.type_id,
+		"account_id": cost.account_id,
+		"supplier_id": cost.supplier_id,
+		"product_id": cost.product_id,
+		"quantity": cost.quantity,
+		"is_payment_to_supplier": cost.is_payment_to_supplier,
+		"amount": cost.amount,
+		"date": cost.date.isoformat() if cost.date else None,
+		"details": cost.details,
+	}
 
 
 @router.get("")
@@ -188,9 +224,24 @@ def add_cost(
 				is_payment_to_supplier=is_payment_to_supplier,
 			)
 			session.add(c)
+			session.flush()
+			
+			# Log creation
+			if c.id:
+				user_id = None  # TODO: Get from session if auth is implemented
+				_log_cost_change(
+					session,
+					c.id,
+					"create",
+					old_data=None,
+					new_data=_cost_to_dict(c),
+					user_id=user_id
+				)
+			
 			session.commit()
 		except Exception:
 			# best-effort insert; ignore on error
+			session.rollback()
 			pass
 	url = "/costs"
 	if start or end:
@@ -211,6 +262,23 @@ def delete_costs(
 ):
 	with get_session() as session:
 		if cost_ids:
+			# Get costs before deleting for logging
+			costs_to_delete = session.exec(
+				select(Cost).where(Cost.id.in_(cost_ids))
+			).all()
+			
+			# Delete existing history log records manually if FK constraint is not CASCADE yet
+			# This is a workaround until the migration updates the constraint to CASCADE
+			for cost in costs_to_delete:
+				if cost.id:
+					history_logs = session.exec(
+						select(CostHistoryLog).where(CostHistoryLog.cost_id == cost.id)
+					).all()
+					for log in history_logs:
+						session.delete(log)
+			
+			session.flush()  # Flush to ensure history logs are deleted before deleting costs
+			
 			# Delete the selected costs
 			session.exec(delete(Cost).where(Cost.id.in_(cost_ids)))
 			session.commit()
@@ -275,5 +343,179 @@ def add_supplier(
 			pass
 	
 	return RedirectResponse(url="/costs", status_code=303)
+
+
+@router.get("/{cost_id}")
+def get_cost(cost_id: int):
+	"""Get a single cost entry by ID."""
+	with get_session() as session:
+		cost = session.exec(select(Cost).where(Cost.id == cost_id)).first()
+		if not cost:
+			raise HTTPException(status_code=404, detail="Cost entry not found")
+		
+		cost_type = session.exec(select(CostType).where(CostType.id == cost.type_id)).first()
+		account = session.exec(select(Account).where(Account.id == cost.account_id)).first() if cost.account_id else None
+		supplier = session.exec(select(Supplier).where(Supplier.id == cost.supplier_id)).first() if cost.supplier_id else None
+		product = session.exec(select(Product).where(Product.id == cost.product_id)).first() if cost.product_id else None
+		
+		return {
+			"id": cost.id,
+			"type_id": cost.type_id,
+			"type_name": cost_type.name if cost_type else "",
+			"account_id": cost.account_id,
+			"account_name": account.name if account else "",
+			"supplier_id": cost.supplier_id,
+			"supplier_name": supplier.name if supplier else "",
+			"product_id": cost.product_id,
+			"product_name": product.name if product else "",
+			"quantity": cost.quantity,
+			"is_payment_to_supplier": cost.is_payment_to_supplier,
+			"amount": cost.amount,
+			"date": cost.date.isoformat() if cost.date else None,
+			"details": cost.details,
+		}
+
+
+@router.post("/update")
+def update_cost(
+	request: Request,
+	cost_id: int = Form(...),
+	type_id: Optional[int] = Form(default=None),
+	amount: Optional[float] = Form(default=None),
+	date: Optional[str] = Form(default=None),
+	details: Optional[str] = Form(default=None),
+	account_id: Optional[int] = Form(default=None),
+	supplier_id: Optional[int] = Form(default=None),
+	product_id: Optional[int] = Form(default=None),
+	quantity: Optional[int] = Form(default=None),
+	is_payment_to_supplier: Optional[bool] = Form(default=None),
+	start: Optional[str] = Form(default=None),
+	end: Optional[str] = Form(default=None),
+):
+	"""Update an existing cost entry."""
+	with get_session() as session:
+		cost = session.exec(select(Cost).where(Cost.id == cost_id)).first()
+		if not cost:
+			raise HTTPException(status_code=404, detail="Cost entry not found")
+		
+		# Store old data for logging
+		old_data = _cost_to_dict(cost)
+		
+		# Update fields if provided
+		if type_id is not None:
+			cost.type_id = int(type_id)
+		if amount is not None:
+			cost.amount = float(amount)
+		if date is not None:
+			try:
+				cost.date = dt.date.fromisoformat(date)
+			except Exception:
+				pass
+		if details is not None:
+			cost.details = details.strip() if details else None
+		if account_id is not None:
+			cost.account_id = int(account_id) if account_id else None
+		if supplier_id is not None:
+			cost.supplier_id = int(supplier_id) if supplier_id else None
+		if product_id is not None:
+			cost.product_id = int(product_id) if product_id else None
+		if quantity is not None:
+			cost.quantity = int(quantity) if quantity else None
+		if is_payment_to_supplier is not None:
+			cost.is_payment_to_supplier = is_payment_to_supplier
+		
+		# Log update
+		user_id = None  # TODO: Get from session if auth is implemented
+		_log_cost_change(
+			session,
+			cost_id,
+			"update",
+			old_data=old_data,
+			new_data=_cost_to_dict(cost),
+			user_id=user_id
+		)
+		
+		session.add(cost)
+		session.commit()
+	
+	url = "/costs"
+	if start or end:
+		params = []
+		if start:
+			params.append(f"start={start}")
+		if end:
+			params.append(f"end={end}")
+		url = f"{url}?{'&'.join(params)}"
+	return RedirectResponse(url=url, status_code=303)
+
+
+@router.delete("/{cost_id}")
+def delete_cost(
+	cost_id: int,
+	request: Request,
+	start: Optional[str] = Query(default=None),
+	end: Optional[str] = Query(default=None),
+):
+	"""Delete a single cost entry."""
+	with get_session() as session:
+		cost = session.exec(select(Cost).where(Cost.id == cost_id)).first()
+		if not cost:
+			raise HTTPException(status_code=404, detail="Cost entry not found")
+		
+		# Store old data for logging
+		old_data = _cost_to_dict(cost)
+		
+		# Delete existing history log records manually if FK constraint is not CASCADE yet
+		# This is a workaround until the migration updates the constraint to CASCADE
+		history_logs = session.exec(
+			select(CostHistoryLog).where(CostHistoryLog.cost_id == cost_id)
+		).all()
+		for log in history_logs:
+			session.delete(log)
+		session.flush()  # Flush to ensure history logs are deleted before deleting cost
+		
+		# Delete cost entry
+		session.delete(cost)
+		session.commit()
+	
+	url = "/costs"
+	if start or end:
+		params = []
+		if start:
+			params.append(f"start={start}")
+		if end:
+			params.append(f"end={end}")
+		url = f"{url}?{'&'.join(params)}"
+	return RedirectResponse(url=url, status_code=303)
+
+
+@router.get("/{cost_id}/history")
+def get_cost_history(cost_id: int):
+	"""Get history log for a cost entry."""
+	with get_session() as session:
+		# Verify cost exists (or was deleted)
+		cost = session.exec(select(Cost).where(Cost.id == cost_id)).first()
+		
+		logs = session.exec(
+			select(CostHistoryLog)
+			.where(CostHistoryLog.cost_id == cost_id)
+			.order_by(CostHistoryLog.created_at.desc())
+		).all()
+		
+		return {
+			"cost_id": cost_id,
+			"cost_exists": cost is not None,
+			"history": [
+				{
+					"id": log.id,
+					"action": log.action,
+					"old_data": json.loads(log.old_data_json) if log.old_data_json else None,
+					"new_data": json.loads(log.new_data_json) if log.new_data_json else None,
+					"user_id": log.user_id,
+					"created_at": log.created_at.isoformat() if log.created_at else None,
+				}
+				for log in logs
+			]
+		}
 
 

@@ -22,6 +22,14 @@
       .field label { display:block; font-size:12px; color:#374151; margin-bottom:4px; }
       .muted { color:#6b7280; font-size:12px; }
       input[type="checkbox"] { margin: 0; }
+      .btn-danger { background:#ef4444; }
+      .btn-sm { font-size: 12px; padding: 4px 8px; }
+      .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+      .modal-content { background: #fff; margin: 5% auto; padding: 20px; border-radius: 8px; width: 90%; max-width: 600px; }
+      .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+      .modal-header h3 { margin: 0; }
+      .close { font-size: 28px; font-weight: bold; cursor: pointer; color: #aaa; }
+      .close:hover { color: #000; }
     </style>
   </head>
   <body>
@@ -157,11 +165,12 @@
               <th>Cari</th>
               <th>Hesap</th>
               <th>Detay</th>
+              <th>İşlemler</th>
             </tr>
           </thead>
           <tbody>
             {% for r in rows %}
-            <tr>
+            <tr id="cost-row-{{ r.id }}">
               <td><input type="checkbox" name="cost_ids" value="{{ r.id }}" form="bulkDeleteForm"></td>
               <td>{{ r.date }}</td>
               <td>{{ type_map.get(r.type_id) or r.type_id }}</td>
@@ -184,6 +193,10 @@
                     {{ product_map.get(r.product_id, 'Ürün') }} × {{ r.quantity }} adet
                   </span>
                 {% endif %}
+              </td>
+              <td>
+                <button class="btn btn-sm" onclick="editCost({{ r.id }})" style="padding:4px 8px; font-size:12px; margin-right:4px;">Düzenle</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteCost({{ r.id }})" style="padding:4px 8px; font-size:12px;">Sil</button>
               </td>
             </tr>
             {% endfor %}
@@ -280,7 +293,220 @@
           }
         });
       });
+
+      // Edit cost entry
+      async function editCost(costId) {
+        try {
+          const res = await fetch(`/costs/${costId}`);
+          const data = await res.json();
+          
+          // Populate edit form
+          document.getElementById('editCostId').value = data.id;
+          document.getElementById('editTypeId').value = data.type_id;
+          document.getElementById('editAmount').value = data.amount;
+          document.getElementById('editDate').value = data.date || '';
+          document.getElementById('editDetails').value = data.details || '';
+          document.getElementById('editAccountId').value = data.account_id || '';
+          document.getElementById('editSupplierId').value = data.supplier_id || '';
+          document.getElementById('editProductId').value = data.product_id || '';
+          document.getElementById('editQuantity').value = data.quantity || '';
+          document.getElementById('editIsPaymentToSupplier').checked = data.is_payment_to_supplier || false;
+          
+          // Update form fields visibility for MERTER MAL ALIM
+          const selectedTypeId = parseInt(data.type_id);
+          const isMerterMalAlim = selectedTypeId === 9;
+          const productField = document.getElementById('editProductField');
+          const quantityField = document.getElementById('editQuantityField');
+          if (isMerterMalAlim) {
+            productField.style.display = 'block';
+            quantityField.style.display = 'block';
+          } else {
+            productField.style.display = 'none';
+            quantityField.style.display = 'none';
+          }
+          
+          // Show modal
+          document.getElementById('editModal').style.display = 'block';
+        } catch (e) {
+          console.error('Failed to load cost:', e);
+          alert('Maliyet bilgisi yüklenemedi');
+        }
+      }
+
+      // Delete cost entry
+      async function deleteCost(costId) {
+        if (!confirm('Bu maliyet kaydını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.')) {
+          return;
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        
+        try {
+          const url = `/costs/${costId}?${params.toString()}`;
+          const res = await fetch(url, {
+            method: 'DELETE',
+          });
+
+          if (res.ok) {
+            alert('Maliyet kaydı başarıyla silindi.');
+            location.reload();
+          } else {
+            const data = await res.json();
+            alert('Hata: ' + (data.detail || 'Silme işlemi başarısız'));
+          }
+        } catch (e) {
+          console.error('Failed to delete cost:', e);
+          alert('Silme işlemi başarısız');
+        }
+      }
+
+      // Close modal
+      function closeEditModal() {
+        document.getElementById('editModal').style.display = 'none';
+      }
+
+      // Close modal when clicking outside
+      window.onclick = function(event) {
+        const modal = document.getElementById('editModal');
+        if (event.target == modal) {
+          modal.style.display = 'none';
+        }
+      }
+
+      // Handle MERTER MAL ALIM (type_id=9) form changes in edit modal
+      document.addEventListener('DOMContentLoaded', function() {
+        const editModal = document.getElementById('editModal');
+        if (editModal) {
+          const editTypeSelect = document.getElementById('editTypeId');
+          const editProductField = document.getElementById('editProductField');
+          const editQuantityField = document.getElementById('editQuantityField');
+          const editProductSelect = document.getElementById('editProductId');
+          const editQuantityInput = document.getElementById('editQuantity');
+          const editForm = document.getElementById('editCostForm');
+
+          if (editTypeSelect) {
+            editTypeSelect.addEventListener('change', function() {
+              const selectedTypeId = parseInt(editTypeSelect.value);
+              const isMerterMalAlim = selectedTypeId === 9;
+
+              if (isMerterMalAlim) {
+                editProductField.style.display = 'block';
+                editQuantityField.style.display = 'block';
+                editProductSelect.required = true;
+                editQuantityInput.required = true;
+              } else {
+                editProductField.style.display = 'none';
+                editQuantityField.style.display = 'none';
+                editProductSelect.required = false;
+                editQuantityInput.required = false;
+                editProductSelect.value = '';
+                editQuantityInput.value = '';
+              }
+            });
+          }
+
+          if (editForm) {
+            editForm.addEventListener('submit', function(e) {
+              const selectedTypeId = parseInt(editTypeSelect.value);
+              if (selectedTypeId === 9) {
+                if (!editProductSelect.value) {
+                  e.preventDefault();
+                  alert('MERTER MAL ALIM için ürün seçimi zorunludur.');
+                  return false;
+                }
+                if (!editQuantityInput.value || parseInt(editQuantityInput.value) <= 0) {
+                  e.preventDefault();
+                  alert('MERTER MAL ALIM için adet bilgisi zorunludur ve 0\'dan büyük olmalıdır.');
+                  return false;
+                }
+              }
+            });
+          }
+        }
+      });
     </script>
+
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Maliyet Düzenle</h3>
+          <span class="close" onclick="closeEditModal()">&times;</span>
+        </div>
+        <form id="editCostForm" method="post" action="/costs/update" class="row">
+          <input type="hidden" id="editCostId" name="cost_id" />
+          {% if start %}<input type="hidden" name="start" value="{{ start }}"/>{% endif %}
+          {% if end %}<input type="hidden" name="end" value="{{ end }}"/>{% endif %}
+          
+          <div class="field">
+            <label>Tür</label>
+            <select name="type_id" id="editTypeId" required>
+              {% for t in types %}
+                <option value="{{ t.id }}">{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>Tutar</label>
+            <input type="number" step="0.01" name="amount" id="editAmount" required />
+          </div>
+          <div class="field">
+            <label>Tarih</label>
+            <input type="date" name="date" id="editDate" />
+          </div>
+          <div class="field">
+            <label>Cari (Opsiyonel)</label>
+            <select name="supplier_id" id="editSupplierId">
+              <option value="">Cari seçilmedi</option>
+              {% if general_supplier %}
+                <option value="{{ general_supplier.id }}">Genel Giderler</option>
+              {% endif %}
+              {% for sup in suppliers %}
+                {% if not general_supplier or sup.id != general_supplier.id %}
+                  <option value="{{ sup.id }}">{{ sup.name }}</option>
+                {% endif %}
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field" id="editProductField" style="display:none;">
+            <label>Ürün <span style="color:red;">*</span></label>
+            <select name="product_id" id="editProductId">
+              <option value="">Ürün seçin</option>
+              {% for prod in products %}
+                <option value="{{ prod.id }}">{{ prod.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field" id="editQuantityField" style="display:none;">
+            <label>Adet <span style="color:red;">*</span></label>
+            <input type="number" name="quantity" id="editQuantity" min="1" step="1" />
+          </div>
+          <div class="field">
+            <label>Hesap (Opsiyonel)</label>
+            <select name="account_id" id="editAccountId">
+              <option value="">Hesap seçilmedi</option>
+              {% for acc in accounts %}
+                <option value="{{ acc.id }}">{{ acc.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field" style="min-width:280px; flex:1">
+            <label>Detay</label>
+            <input type="text" name="details" id="editDetails" placeholder="örn. Kampanya X reklamları" />
+          </div>
+          <div class="field">
+            <label>
+              <input type="checkbox" name="is_payment_to_supplier" id="editIsPaymentToSupplier" />
+              Cariye Ödeme
+            </label>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:12px;">
+            <button class="btn" type="submit">Kaydet</button>
+            <button class="btn" type="button" onclick="closeEditModal()">İptal</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </body>
 </html>
 

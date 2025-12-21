@@ -1342,6 +1342,66 @@ def init_db() -> None:
                 except Exception:
                     pass
 
+                # Ensure costhistorylog table exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'costhistorylog'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql(
+                            """
+                            CREATE TABLE costhistorylog (
+                                id INT PRIMARY KEY AUTO_INCREMENT,
+                                cost_id INT NOT NULL,
+                                action VARCHAR(32) NOT NULL,
+                                old_data_json TEXT NULL,
+                                new_data_json TEXT NULL,
+                                user_id INT NULL,
+                                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                INDEX idx_costhistorylog_cost (cost_id),
+                                INDEX idx_costhistorylog_action (action),
+                                INDEX idx_costhistorylog_user (user_id),
+                                INDEX idx_costhistorylog_created (created_at),
+                                FOREIGN KEY (cost_id) REFERENCES cost(id) ON DELETE CASCADE,
+                                FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE SET NULL
+                            )
+                            """
+                        )
+                except Exception:
+                    pass
+
+                # Update costhistorylog foreign key to CASCADE if it exists but has wrong constraint
+                try:
+                    # Check if foreign key exists and what its delete rule is
+                    fk_row = conn.exec_driver_sql(
+                        """
+                        SELECT CONSTRAINT_NAME, DELETE_RULE
+                        FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+                        JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+                        ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+                        WHERE kcu.TABLE_SCHEMA = DATABASE()
+                        AND kcu.TABLE_NAME = 'costhistorylog'
+                        AND kcu.COLUMN_NAME = 'cost_id'
+                        AND kcu.REFERENCED_TABLE_NAME = 'cost'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if fk_row and fk_row[1] != 'CASCADE':
+                        # Drop old constraint and recreate with CASCADE
+                        constraint_name = fk_row[0]
+                        conn.exec_driver_sql(f"ALTER TABLE costhistorylog DROP FOREIGN KEY {constraint_name}")
+                        conn.exec_driver_sql(
+                            "ALTER TABLE costhistorylog "
+                            "ADD CONSTRAINT costhistorylog_ibfk_1 "
+                            "FOREIGN KEY (cost_id) REFERENCES cost(id) ON DELETE CASCADE"
+                        )
+                except Exception:
+                    pass
+
                 # Ensure cost.account_id exists
                 try:
                     row = conn.exec_driver_sql(
