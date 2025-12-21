@@ -1314,6 +1314,34 @@ def init_db() -> None:
                 except Exception:
                     pass
 
+                # Update incomehistorylog foreign key to CASCADE if it exists but has wrong constraint
+                try:
+                    # Check if foreign key exists and what its delete rule is
+                    fk_row = conn.exec_driver_sql(
+                        """
+                        SELECT CONSTRAINT_NAME, DELETE_RULE
+                        FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+                        JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+                        ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+                        WHERE kcu.TABLE_SCHEMA = DATABASE()
+                        AND kcu.TABLE_NAME = 'incomehistorylog'
+                        AND kcu.COLUMN_NAME = 'income_id'
+                        AND kcu.REFERENCED_TABLE_NAME = 'income'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if fk_row and fk_row[1] != 'CASCADE':
+                        # Drop old constraint and recreate with CASCADE
+                        constraint_name = fk_row[0]
+                        conn.exec_driver_sql(f"ALTER TABLE incomehistorylog DROP FOREIGN KEY {constraint_name}")
+                        conn.exec_driver_sql(
+                            "ALTER TABLE incomehistorylog "
+                            "ADD CONSTRAINT incomehistorylog_ibfk_1 "
+                            "FOREIGN KEY (income_id) REFERENCES income(id) ON DELETE CASCADE"
+                        )
+                except Exception:
+                    pass
+
                 # Ensure cost.account_id exists
                 try:
                     row = conn.exec_driver_sql(

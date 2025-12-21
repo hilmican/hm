@@ -436,18 +436,18 @@ def delete_income(
 		for op in order_payments:
 			session.delete(op)
 		
-		# Log deletion before deleting
-		user_id = None  # TODO: Get from session if auth is implemented
-		_log_income_change(
-			session,
-			income_id,
-			"delete",
-			old_data=old_data,
-			new_data=None,
-			user_id=user_id
-		)
+		# Delete existing history log records manually if FK constraint is not CASCADE yet
+		# This is a workaround until the migration updates the constraint to CASCADE
+		history_logs = session.exec(
+			select(IncomeHistoryLog).where(IncomeHistoryLog.income_id == income_id)
+		).all()
+		for log in history_logs:
+			session.delete(log)
+		session.flush()  # Flush to ensure history logs are deleted before deleting income
 		
 		# Delete income entry
+		# Note: We don't log the deletion since we're deleting all history logs anyway
+		# Once the FK constraint is CASCADE, history logs will be automatically deleted
 		session.delete(income)
 		session.commit()
 	
