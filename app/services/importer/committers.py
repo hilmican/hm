@@ -45,8 +45,8 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             order.total_amount = rec.get("total_amount")
         if rec.get("shipment_date") and not order.shipment_date:
             order.shipment_date = rec.get("shipment_date")
-        if rec.get("shipment_date") and not order.data_date:
-            order.data_date = rec.get("shipment_date")
+        # DO NOT update data_date from shipment_date - preserve original data_date (from bizim excel import)
+        # data_date represents when the order data was imported, not the shipment date
         if rec.get("alici_kodu"):
             cur = order.notes or None
             ak = f"AliciKodu:{rec.get('alici_kodu')}"
@@ -142,8 +142,8 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 quantity=rec.get("quantity") or 1,
                 unit_price=rec.get("unit_price"),
                 total_amount=rec.get("total_amount"),
-                shipment_date=rec.get("shipment_date"),
-                data_date=rec.get("shipment_date") or run.data_date,
+                shipment_date=rec.get("shipment_date"),  # kargo tarihi from Excel row
+                data_date=run.data_date,  # data tarihi from filename (when kargo Excel was imported)
                 source="kargo",
                 notes=order_notes,
                 status="placeholder",

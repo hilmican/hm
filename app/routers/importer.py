@@ -441,12 +441,14 @@ def commit_import(body: dict, request: Request):
 					except Exception:
 						# Leave as None if filename doesn't contain a valid ISO date
 						pass
-			elif source == "kargo":  # derive from records' shipment_date
+			elif source == "kargo":  # derive from filename (when kargo Excel was imported/received)
+				# Extract date from filename (first 10 characters expected to be YYYY-MM-DD)
 				try:
 					import datetime as _dt
-					dates = [r.get("shipment_date") for r in records_loc if r.get("shipment_date")]
-					run.data_date = max(dates) if dates else None
+					prefix = str(fn)[:10]
+					run.data_date = _dt.date.fromisoformat(prefix)
 				except Exception:
+					# Leave as None if filename doesn't contain a valid ISO date
 					pass
 			else:  # returns -> expect dd_raw provided by caller (commit body)
 				if dd_raw:
