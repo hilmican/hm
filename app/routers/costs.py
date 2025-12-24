@@ -80,14 +80,13 @@ def costs_page(
 		# Get "Genel Giderler" supplier as default
 		general_supplier = session.exec(select(Supplier).where(Supplier.name == "Genel Giderler")).first()
 		
-		# Exclude payments to suppliers from the costs list (they're tracked separately)
+		# Show all costs including payments (payments are marked with "(Ödeme)" in the template)
 		rows = session.exec(
 			select(Cost)
 			.where(Cost.date.is_not(None))
 			.where(Cost.date >= start_date)
 			.where(Cost.date <= end_date)
 			.where(Cost.deleted_at.is_(None))
-			.where(or_(Cost.is_payment_to_supplier == False, Cost.is_payment_to_supplier.is_(None)))
 			.order_by(Cost.date.desc(), Cost.id.desc())
 		).all()
 		type_map = {t.id: t.name for t in types if t.id is not None}
