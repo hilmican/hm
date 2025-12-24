@@ -6,7 +6,7 @@ from typing import Optional
 from collections import defaultdict
 
 from ..db import get_session
-from ..models import Order, Payment, OrderItem, Item, Client, OrderEditLog
+from ..models import Order, Payment, OrderItem, Item, Client, OrderEditLog, ShippingCompanyRate
 from ..services.inventory import get_or_create_item as _get_or_create_item
 from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
@@ -264,6 +264,13 @@ def list_orders_table(
                 return cost >= 0.7 * total
             rows = [o for o in rows if _high_cost(o)]
 
+        # Load active shipping companies for dropdown
+        shipping_companies = session.exec(
+            select(ShippingCompanyRate)
+            .where(ShippingCompanyRate.is_active == True)
+            .order_by(ShippingCompanyRate.company_code)
+        ).all()
+        
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "orders_table.html",
@@ -275,6 +282,7 @@ def list_orders_table(
                 "status_map": status_map,
                 "shipping_map": shipping_map,
                 "cost_map": cost_map,
+                "shipping_companies": shipping_companies,
                 # totals over filtered rows
                 "sum_qty": sum(int(o.quantity or 0) for o in rows),
                 "sum_total": sum(float(o.total_amount or 0.0) for o in rows),

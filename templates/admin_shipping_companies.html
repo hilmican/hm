@@ -37,10 +37,15 @@
     <div class="container">
         <h2>🚚 Kargo Firmaları & Fiyatlar</h2>
         
+        <div id="alertContainer"></div>
+        
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <h3 style="margin: 0;">Kargo Firmaları</h3>
-                <a href="/admin/shipping-companies/new" class="btn primary">+ Yeni Kargo Firması</a>
+                <div style="display: flex; gap: 8px;">
+                    <button onclick="initDefault()" class="btn" style="background: #10b981; color: #fff; border-color: #10b981;">🔧 Varsayılanları Yükle (Sürat)</button>
+                    <a href="/admin/shipping-companies/new" class="btn primary">+ Yeni Kargo Firması</a>
+                </div>
             </div>
             
             {% if companies %}
@@ -106,6 +111,42 @@
             </p>
         </div>
     </div>
+    
+    <script>
+        function showAlert(message, type) {
+            const container = document.getElementById('alertContainer');
+            container.innerHTML = `<div class="alert ${type}">${message}</div>`;
+            setTimeout(() => {
+                container.innerHTML = '';
+            }, 5000);
+        }
+        
+        async function initDefault() {
+            if (!confirm('Varsayılan Sürat Kargo firmasını eklemek istediğinizden emin misiniz?')) {
+                return;
+            }
+            
+            try {
+                const res = await fetch('/admin/shipping-companies/init-default', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    showAlert(data.message || 'Sürat Kargo başarıyla eklendi!', 'success');
+                    setTimeout(() => {
+                        location.reload();
+                    }, 1500);
+                } else {
+                    showAlert('Hata: ' + (data.detail || data.message || res.status), 'error');
+                }
+            } catch (e) {
+                showAlert('Ağ hatası: ' + e.message, 'error');
+            }
+        }
+    </script>
 </body>
 </html>
 

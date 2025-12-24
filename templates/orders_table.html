@@ -256,10 +256,9 @@
                     <label>Kargo Firması</label>
                     <select id="epShippingCompany" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px;">
                         <option value="">Sürat Kargo (Varsayılan)</option>
-                        <option value="surat">Sürat Kargo</option>
-                        <option value="mng">MNG Kargo</option>
-                        <option value="dhl">DHL</option>
-                        <option value="ptt">PTT</option>
+                        {% for company in shipping_companies %}
+                        <option value="{{ company.company_code }}">{{ company.company_name }}</option>
+                        {% endfor %}
                     </select>
                 </div>
                 <div class="form-inline">

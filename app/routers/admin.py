@@ -638,3 +638,39 @@ def create_shipping_company(body: Dict[str, Any]):
 		session.add(company)
 		session.commit()
 		return {"status": "ok", "company_id": company.id}
+
+
+@router.post("/shipping-companies/init-default")
+def init_default_shipping_companies():
+	"""Initialize default Sürat Kargo if not exists."""
+	with get_session() as session:
+		# Check if Sürat Kargo exists
+		surat = session.exec(
+			select(ShippingCompanyRate).where(ShippingCompanyRate.company_code == "surat")
+		).first()
+		
+		if surat:
+			return {"status": "ok", "message": "Sürat Kargo already exists", "company_id": surat.id}
+		
+		# Create Sürat Kargo with default rates
+		surat_rates = [
+			{"max": 500, "fee": 17.81},
+			{"max": 1000, "fee": 31.46},
+			{"max": 2000, "fee": 58.76},
+			{"max": 3000, "fee": 86.06},
+			{"max": 4000, "fee": 113.36},
+			{"max": 5000, "fee": 140.66},
+			{"max": None, "fee_percent": 1.5}  # > 5000 için %1.5
+		]
+		
+		surat = ShippingCompanyRate(
+			company_code="surat",
+			company_name="Sürat Kargo",
+			base_fee=89.0,
+			rates_json=json.dumps(surat_rates),
+			is_active=True
+		)
+		
+		session.add(surat)
+		session.commit()
+		return {"status": "ok", "message": "Sürat Kargo created", "company_id": surat.id}
