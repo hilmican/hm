@@ -641,7 +641,7 @@ def create_shipping_company(body: Dict[str, Any]):
 
 
 @router.post("/shipping-companies/init-default")
-def init_default_shipping_companies(body: Optional[Dict[str, Any]] = Body(default=None)):
+def init_default_shipping_companies():
 	"""Initialize default Sürat Kargo if not exists."""
 	try:
 		with get_session() as session:

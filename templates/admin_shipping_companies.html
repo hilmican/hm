@@ -128,9 +128,7 @@
             
             try {
                 const res = await fetch('/admin/shipping-companies/init-default', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
+                    method: 'POST'
                 });
                 
                 let data;
