@@ -211,7 +211,13 @@ def list_orders_table(
                 pre_tax = float(o.shipping_fee or 0.0)
             else:
                 amt = float(o.total_amount or 0.0)
-                pre_tax = compute_shipping_fee(amt)
+                company_code = o.shipping_company or None
+                pre_tax = compute_shipping_fee(
+                    amt,
+                    company_code=company_code,
+                    paid_by_bank_transfer=bool(o.paid_by_bank_transfer),
+                    session=session
+                )
             shipping_map[oid] = round(float(pre_tax or 0.0) * 1.20, 2)
 
         # Use stored total_cost; if missing, compute via batch-loaded OrderItems and Items
@@ -296,10 +302,22 @@ def recalc_financials():
         for o in rows:
             # shipping from toplam; zero totals => base only
             amt = float(o.total_amount or 0.0)
+            company_code = o.shipping_company or None
             if bool(o.paid_by_bank_transfer):
-                o.shipping_fee = 89.0
+                # IBAN ödemelerinde sadece base fee (kargo firmasına göre)
+                o.shipping_fee = compute_shipping_fee(
+                    amt,
+                    company_code=company_code,
+                    paid_by_bank_transfer=True,
+                    session=session
+                )
             else:
-                o.shipping_fee = compute_shipping_fee(amt)
+                o.shipping_fee = compute_shipping_fee(
+                    amt,
+                    company_code=company_code,
+                    paid_by_bank_transfer=False,
+                    session=session
+                )
             # cost from order items using FIFO (zero if refunded/switched or negative totals)
             if (o.status or "") in ("refunded", "switched", "stitched", "cancelled") or (float(o.total_amount or 0.0) < 0.0):
                 o.total_cost = 0.0
@@ -630,6 +648,13 @@ def update_total(order_id: int, body: dict):
         iban_flag = False if iban_flag_raw is None else (str(iban_flag_raw).lower() in ("1", "true", "on", "yes"))
     except Exception:
         iban_flag = False
+    # Optional shipping company
+    shipping_company_raw = body.get("shipping_company", None)
+    shipping_company = None
+    if shipping_company_raw is not None:
+        shipping_company = str(shipping_company_raw).strip() if shipping_company_raw else None
+        if shipping_company == "":
+            shipping_company = None
     with get_session() as session:
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
@@ -647,12 +672,24 @@ def update_total(order_id: int, body: dict):
                     changes["paid_by_bank_transfer"] = [prev_iban, bool(iban_flag)]
         except Exception:
             pass
-        # Recompute shipping_fee pre-tax based on flag and new total
+        # Update shipping company if provided
         try:
-            if bool(o.paid_by_bank_transfer):
-                o.shipping_fee = 89.0
-            else:
-                o.shipping_fee = compute_shipping_fee(new_total_rounded)
+            if shipping_company_raw is not None:
+                prev_company = o.shipping_company
+                if shipping_company != prev_company:
+                    o.shipping_company = shipping_company
+                    changes["shipping_company"] = [prev_company, shipping_company]
+        except Exception:
+            pass
+        # Recompute shipping_fee pre-tax based on flag, company, and new total
+        try:
+            company_code = o.shipping_company or None
+            o.shipping_fee = compute_shipping_fee(
+                new_total_rounded,
+                company_code=company_code,
+                paid_by_bank_transfer=bool(o.paid_by_bank_transfer),
+                session=session
+            )
         except Exception:
             pass
         # Ensure product cost is zero when refunded/switched/stitched or negative totals

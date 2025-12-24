@@ -10,7 +10,7 @@ from sqlmodel import select
 from ..db import get_session
 from ..services.queue import _get_redis
 from ..services.queue import enqueue
-from ..models import Message, Client, Order
+from ..models import Message, Client, Order, ShippingCompanyRate
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -525,3 +525,96 @@ def fix_message_timestamps(request: Request):
 		"errors": errors[:50],
 	}
 	return templates.TemplateResponse("admin_fix_timestamps.html", {"request": request, **ctx})
+
+
+@router.get("/shipping-companies")
+def list_shipping_companies(request: Request):
+	"""List all shipping company rates."""
+	with get_session() as session:
+		companies = session.exec(select(ShippingCompanyRate).order_by(ShippingCompanyRate.company_code)).all()
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"admin_shipping_companies.html",
+			{"request": request, "companies": companies}
+		)
+
+
+@router.get("/shipping-companies/{company_id}")
+def get_shipping_company(company_id: int, request: Request):
+	"""Get shipping company rate details."""
+	with get_session() as session:
+		company = session.get(ShippingCompanyRate, company_id)
+		if not company:
+			raise HTTPException(status_code=404, detail="Shipping company not found")
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"admin_shipping_company_edit.html",
+			{"request": request, "company": company}
+		)
+
+
+@router.post("/shipping-companies/{company_id}")
+def update_shipping_company(company_id: int, body: Dict[str, Any]):
+	"""Update shipping company rates."""
+	with get_session() as session:
+		company = session.get(ShippingCompanyRate, company_id)
+		if not company:
+			raise HTTPException(status_code=404, detail="Shipping company not found")
+		
+		# Update fields
+		if "company_name" in body:
+			company.company_name = str(body["company_name"])
+		if "base_fee" in body:
+			company.base_fee = float(body["base_fee"])
+		if "rates_json" in body:
+			# Validate JSON
+			rates_json = body["rates_json"]
+			if isinstance(rates_json, str):
+				try:
+					json.loads(rates_json)  # Validate JSON
+					company.rates_json = rates_json
+				except json.JSONDecodeError:
+					raise HTTPException(status_code=400, detail="Invalid JSON in rates_json")
+			elif isinstance(rates_json, list):
+				company.rates_json = json.dumps(rates_json)
+		if "is_active" in body:
+			company.is_active = bool(body["is_active"])
+		
+		session.add(company)
+		session.commit()
+		return {"status": "ok", "company_id": company_id}
+
+
+@router.post("/shipping-companies")
+def create_shipping_company(body: Dict[str, Any]):
+	"""Create a new shipping company rate."""
+	with get_session() as session:
+		company_code = body.get("company_code")
+		if not company_code:
+			raise HTTPException(status_code=400, detail="company_code is required")
+		
+		# Check if already exists
+		existing = session.exec(
+			select(ShippingCompanyRate).where(ShippingCompanyRate.company_code == company_code)
+		).first()
+		if existing:
+			raise HTTPException(status_code=409, detail="Shipping company already exists")
+		
+		company = ShippingCompanyRate(
+			company_code=str(company_code),
+			company_name=body.get("company_name", str(company_code).upper()),
+			base_fee=float(body.get("base_fee", 89.0)),
+			rates_json=body.get("rates_json"),
+			is_active=bool(body.get("is_active", True))
+		)
+		
+		# Validate rates_json if provided
+		if company.rates_json:
+			try:
+				json.loads(company.rates_json)
+			except json.JSONDecodeError:
+				raise HTTPException(status_code=400, detail="Invalid JSON in rates_json")
+		
+		session.add(company)
+		session.commit()
+		return {"status": "ok", "company_id": company.id}

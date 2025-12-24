@@ -677,6 +677,58 @@ def init_db() -> None:
                             conn.exec_driver_sql("CREATE INDEX idx_order_partial_payment_group_id ON `order`(partial_payment_group_id)")
                         except Exception:
                             pass
+                    # Ensure shipping_company exists
+                    if 'shipping_company' not in have_cols:
+                        try:
+                            conn.exec_driver_sql("ALTER TABLE `order` ADD COLUMN shipping_company VARCHAR(32) NULL")
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql("CREATE INDEX idx_order_shipping_company ON `order`(shipping_company)")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # Ensure shipping_company_rate table exists
+                try:
+                    rows = conn.exec_driver_sql(
+                        """
+                        SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'shipping_company_rate'
+                        """
+                    ).fetchall()
+                    if not rows:
+                        conn.exec_driver_sql("""
+                            CREATE TABLE shipping_company_rate (
+                                id INT AUTO_INCREMENT PRIMARY KEY,
+                                company_code VARCHAR(32) NOT NULL UNIQUE,
+                                company_name VARCHAR(128) NOT NULL,
+                                base_fee DECIMAL(10,2) NOT NULL DEFAULT 89.00,
+                                rates_json LONGTEXT NULL,
+                                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                INDEX idx_shipping_company_rate_code (company_code),
+                                INDEX idx_shipping_company_rate_active (is_active)
+                            )
+                        """)
+                        # Insert default MNG rates
+                        import json
+                        mng_rates = [
+                            {"max": 500, "fee": 17.81},
+                            {"max": 1000, "fee": 31.46},
+                            {"max": 2000, "fee": 58.76},
+                            {"max": 3000, "fee": 86.06},
+                            {"max": 4000, "fee": 113.36},
+                            {"max": 5000, "fee": 140.66},
+                            {"max": None, "fee_percent": 1.5}  # > 5000 için %1.5
+                        ]
+                        mng_rates_json = json.dumps(mng_rates)
+                        # Escape single quotes in JSON for SQL
+                        mng_rates_json_escaped = mng_rates_json.replace("'", "''")
+                        conn.exec_driver_sql(
+                            f"INSERT INTO shipping_company_rate (company_code, company_name, base_fee, rates_json) VALUES ('mng', 'MNG Kargo', 89.0, '{mng_rates_json_escaped}')"
+                        )
                 except Exception:
                     pass
                 # ai_conversations is deprecated; new deployments should use conversations only

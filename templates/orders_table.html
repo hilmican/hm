@@ -147,14 +147,14 @@
     <h2>Siparisler</h2>
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th class="tracking">Takip</th><th class="client">Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>I/D Tarihi</th><th>Kanali</th><th>IG DM</th><th>Durum</th><th></th></tr>
+            <tr><th>ID</th><th class="tracking">Takip</th><th class="client">Musteri</th><th>Urun</th><th>Adet</th><th>Toplam</th><th>Maliyet</th><th>Kargo</th><th>Kargo Firması</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>I/D Tarihi</th><th>Kanali</th><th>IG DM</th><th>Durum</th><th></th></tr>
             <tr>
                 <th colspan="4" style="text-align:right">Toplamlar:</th>
                 <th data-type="num">{{ sum_qty }}</th>
                 <th data-type="num">{{ '%.2f'|format(sum_total or 0) }}</th>
                 <th data-type="num">{{ '%.2f'|format(sum_cost or 0) }}</th>
                 <th data-type="num">{{ '%.2f'|format(sum_shipping or 0) }}</th>
-                <th colspan="6"></th>
+                <th colspan="7"></th>
             </tr>
         </thead>
         <tbody>
@@ -188,10 +188,21 @@
                 <td>{{ o.quantity }}</td>
                 <td>
                     <span id="tot-{{ o.id }}">{{ o.total_amount }}</span>
-                    <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(o.total_amount or 0) }}', {{ 'true' if (o.paid_by_bank_transfer or False) else 'false' }})">Düzenle</button>
+                    <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(o.total_amount or 0) }}', {{ 'true' if (o.paid_by_bank_transfer or False) else 'false' }}, '{{ o.shipping_company or '' }}')">Düzenle</button>
                 </td>
                 <td>{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
                 <td>{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
+                <td>
+                    {% if o.shipping_company %}
+                        {% if o.shipping_company == 'mng' %}MNG
+                        {% elif o.shipping_company == 'dhl' %}DHL
+                        {% elif o.shipping_company == 'ptt' %}PTT
+                        {% else %}{{ o.shipping_company }}
+                        {% endif %}
+                    {% else %}
+                        <span style="color: #9ca3af;">MNG</span>
+                    {% endif %}
+                </td>
                 <td>{{ o.shipment_date }}</td>
                 <td>{{ o.data_date }}</td>
                 <td>{{ o.return_or_switch_date }}</td>
@@ -234,11 +245,20 @@
     <!-- Inline modal panel -->
     <div id="editOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
         <div class="modal">
-            <h3 id="editModalTitle">Toplam & IBAN</h3>
+            <h3 id="editModalTitle">Toplam, Kargo Firması & IBAN</h3>
             <div class="row">
                 <div>
                     <label>Yeni Toplam</label>
                     <input id="epTotal" type="number" step="0.01" inputmode="decimal" />
+                </div>
+                <div>
+                    <label>Kargo Firması</label>
+                    <select id="epShippingCompany" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px;">
+                        <option value="">MNG (Varsayılan)</option>
+                        <option value="mng">MNG Kargo</option>
+                        <option value="dhl">DHL</option>
+                        <option value="ptt">PTT</option>
+                    </select>
                 </div>
                 <div class="form-inline">
                     <input id="epIban" type="checkbox" />
@@ -342,16 +362,18 @@
     const overlay = document.getElementById('editOverlay');
     const epTotal = document.getElementById('epTotal');
     const epIban = document.getElementById('epIban');
+    const epShippingCompany = document.getElementById('epShippingCompany');
     const epSave = document.getElementById('epSave');
     const epCancel = document.getElementById('epCancel');
     const epErr = document.getElementById('epError');
     let editingOrderId = null;
     function showOverlay(){ overlay.style.display = 'flex'; }
     function hideOverlay(){ overlay.style.display = 'none'; epErr.textContent=''; }
-    function editTotal(id, cur, isIban){
+    function editTotal(id, cur, isIban, shippingCompany){
         editingOrderId = id;
         epTotal.value = String(cur || '0.00');
         epIban.checked = !!isIban;
+        epShippingCompany.value = shippingCompany || '';
         epErr.textContent = '';
         showOverlay();
         setTimeout(()=>{ try{ epTotal.focus(); epTotal.select(); }catch(_){} }, 0);
@@ -366,11 +388,16 @@
         const num = parseFloat(raw);
         if(!isFinite(num)){ epErr.textContent = 'Geçersiz tutar'; return; }
         const isIban = !!epIban.checked;
+        const shippingCompany = epShippingCompany.value || null;
         try{
             const res = await fetch(`/orders/${id}/update-total`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ total: num, paid_by_bank_transfer: isIban })
+                body: JSON.stringify({ 
+                    total: num, 
+                    paid_by_bank_transfer: isIban,
+                    shipping_company: shippingCompany
+                })
             });
             if(!res.ok){
                 const t = await res.text();

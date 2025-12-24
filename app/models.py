@@ -50,6 +50,7 @@ class Order(SQLModel, table=True):
     total_cost: Optional[float] = Field(default=None, index=True)
     shipping_fee: Optional[float] = Field(default=None, index=True)
     paid_by_bank_transfer: Optional[bool] = Field(default=False, index=True, description="IBAN ödeme: True ise kargo ücreti sadece taban (89) olarak alınır")
+    shipping_company: Optional[str] = Field(default=None, index=True, description="Kargo firması: mng|dhl|ptt|other")
     shipment_date: Optional[dt.date] = Field(default=None, index=True)
     data_date: Optional[dt.date] = Field(default=None, index=True)
     # date when return or switch (iade/degisim) happened
@@ -610,6 +611,26 @@ class SystemSetting(SQLModel, table=True):
 	key: str = Field(primary_key=True, description="Setting key")
 	value: str = Field(description="Setting value (JSON-encoded if needed)")
 	description: Optional[str] = Field(default=None, description="Human-readable description")
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
+class ShippingCompanyRate(SQLModel, table=True):
+	"""Kargo firması bazında ücret oranları."""
+	__tablename__ = "shipping_company_rate"
+	
+	id: Optional[int] = Field(default=None, primary_key=True)
+	company_code: str = Field(index=True, unique=True, description="Kargo firması kodu: mng|dhl|ptt")
+	company_name: str = Field(description="Kargo firması adı: MNG Kargo|DHL|PTT")
+	base_fee: float = Field(default=89.0, description="Taban ücret (TL)")
+	# Oranlar JSON formatında: [{"max": 500, "fee": 17.81}, {"max": 1000, "fee": 31.46}, ...]
+	# Son oran için "max" null olabilir veya yüksek bir değer (örn: 999999)
+	rates_json: Optional[str] = Field(
+		default=None,
+		sa_column=Column(Text),
+		description="JSON array: [{'max': 500, 'fee': 17.81}, {'max': 1000, 'fee': 31.46}, ...]"
+	)
+	is_active: bool = Field(default=True, index=True)
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 

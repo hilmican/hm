@@ -1,10 +1,16 @@
 from __future__ import annotations
+from typing import Optional
+import json
+
+from sqlmodel import Session, select
+
+from ..models import ShippingCompanyRate
 
 
-def compute_shipping_fee(amount: float) -> float:
-	"""Compute shipping fee as base + fractional by TahsilatTutari.
-
-	Rules (confirmed):
+def _compute_shipping_fee_mng(amount: float) -> float:
+	"""Compute MNG shipping fee (default/legacy rates).
+	
+	Rules:
 	- Base cost always applies per shipment: 89.00
 	- Fractional by collected amount (TahsilatTutari) in TL:
 	  <= 500: 17.81
@@ -37,5 +43,82 @@ def compute_shipping_fee(amount: float) -> float:
 	else:
 		frac = round(a * 0.015, 2)
 	return round(base + frac, 2)
+
+
+def compute_shipping_fee(
+	amount: float,
+	company_code: Optional[str] = None,
+	paid_by_bank_transfer: bool = False,
+	session: Optional[Session] = None
+) -> float:
+	"""Compute shipping fee based on company rates.
+	
+	Args:
+		amount: Order total amount
+		company_code: Shipping company code (mng|dhl|ptt). If None, defaults to MNG.
+		paid_by_bank_transfer: If True, only base fee applies (IBAN ödeme)
+		session: Optional database session for fetching rates. If None, uses default MNG rates.
+	
+	Returns:
+		Total shipping fee rounded to 2 decimals.
+	"""
+	a = float(amount or 0.0)
+	
+	# IBAN ödemelerinde sadece base fee (kargo firmasına göre değişebilir)
+	if paid_by_bank_transfer:
+		if company_code and session:
+			# Kargo firmasının base fee'sini kullan
+			rate = session.exec(
+				select(ShippingCompanyRate)
+				.where(ShippingCompanyRate.company_code == company_code)
+				.where(ShippingCompanyRate.is_active == True)
+			).first()
+			if rate:
+				return round(float(rate.base_fee or 89.0), 2)
+		# Default MNG base
+		return 89.0
+	
+	# Company-specific rates
+	if company_code and session:
+		rate = session.exec(
+			select(ShippingCompanyRate)
+			.where(ShippingCompanyRate.company_code == company_code)
+			.where(ShippingCompanyRate.is_active == True)
+		).first()
+		
+		if rate and rate.rates_json:
+			try:
+				rates = json.loads(rate.rates_json)
+				base = float(rate.base_fee or 89.0)
+				
+				# Zero or negative totals still incur base fee only
+				if a <= 0:
+					return round(base, 2)
+				
+				# Find matching rate tier
+				for tier in rates:
+					max_val = tier.get("max")
+					fee = tier.get("fee")
+					fee_percent = tier.get("fee_percent")
+					
+					if max_val is None or a <= max_val:
+						if fee_percent is not None:
+							# Percentage-based fee
+							frac = round(a * (fee_percent / 100.0), 2)
+						elif fee is not None:
+							# Fixed fee
+							frac = float(fee)
+						else:
+							frac = 0.0
+						return round(base + frac, 2)
+				
+				# Fallback: if no tier matches, use base only
+				return round(base, 2)
+			except Exception:
+				# JSON parse error or invalid structure, fall back to MNG
+				pass
+	
+	# Default MNG rates (backward compatibility)
+	return _compute_shipping_fee_mng(a)
 
 
