@@ -298,6 +298,11 @@
                                 <td style="padding:8px 10px; text-align:right;">{{ '%.2f'|format(operational_costs or 0) }} ₺</td>
                                 <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Genel giderler</td>
                             </tr>
+                            <tr>
+                                <td style="padding:8px 10px; padding-left:20px;">Nakliye Maliyetleri</td>
+                                <td style="padding:8px 10px; text-align:right;">{{ '%.2f'|format(transportation_costs or 0) }} ₺</td>
+                                <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Kargo ücretleri</td>
+                            </tr>
                             <tr style="border-top:2px solid #e5e7eb;">
                                 <td style="padding:8px 10px; font-weight:600;">Toplam Maliyet</td>
                                 <td style="padding:8px 10px; text-align:right; font-weight:700;">{{ '%.2f'|format(total_cost or 0) }} ₺</td>
@@ -314,24 +319,14 @@
                                 <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Satış - Maliyet</td>
                             </tr>
                             <tr>
-                                <td style="padding:8px 10px; padding-left:20px;">Eksi: Nakliye Maliyetleri</td>
-                                <td style="padding:8px 10px; text-align:right; color:#dc2626;">-{{ '%.2f'|format(transportation_costs or 0) }} ₺</td>
-                                <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Kargo ücretleri</td>
-                            </tr>
-                            <tr>
-                                <td style="padding:8px 10px; padding-left:20px;">Eksi: Diğer Kesintiler</td>
-                                <td style="padding:8px 10px; text-align:right; color:#dc2626;">-{{ '%.2f'|format((total_fees or 0) - (transportation_costs or 0)) }} ₺</td>
+                                <td style="padding:8px 10px; padding-left:20px;">Eksi: Kesintiler</td>
+                                <td style="padding:8px 10px; text-align:right; color:#dc2626;">-{{ '%.2f'|format(total_fees or 0) }} ₺</td>
                                 <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Komisyon, hizmet, iade vb.</td>
-                            </tr>
-                            <tr style="border-top:1px solid #d1d5db;">
-                                <td style="padding:8px 10px; font-weight:600;">Toplam Kesintiler</td>
-                                <td style="padding:8px 10px; text-align:right; font-weight:600; color:#dc2626;">-{{ '%.2f'|format(total_fees or 0) }} ₺</td>
-                                <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Nakliye + Diğer</td>
                             </tr>
                             <tr>
                                 <td style="padding:8px 10px; font-weight:600;">Net Kâr</td>
                                 <td style="padding:8px 10px; text-align:right; font-weight:700;">{{ '%.2f'|format(net_profit or 0) }} ₺</td>
-                                <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Brüt Kâr - Toplam Kesintiler</td>
+                                <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Brüt Kâr - Kesintiler</td>
                             </tr>
                             
                             <!-- Assets Section -->

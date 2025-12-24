@@ -157,15 +157,6 @@ def daily_report(
 		except Exception:
 			period_costs = 0.0
 		
-		# Total cost = order costs + operational costs
-		total_cost = order_costs + period_costs
-
-		gross_profit = total_sales - total_cost
-		gross_margin = (gross_profit / total_sales) if total_sales > 0 else 0.0
-		aov = (total_sales / order_count) if order_count > 0 else 0.0
-		asp = (total_sales / total_quantity) if total_quantity > 0 else 0.0
-		# net_margin is computed later after fees are loaded
-
 		# Payments in the period by payment.date (use SQL sums with short cache)
 		ttl = int(os.getenv("CACHE_TTL_REPORTS", "60"))
 		cache_key = f"rep:daily:pay:{start_date.isoformat()}:{end_date.isoformat()}"
@@ -195,7 +186,18 @@ def daily_report(
 		fee_kar = sum(order_shipping_map.get(o.id or 0, 0.0) for o in orders)
 		fee_iad = float(pay_sums.get("iad", 0.0))
 		fee_eok = float(pay_sums.get("eok", 0.0))
-		total_fees = fee_kom + fee_hiz + fee_kar + fee_iad + fee_eok
+		
+		# Total cost = order costs + operational costs + transportation costs (nakliye maliyetleri de maliyet kalemi)
+		total_cost = order_costs + period_costs + fee_kar
+		
+		# Total fees = only non-cost fees (komisyon, hizmet, iade, erken ödeme) - nakliye artık maliyet olarak dahil
+		total_fees = fee_kom + fee_hiz + fee_iad + fee_eok
+
+		gross_profit = total_sales - total_cost
+		gross_margin = (gross_profit / total_sales) if total_sales > 0 else 0.0
+		aov = (total_sales / order_count) if order_count > 0 else 0.0
+		asp = (total_sales / total_quantity) if total_quantity > 0 else 0.0
+		# net_margin is computed later after fees are loaded
 		net_profit = gross_profit - total_fees
 		# Treat IBAN-marked orders as collected/completed for ratios/outstanding
 		iban_collected = sum(float(o.total_amount or 0.0) for o in orders if bool(getattr(o, "paid_by_bank_transfer", False)))
