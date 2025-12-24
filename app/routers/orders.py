@@ -663,6 +663,23 @@ def update_total(order_id: int, body: dict):
         shipping_company = str(shipping_company_raw).strip() if shipping_company_raw else None
         if shipping_company == "":
             shipping_company = None
+    # Optional payment status
+    payment_status_raw = body.get("payment_status", None)
+    payment_status = None
+    if payment_status_raw is not None:
+        payment_status = str(payment_status_raw).strip() if payment_status_raw else None
+        if payment_status == "":
+            payment_status = None
+    # Optional payment date
+    payment_date_raw = body.get("payment_date", None)
+    payment_date = None
+    if payment_date_raw is not None:
+        try:
+            payment_date_str = str(payment_date_raw).strip()
+            if payment_date_str:
+                payment_date = dt.date.fromisoformat(payment_date_str)
+        except Exception:
+            pass
     with get_session() as session:
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
@@ -687,6 +704,24 @@ def update_total(order_id: int, body: dict):
                 if shipping_company != prev_company:
                     o.shipping_company = shipping_company
                     changes["shipping_company"] = [prev_company, shipping_company]
+        except Exception:
+            pass
+        # Update payment status if provided
+        try:
+            if payment_status_raw is not None:
+                prev_status = o.status
+                if payment_status != prev_status:
+                    o.status = payment_status
+                    changes["status"] = [prev_status, payment_status]
+        except Exception:
+            pass
+        # Update payment date if provided
+        try:
+            if payment_date_raw is not None:
+                prev_payment_date = o.payment_date
+                if payment_date != prev_payment_date:
+                    o.payment_date = payment_date
+                    changes["payment_date"] = [prev_payment_date.isoformat() if prev_payment_date else None, payment_date.isoformat() if payment_date else None]
         except Exception:
             pass
         # Recompute shipping_fee pre-tax based on flag, company, and new total

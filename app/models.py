@@ -55,6 +55,7 @@ class Order(SQLModel, table=True):
     data_date: Optional[dt.date] = Field(default=None, index=True)
     # date when return or switch (iade/degisim) happened
     return_or_switch_date: Optional[dt.date] = Field(default=None, index=True)
+    payment_date: Optional[dt.date] = Field(default=None, index=True, description="Ödeme tarihi")
     status: Optional[str] = Field(default=None, index=True)
     notes: Optional[str] = None
     source: str = Field(index=True, description="bizim|kargo")

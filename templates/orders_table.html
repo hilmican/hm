@@ -188,7 +188,7 @@
                 <td>{{ o.quantity }}</td>
                 <td>
                     <span id="tot-{{ o.id }}">{{ o.total_amount }}</span>
-                    <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(o.total_amount or 0) }}', {{ 'true' if (o.paid_by_bank_transfer or False) else 'false' }}, '{{ o.shipping_company or '' }}')">Düzenle</button>
+                    <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(o.total_amount or 0) }}', {{ 'true' if (o.paid_by_bank_transfer or False) else 'false' }}, '{{ o.shipping_company or '' }}', '{{ o.status or '' }}', '{{ o.payment_date.isoformat() if o.payment_date else '' }}')">Düzenle</button>
                 </td>
                 <td>{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
                 <td>{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
@@ -246,7 +246,7 @@
     <!-- Inline modal panel -->
     <div id="editOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
         <div class="modal">
-            <h3 id="editModalTitle">Toplam, Kargo Firması & IBAN</h3>
+            <h3 id="editModalTitle">Toplam, Kargo Firması, IBAN & Ödeme Durumu</h3>
             <div class="row">
                 <div>
                     <label>Yeni Toplam</label>
@@ -264,6 +264,22 @@
                 <div class="form-inline">
                     <input id="epIban" type="checkbox" />
                     <label for="epIban" style="margin:0;cursor:pointer;">IBAN ödemesi (banka havalesi)</label>
+                </div>
+                <div>
+                    <label>Ödeme Durumu</label>
+                    <select id="epPaymentStatus" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px;">
+                        <option value="">-- Seçiniz --</option>
+                        <option value="paid">Ödendi</option>
+                        <option value="unpaid">Ödenmedi</option>
+                        <option value="partial_paid">Kısmi Ödeme</option>
+                        <option value="cancelled">İptal</option>
+                        <option value="refunded">İade</option>
+                        <option value="switched">Değişim</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Ödeme Tarihi</label>
+                    <input id="epPaymentDate" type="date" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px;" />
                 </div>
                 <div id="epError" class="err"></div>
             </div>
@@ -364,17 +380,31 @@
     const epTotal = document.getElementById('epTotal');
     const epIban = document.getElementById('epIban');
     const epShippingCompany = document.getElementById('epShippingCompany');
+    const epPaymentStatus = document.getElementById('epPaymentStatus');
+    const epPaymentDate = document.getElementById('epPaymentDate');
     const epSave = document.getElementById('epSave');
     const epCancel = document.getElementById('epCancel');
     const epErr = document.getElementById('epError');
     let editingOrderId = null;
     function showOverlay(){ overlay.style.display = 'flex'; }
     function hideOverlay(){ overlay.style.display = 'none'; epErr.textContent=''; }
-    function editTotal(id, cur, isIban, shippingCompany){
+    function editTotal(id, cur, isIban, shippingCompany, paymentStatus, paymentDate){
         editingOrderId = id;
         epTotal.value = String(cur || '0.00');
         epIban.checked = !!isIban;
         epShippingCompany.value = shippingCompany || '';
+        epPaymentStatus.value = paymentStatus || '';
+        // Set payment date: if exists use it, otherwise default to today
+        if(paymentDate && paymentDate.trim() !== ''){
+            epPaymentDate.value = paymentDate;
+        } else {
+            // Default to today
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(today.getDate()).padStart(2, '0');
+            epPaymentDate.value = `${year}-${month}-${day}`;
+        }
         epErr.textContent = '';
         showOverlay();
         setTimeout(()=>{ try{ epTotal.focus(); epTotal.select(); }catch(_){} }, 0);
@@ -390,6 +420,8 @@
         if(!isFinite(num)){ epErr.textContent = 'Geçersiz tutar'; return; }
         const isIban = !!epIban.checked;
         const shippingCompany = epShippingCompany.value || null;
+        const paymentStatus = epPaymentStatus.value || null;
+        const paymentDate = epPaymentDate.value || null;
         try{
             const res = await fetch(`/orders/${id}/update-total`, {
                 method: 'POST',
@@ -397,7 +429,9 @@
                 body: JSON.stringify({ 
                     total: num, 
                     paid_by_bank_transfer: isIban,
-                    shipping_company: shippingCompany
+                    shipping_company: shippingCompany,
+                    payment_status: paymentStatus,
+                    payment_date: paymentDate
                 })
             });
             if(!res.ok){
