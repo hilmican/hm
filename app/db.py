@@ -687,6 +687,16 @@ def init_db() -> None:
                             conn.exec_driver_sql("CREATE INDEX idx_order_shipping_company ON `order`(shipping_company)")
                         except Exception:
                             pass
+                    # Ensure payment_date exists
+                    if 'payment_date' not in have_cols:
+                        try:
+                            conn.exec_driver_sql("ALTER TABLE `order` ADD COLUMN payment_date DATE NULL")
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql("CREATE INDEX idx_order_payment_date ON `order`(payment_date)")
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 # Ensure shipping_company_rate table exists
