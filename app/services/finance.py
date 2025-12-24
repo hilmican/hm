@@ -27,10 +27,11 @@ def calculate_account_balance(session: Session, account_id: int) -> float:
 	if income_total:
 		balance += float(income_total or 0.0)
 	
-	# Subtract all expenses linked to this account
+	# Subtract all expenses linked to this account (exclude soft-deleted)
 	expense_total = session.exec(
 		select(func.sum(Cost.amount))
 		.where(Cost.account_id == account_id)
+		.where(Cost.deleted_at.is_(None))
 	).first()
 	if expense_total:
 		balance -= float(expense_total or 0.0)
