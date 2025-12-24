@@ -220,13 +220,6 @@ def daily_report(
 		
 		# Calculate transportation costs (kargo maliyetleri) - these are fees, not operational costs
 		transportation_costs = fee_kar  # Shipping fees
-		
-		# Calculate working capital (çalışma sermayesi) = Outstanding + Inventory Value
-		working_capital = outstanding + inventory_value
-		
-		# Calculate cash on hand (elimdeki para) = Net Profit - Working Capital + Stock Value
-		# Or: Cash = Account Balances (money in bank accounts)
-		cash_on_hand = total_account_balances
 
 		# Orders by channel (source)
 		by_channel: dict[str, dict[str, float]] = {}
@@ -353,6 +346,12 @@ def daily_report(
 			if qty > 0 and cost > 0:
 				inventory_value += qty * cost
 		inventory_item_count = len(inv_item_ids)
+		
+		# Calculate working capital (çalışma sermayesi) = Outstanding + Inventory Value
+		working_capital = outstanding + inventory_value
+		
+		# Calculate cash on hand (elimdeki para) = Account Balances (money in bank accounts)
+		cash_on_hand = total_account_balances
 
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
