@@ -132,7 +132,15 @@
                     headers: { 'Content-Type': 'application/json' }
                 });
                 
-                const data = await res.json();
+                let data;
+                try {
+                    data = await res.json();
+                } catch (jsonError) {
+                    // If response is not JSON, try to get text
+                    const text = await res.text();
+                    showAlert('Hata: ' + text, 'error');
+                    return;
+                }
                 
                 if (res.ok) {
                     showAlert(data.message || 'Sürat Kargo başarıyla eklendi!', 'success');
@@ -140,7 +148,8 @@
                         location.reload();
                     }, 1500);
                 } else {
-                    showAlert('Hata: ' + (data.detail || data.message || res.status), 'error');
+                    const errorMsg = data.detail || data.message || data.error || JSON.stringify(data);
+                    showAlert('Hata: ' + errorMsg, 'error');
                 }
             } catch (e) {
                 showAlert('Ağ hatası: ' + e.message, 'error');

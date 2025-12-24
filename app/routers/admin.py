@@ -643,34 +643,65 @@ def create_shipping_company(body: Dict[str, Any]):
 @router.post("/shipping-companies/init-default")
 def init_default_shipping_companies():
 	"""Initialize default Sürat Kargo if not exists."""
-	with get_session() as session:
-		# Check if Sürat Kargo exists
-		surat = session.exec(
-			select(ShippingCompanyRate).where(ShippingCompanyRate.company_code == "surat")
-		).first()
-		
-		if surat:
-			return {"status": "ok", "message": "Sürat Kargo already exists", "company_id": surat.id}
-		
-		# Create Sürat Kargo with default rates
-		surat_rates = [
-			{"max": 500, "fee": 17.81},
-			{"max": 1000, "fee": 31.46},
-			{"max": 2000, "fee": 58.76},
-			{"max": 3000, "fee": 86.06},
-			{"max": 4000, "fee": 113.36},
-			{"max": 5000, "fee": 140.66},
-			{"max": None, "fee_percent": 1.5}  # > 5000 için %1.5
-		]
-		
-		surat = ShippingCompanyRate(
-			company_code="surat",
-			company_name="Sürat Kargo",
-			base_fee=89.0,
-			rates_json=json.dumps(surat_rates),
-			is_active=True
-		)
-		
-		session.add(surat)
-		session.commit()
-		return {"status": "ok", "message": "Sürat Kargo created", "company_id": surat.id}
+	try:
+		with get_session() as session:
+			# Try to check if table exists, if not create it
+			try:
+				# Check if Sürat Kargo exists
+				surat = session.exec(
+					select(ShippingCompanyRate).where(ShippingCompanyRate.company_code == "surat")
+				).first()
+			except Exception as table_error:
+				# Table might not exist, try to create it
+				from sqlalchemy import text
+				try:
+					session.exec(text("""
+						CREATE TABLE IF NOT EXISTS shipping_company_rate (
+							id INT AUTO_INCREMENT PRIMARY KEY,
+							company_code VARCHAR(32) NOT NULL UNIQUE,
+							company_name VARCHAR(128) NOT NULL,
+							base_fee DECIMAL(10,2) NOT NULL DEFAULT 89.00,
+							rates_json LONGTEXT NULL,
+							is_active TINYINT(1) NOT NULL DEFAULT 1,
+							created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+							updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+							INDEX idx_shipping_company_rate_code (company_code),
+							INDEX idx_shipping_company_rate_active (is_active)
+						)
+					"""))
+					session.commit()
+					surat = None  # Will create below
+				except Exception as create_error:
+					raise HTTPException(status_code=500, detail=f"Tablo oluşturulamadı: {str(create_error)}")
+			
+			if surat:
+				return {"status": "ok", "message": "Sürat Kargo zaten mevcut", "company_id": surat.id}
+			
+			# Create Sürat Kargo with default rates
+			surat_rates = [
+				{"max": 500, "fee": 17.81},
+				{"max": 1000, "fee": 31.46},
+				{"max": 2000, "fee": 58.76},
+				{"max": 3000, "fee": 86.06},
+				{"max": 4000, "fee": 113.36},
+				{"max": 5000, "fee": 140.66},
+				{"max": None, "fee_percent": 1.5}  # > 5000 için %1.5
+			]
+			
+			surat = ShippingCompanyRate(
+				company_code="surat",
+				company_name="Sürat Kargo",
+				base_fee=89.0,
+				rates_json=json.dumps(surat_rates),
+				is_active=True
+			)
+			
+			session.add(surat)
+			session.commit()
+			return {"status": "ok", "message": "Sürat Kargo başarıyla oluşturuldu", "company_id": surat.id}
+	except HTTPException:
+		raise
+	except Exception as e:
+		import traceback
+		error_detail = f"{str(e)}\n{traceback.format_exc()}"
+		raise HTTPException(status_code=500, detail=f"Sürat Kargo eklenirken hata oluştu: {error_detail}")
