@@ -163,6 +163,8 @@ def list_orders_table(
             # refunded/switched/cancelled take precedence for row classes
             if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
                 status_map[oid] = str(o.status)
+            elif (o.status or "") == "paid":
+                status_map[oid] = "paid"
             elif (o.status or "") == "partial_paid":
                 status_map[oid] = "partial_paid"
             else:
@@ -723,6 +725,86 @@ def update_total(order_id: int, body: dict):
                     o.payment_date = payment_date
                     changes["payment_date"] = [prev_payment_date.isoformat() if prev_payment_date else None, payment_date.isoformat() if payment_date else None]
         except Exception:
+            pass
+        
+        # Manage Payment records based on payment_status
+        try:
+            # Get existing payment records for this order
+            existing_payments = session.exec(
+                select(Payment).where(Payment.order_id == order_id)
+            ).all()
+            
+            if payment_status_raw is not None:
+                if payment_status == "paid":
+                    # Create or update Payment record
+                    # Use provided payment_date or Order.payment_date or today
+                    effective_payment_date = payment_date or o.payment_date or dt.date.today()
+                    
+                    if existing_payments:
+                        # Update existing payment (use the first one if multiple)
+                        payment = existing_payments[0]
+                        prev_amount = payment.amount
+                        prev_date = payment.payment_date or payment.date
+                        payment.amount = new_total_rounded
+                        payment.payment_date = effective_payment_date
+                        payment.date = effective_payment_date  # Update legacy field too
+                        payment.net_amount = new_total_rounded  # Simple: net = amount (no fees)
+                        session.add(payment)
+                        changes["payment"] = [f"updated: {prev_amount} -> {new_total_rounded}, {prev_date} -> {effective_payment_date}"]
+                        
+                        # Delete other payment records if there are multiple
+                        if len(existing_payments) > 1:
+                            for extra_payment in existing_payments[1:]:
+                                session.delete(extra_payment)
+                            changes["payment"] = changes.get("payment", "") + f", deleted {len(existing_payments)-1} duplicate(s)"
+                    else:
+                        # Create new payment record
+                        if o.client_id:
+                            payment = Payment(
+                                client_id=o.client_id,
+                                order_id=order_id,
+                                amount=new_total_rounded,
+                                payment_date=effective_payment_date,
+                                date=effective_payment_date,  # Legacy field
+                                net_amount=new_total_rounded,  # Simple: net = amount (no fees)
+                                method=None,  # Can be set later if needed
+                            )
+                            session.add(payment)
+                            changes["payment"] = [f"created: {new_total_rounded} on {effective_payment_date}"]
+                
+                elif payment_status == "unpaid":
+                    # Delete all payment records for this order
+                    if existing_payments:
+                        for payment in existing_payments:
+                            session.delete(payment)
+                        changes["payment"] = [f"deleted {len(existing_payments)} payment record(s)"]
+                
+                # For other statuses (partial_paid, etc.), keep existing payments as-is
+                # Payment records remain unchanged for partial_paid, cancelled, refunded, etc.
+            
+            # If payment_date was updated and we have existing payments (and status is not unpaid), update their dates too
+            # Note: If payment_status was "paid", we already updated the payment date above, so this handles other cases
+            if payment_date_raw is not None and payment_status != "unpaid":
+                # Re-fetch payments in case they were just created/updated above
+                current_payments = session.exec(
+                    select(Payment).where(Payment.order_id == order_id)
+                ).all()
+                if current_payments:
+                    for payment in current_payments:
+                        if payment.payment_date != payment_date:
+                            payment.payment_date = payment_date
+                            payment.date = payment_date  # Update legacy field too
+                            session.add(payment)
+                            if "payment" not in changes:
+                                changes["payment"] = []
+                            if isinstance(changes["payment"], list) and len(changes["payment"]) > 0 and isinstance(changes["payment"][0], str):
+                                if "updated date" not in changes["payment"][0]:
+                                    changes["payment"][0] = changes["payment"][0] + f", updated date to {payment_date}"
+                            else:
+                                changes["payment"] = [f"updated payment date to {payment_date}"]
+        except Exception as e:
+            # Log error but don't fail the request
+            changes["payment_error"] = [str(e)]
             pass
         # Recompute shipping_fee pre-tax based on flag, company, and new total
         try:
