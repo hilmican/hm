@@ -712,8 +712,13 @@ def init_db() -> None:
                                 INDEX idx_shipping_company_rate_active (is_active)
                             )
                         """)
-                        # Insert default Sürat Kargo rates (eski kargocu)
-                        import json
+                    
+                    # Ensure default Sürat Kargo rates exist (insert if not exists)
+                    import json
+                    check_surat = conn.exec_driver_sql(
+                        "SELECT id FROM shipping_company_rate WHERE company_code = 'surat' LIMIT 1"
+                    ).fetchone()
+                    if not check_surat:
                         surat_rates = [
                             {"max": 500, "fee": 17.81},
                             {"max": 1000, "fee": 31.46},
