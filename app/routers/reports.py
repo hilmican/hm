@@ -101,15 +101,15 @@ def daily_report(
 		clients = session.exec(select(Client).where(Client.id.in_(client_ids))).all() if client_ids else []
 		client_map = {c.id: c for c in clients if c.id is not None}
 
-		# Compute total cost (prefer stored per-order total_cost; otherwise sum over OrderItems * item.cost)
-		total_cost = 0.0
+		# Compute order costs (prefer stored per-order total_cost; otherwise sum over OrderItems * item.cost)
+		order_costs = 0.0
 		for o in orders:
 			# For refunded/switch/stitched or negative totals, treat product cost as zero for reporting
 			status_lc = str(o.status or "").lower()
 			if (status_lc in ("refunded", "switched", "stitched")) or (float(o.total_amount or 0.0) < 0.0):
 				continue
 			if o.total_cost is not None:
-				total_cost += float(o.total_cost or 0.0)
+				order_costs += float(o.total_cost or 0.0)
 			else:
 				acc = 0.0
 				if o.id and (o.id in order_item_map):
@@ -118,25 +118,47 @@ def daily_report(
 				elif o.item_id and (o.item_id in item_map):
 					# fallback to single-item orders if present
 					acc = float(item_map[o.item_id].cost or 0.0) * int(o.quantity or 0)
-				total_cost += acc
+				order_costs += acc
 
-		# Add overhead/operational costs from Cost table within the period
+		# Calculate operational costs from Cost table within the period, grouped by type
 		# Exclude payments to suppliers, MERTER MAL ALIM (type_id=9) costs, and soft-deleted costs
+		from ..models import CostType
+		operational_costs_by_type = {}
+		period_costs = 0.0
 		try:
-			period_costs_query = (
-				select(func.sum(Cost.amount))
+			# Get all cost types for mapping
+			cost_types = session.exec(select(CostType)).all()
+			type_map = {t.id: t.name for t in cost_types if t.id is not None}
+			
+			# Get operational costs grouped by type
+			operational_costs = session.exec(
+				select(Cost)
 				.where(Cost.date.is_not(None))
 				.where(Cost.date >= start_date)
 				.where(Cost.date <= end_date)
 				.where(Cost.deleted_at.is_(None))
 				.where(or_(Cost.is_payment_to_supplier == False, Cost.is_payment_to_supplier.is_(None)))
 				.where(or_(Cost.type_id != 9, Cost.type_id.is_(None)))
-			)
-			period_costs_result = session.exec(period_costs_query).first()
-			period_costs = float(period_costs_result or 0.0)
+			).all()
+			
+			# Group by type
+			for cost in operational_costs:
+				type_id = cost.type_id
+				type_name = type_map.get(type_id, f"Type {type_id}")
+				if type_name not in operational_costs_by_type:
+					operational_costs_by_type[type_name] = 0.0
+				operational_costs_by_type[type_name] += float(cost.amount or 0.0)
+			
+			# Calculate total operational costs
+			period_costs = sum(operational_costs_by_type.values())
+			
+			# Sort by amount (descending) for display
+			operational_costs_by_type = dict(sorted(operational_costs_by_type.items(), key=lambda x: x[1], reverse=True))
 		except Exception:
 			period_costs = 0.0
-		total_cost += period_costs
+		
+		# Total cost = order costs + operational costs
+		total_cost = order_costs + period_costs
 
 		gross_profit = total_sales - total_cost
 		gross_margin = (gross_profit / total_sales) if total_sales > 0 else 0.0
@@ -186,6 +208,25 @@ def daily_report(
 		linked_paid = sum(float(p.amount or 0.0) for p in linked_payments)
 		# Consider IBAN-marked orders fully paid
 		outstanding = total_sales - (linked_paid + iban_collected)
+		
+		# Get account balances (bankadaki paralar)
+		from ..services.finance import get_account_balances
+		account_balances = get_account_balances(session)
+		total_account_balances = sum(account_balances.values())
+		
+		# Get account names for display
+		accounts = session.exec(select(Account).where(Account.is_active == True)).all()
+		account_name_map = {acc.id: acc.name for acc in accounts if acc.id is not None}
+		
+		# Calculate transportation costs (kargo maliyetleri) - these are fees, not operational costs
+		transportation_costs = fee_kar  # Shipping fees
+		
+		# Calculate working capital (çalışma sermayesi) = Outstanding + Inventory Value
+		working_capital = outstanding + inventory_value
+		
+		# Calculate cash on hand (elimdeki para) = Net Profit - Working Capital + Stock Value
+		# Or: Cash = Account Balances (money in bank accounts)
+		cash_on_hand = total_account_balances
 
 		# Orders by channel (source)
 		by_channel: dict[str, dict[str, float]] = {}
@@ -375,6 +416,18 @@ def daily_report(
 				"partial_paid_total_amount": partial_paid_total_amount,
 				# shipment costs (kargo) as separate KPI
 				"total_shipment_costs": fee_kar,
+				# cost breakdowns
+				"order_costs": order_costs,
+				"operational_costs": period_costs,
+				"operational_costs_by_type": operational_costs_by_type,
+				# financial summary
+				"outstanding": outstanding,
+				"account_balances": account_balances,
+				"account_name_map": account_name_map,
+				"total_account_balances": total_account_balances,
+				"transportation_costs": transportation_costs,
+				"working_capital": working_capital,
+				"cash_on_hand": cash_on_hand,
 			},
 		)
 
