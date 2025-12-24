@@ -642,6 +642,7 @@ class Cost(SQLModel, table=True):
 	date: Optional[dt.date] = Field(default=None, index=True)
 	details: Optional[str] = Field(default=None, sa_column=Column(Text))
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+	deleted_at: Optional[dt.datetime] = Field(default=None, index=True, description="Soft delete timestamp - if set, cost is considered deleted")
 
 
 class SupplierPaymentAllocation(SQLModel, table=True):

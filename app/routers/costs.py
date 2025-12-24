@@ -4,7 +4,7 @@ import json
 
 from fastapi import APIRouter, Request, Query, Form, HTTPException
 from fastapi.responses import RedirectResponse, JSONResponse
-from sqlmodel import select, delete
+from sqlmodel import select
 
 from ..db import get_session
 from ..models import Cost, CostType, Account, Supplier, Product, CostHistoryLog
@@ -84,6 +84,7 @@ def costs_page(
 			.where(Cost.date.is_not(None))
 			.where(Cost.date >= start_date)
 			.where(Cost.date <= end_date)
+			.where(Cost.deleted_at.is_(None))
 			.order_by(Cost.date.desc(), Cost.id.desc())
 		).all()
 		type_map = {t.id: t.name for t in types if t.id is not None}
@@ -256,25 +257,33 @@ def delete_costs(
 ):
 	with get_session() as session:
 		if cost_ids:
-			# Get costs before deleting for logging
+			# Get costs before soft-deleting for logging
 			costs_to_delete = session.exec(
-				select(Cost).where(Cost.id.in_(cost_ids))
+				select(Cost).where(Cost.id.in_(cost_ids)).where(Cost.deleted_at.is_(None))
 			).all()
 			
-			# Delete existing history log records manually if FK constraint is not CASCADE yet
-			# This is a workaround until the migration updates the constraint to CASCADE
+			# Soft delete: set deleted_at timestamp
+			now = dt.datetime.utcnow()
 			for cost in costs_to_delete:
+				# Store old data for logging
+				old_data = _cost_to_dict(cost)
+				
+				# Soft delete: set deleted_at
+				cost.deleted_at = now
+				session.add(cost)
+				
+				# Log deletion
 				if cost.id:
-					history_logs = session.exec(
-						select(CostHistoryLog).where(CostHistoryLog.cost_id == cost.id)
-					).all()
-					for log in history_logs:
-						session.delete(log)
+					user_id = None  # TODO: Get from session if auth is implemented
+					_log_cost_change(
+						session,
+						cost.id,
+						"delete",
+						old_data=old_data,
+						new_data=None,
+						user_id=user_id
+					)
 			
-			session.flush()  # Flush to ensure history logs are deleted before deleting costs
-			
-			# Delete the selected costs
-			session.exec(delete(Cost).where(Cost.id.in_(cost_ids)))
 			session.commit()
 
 	url = "/costs"
@@ -343,7 +352,7 @@ def add_supplier(
 def get_cost(cost_id: int):
 	"""Get a single cost entry by ID."""
 	with get_session() as session:
-		cost = session.exec(select(Cost).where(Cost.id == cost_id)).first()
+		cost = session.exec(select(Cost).where(Cost.id == cost_id).where(Cost.deleted_at.is_(None))).first()
 		if not cost:
 			raise HTTPException(status_code=404, detail="Cost entry not found")
 		
@@ -388,7 +397,7 @@ def update_cost(
 ):
 	"""Update an existing cost entry."""
 	with get_session() as session:
-		cost = session.exec(select(Cost).where(Cost.id == cost_id)).first()
+		cost = session.exec(select(Cost).where(Cost.id == cost_id).where(Cost.deleted_at.is_(None))).first()
 		if not cost:
 			raise HTTPException(status_code=404, detail="Cost entry not found")
 		
@@ -460,26 +469,30 @@ def delete_cost(
 	start: Optional[str] = Query(default=None),
 	end: Optional[str] = Query(default=None),
 ):
-	"""Delete a single cost entry."""
+	"""Soft delete a single cost entry."""
 	with get_session() as session:
-		cost = session.exec(select(Cost).where(Cost.id == cost_id)).first()
+		cost = session.exec(select(Cost).where(Cost.id == cost_id).where(Cost.deleted_at.is_(None))).first()
 		if not cost:
 			raise HTTPException(status_code=404, detail="Cost entry not found")
 		
 		# Store old data for logging
 		old_data = _cost_to_dict(cost)
 		
-		# Delete existing history log records manually if FK constraint is not CASCADE yet
-		# This is a workaround until the migration updates the constraint to CASCADE
-		history_logs = session.exec(
-			select(CostHistoryLog).where(CostHistoryLog.cost_id == cost_id)
-		).all()
-		for log in history_logs:
-			session.delete(log)
-		session.flush()  # Flush to ensure history logs are deleted before deleting cost
+		# Soft delete: set deleted_at timestamp
+		cost.deleted_at = dt.datetime.utcnow()
+		session.add(cost)
 		
-		# Delete cost entry
-		session.delete(cost)
+		# Log deletion
+		user_id = None  # TODO: Get from session if auth is implemented
+		_log_cost_change(
+			session,
+			cost_id,
+			"delete",
+			old_data=old_data,
+			new_data=None,
+			user_id=user_id
+		)
+		
 		session.commit()
 	
 	url = "/costs"

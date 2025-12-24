@@ -147,8 +147,8 @@ def account_transactions(request: Request, account_id: int, start: Optional[str]
 			income_q = income_q.where(Income.date <= end_date)
 		incomes = session.exec(income_q.order_by(Income.date.desc(), Income.id.desc())).all()
 		
-		# Get expenses
-		expense_q = select(Cost).where(Cost.account_id == account_id)
+		# Get expenses (exclude soft-deleted)
+		expense_q = select(Cost).where(Cost.account_id == account_id).where(Cost.deleted_at.is_(None))
 		if start_date:
 			expense_q = expense_q.where(Cost.date >= start_date)
 		if end_date:

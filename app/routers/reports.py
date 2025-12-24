@@ -121,13 +121,14 @@ def daily_report(
 				total_cost += acc
 
 		# Add overhead/operational costs from Cost table within the period
-		# Exclude payments to suppliers and MERTER MAL ALIM (type_id=9) costs
+		# Exclude payments to suppliers, MERTER MAL ALIM (type_id=9) costs, and soft-deleted costs
 		try:
 			period_costs_query = (
 				select(func.sum(Cost.amount))
 				.where(Cost.date.is_not(None))
 				.where(Cost.date >= start_date)
 				.where(Cost.date <= end_date)
+				.where(Cost.deleted_at.is_(None))
 				.where(or_(Cost.is_payment_to_supplier == False, Cost.is_payment_to_supplier.is_(None)))
 				.where(or_(Cost.type_id != 9, Cost.type_id.is_(None)))
 			)
@@ -463,12 +464,13 @@ def finance_report(
 		).all()
 		total_income = sum(float(inc.amount) for inc in incomes)
 		
-		# Get expenses in period
+		# Get expenses in period (exclude soft-deleted)
 		expenses = session.exec(
 			select(Cost)
 			.where(Cost.date.is_not(None))
 			.where(Cost.date >= start_date)
 			.where(Cost.date <= end_date)
+			.where(Cost.deleted_at.is_(None))
 			.order_by(Cost.date.desc())
 		).all()
 		total_expenses = sum(float(exp.amount) for exp in expenses)

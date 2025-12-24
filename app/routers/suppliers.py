@@ -25,10 +25,11 @@ def suppliers_page(request: Request):
 			if supplier.id is None:
 				continue
 			
-			# Get all costs for this supplier
+			# Get all costs for this supplier (exclude soft-deleted)
 			costs = session.exec(
 				select(Cost)
 				.where(Cost.supplier_id == supplier.id)
+				.where(Cost.deleted_at.is_(None))
 			).all()
 			
 			# Get debts (MERTER MAL ALIM costs, not payments)
@@ -83,10 +84,11 @@ def supplier_detail(
 		if not supplier:
 			return RedirectResponse(url="/suppliers", status_code=303)
 		
-		# Get all costs for this supplier
+		# Get all costs for this supplier (exclude soft-deleted)
 		costs = session.exec(
 			select(Cost)
 			.where(Cost.supplier_id == supplier_id)
+			.where(Cost.deleted_at.is_(None))
 			.order_by(Cost.date.desc(), Cost.id.desc())
 		).all()
 		
@@ -276,12 +278,13 @@ def add_payment_to_supplier(
 					payment_amount = float(amount)
 					remaining_payment = payment_amount
 					
-					# Get all debts for this supplier
+					# Get all debts for this supplier (exclude soft-deleted)
 					debts = session.exec(
 						select(Cost)
 						.where(Cost.supplier_id == supplier_id)
 						.where(Cost.is_payment_to_supplier == False)
 						.where(Cost.type_id == 9)
+						.where(Cost.deleted_at.is_(None))
 						.order_by(Cost.date.asc(), Cost.id.asc())  # FIFO: oldest first
 					).all()
 					
@@ -399,12 +402,13 @@ def allocate_existing_payment_to_debts(
 		if not supplier:
 			return RedirectResponse(url="/suppliers", status_code=303)
 		
-		# Verify payment exists and belongs to this supplier
+		# Verify payment exists and belongs to this supplier (exclude soft-deleted)
 		payment = session.exec(
 			select(Cost)
 			.where(Cost.id == payment_id)
 			.where(Cost.supplier_id == supplier_id)
 			.where(Cost.is_payment_to_supplier == True)
+			.where(Cost.deleted_at.is_(None))
 		).first()
 		if not payment:
 			return RedirectResponse(url=f"/suppliers/{supplier_id}", status_code=303)
@@ -424,12 +428,13 @@ def allocate_existing_payment_to_debts(
 			try:
 				allocations = json.loads(debt_allocations)
 				
-				# Get all debts for this supplier
+				# Get all debts for this supplier (exclude soft-deleted)
 				debts = session.exec(
 					select(Cost)
 					.where(Cost.supplier_id == supplier_id)
 					.where(Cost.is_payment_to_supplier == False)
 					.where(Cost.type_id == 9)
+					.where(Cost.deleted_at.is_(None))
 					.order_by(Cost.date.asc(), Cost.id.asc())  # FIFO: oldest first
 				).all()
 				

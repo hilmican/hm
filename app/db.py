@@ -1525,6 +1525,21 @@ def init_db() -> None:
                 except Exception:
                     pass
 
+                # Ensure cost.deleted_at exists for soft delete
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cost' AND COLUMN_NAME = 'deleted_at'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE cost ADD COLUMN deleted_at DATETIME NULL")
+                        conn.exec_driver_sql("CREATE INDEX idx_cost_deleted_at ON cost(deleted_at)")
+                except Exception:
+                    pass
+
                 # Ensure "Genel Giderler" supplier exists
                 try:
                     from sqlmodel import select
