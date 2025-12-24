@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Body
 from sqlalchemy import text
 from sqlmodel import select
 
@@ -641,7 +641,7 @@ def create_shipping_company(body: Dict[str, Any]):
 
 
 @router.post("/shipping-companies/init-default")
-def init_default_shipping_companies():
+def init_default_shipping_companies(body: Optional[Dict[str, Any]] = Body(default=None)):
 	"""Initialize default Sürat Kargo if not exists."""
 	try:
 		with get_session() as session:
