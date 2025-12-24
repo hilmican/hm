@@ -249,15 +249,9 @@ def add_payment_to_supplier(
 		
 		try:
 			# Create a cost entry as payment
-			# Find or use default cost type for payments
-			from ..models import CostType
-			payment_type = session.exec(select(CostType).where(CostType.name == "Ödeme")).first()
-			if not payment_type:
-				# Try to find any type, or use first one
-				first_type = session.exec(select(CostType).limit(1)).first()
-				type_id = first_type.id if first_type and first_type.id else 1
-			else:
-				type_id = payment_type.id
+			# Use MERTER MAL ALIM type (type_id=9) for supplier payments since they're payments against MERTER MAL ALIM debts
+			# This ensures they're properly categorized and excluded from cost calculations
+			type_id = 9  # MERTER MAL ALIM type
 			
 			payment_cost = Cost(
 				type_id=type_id,
