@@ -3,7 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 from sqlmodel import select
-from sqlalchemy import or_, and_, text
+from sqlalchemy import or_, and_, text, func
 import os
 
 from ..db import get_session
@@ -123,20 +123,16 @@ def daily_report(
 		# Add overhead/operational costs from Cost table within the period
 		# Exclude payments to suppliers and MERTER MAL ALIM (type_id=9) costs
 		try:
-			extra_costs_row = session.exec(
-				text("""
-					SELECT SUM(COALESCE(amount,0)) 
-					FROM cost 
-					WHERE date IS NOT NULL 
-					AND date >= :s 
-					AND date <= :e
-					AND (is_payment_to_supplier = FALSE OR is_payment_to_supplier IS NULL)
-					AND (type_id != 9 OR type_id IS NULL)
-				""").bindparams(
-					s=start_date, e=end_date
-				)
-			).first()
-			period_costs = float((extra_costs_row or [0])[0] or 0.0)
+			period_costs_query = (
+				select(func.sum(Cost.amount))
+				.where(Cost.date.is_not(None))
+				.where(Cost.date >= start_date)
+				.where(Cost.date <= end_date)
+				.where(or_(Cost.is_payment_to_supplier == False, Cost.is_payment_to_supplier.is_(None)))
+				.where(or_(Cost.type_id != 9, Cost.type_id.is_(None)))
+			)
+			period_costs_result = session.exec(period_costs_query).first()
+			period_costs = float(period_costs_result or 0.0)
 		except Exception:
 			period_costs = 0.0
 		total_cost += period_costs
