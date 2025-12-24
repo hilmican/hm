@@ -712,9 +712,9 @@ def init_db() -> None:
                                 INDEX idx_shipping_company_rate_active (is_active)
                             )
                         """)
-                        # Insert default MNG rates
+                        # Insert default Sürat Kargo rates (eski kargocu)
                         import json
-                        mng_rates = [
+                        surat_rates = [
                             {"max": 500, "fee": 17.81},
                             {"max": 1000, "fee": 31.46},
                             {"max": 2000, "fee": 58.76},
@@ -723,11 +723,11 @@ def init_db() -> None:
                             {"max": 5000, "fee": 140.66},
                             {"max": None, "fee_percent": 1.5}  # > 5000 için %1.5
                         ]
-                        mng_rates_json = json.dumps(mng_rates)
+                        surat_rates_json = json.dumps(surat_rates)
                         # Escape single quotes in JSON for SQL
-                        mng_rates_json_escaped = mng_rates_json.replace("'", "''")
+                        surat_rates_json_escaped = surat_rates_json.replace("'", "''")
                         conn.exec_driver_sql(
-                            f"INSERT INTO shipping_company_rate (company_code, company_name, base_fee, rates_json) VALUES ('mng', 'MNG Kargo', 89.0, '{mng_rates_json_escaped}')"
+                            f"INSERT INTO shipping_company_rate (company_code, company_name, base_fee, rates_json) VALUES ('surat', 'Sürat Kargo', 89.0, '{surat_rates_json_escaped}')"
                         )
                 except Exception:
                     pass

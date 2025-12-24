@@ -55,9 +55,9 @@ def compute_shipping_fee(
 	
 	Args:
 		amount: Order total amount
-		company_code: Shipping company code (mng|dhl|ptt). If None, defaults to MNG.
+		company_code: Shipping company code (surat|mng|dhl|ptt). If None, defaults to Sürat Kargo.
 		paid_by_bank_transfer: If True, only base fee applies (IBAN ödeme)
-		session: Optional database session for fetching rates. If None, uses default MNG rates.
+		session: Optional database session for fetching rates. If None, uses default Sürat Kargo rates.
 	
 	Returns:
 		Total shipping fee rounded to 2 decimals.
@@ -75,7 +75,7 @@ def compute_shipping_fee(
 			).first()
 			if rate:
 				return round(float(rate.base_fee or 89.0), 2)
-		# Default MNG base
+		# Default Sürat Kargo base
 		return 89.0
 	
 	# Company-specific rates
@@ -115,10 +115,10 @@ def compute_shipping_fee(
 				# Fallback: if no tier matches, use base only
 				return round(base, 2)
 			except Exception:
-				# JSON parse error or invalid structure, fall back to MNG
+				# JSON parse error or invalid structure, fall back to Sürat
 				pass
 	
-	# Default MNG rates (backward compatibility)
+	# Default Sürat Kargo rates (backward compatibility - same rates as old MNG)
 	return _compute_shipping_fee_mng(a)
 
 

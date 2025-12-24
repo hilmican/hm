@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kargo Firmaları & Fiyatlar</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background: #f7f7fb; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; margin: 16px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+        h2 { margin: 0 0 16px 0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #f0f0f0; }
+        th { background: #fafafa; font-weight: 600; }
+        .btn { padding: 8px 16px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff; cursor: pointer; text-decoration: none; display: inline-block; }
+        .btn:hover { background: #f8fafc; }
+        .btn.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+        .btn.primary:hover { background: #1d4ed8; }
+        .btn.danger { background: #ef4444; color: #fff; border-color: #ef4444; }
+        .btn.danger:hover { background: #dc2626; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .badge.active { background: #d1fae5; color: #065f46; }
+        .badge.inactive { background: #fee2e2; color: #991b1b; }
+        .json-preview { font-family: monospace; font-size: 12px; background: #f3f4f6; padding: 8px; border-radius: 4px; max-height: 200px; overflow-y: auto; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 4px; font-weight: 500; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px; }
+        .form-group textarea { min-height: 150px; font-family: monospace; }
+        .form-actions { display: flex; gap: 8px; margin-top: 16px; }
+        .alert { padding: 12px; border-radius: 8px; margin-bottom: 16px; }
+        .alert.success { background: #d1fae5; color: #065f46; }
+        .alert.error { background: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <div class="container">
+        <h2>🚚 Kargo Firmaları & Fiyatlar</h2>
+        
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="margin: 0;">Kargo Firmaları</h3>
+                <a href="/admin/shipping-companies/new" class="btn primary">+ Yeni Kargo Firması</a>
+            </div>
+            
+            {% if companies %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Kod</th>
+                        <th>Firma Adı</th>
+                        <th>Taban Ücret</th>
+                        <th>Oranlar</th>
+                        <th>Durum</th>
+                        <th>İşlemler</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for company in companies %}
+                    <tr>
+                        <td><strong>{{ company.company_code }}</strong></td>
+                        <td>{{ company.company_name }}</td>
+                        <td>{{ '%.2f'|format(company.base_fee or 0) }} ₺</td>
+                        <td>
+                            {% if company.rates_json %}
+                            <div class="json-preview">{{ company.rates_json[:100] }}{% if company.rates_json|length > 100 %}...{% endif %}</div>
+                            {% else %}
+                            <span style="color: #9ca3af;">Oran tanımlı değil</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge {% if company.is_active %}active{% else %}inactive{% endif %}">
+                                {% if company.is_active %}Aktif{% else %}Pasif{% endif %}
+                            </span>
+                        </td>
+                        <td>
+                            <a href="/admin/shipping-companies/{{ company.id }}" class="btn">Düzenle</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: #6b7280;">Henüz kargo firması tanımlanmamış.</p>
+            {% endif %}
+        </div>
+        
+        <div class="card">
+            <h3>Oran Formatı</h3>
+            <p>Oranlar JSON formatında tanımlanır. Her oran bir "tier" (seviye) temsil eder:</p>
+            <div class="json-preview">[
+  {"max": 500, "fee": 17.81},
+  {"max": 1000, "fee": 31.46},
+  {"max": 2000, "fee": 58.76},
+  {"max": 3000, "fee": 86.06},
+  {"max": 4000, "fee": 113.36},
+  {"max": 5000, "fee": 140.66},
+  {"max": null, "fee_percent": 1.5}
+]</div>
+            <p style="margin-top: 12px; color: #6b7280; font-size: 14px;">
+                <strong>Açıklama:</strong><br>
+                - <code>max</code>: Bu seviyeye kadar olan tutarlar için geçerli (null ise son seviye)<br>
+                - <code>fee</code>: Sabit ücret (TL)<br>
+                - <code>fee_percent</code>: Yüzde bazlı ücret (örn: 1.5 = %1.5)<br>
+                - Toplam kargo ücreti = Taban Ücret + Seviye Ücreti
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+

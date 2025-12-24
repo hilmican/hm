@@ -194,13 +194,14 @@
                 <td>{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
                 <td>
                     {% if o.shipping_company %}
-                        {% if o.shipping_company == 'mng' %}MNG
+                        {% if o.shipping_company == 'surat' %}Sürat
+                        {% elif o.shipping_company == 'mng' %}MNG
                         {% elif o.shipping_company == 'dhl' %}DHL
                         {% elif o.shipping_company == 'ptt' %}PTT
                         {% else %}{{ o.shipping_company }}
                         {% endif %}
                     {% else %}
-                        <span style="color: #9ca3af;">MNG</span>
+                        <span style="color: #9ca3af;">Sürat</span>
                     {% endif %}
                 </td>
                 <td>{{ o.shipment_date }}</td>
@@ -254,7 +255,8 @@
                 <div>
                     <label>Kargo Firması</label>
                     <select id="epShippingCompany" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px;">
-                        <option value="">MNG (Varsayılan)</option>
+                        <option value="">Sürat Kargo (Varsayılan)</option>
+                        <option value="surat">Sürat Kargo</option>
                         <option value="mng">MNG Kargo</option>
                         <option value="dhl">DHL</option>
                         <option value="ptt">PTT</option>
