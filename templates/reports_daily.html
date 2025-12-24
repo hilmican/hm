@@ -143,78 +143,121 @@
             <div style="padding:16px;">
                 <!-- Equation 1: Costs + Outstanding + Bank Balances = Total Sales -->
                 <div style="margin-bottom:24px; padding:16px; background:#f0f9ff; border-radius:8px; border:2px solid #3b82f6;">
-                    <h3 style="margin:0 0 12px 0; font-size:16px; color:#1e40af;">Satış Denklemi</h3>
-                    <div style="display:grid; grid-template-columns: 1fr auto 1fr; gap:12px; align-items:center; font-size:14px;">
-                        <div style="text-align:right;">
-                            <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Maliyetler</div>
-                            <div style="font-weight:600;">{{ '%.2f'|format(total_cost or 0) }} ₺</div>
+                    <h3 style="margin:0 0 16px 0; font-size:16px; color:#1e40af;">Satış Denklemi</h3>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; margin-bottom:16px;">
+                        <!-- Sol Taraf -->
+                        <div style="padding:12px; background:#fff; border-radius:6px; border:2px solid #3b82f6;">
+                            <div style="font-size:13px; font-weight:600; color:#1e40af; margin-bottom:12px; text-align:center;">SOL TARAF (Harcanan + Bekleyen)</div>
+                            <div style="margin-bottom:8px;">
+                                <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Maliyetler</div>
+                                <div style="font-weight:600; font-size:16px;">{{ '%.2f'|format(total_cost or 0) }} ₺</div>
+                            </div>
+                            <div style="margin-top:12px; padding-top:12px; border-top:1px solid #e5e7eb;">
+                                <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">+ Alacaklar</div>
+                                <div style="font-weight:600; font-size:16px;">{{ '%.2f'|format(outstanding or 0) }} ₺</div>
+                                <div style="font-size:11px; color:#6b7280; margin-top:4px;">Ödenmemiş siparişler</div>
+                            </div>
+                            <div style="margin-top:12px; padding-top:12px; border-top:2px solid #3b82f6;">
+                                <div style="color:#1e40af; font-size:12px; font-weight:600; margin-bottom:4px;">TOPLAM</div>
+                                <div style="font-weight:700; font-size:18px; color:#1e40af;">
+                                    {% set left_total = (total_cost or 0) + (outstanding or 0) %}
+                                    {{ '%.2f'|format(left_total) }} ₺
+                                </div>
+                            </div>
                         </div>
-                        <div style="font-size:20px; font-weight:700;">+</div>
-                        <div style="text-align:left;">
-                            <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Alacaklar</div>
-                            <div style="font-weight:600;">{{ '%.2f'|format(outstanding or 0) }} ₺</div>
+                        <!-- Sağ Taraf -->
+                        <div style="padding:12px; background:#fff; border-radius:6px; border:2px solid #3b82f6;">
+                            <div style="font-size:13px; font-weight:600; color:#1e40af; margin-bottom:12px; text-align:center;">SAĞ TARAF (Elde Edilen)</div>
+                            <div style="margin-bottom:8px;">
+                                <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Bankadaki Paralar</div>
+                                <div style="font-weight:600; font-size:16px;">{{ '%.2f'|format(total_account_balances or 0) }} ₺</div>
+                                <div style="font-size:11px; color:#6b7280; margin-top:4px;">Tahsil edilen paralar</div>
+                            </div>
+                            <div style="margin-top:12px; padding-top:12px; border-top:2px solid #3b82f6;">
+                                <div style="color:#1e40af; font-size:12px; font-weight:600; margin-bottom:4px;">TOPLAM SATIŞ</div>
+                                <div style="font-weight:700; font-size:18px; color:#1e40af;">{{ '%.2f'|format(total_sales or 0) }} ₺</div>
+                                <div style="font-size:11px; color:#6b7280; margin-top:4px;">Dönem içindeki tüm siparişler</div>
+                            </div>
                         </div>
                     </div>
-                    <div style="display:grid; grid-template-columns: 1fr auto 1fr; gap:12px; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid #bfdbfe;">
-                        <div style="text-align:right;">
-                            <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Bankadaki Paralar</div>
-                            <div style="font-weight:600;">{{ '%.2f'|format(total_account_balances or 0) }} ₺</div>
-                        </div>
-                        <div style="font-size:20px; font-weight:700;">=</div>
-                        <div style="text-align:left;">
-                            <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Toplam Satış</div>
-                            <div style="font-weight:700; font-size:18px;">{{ '%.2f'|format(total_sales or 0) }} ₺</div>
-                        </div>
-                    </div>
-                    <div style="margin-top:12px; padding:8px; background:#fff; border-radius:4px; text-align:center; font-size:12px; color:#059669;">
+                    <div style="margin-top:12px; padding:10px; background:#fff; border-radius:4px; text-align:center; font-size:12px;">
+                        <div style="margin-bottom:6px; color:#374151; font-weight:600;">Denklem: Sol = Sağ</div>
                         {% set calculated_total = (total_cost or 0) + (outstanding or 0) + (total_account_balances or 0) %}
                         {% set difference = (total_sales or 0) - calculated_total %}
-                        Doğrulama: {{ '%.2f'|format(calculated_total) }} ₺ 
+                        <div style="color:#059669;">
+                            Sol: {{ '%.2f'|format((total_cost or 0) + (outstanding or 0)) }} ₺ + Sağ: {{ '%.2f'|format(total_account_balances or 0) }} ₺ = {{ '%.2f'|format(calculated_total) }} ₺
+                        </div>
                         {% if difference|abs > 0.01 %}
-                        <span style="color:#dc2626;">(Fark: {{ '%.2f'|format(difference) }} ₺)</span>
+                        <div style="margin-top:4px; color:#dc2626; font-weight:600;">Fark: {{ '%.2f'|format(difference) }} ₺</div>
                         {% else %}
-                        <span style="color:#059669;">✓</span>
+                        <div style="margin-top:4px; color:#059669; font-weight:600;">✓ Denklem doğru</div>
                         {% endif %}
                     </div>
                 </div>
 
                 <!-- Equation 2: Net Profit - Working Capital = Cash on Hand - Stock Value -->
                 <div style="margin-bottom:24px; padding:16px; background:#fef3c7; border-radius:8px; border:2px solid #f59e0b;">
-                    <h3 style="margin:0 0 12px 0; font-size:16px; color:#92400e;">Nakit Akışı Denklemi</h3>
-                    <div style="display:grid; grid-template-columns: 1fr auto 1fr; gap:12px; align-items:center; font-size:14px;">
-                        <div style="text-align:right;">
-                            <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Net Kâr</div>
-                            <div style="font-weight:600;">{{ '%.2f'|format(net_profit or 0) }} ₺</div>
+                    <h3 style="margin:0 0 16px 0; font-size:16px; color:#92400e;">Nakit Akışı Denklemi</h3>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; margin-bottom:16px;">
+                        <!-- Sol Taraf -->
+                        <div style="padding:12px; background:#fff; border-radius:6px; border:2px solid #f59e0b;">
+                            <div style="font-size:13px; font-weight:600; color:#92400e; margin-bottom:12px; text-align:center;">SOL TARAF (Kâr - Bağlı Sermaye)</div>
+                            <div style="margin-bottom:8px;">
+                                <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Net Kâr</div>
+                                <div style="font-weight:600; font-size:16px;">{{ '%.2f'|format(net_profit or 0) }} ₺</div>
+                                <div style="font-size:11px; color:#6b7280; margin-top:4px;">Brüt Kâr - Kesintiler</div>
+                            </div>
+                            <div style="margin-top:12px; padding-top:12px; border-top:1px solid #e5e7eb;">
+                                <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">- Çalışma Sermayesi</div>
+                                <div style="font-weight:600; font-size:16px;">{{ '%.2f'|format(working_capital or 0) }} ₺</div>
+                                <div style="font-size:11px; color:#6b7280; margin-top:4px;">
+                                    (Alacaklar: {{ '%.2f'|format(outstanding or 0) }} ₺ + Stok: {{ '%.2f'|format(inventory_value or 0) }} ₺)
+                                </div>
+                            </div>
+                            <div style="margin-top:12px; padding-top:12px; border-top:2px solid #f59e0b;">
+                                <div style="color:#92400e; font-size:12px; font-weight:600; margin-bottom:4px;">SONUÇ</div>
+                                <div style="font-weight:700; font-size:18px; color:#92400e;">
+                                    {% set left_side = (net_profit or 0) - (working_capital or 0) %}
+                                    {{ '%.2f'|format(left_side) }} ₺
+                                </div>
+                                <div style="font-size:11px; color:#6b7280; margin-top:4px;">Serbest nakit akışı</div>
+                            </div>
                         </div>
-                        <div style="font-size:20px; font-weight:700;">-</div>
-                        <div style="text-align:left;">
-                            <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Çalışma Sermayesi</div>
-                            <div style="font-weight:600;">{{ '%.2f'|format(working_capital or 0) }} ₺</div>
-                            <div style="font-size:11px; color:#6b7280; margin-top:4px;">
-                                (Alacaklar: {{ '%.2f'|format(outstanding or 0) }} ₺ + Stok: {{ '%.2f'|format(inventory_value or 0) }} ₺)
+                        <!-- Sağ Taraf -->
+                        <div style="padding:12px; background:#fff; border-radius:6px; border:2px solid #f59e0b;">
+                            <div style="font-size:13px; font-weight:600; color:#92400e; margin-bottom:12px; text-align:center;">SAĞ TARAF (Nakit - Stok)</div>
+                            <div style="margin-bottom:8px;">
+                                <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Elimdeki Para</div>
+                                <div style="font-weight:600; font-size:16px;">{{ '%.2f'|format(cash_on_hand or 0) }} ₺</div>
+                                <div style="font-size:11px; color:#6b7280; margin-top:4px;">Banka hesaplarındaki toplam</div>
+                            </div>
+                            <div style="margin-top:12px; padding-top:12px; border-top:1px solid #e5e7eb;">
+                                <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">- Stok Değeri</div>
+                                <div style="font-weight:600; font-size:16px;">{{ '%.2f'|format(inventory_value or 0) }} ₺</div>
+                                <div style="font-size:11px; color:#6b7280; margin-top:4px;">Elimdeki ürünlerin maliyeti</div>
+                            </div>
+                            <div style="margin-top:12px; padding-top:12px; border-top:2px solid #f59e0b;">
+                                <div style="color:#92400e; font-size:12px; font-weight:600; margin-bottom:4px;">SONUÇ</div>
+                                <div style="font-weight:700; font-size:18px; color:#92400e;">
+                                    {% set right_side = (cash_on_hand or 0) - (inventory_value or 0) %}
+                                    {{ '%.2f'|format(right_side) }} ₺
+                                </div>
+                                <div style="font-size:11px; color:#6b7280; margin-top:4px;">Kullanılabilir nakit</div>
                             </div>
                         </div>
                     </div>
-                    <div style="display:grid; grid-template-columns: 1fr auto 1fr; gap:12px; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid #fde68a;">
-                        <div style="text-align:right;">
-                            <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Elimdeki Para</div>
-                            <div style="font-weight:600;">{{ '%.2f'|format(cash_on_hand or 0) }} ₺</div>
-                        </div>
-                        <div style="font-size:20px; font-weight:700;">-</div>
-                        <div style="text-align:left;">
-                            <div style="color:#6b7280; font-size:12px; margin-bottom:4px;">Stok Değeri</div>
-                            <div style="font-weight:600;">{{ '%.2f'|format(inventory_value or 0) }} ₺</div>
-                        </div>
-                    </div>
-                    <div style="margin-top:12px; padding:8px; background:#fff; border-radius:4px; text-align:center; font-size:12px; color:#059669;">
+                    <div style="margin-top:12px; padding:10px; background:#fff; border-radius:4px; text-align:center; font-size:12px;">
+                        <div style="margin-bottom:6px; color:#374151; font-weight:600;">Denklem: Sol = Sağ</div>
                         {% set left_side = (net_profit or 0) - (working_capital or 0) %}
                         {% set right_side = (cash_on_hand or 0) - (inventory_value or 0) %}
                         {% set diff = left_side - right_side %}
-                        Sol: {{ '%.2f'|format(left_side) }} ₺ | Sağ: {{ '%.2f'|format(right_side) }} ₺
+                        <div style="color:#059669;">
+                            Sol: {{ '%.2f'|format(left_side) }} ₺ | Sağ: {{ '%.2f'|format(right_side) }} ₺
+                        </div>
                         {% if diff|abs > 0.01 %}
-                        <span style="color:#dc2626;">(Fark: {{ '%.2f'|format(diff) }} ₺)</span>
+                        <div style="margin-top:4px; color:#dc2626; font-weight:600;">Fark: {{ '%.2f'|format(diff) }} ₺</div>
                         {% else %}
-                        <span style="color:#059669;">✓</span>
+                        <div style="margin-top:4px; color:#059669; font-weight:600;">✓ Denklem doğru</div>
                         {% endif %}
                     </div>
                 </div>
@@ -281,9 +324,24 @@
                                 <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Satış - Maliyet</td>
                             </tr>
                             <tr>
-                                <td style="padding:8px 10px;">Net Kâr</td>
-                                <td style="padding:8px 10px; text-align:right; font-weight:600;">{{ '%.2f'|format(net_profit or 0) }} ₺</td>
-                                <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Brüt Kâr - Kesintiler</td>
+                                <td style="padding:8px 10px; padding-left:20px;">Eksi: Nakliye Maliyetleri</td>
+                                <td style="padding:8px 10px; text-align:right; color:#dc2626;">-{{ '%.2f'|format(transportation_costs or 0) }} ₺</td>
+                                <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Kargo ücretleri</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:8px 10px; padding-left:20px;">Eksi: Diğer Kesintiler</td>
+                                <td style="padding:8px 10px; text-align:right; color:#dc2626;">-{{ '%.2f'|format((total_fees or 0) - (transportation_costs or 0)) }} ₺</td>
+                                <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Komisyon, hizmet, iade vb.</td>
+                            </tr>
+                            <tr style="border-top:1px solid #d1d5db;">
+                                <td style="padding:8px 10px; font-weight:600;">Toplam Kesintiler</td>
+                                <td style="padding:8px 10px; text-align:right; font-weight:600; color:#dc2626;">-{{ '%.2f'|format(total_fees or 0) }} ₺</td>
+                                <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Nakliye + Diğer</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:8px 10px; font-weight:600;">Net Kâr</td>
+                                <td style="padding:8px 10px; text-align:right; font-weight:700;">{{ '%.2f'|format(net_profit or 0) }} ₺</td>
+                                <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Brüt Kâr - Toplam Kesintiler</td>
                             </tr>
                             
                             <!-- Assets Section -->
@@ -301,6 +359,11 @@
                                 <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Elimdeki ürünler</td>
                             </tr>
                             {% if account_balances %}
+                            <tr>
+                                <td style="padding:8px 10px; font-weight:600; color:#5b21b6;">Banka ve Kasalar</td>
+                                <td style="padding:8px 10px; text-align:right;"></td>
+                                <td style="padding:8px 10px;"></td>
+                            </tr>
                             {% for acc_id, balance in account_balances.items() %}
                             <tr>
                                 <td style="padding:8px 10px; padding-left:20px;">{{ account_name_map.get(acc_id) or ('Hesap ' + acc_id|string) }}</td>
