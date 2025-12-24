@@ -539,6 +539,26 @@ def list_shipping_companies(request: Request):
 		)
 
 
+@router.get("/shipping-companies/new")
+def new_shipping_company(request: Request):
+	"""Create new shipping company form."""
+	templates = request.app.state.templates
+	# Create a dummy company object for the form
+	from ..models import ShippingCompanyRate
+	dummy_company = ShippingCompanyRate(
+		id=None,
+		company_code="",
+		company_name="",
+		base_fee=89.0,
+		rates_json="[]",
+		is_active=True
+	)
+	return templates.TemplateResponse(
+		"admin_shipping_company_edit.html",
+		{"request": request, "company": dummy_company, "is_new": True}
+	)
+
+
 @router.get("/shipping-companies/{company_id}")
 def get_shipping_company(company_id: int, request: Request):
 	"""Get shipping company rate details."""
@@ -549,7 +569,7 @@ def get_shipping_company(company_id: int, request: Request):
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"admin_shipping_company_edit.html",
-			{"request": request, "company": company}
+			{"request": request, "company": company, "is_new": False}
 		)
 
 

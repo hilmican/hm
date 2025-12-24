@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kargo Firması Düzenle</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background: #f7f7fb; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; margin: 16px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+        h2 { margin: 0 0 16px 0; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 4px; font-weight: 500; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+        .form-group textarea { min-height: 200px; font-family: monospace; }
+        .form-group input[type="checkbox"] { width: auto; }
+        .form-actions { display: flex; gap: 8px; margin-top: 24px; }
+        .btn { padding: 10px 20px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff; cursor: pointer; text-decoration: none; display: inline-block; }
+        .btn:hover { background: #f8fafc; }
+        .btn.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+        .btn.primary:hover { background: #1d4ed8; }
+        .alert { padding: 12px; border-radius: 8px; margin-bottom: 16px; }
+        .alert.success { background: #d1fae5; color: #065f46; }
+        .alert.error { background: #fee2e2; color: #991b1b; }
+        .help-text { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <div class="container">
+        <h2>{% if is_new %}Yeni Kargo Firması{% else %}Kargo Firması Düzenle: {{ company.company_name }}{% endif %}</h2>
+        
+        <div id="alertContainer"></div>
+        
+        <div class="card">
+            <form id="editForm" onsubmit="return saveCompany(event);">
+                <div class="form-group">
+                    <label>Kargo Firması Kodu</label>
+                    <input type="text" name="company_code" value="{{ company.company_code }}" {% if not is_new %}readonly style="background: #f3f4f6;"{% else %}required{% endif %}>
+                    <div class="help-text">{% if is_new %}Kod (örn: surat, mng, dhl, ptt){% else %}Kod değiştirilemez{% endif %}</div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Firma Adı</label>
+                    <input type="text" name="company_name" value="{{ company.company_name }}" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Taban Ücret (TL)</label>
+                    <input type="number" name="base_fee" step="0.01" value="{{ '%.2f'|format(company.base_fee or 89.0) }}" required>
+                    <div class="help-text">Her gönderi için uygulanan sabit ücret</div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Oranlar (JSON)</label>
+                    <textarea name="rates_json" id="ratesJson">{{ company.rates_json or '[]' }}</textarea>
+                    <div class="help-text">JSON formatında oran listesi. Örnek: [{"max": 500, "fee": 17.81}, {"max": 1000, "fee": 31.46}, ...]</div>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="is_active" {% if company.is_active %}checked{% endif %}>
+                        Aktif
+                    </label>
+                    <div class="help-text">Pasif kargo firmaları siparişlerde görünmez</div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn primary">Kaydet</button>
+                    <a href="/admin/shipping-companies" class="btn">İptal</a>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        function showAlert(message, type) {
+            const container = document.getElementById('alertContainer');
+            container.innerHTML = `<div class="alert ${type}">${message}</div>`;
+            setTimeout(() => {
+                container.innerHTML = '';
+            }, 5000);
+        }
+        
+        async function saveCompany(event) {
+            event.preventDefault();
+            const form = event.target;
+            const formData = new FormData(form);
+            
+            // Validate JSON
+            const ratesJson = formData.get('rates_json');
+            try {
+                JSON.parse(ratesJson);
+            } catch (e) {
+                showAlert('Geçersiz JSON formatı: ' + e.message, 'error');
+                return false;
+            }
+            
+            const data = {
+                company_name: formData.get('company_name'),
+                base_fee: parseFloat(formData.get('base_fee')),
+                rates_json: ratesJson,
+                is_active: formData.has('is_active')
+            };
+            
+            {% if is_new %}
+            const url = '/admin/shipping-companies';
+            data.company_code = formData.get('company_code');
+            {% else %}
+            const url = '/admin/shipping-companies/{{ company.id }}';
+            {% endif %}
+            const method = 'POST';
+            
+            try {
+                const res = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                if (res.ok) {
+                    showAlert('Kargo firması başarıyla {% if is_new %}oluşturuldu{% else %}güncellendi{% endif %}!', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/admin/shipping-companies';
+                    }, 1500);
+                } else {
+                    const error = await res.text();
+                    showAlert('Hata: ' + error, 'error');
+                }
+            } catch (e) {
+                showAlert('Ağ hatası: ' + e.message, 'error');
+            }
+            
+            return false;
+        }
+    </script>
+</body>
+</html>
+
