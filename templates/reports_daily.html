@@ -303,7 +303,7 @@
                             {% if account_balances %}
                             {% for acc_id, balance in account_balances.items() %}
                             <tr>
-                                <td style="padding:8px 10px; padding-left:20px;">{{ account_name_map.get(acc_id, f'Hesap {acc_id}') }}</td>
+                                <td style="padding:8px 10px; padding-left:20px;">{{ account_name_map.get(acc_id) or ('Hesap ' + acc_id|string) }}</td>
                                 <td style="padding:8px 10px; text-align:right;">{{ '%.2f'|format(balance) }} ₺</td>
                                 <td style="padding:8px 10px; color:#6b7280; font-size:12px;">Banka hesabı</td>
                             </tr>
