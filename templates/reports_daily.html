@@ -129,6 +129,14 @@
                     {% endif %}
                 </div>
                 
+                <div style="margin-bottom:16px; padding:12px; background:#fef3c7; border-radius:6px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-weight:600;">Nakliye Maliyetleri (Transportation Costs)</span>
+                        <span style="font-size:18px; font-weight:600;">{{ '%.2f'|format(transportation_costs or 0) }} ₺</span>
+                    </div>
+                    <div style="font-size:12px; color:#6b7280;">Kargo ücretleri</div>
+                </div>
+                
                 <div style="padding:12px; background:#fef3c7; border-radius:6px; border:2px solid #fbbf24;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <span style="font-weight:700; font-size:16px;">Toplam Maliyet</span>
