@@ -13,10 +13,10 @@ Kaynak: prod DB (`appdb_h`), bugün çekilen veriler.
 - **Maliyetler:**  
   - Ürün maliyeti (order_costs): 1.219.425 ₺  
   - Operasyonel gider: 655.541 ₺  
-  - Kargo maliyeti (shipping_fee): 140.807 ₺  
-  - **Toplam maliyet:** 2.015.773 ₺
+  - Kargo maliyeti (shipping_fee, **KDV dahil**): 273.398 ₺  
+  - **Toplam maliyet (KDV dahil kargo ile):** 2.148.364 ₺
 - **Kesinti (COD tahsilat/kargo):** Payment.net - Payment.amount farkı ≈ 173.304 ₺ ve tamamı **fee_kargo** (Sürat COD tahsilat komisyonu; platform kesintisi yok). Kârlılıkta satış–maliyet baz alınmalı; net_amount kullanılırsa kargo iki kez düşülmüş olur.
-- **Net kâr (gross tahsilat varsayımı + maliyetler):** ≈ 185.919 ₺
+- **Net kâr (gross tahsilat varsayımı + KDV dahil kargo):** ≈ 226.632 ₺
 - **Çalışma sermayesi (alacak + stok):** 664.987 ₺
 - **Serbest nakit akışı (net kâr – çalışma sermayesi):** ≈ -479.068 ₺
 - **Nakit – Stok:** -101.909 ₺
