@@ -15,7 +15,7 @@ Kaynak: prod DB (`appdb_h`), bugün çekilen veriler.
   - Operasyonel gider: 655.541 ₺  
   - Kargo maliyeti (shipping_fee): 140.807 ₺  
   - **Toplam maliyet:** 2.015.773 ₺
-- **Kesinti varsayımı:** Payment.net - Payment.amount farkı ≈ 173.304 ₺ (fee_* kolonları dolu değil). Net’in neden düşük olduğu belirsiz; eğer bu fark kargo/komisyon nedeniyleyse ve kargo maliyetlerini ayrıca yazıyorsak, net kullanmak çifte kesinti yaratır. Bu yüzden kârlılıkta **gross** baz alınmalı.
+- **Kesinti (COD tahsilat/kargo):** Payment.net - Payment.amount farkı ≈ 173.304 ₺ ve tamamı **fee_kargo** (Sürat COD tahsilat komisyonu; platform kesintisi yok). Kârlılıkta satış–maliyet baz alınmalı; net_amount kullanılırsa kargo iki kez düşülmüş olur.
 - **Net kâr (gross tahsilat varsayımı + maliyetler):** ≈ 185.919 ₺
 - **Çalışma sermayesi (alacak + stok):** 664.987 ₺
 - **Serbest nakit akışı (net kâr – çalışma sermayesi):** ≈ -479.068 ₺
@@ -37,9 +37,9 @@ Toplam: 485.267 ₺ (en büyük risk Aralık gönderileri).
 **Acil / kritik**
 1) **COD tahsilat mutabakatı (Focus/Sürat):** Özellikle Aralık alacakları (≈354k) liste çıkarılıp ödeme dosyalarıyla eşleştirilmeli; 30+ gün geçmiş Ekim-Kasım (≈132k) için iade/kayıp/tanzim süreçleri açılmalı.  
 2) **Tahsilat izleme standardı:**  
-   - Kârlılıkta ve alacakta **Payment.amount (gross)** + IBAN işaretlileri baz alınsın.  
-   - `payment.net_amount` şimdilik kâra sokulmasın; aksi halde (net düşükse) kargo maliyetiyle çifte düşüş olur.  
-   - Eğer net/gross farkı gerçekten kargo kesintisi ise, fee_kargo kolonuna yazılmalı; yoksa boş bırakılmalı.
+   - Kârlılık ve alacakta **Payment.amount (gross)** + IBAN işaretlileri baz alınsın.  
+   - `payment.net_amount` kâra sokulmasın; net zaten fee_kargo düşülmüş tutar, kargo maliyeti ayrıca `shipping_fee` ile giderde.  
+   - COD tahsilat komisyonu (fee_kargo) istersek “kesintiler” KPI’sında gösterilebilir; kâr hesabı yine satış–maliyet olmalı.
 
 **Kısa vadeli iyileştirme**
 3) **Kargo firması alanı:** shipping_company boş olanları “surat” ile güncelleyebiliriz (isteğe bağlı).  
@@ -52,7 +52,7 @@ Toplam: 485.267 ₺ (en büyük risk Aralık gönderileri).
 6) **orderpayment kullanımına geçiş** (kargo tahsilatlarını toplu bağlamak) ileride alacak takibini basitleştirir.
 
 ## Sık sorulanlar
-- **Platform kesintisi var mı?** Yok; net-gross farkı platform değil, muhtemelen kargo/transfer kesintisi veya importtaki yuvarlama. fee_* boş olduğu için raporda 0 görünüyor.  
+- **Platform kesintisi var mı?** Yok; net-gross farkı tamamen Sürat COD tahsilat komisyonu (fee_kargo), platform komisyonu değil.  
 - **Kargo maliyeti anlık mı hesaplanıyor?** `shipping_fee` alanı doluysa **sabit**. Boşsa, rapor sırasında `compute_shipping_fee` ile **güncel tarifeden** hesaplanıyor; bu geçmiş maliyeti oynatabilir. Bu yüzden `shipping_fee`’yi sipariş anında setleyip (veya backfill) sabitlemek önemli.
 
 
