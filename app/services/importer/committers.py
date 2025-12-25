@@ -18,6 +18,25 @@ from ..inventory import adjust_stock
 from ..shipping import compute_shipping_fee
 
 
+def _normalize_shipping_company(val: Optional[str]) -> str:
+	try:
+		s = (val or "").strip().lower()
+		if not s:
+			return "surat"
+		if s.startswith("sur"):
+			return "surat"
+		if s.startswith("mng"):
+			return "mng"
+		if s.startswith("dhl"):
+			return "dhl"
+		if s.startswith("ptt"):
+			return "ptt"
+		# default fallback
+		return "surat"
+	except Exception:
+		return "surat"
+
+
 def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[int], Optional[int]]:
     """Process a single Kargo record. Returns (status, message, matched_client_id, matched_order_id).
 
@@ -121,6 +140,13 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 order.total_amount = rec.get("total_amount")
             if rec.get("shipment_date") and not order.shipment_date:
                 order.shipment_date = rec.get("shipment_date")
+            # update shipping company if missing
+            if not order.shipping_company:
+                order.shipping_company = _normalize_shipping_company(rec.get("shipping_company"))
+            # backfill shipping_fee if missing and total_amount is present
+            if (order.shipping_fee is None) and order.total_amount is not None:
+                company_code = order.shipping_company or _normalize_shipping_company(rec.get("shipping_company"))
+                order.shipping_fee = compute_shipping_fee(float(order.total_amount or 0.0), company_code=company_code, paid_by_bank_transfer=bool(order.paid_by_bank_transfer))
             # DO NOT update data_date - preserve the oldest date (original bizim order date)
             # data_date should remain as the original order creation date
             if rec.get("alici_kodu"):
@@ -135,6 +161,10 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             order_notes = rec.get("notes") or None
             if rec.get("alici_kodu"):
                 order_notes = f"{order_notes} | AliciKodu:{rec.get('alici_kodu')}" if order_notes else f"AliciKodu:{rec.get('alici_kodu')}"
+            company_code = _normalize_shipping_company(rec.get("shipping_company"))
+            shipping_fee = None
+            if rec.get("total_amount") is not None:
+                shipping_fee = compute_shipping_fee(float(rec.get("total_amount") or 0.0), company_code=company_code, paid_by_bank_transfer=bool(rec.get("paid_by_bank_transfer")))
             order = Order(
                 tracking_no=rec.get("tracking_no"),
                 client_id=client.id,  # type: ignore
@@ -142,6 +172,8 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 quantity=rec.get("quantity") or 1,
                 unit_price=rec.get("unit_price"),
                 total_amount=rec.get("total_amount"),
+                shipping_company=company_code,
+                shipping_fee=shipping_fee,
                 shipment_date=rec.get("shipment_date"),  # kargo tarihi from Excel row
                 data_date=run.data_date,  # data tarihi from filename (when kargo Excel was imported)
                 source="kargo",

@@ -79,6 +79,14 @@ KARGO_MAPPING = {
 	"odeme tipi": "payment_method",
 	"odemetipi": "payment_method",
 
+	# shipping company
+	"kargo_firmasi": "shipping_company",
+	"kargo firmasi": "shipping_company",
+	"kargo şirketi": "shipping_company",
+	"kargo sirketi": "shipping_company",
+	"kargo firma": "shipping_company",
+	"firma": "shipping_company",
+
 	# identifiers
 	"alicikodu": "alici_kodu",
 }
@@ -108,6 +116,10 @@ def map_row(raw: dict[str, Any], row_values: list[Any] | None = None) -> dict[st
 		mapped["total_amount"] = parse_float(mapped.get("total_amount"))
 	if "payment_amount" in mapped:
 		mapped["payment_amount"] = parse_float(mapped.get("payment_amount"))
+	if "shipping_company" in mapped:
+		val = mapped.get("shipping_company")
+		if isinstance(val, str):
+			mapped["shipping_company"] = val.strip()
 	# fees to floats
 	for fk in ("fee_komisyon","fee_hizmet","fee_kargo","fee_iade","fee_erken_odeme"):
 		if fk in mapped:
