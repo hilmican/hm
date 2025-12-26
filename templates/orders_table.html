@@ -132,6 +132,10 @@
                 <option value="linked" {{ 'selected' if ig_linked == 'linked' else '' }}>IG Bağlı</option>
                 <option value="unlinked" {{ 'selected' if ig_linked == 'unlinked' else '' }}>IG Bağsız</option>
             </select>
+            <select name="repeat_customer">
+                <option value="" {{ 'selected' if not repeat_customer else '' }}>Tüm Müşteriler</option>
+                <option value="multi" {{ 'selected' if repeat_customer == 'multi' else '' }}>1'den fazla sipariş</option>
+            </select>
             <button class="btn" type="submit">Filtrele</button>
             <a class="link-muted" href="/orders/table">Temizle</a>
         </form>

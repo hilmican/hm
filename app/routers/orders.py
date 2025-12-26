@@ -54,6 +54,7 @@ def list_orders_table(
     status: Optional[str] = Query(default=None),
     preset: Optional[str] = Query(default=None),
     ig_linked: Optional[str] = Query(default=None, regex="^(linked|unlinked)?$"),
+    repeat_customer: Optional[str] = Query(default=None, regex="^(multi)?$"),
 ):
     def _parse_date_or_default(value: Optional[str], fallback: dt.date) -> dt.date:
         try:
@@ -194,6 +195,15 @@ def list_orders_table(
                 return paid <= 0.0
             rows = [o for o in rows if _is_overdue_unpaid(o)]
 
+        # Optional repeat-customer filter (show only clients with 2+ orders in the current range)
+        if repeat_customer == "multi":
+            client_order_counts: dict[int, int] = defaultdict(int)
+            for o in rows:
+                if o.client_id is None:
+                    continue
+                client_order_counts[int(o.client_id)] += 1
+            rows = [o for o in rows if (o.client_id is not None and client_order_counts.get(int(o.client_id), 0) >= 2)]
+
         # build simple maps for names based on filtered rows
         client_ids = sorted({o.client_id for o in rows if o.client_id})
         item_ids = sorted({o.item_id for o in rows if o.item_id})
@@ -297,6 +307,7 @@ def list_orders_table(
                 "source": source,
                 "status": status,
                 "ig_linked": ig_linked,
+                "repeat_customer": repeat_customer,
                 # current preset
                 "preset": preset,
             },
@@ -455,6 +466,7 @@ def export_orders(
     source: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
     preset: Optional[str] = Query(default=None),
+    repeat_customer: Optional[str] = Query(default=None, regex="^(multi)?$"),
 ):
     if openpyxl is None:
         raise HTTPException(status_code=500, detail="openpyxl not available for export")
@@ -533,6 +545,14 @@ def export_orders(
                 paid = paid_map.get(o.id or 0, 0.0)
                 return paid <= 0.0
             rows = [o for o in rows if _is_overdue_unpaid(o)]
+        # Optional repeat-customer filter for export (2+ orders in current range)
+        if repeat_customer == "multi":
+            client_order_counts: dict[int, int] = defaultdict(int)
+            for o in rows:
+                if o.client_id is None:
+                    continue
+                client_order_counts[int(o.client_id)] += 1
+            rows = [o for o in rows if (o.client_id is not None and client_order_counts.get(int(o.client_id), 0) >= 2)]
         # Build cost_map similar to table for high_cost filtering
         from sqlmodel import select as _select
         cost_map: dict[int, float] = {}
