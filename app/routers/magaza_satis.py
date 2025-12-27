@@ -197,6 +197,9 @@ def checkout(payload: dict = Body(...)):
 	discount = float(payload.get("discount") or 0.0)
 	if discount < 0:
 		discount = 0.0
+	commission = float(payload.get("commission") or 0.0)
+	if commission < 0:
+		commission = 0.0
 
 	notes = (payload.get("notes") or "").strip() or None
 	skip_stock = bool(payload.get("skip_stock"))
@@ -236,7 +239,7 @@ def checkout(payload: dict = Body(...)):
 			)
 
 		subtotal = sum(l["unit_price"] * l["quantity"] for l in lines)
-		total_amount = max(subtotal - discount, 0.0)
+		total_amount = max(subtotal - discount + commission, 0.0)
 
 		order = Order(
 			client_id=client.id,  # type: ignore[arg-type]

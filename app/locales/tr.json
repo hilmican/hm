@@ -92,6 +92,8 @@
     "payment_method": "Ödeme Yöntemi",
     "cash": "Nakit",
     "discount": "İndirim",
+    "commission": "Komisyon (ek masraf)",
+    "commission_hint": "Toplama eklenir, boş bırakılırsa 0 kabul edilir.",
     "notes": "Notlar",
     "notes_placeholder": "Beden, teslimat, özel istek vb.",
     "total_label": "Genel Toplam",
@@ -120,6 +122,15 @@
     "stock_handling": "Stok İşlemi",
     "skip_stock": "Stok düşmeden kaydet",
     "skip_stock_hint": "Seçilirse stok değişmez, seçilmezse stok düşülür."
+  },
+  "settings": {
+    "finance_title": "Finans Ayarları",
+    "default_cash_account": "Nakit (POS) gelir hesabı",
+    "default_bank_account": "IBAN (havale/EFT) gelir hesabı",
+    "default_cash_hint": "Nakit satışlar bu hesaba gelir olarak kaydedilir.",
+    "default_bank_hint": "IBAN ödemeleri bu hesaba gelir olarak kaydedilir.",
+    "select_placeholder": "Seçiniz",
+    "save": "Kaydet"
   },
   "status": {
     "tamamlandi": "Tamamlandı",

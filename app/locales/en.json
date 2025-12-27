@@ -92,6 +92,8 @@
     "payment_method": "Payment Method",
     "cash": "Cash",
     "discount": "Discount",
+    "commission": "Commission (surcharge)",
+    "commission_hint": "Added to total; leave empty for 0.",
     "notes": "Notes",
     "notes_placeholder": "Size, delivery, special request, etc.",
     "total_label": "Order Total",
@@ -120,6 +122,15 @@
     "stock_handling": "Stock Handling",
     "skip_stock": "Save without stock deduction",
     "skip_stock_hint": "When checked, stock is not changed; otherwise stock is reduced."
+  },
+  "settings": {
+    "finance_title": "Finance Settings",
+    "default_cash_account": "Cash (POS) income account",
+    "default_bank_account": "IBAN (wire/EFT) income account",
+    "default_cash_hint": "Cash sales will be recorded to this account.",
+    "default_bank_hint": "IBAN payments will be recorded to this account.",
+    "select_placeholder": "Select",
+    "save": "Save"
   },
   "status": {
     "tamamlandi": "Completed",
