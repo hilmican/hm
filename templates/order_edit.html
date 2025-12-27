@@ -19,6 +19,11 @@
 <body>
     {% include "_nav.html" %}
     <h2>Order #{{ order.id }} Düzenle</h2>
+    {% if status_param %}
+    <div style="margin:10px 0; padding:10px 12px; border-radius:8px; border:1px solid {{ 'transparent' if status_param=='ok' else '#fecdd3' }}; background: {{ '#ecfdf3' if status_param=='ok' else '#fef2f2' }}; color: {{ '#166534' if status_param=='ok' else '#b91c1c' }};">
+        {{ status_msg or ('Kaydedildi' if status_param=='ok' else 'Kaydedilemedi') }}
+    </div>
+    {% endif %}
     {% if order.ig_conversation_id %}
     <div class="card" style="margin-bottom:12px; padding:12px;">
         <div style="font-size:13px; color:#374151;">

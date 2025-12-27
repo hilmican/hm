@@ -11,7 +11,8 @@ from ..services.inventory import get_or_create_item as _get_or_create_item
 from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
 from ..services.finance import get_effective_total
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse
+from urllib.parse import quote
 import io
 try:
     import openpyxl
@@ -1152,6 +1153,8 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
             "order_edit.html",
             {
                 "request": request,
+                "status_param": request.query_params.get("status"),
+                "status_msg": request.query_params.get("msg"),
                 "order": o,
                 "clients": clients,
                 "items": items,
@@ -1494,7 +1497,7 @@ async def edit_order_apply(order_id: int, request: Request):
         except Exception:
             pass
 
-        return {"status": "ok", "changed": changes}
+        return RedirectResponse(url=f"/orders/{order_id}/edit?status=ok", status_code=303)
 
 
 @router.post("/{order_id}/apply-mapping")
