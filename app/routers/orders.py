@@ -1479,14 +1479,18 @@ async def edit_order_apply(order_id: int, request: Request):
         except Exception:
             pass
 
-        # Update shipping fee based on IBAN flag and current total
+        # Update shipping fee based on channel/IBAN flag and current total
         try:
-            if bool(o.paid_by_bank_transfer):
-                # IBAN: only base fee (pre-tax)
-                o.shipping_fee = 89.0
+            if (o.channel or "instagram") == "magaza":
+                o.shipping_fee = 0.0
+                o.shipping_company = None
             else:
-                amt = float(o.total_amount or 0.0)
-                o.shipping_fee = compute_shipping_fee(amt)
+                if bool(o.paid_by_bank_transfer):
+                    # IBAN: only base fee (pre-tax)
+                    o.shipping_fee = 89.0
+                else:
+                    amt = float(o.total_amount or 0.0)
+                    o.shipping_fee = compute_shipping_fee(amt)
         except Exception:
             pass
         # Final guard: zero product cost if refunded/switched/stitched or negative totals
