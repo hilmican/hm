@@ -209,20 +209,20 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             except:
                 pass
     
-	# Detect iade bekliyor sinyali: "Müşteri Tahsil etti ya da Evrak İade edildi."
-	try:
-		if order is not None:
-			IADE_HINT = "müşteri tahsil etti ya da evrak iade edildi"
-			note_source = " ".join([
-				str(rec.get("notes") or ""),
-				str(getattr(order, "notes", "") or ""),
-			]).lower()
-			if IADE_HINT in note_source and (str(order.status or "").lower() not in ("refunded", "switched", "stitched", "cancelled", "iade")):
-				order.status = "iade_bekliyor"
-	except Exception:
-		pass
+    # Detect iade bekliyor sinyali: "Müşteri Tahsil etti ya da Evrak İade edildi."
+    try:
+        if order is not None:
+            IADE_HINT = "müşteri tahsil etti ya da evrak iade edildi"
+            note_source = " ".join([
+                str(rec.get("notes") or ""),
+                str(getattr(order, "notes", "") or ""),
+            ]).lower()
+            if IADE_HINT in note_source and (str(order.status or "").lower() not in ("refunded", "switched", "stitched", "cancelled", "iade")):
+                order.status = "iade_bekliyor"
+    except Exception:
+        pass
 
-	if (amt_raw or 0.0) > 0 and pdate_legacy is not None and order is not None:
+    if (amt_raw or 0.0) > 0 and pdate_legacy is not None and order is not None:
         existing = session.exec(select(Payment).where(Payment.order_id == order.id, Payment.date == pdate_legacy)).first()
         fee_kom = rec.get("fee_komisyon") or 0.0
         fee_hiz = rec.get("fee_hizmet") or 0.0
