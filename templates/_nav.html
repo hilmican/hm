@@ -64,6 +64,7 @@
         <a href="#">{{ t(request, 'nav.sales') }}</a>
         <div class="submenu">
           <a href="/orders/table">{{ t(request, 'nav.orders') }}</a>
+          <a href="/orders/problem">⚠️ Sorunlu Siparişler</a>
           <a href="/orders/partial-payments">💰 Kısmi Ödemeler</a>
           <a href="/orders/duplicates">🔍 Potansiyel Çiftler</a>
           <a href="/payments/table">{{ t(request, 'nav.payments') }}</a>
@@ -278,6 +279,7 @@
     <a href="#" onclick="toggleMobileSubmenu(this); return false;">{{ t(request, 'nav.sales') }}</a>
     <div class="mobile-submenu">
       <a href="/orders/table" onclick="closeMobileMenu()">{{ t(request, 'nav.orders') }}</a>
+      <a href="/orders/problem" onclick="closeMobileMenu()">⚠️ Sorunlu Siparişler</a>
       <a href="/orders/partial-payments" onclick="closeMobileMenu()">💰 Kısmi Ödemeler</a>
       <a href="/orders/duplicates" onclick="closeMobileMenu()">🔍 Potansiyel Çiftler</a>
       <a href="/payments/table" onclick="closeMobileMenu()">{{ t(request, 'nav.payments') }}</a>

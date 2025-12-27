@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sorunlu Siparişler</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:16px; background:#f7f7fb; }
+        .card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
+        table { width:100%; border-collapse: collapse; }
+        th, td { padding:8px 10px; border-bottom:1px solid #f0f0f0; text-align:left; font-size:13px; white-space: nowrap; }
+        th { background:#fafafa; position: sticky; top:0; z-index:1; }
+        .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-size:12px; }
+        .pill.iade { background:#fee2e2; color:#991b1b; }
+        .pill.late { background:#e0f2fe; color:#075985; }
+        .filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+        .filters input, .filters select { padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; }
+        .btn { padding:8px 10px; border-radius:8px; border:1px solid #e5e7eb; background:#fff; cursor:pointer; font-size:12px; }
+        .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <h2>Sorunlu Siparişler</h2>
+    <form method="get" action="/orders/problem" class="filters card">
+        <label>Başlangıç: <input type="date" name="start" value="{{ start }}" /></label>
+        <label>Bitiş: <input type="date" name="end" value="{{ end }}" /></label>
+        <label>İş günü eşiği: <input type="number" name="bizdays" min="1" max="60" value="{{ bizdays }}" /></label>
+        <label>Kaynak:
+            <select name="source">
+                <option value="" {{ 'selected' if not source else '' }}>Hepsi</option>
+                <option value="bizim" {{ 'selected' if source == 'bizim' else '' }}>bizim</option>
+                <option value="kargo" {{ 'selected' if source == 'kargo' else '' }}>kargo</option>
+            </select>
+        </label>
+        <button class="btn primary" type="submit">Filtrele</button>
+        <a class="btn" href="/orders/problem">Temizle</a>
+        <a class="btn" href="/orders/table">Sipariş Tablosu</a>
+    </form>
+    <div class="card">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Takip</th>
+                    <th>Müşteri</th>
+                    <th>Status</th>
+                    <th>Tanzim</th>
+                    <th>Kargo Tarihi</th>
+                    <th>Teslim Tarihi</th>
+                    <th>İş Günü</th>
+                    <th>Etkin Toplam</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                {% set o = row.order %}
+                <tr>
+                    <td><a href="/orders/{{ o.id }}/edit">#{{ o.id }}</a></td>
+                    <td>{{ o.tracking_no or '-' }}</td>
+                    <td>{{ row.client_name or o.client_id }}</td>
+                    <td>
+                        {% if row.is_iade %}
+                            <span class="pill iade">iade_bekliyor</span>
+                        {% else %}
+                            {{ o.status or '-' }}
+                        {% endif %}
+                        {% if row.is_late %}
+                            <span class="pill late">gecikmiş</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ o.tanzim_status or '-' }}
+                        {% if o.tanzim_amount_manual %}
+                            <div style="font-size:11px; color:#6b7280;">{{ '%.2f'|format(o.tanzim_amount_manual) }}</div>
+                        {% endif %}
+                    </td>
+                    <td>{{ o.shipment_date or o.data_date or '-' }}</td>
+                    <td>{{ o.delivery_date or '-' }}</td>
+                    <td>{{ row.bizdays if row.bizdays is not none else '-' }}</td>
+                    <td>{{ '%.2f'|format(row.effective_total or 0) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
+

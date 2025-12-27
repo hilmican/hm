@@ -103,6 +103,20 @@
                     </select>
                 </div>
                 <div>
+                    <label>Tanzim Durumu</label>
+                    {% set tz = order.tanzim_status or '' %}
+                    <select name="tanzim_status">
+                        <option value="" {{ 'selected' if tz=='' else '' }}>(boş)</option>
+                        <option value="tanzim_bekliyor" {{ 'selected' if tz=='tanzim_bekliyor' else '' }}>tanzim_bekliyor</option>
+                        <option value="tanzim_basari" {{ 'selected' if tz=='tanzim_basari' else '' }}>tanzim_basari</option>
+                        <option value="tanzim_basarisiz" {{ 'selected' if tz=='tanzim_basarisiz' else '' }}>tanzim_basarisiz</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Tanzim Manuel Tutar</label>
+                    <input name="tanzim_amount_manual" type="number" step="0.01" value="{{ order.tanzim_amount_manual or '' }}" />
+                </div>
+                <div>
                     <label>Kanal</label>
                     <select name="source">
                         {% set src = order.source or '' %}

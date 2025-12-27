@@ -64,6 +64,8 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             order.total_amount = rec.get("total_amount")
         if rec.get("shipment_date") and not order.shipment_date:
             order.shipment_date = rec.get("shipment_date")
+		if rec.get("delivery_date") and not getattr(order, "delivery_date", None):
+			order.delivery_date = rec.get("delivery_date")
         # DO NOT update data_date from shipment_date - preserve original data_date (from bizim excel import)
         # data_date represents when the order data was imported, not the shipment date
         if rec.get("alici_kodu"):
@@ -140,6 +142,8 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 order.total_amount = rec.get("total_amount")
             if rec.get("shipment_date") and not order.shipment_date:
                 order.shipment_date = rec.get("shipment_date")
+            if rec.get("delivery_date") and not getattr(order, "delivery_date", None):
+                order.delivery_date = rec.get("delivery_date")
             # update shipping company if missing
             if not order.shipping_company:
                 order.shipping_company = _normalize_shipping_company(rec.get("shipping_company"))
@@ -175,6 +179,7 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 shipping_company=company_code,
                 shipping_fee=shipping_fee,
                 shipment_date=rec.get("shipment_date"),  # kargo tarihi from Excel row
+                delivery_date=rec.get("delivery_date"),
                 data_date=run.data_date,  # data tarihi from filename (when kargo Excel was imported)
                 source="kargo",
                 notes=order_notes,
@@ -204,7 +209,20 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             except:
                 pass
     
-    if (amt_raw or 0.0) > 0 and pdate_legacy is not None and order is not None:
+	# Detect iade bekliyor sinyali: "Müşteri Tahsil etti ya da Evrak İade edildi."
+	try:
+		if order is not None:
+			IADE_HINT = "müşteri tahsil etti ya da evrak iade edildi"
+			note_source = " ".join([
+				str(rec.get("notes") or ""),
+				str(getattr(order, "notes", "") or ""),
+			]).lower()
+			if IADE_HINT in note_source and (str(order.status or "").lower() not in ("refunded", "switched", "stitched", "cancelled", "iade")):
+				order.status = "iade_bekliyor"
+	except Exception:
+		pass
+
+	if (amt_raw or 0.0) > 0 and pdate_legacy is not None and order is not None:
         existing = session.exec(select(Payment).where(Payment.order_id == order.id, Payment.date == pdate_legacy)).first()
         fee_kom = rec.get("fee_komisyon") or 0.0
         fee_hiz = rec.get("fee_hizmet") or 0.0

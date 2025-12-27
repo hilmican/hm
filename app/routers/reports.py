@@ -11,7 +11,7 @@ from ..models import Order, Payment, Item, Client, ImportRun, StockMovement, Ord
 from ..services.shipping import compute_shipping_fee
 from ..services.inventory import get_stock_map
 from ..services.cache import cached_json
-from ..services.finance import get_account_balances, detect_payment_leaks
+from ..services.finance import get_account_balances, detect_payment_leaks, get_effective_total
 
 
 router = APIRouter()
@@ -76,7 +76,12 @@ def daily_report(
 		orders = [o for o in orders if o.merged_into_order_id is None]
 		order_count = len(orders)
 		total_quantity = sum(int(o.quantity or 0) for o in orders)
-		total_sales = sum(float(o.total_amount or 0.0) for o in orders)
+		# Tanzim etkisi: etkin toplamları kullan
+		effective_map: dict[int, float] = {}
+		for o in orders:
+			if o.id is not None:
+				effective_map[int(o.id)] = get_effective_total(o)
+		total_sales = sum(float(effective_map.get(o.id or 0, o.total_amount or 0.0)) for o in orders)
 
 		# Prefetch items for name display (Order.item_id) and also prefetch OrderItems for cost fallback
 		item_ids = sorted({o.item_id for o in orders if o.item_id})

@@ -280,3 +280,26 @@ def detect_payment_leaks(session: Session, min_days_old: int = 7) -> List[Dict]:
 	
 	return leaks
 
+
+def get_effective_total(order: Order) -> float:
+	"""
+	Compute the revenue-effective total for an order, considering tanzim states.
+
+	Rules:
+	- tanzim_bekliyor: use 60% of total_amount
+	- tanzim_basari: use tanzim_amount_manual if set, else total_amount
+	- tanzim_basarisiz: revenue impact 0 (costs/fees remain)
+	- default: total_amount
+	"""
+	status = (order.tanzim_status or "").strip().lower()
+	total = float(order.total_amount or 0.0)
+	if status == "tanzim_bekliyor":
+		return round(total * 0.6, 2)
+	if status == "tanzim_basari":
+		if order.tanzim_amount_manual is not None:
+			return float(order.tanzim_amount_manual or 0.0)
+		return total
+	if status == "tanzim_basarisiz":
+		return 0.0
+	return total
+

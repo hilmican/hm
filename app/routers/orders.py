@@ -10,6 +10,7 @@ from ..models import Order, Payment, OrderItem, Item, Client, OrderEditLog, Ship
 from ..services.inventory import get_or_create_item as _get_or_create_item
 from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
+from ..services.finance import get_effective_total
 from fastapi.responses import StreamingResponse
 import io
 try:
@@ -149,10 +150,16 @@ def list_orders_table(
                 group_paid = sum(paid_map.get(oid, 0.0) for oid in group_order_ids)
                 paid_map[group_id] = group_paid
         
+        # Effective totals considering tanzim states
+        effective_map: dict[int, float] = {}
+        for o in rows:
+            if o.id is not None:
+                effective_map[int(o.id)] = get_effective_total(o)
+
         status_map: dict[int, str] = {}
         for o in rows:
             oid = o.id or 0
-            total = float(o.total_amount or 0.0)
+            total = float(effective_map.get(oid, o.total_amount or 0.0))
             
             # For partial payment groups, use group total payments
             if o.partial_payment_group_id and o.partial_payment_group_id == oid:
@@ -292,12 +299,13 @@ def list_orders_table(
                 "client_map": client_map,
                 "item_map": item_map,
                 "status_map": status_map,
+                "effective_map": effective_map,
                 "shipping_map": shipping_map,
                 "cost_map": cost_map,
                 "shipping_companies": shipping_companies,
                 # totals over filtered rows
                 "sum_qty": sum(int(o.quantity or 0) for o in rows),
-                "sum_total": sum(float(o.total_amount or 0.0) for o in rows),
+                "sum_total": sum(float(effective_map.get(o.id or 0, o.total_amount or 0.0)) for o in rows),
                 "sum_cost": sum(float(cost_map.get(o.id or 0, 0.0)) for o in rows),
                 "sum_shipping": sum(float(shipping_map.get(o.id or 0, 0.0)) for o in rows),
                 # current filters
@@ -511,6 +519,11 @@ def export_orders(
         if (preset not in ("overdue_unpaid_7", "all")) and source in ("bizim", "kargo"):
             q = q.where(Order.source == source)
         rows = session.exec(q).all()
+        # effective totals map for paid/unpaid logic and potential export
+        effective_map: dict[int, float] = {}
+        for o in rows:
+            if o.id is not None:
+                effective_map[int(o.id)] = get_effective_total(o)
         # payments map
         order_ids = [o.id for o in rows if o.id]
         pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
@@ -522,7 +535,7 @@ def export_orders(
         status_map: dict[int, str] = {}
         for o in rows:
             oid = o.id or 0
-            total = float(o.total_amount or 0.0)
+            total = float(effective_map.get(oid, o.total_amount or 0.0))
             paid = paid_map.get(oid, 0.0)
             if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
                 status_map[oid] = str(o.status)
@@ -632,6 +645,98 @@ def export_orders(
         )
 
 
+@router.get("/problem")
+def list_problem_orders(
+    request: Request,
+    bizdays: int = Query(default=5, ge=1, le=60),
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
+    source: Optional[str] = Query(default=None),
+):
+    def _parse_date(value: Optional[str], fallback: dt.date) -> dt.date:
+        try:
+            if value:
+                return dt.date.fromisoformat(value)
+        except Exception:
+            pass
+        return fallback
+
+    def _business_days_since(start_date: dt.date, end_date: dt.date) -> int:
+        if not start_date:
+            return 0
+        day = start_date
+        count = 0
+        while day < end_date:
+            if day.weekday() < 5:  # Mon-Fri
+                count += 1
+            day += dt.timedelta(days=1)
+        return count
+
+    today = dt.date.today()
+    default_start = today - dt.timedelta(days=30)
+    start_date = _parse_date(start, default_start)
+    end_date = _parse_date(end, today)
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    with get_session() as session:
+        q = select(Order).where(Order.merged_into_order_id.is_(None))
+        if source in ("bizim", "kargo"):
+            q = q.where(Order.source == source)
+        q = q.where(
+            or_(
+                and_(Order.shipment_date.is_not(None), Order.shipment_date >= start_date, Order.shipment_date <= end_date),
+                and_(Order.shipment_date.is_(None), Order.data_date.is_not(None), Order.data_date >= start_date, Order.data_date <= end_date),
+            )
+        )
+        rows = session.exec(q.order_by(Order.id.desc())).all()
+
+        # Prefetch clients
+        client_ids = sorted({o.client_id for o in rows if o.client_id})
+        clients = session.exec(select(Client).where(Client.id.in_(client_ids))).all() if client_ids else []
+        client_map = {c.id: c.name for c in clients if c.id is not None}
+
+        # effective totals for display
+        effective_map: dict[int, float] = {}
+        for o in rows:
+            if o.id is not None:
+                effective_map[int(o.id)] = get_effective_total(o)
+
+        problem_rows = []
+        for o in rows:
+            status_lc = str(o.status or "").lower()
+            is_iade = status_lc == "iade_bekliyor"
+            shipped = o.shipment_date or o.data_date
+            delivered = getattr(o, "delivery_date", None)
+            bdays = _business_days_since(shipped, today) if shipped else None
+            is_late = (delivered is None) and (bdays is not None) and (bdays >= bizdays)
+            if not (is_iade or is_late):
+                continue
+            problem_rows.append(
+                {
+                    "order": o,
+                    "client_name": client_map.get(o.client_id),
+                    "bizdays": bdays,
+                    "is_iade": is_iade,
+                    "is_late": is_late,
+                    "effective_total": effective_map.get(o.id or 0, o.total_amount),
+                }
+            )
+
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "orders_problem.html",
+            {
+                "request": request,
+                "rows": problem_rows,
+                "bizdays": bizdays,
+                "start": start_date,
+                "end": end_date,
+                "source": source,
+            },
+        )
+
+
 @router.post("/{order_id}/switch")
 def switch_order(order_id: int):
     with get_session() as session:
@@ -708,9 +813,20 @@ def update_total(order_id: int, body: dict):
             raise HTTPException(status_code=404, detail="Order not found")
         prev_total = float(o.total_amount or 0.0)
         new_total_rounded = round(new_total, 2)
+        if o.tanzim_original_total is None:
+            o.tanzim_original_total = prev_total
         o.total_amount = new_total_rounded
         # Update IBAN flag if provided; None keeps existing value
         changes = {"total_amount": [prev_total, new_total_rounded]}
+        # Append previous total into notes for traceability
+        try:
+            marker = f"[Eski Toplam {prev_total:.2f} {dt.date.today().isoformat()}]"
+            if not o.notes:
+                o.notes = marker
+            elif marker not in (o.notes or ""):
+                o.notes = f"{o.notes} | {marker}"
+        except Exception:
+            pass
         try:
             if iban_flag_raw is not None:
                 prev_iban = bool(o.paid_by_bank_transfer or False)
@@ -937,6 +1053,8 @@ async def edit_order_apply(order_id: int, request: Request):
     new_ship = _get("shipment_date")
     new_data = _get("data_date")
     new_status = _get("status") or None
+    new_tanzim_status = _get("tanzim_status") or None
+    new_tanzim_amount_manual = _get("tanzim_amount_manual")
     new_notes = _get("notes") or None
     new_source = _get("source") or None
     new_paid_by_bank_transfer = (_get("paid_by_bank_transfer").lower() in ("1","true","on","yes"))
@@ -1111,8 +1229,20 @@ async def edit_order_apply(order_id: int, request: Request):
             if new_total != "":
                 tv = round(float(new_total.replace(",", ".")), 2)
                 if tv != float(o.total_amount or 0.0):
+                    prev_total_val = float(o.total_amount or 0.0)
                     changes["total_amount"] = [o.total_amount, tv]
+                    if o.tanzim_original_total is None:
+                        o.tanzim_original_total = prev_total_val
                     o.total_amount = tv
+                    # Append previous total to notes for auditability
+                    try:
+                        marker = f"[Eski Toplam {prev_total_val:.2f} {_dt.date.today().isoformat()}]"
+                        if not o.notes:
+                            o.notes = marker
+                        elif marker not in o.notes:
+                            o.notes = f"{o.notes} | {marker}"
+                    except Exception:
+                        pass
         except Exception:
             pass
         import datetime as _dt
@@ -1137,6 +1267,18 @@ async def edit_order_apply(order_id: int, request: Request):
         if new_notes != (o.notes or None):
             changes["notes"] = [o.notes, new_notes]
             o.notes = new_notes
+        # tanzim fields
+        if new_tanzim_status != (o.tanzim_status or None):
+            changes["tanzim_status"] = [o.tanzim_status, new_tanzim_status]
+            o.tanzim_status = new_tanzim_status
+        try:
+            if new_tanzim_amount_manual != "":
+                tval = float(str(new_tanzim_amount_manual).replace(",", "."))
+                if tval != float(o.tanzim_amount_manual or 0.0):
+                    changes["tanzim_amount_manual"] = [o.tanzim_amount_manual, tval]
+                    o.tanzim_amount_manual = tval
+        except Exception:
+            pass
         # paid_by_bank_transfer flag
         prev_iban = bool(o.paid_by_bank_transfer or False)
         if new_paid_by_bank_transfer != prev_iban:
