@@ -5,7 +5,7 @@ import datetime as dt
 from typing import Optional, List, Dict, Any
 
 from ..db import get_session
-from ..models import Client, Item, Order, OrderItem, Payment
+from ..models import Client, Item, Order, OrderItem, Payment, Product
 from ..services.inventory import adjust_stock, get_stock_map
 from ..utils.normalize import normalize_phone, client_unique_key
 
@@ -23,14 +23,17 @@ def _serialize_client(c: Client) -> Dict[str, Any]:
 	}
 
 
-def _serialize_item(it: Item, on_hand: Optional[int] = None) -> Dict[str, Any]:
+def _serialize_item(it: Item, on_hand: Optional[int] = None, product_price: Optional[float] = None) -> Dict[str, Any]:
+	price = it.price
+	if price is None and product_price is not None:
+		price = product_price
 	return {
 		"id": it.id,
 		"sku": it.sku,
 		"name": it.name,
 		"size": it.size,
 		"color": it.color,
-		"price": it.price,
+		"price": price,
 		"on_hand": on_hand,
 	}
 
@@ -95,8 +98,11 @@ def page(request: Request):
 			.limit(15)
 		)
 		items = session.exec(q).all()
+		prod_ids = [it.product_id for it in items if it.product_id]
+		products = session.exec(select(Product).where(Product.id.in_(prod_ids))).all() if prod_ids else []
+		prod_price_map = {p.id: p.default_price for p in products if p.id is not None}
 		stock_map = get_stock_map(session)
-		items_payload = [_serialize_item(it, stock_map.get(it.id or 0)) for it in items]
+		items_payload = [_serialize_item(it, stock_map.get(it.id or 0), prod_price_map.get(it.product_id)) for it in items]
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"magaza_satis.html",
@@ -166,10 +172,13 @@ def search_items(q: Optional[str] = Query(default=None, description="SKU/isim/re
 					)
 				query = query.where(and_(*clauses))
 		items = session.exec(query).all()
+		prod_ids = [it.product_id for it in items if it.product_id]
+		products = session.exec(select(Product).where(Product.id.in_(prod_ids))).all() if prod_ids else []
+		prod_price_map = {p.id: p.default_price for p in products if p.id is not None}
 		stock_map = get_stock_map(session)
 		return {
 			"items": [
-				_serialize_item(it, stock_map.get(it.id or 0))
+				_serialize_item(it, stock_map.get(it.id or 0), prod_price_map.get(it.product_id))
 				for it in items
 			]
 		}
