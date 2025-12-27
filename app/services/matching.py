@@ -38,14 +38,18 @@ def find_order_by_tracking(session, tracking_no: str | None) -> Order | None:
 
 
 def find_order_by_client_and_date(session, client_id: int | None, date_val, preferred_amount: float | None = None) -> Order | None:
-    """Find an order for a client around a date, preferring source='bizim' and matching amounts.
-
-    Matches if either data_date OR shipment_date falls within ±7 days.
-    If preferred_amount is provided, prefers orders with total_amount matching that amount.
-    """
+    """Find a client's order near a date, preferring bizim, matching amount, and closest date."""
     if not client_id or not date_val:
         return None
     from datetime import timedelta
+
+    def _best_date(o):
+        dates = [d for d in (o.data_date, o.shipment_date) if d]
+        if not dates:
+            return None
+        # choose the date closest to date_val
+        return min(dates, key=lambda d: abs((d - date_val).days))
+
     start = date_val - timedelta(days=7)
     end = date_val + timedelta(days=7)
     rows = session.exec(
@@ -61,11 +65,9 @@ def find_order_by_client_and_date(session, client_id: int | None, date_val, pref
     ).all()
     if not rows:
         return None
-    bizim = [o for o in rows if (o.source or "") == "bizim"]
-    if not bizim:
-        bizim = rows
+    bizim = [o for o in rows if (o.source or "").lower() == "bizim"] or rows
 
-    # When looking for a positive payment, avoid attaching to refund/negative orders.
+    # Avoid attaching positive payments to negative/refund/cancelled orders.
     if preferred_amount is not None and preferred_amount > 0:
         filtered = [
             o for o in bizim
@@ -74,20 +76,23 @@ def find_order_by_client_and_date(session, client_id: int | None, date_val, pref
         ]
         if filtered:
             bizim = filtered
-    
-    # If preferred_amount is provided, prefer orders with matching total_amount
-    if preferred_amount is not None:
-        matching_amount = [o for o in bizim if o.total_amount and abs(float(o.total_amount) - float(preferred_amount)) < 0.01]
-        if matching_amount:
-            # Among matching amounts, prefer exact date matches
-            exact_date = [o for o in matching_amount if (
-                (o.data_date == date_val) or (o.shipment_date == date_val)
-            )]
-            if exact_date:
-                return exact_date[0]
-            return matching_amount[0]
-    
-    return bizim[0]
+
+    def _score(o):
+        amt_match = 1 if (preferred_amount is not None and o.total_amount is not None and abs(float(o.total_amount) - float(preferred_amount)) < 0.01) else 0
+        best_date = _best_date(o)
+        date_delta = abs((best_date - date_val).days) if best_date else 999
+        has_tracking = 1 if o.tracking_no else 0
+        src_score = 1 if (o.source or "").lower() == "bizim" else 0
+        return (
+            amt_match,          # amount match first
+            -date_delta,        # then closest date (larger is better via negative delta)
+            has_tracking,       # prefer orders with tracking
+            src_score,          # then source score
+            int(o.id or 0),     # stable tie-break
+        )
+
+    ranked = sorted(bizim, key=_score, reverse=True)
+    return ranked[0] if ranked else None
 
 
 def find_recent_placeholder_kargo_for_client(session, client_id: int, days: int = 7) -> Order | None:

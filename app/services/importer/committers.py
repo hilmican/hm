@@ -223,14 +223,35 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
         pass
 
     if (amt_raw or 0.0) > 0 and pdate_legacy is not None and order is not None:
+        amt = float(amt_raw or 0.0)
+
+        # Duplicate guard across orders by (reference, amount)
+        existing_ref = None
+        if rec.get("tracking_no"):
+            existing_ref = session.exec(
+                select(Payment).where(
+                    Payment.reference == rec.get("tracking_no"),
+                    Payment.amount == amt,
+                )
+            ).first()
+
         existing = session.exec(select(Payment).where(Payment.order_id == order.id, Payment.date == pdate_legacy)).first()
+        if existing_ref and not existing:
+            existing = existing_ref
+            # If the ref belongs to another order, prefer reusing that instead of creating a duplicate
+            if existing_ref.order_id and existing_ref.order_id != order.id:
+                matched_order_id = existing_ref.order_id
+                matched_client_id = existing_ref.client_id
+                order = session.get(Order, existing_ref.order_id) or order
+                status = "updated"
+                message = message or "payment reference already exists; reused"
+
         fee_kom = rec.get("fee_komisyon") or 0.0
         fee_hiz = rec.get("fee_hizmet") or 0.0
         # Ignore any fee_kargo coming from Excel and compute deterministically
         # based on TahsilatTutari (payment amount)
         fee_iad = rec.get("fee_iade") or 0.0
         fee_eok = rec.get("fee_erken_odeme") or 0.0
-        amt = float(amt_raw or 0.0)
         fee_kar = compute_shipping_fee(amt)
         net = round((amt or 0.0) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok]), 2)
         if not existing:
