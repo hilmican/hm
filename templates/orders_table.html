@@ -206,7 +206,7 @@
                     {% if (orig is not none) and (eff != orig) %}
                         <div style="font-size:11px; color:#6b7280;">Orj: {{ '%.2f'|format(orig or 0) }}</div>
                     {% endif %}
-                    <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(orig or 0) }}', {{ 'true' if (o.paid_by_bank_transfer or False) else 'false' }}, '{{ o.shipping_company or '' }}', '{{ o.status or '' }}', '{{ o.payment_date.isoformat() if o.payment_date else '' }}')">Düzenle</button>
+                    <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(orig or 0) }}', {{ 'true' if (o.paid_by_bank_transfer or False) else 'false' }}, '{{ o.shipping_company or '' }}', '{{ o.status or '' }}', '{{ o.payment_date.isoformat() if o.payment_date else '' }}', '{{ o.tanzim_status or '' }}', '{{ '%.2f'|format(o.tanzim_amount_manual or 0) if o.tanzim_amount_manual is not none else '' }}')">Düzenle</button>
                 </td>
                 <td>{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
                 <td>{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
