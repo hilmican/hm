@@ -64,6 +64,16 @@ def find_order_by_client_and_date(session, client_id: int | None, date_val, pref
     bizim = [o for o in rows if (o.source or "") == "bizim"]
     if not bizim:
         bizim = rows
+
+    # When looking for a positive payment, avoid attaching to refund/negative orders.
+    if preferred_amount is not None and preferred_amount > 0:
+        filtered = [
+            o for o in bizim
+            if (o.total_amount is None or o.total_amount >= 0)
+            and (o.status or "").lower() not in {"refunded", "iade", "cancelled", "returned"}
+        ]
+        if filtered:
+            bizim = filtered
     
     # If preferred_amount is provided, prefer orders with matching total_amount
     if preferred_amount is not None:
