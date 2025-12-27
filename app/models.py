@@ -59,7 +59,7 @@ class Order(SQLModel, table=True):
     return_or_switch_date: Optional[dt.date] = Field(default=None, index=True)
     payment_date: Optional[dt.date] = Field(default=None, index=True, description="Ödeme tarihi")
     status: Optional[str] = Field(default=None, index=True)
-	channel: Optional[str] = Field(default="instagram", index=True, description="Sales channel: instagram|magaza|tiktok|whatsapp|other")
+    channel: Optional[str] = Field(default="instagram", index=True, description="Sales channel: instagram|magaza|tiktok|whatsapp|other")
     # Tanzim başarılı olduğunda manuel belirlenen tutar
     tanzim_amount_manual: Optional[float] = Field(default=None, index=True)
     # Toplam değiştiğinde eski tutarı saklamak için referans
