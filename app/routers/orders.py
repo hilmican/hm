@@ -714,6 +714,104 @@ def list_problem_orders(
                 effective_map[int(o.id)] = get_effective_total(o)
 
         problem_rows = []
+        unique_clients: set[int] = set()
+        for o in rows:
+            status_lc = str(o.status or "").lower()
+            is_iade = status_lc == "iade_bekliyor"
+            shipped = o.shipment_date or o.data_date
+            delivered = getattr(o, "delivery_date", None)
+            bdays = _business_days_since(shipped, today) if shipped else None
+            is_late = (delivered is None) and (bdays is not None) and (bdays >= bizdays)
+            if not (is_iade or is_late):
+                continue
+            if o.client_id:
+                unique_clients.add(int(o.client_id))
+            problem_rows.append(
+                {
+                    "order": o,
+                    "client_name": client_map.get(o.client_id),
+                    "bizdays": bdays,
+                    "is_iade": is_iade,
+                    "is_late": is_late,
+                    "effective_total": effective_map.get(o.id or 0, o.total_amount),
+                }
+            )
+
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "orders_problem.html",
+            {
+                "request": request,
+                "rows": problem_rows,
+                "order_count": len(problem_rows),
+                "client_count": len(unique_clients),
+                "bizdays": bizdays,
+                "start": start_date,
+                "end": end_date,
+                "source": source,
+            },
+        )
+
+
+@router.get("/problem/export")
+def export_problem_orders(
+    bizdays: int = Query(default=5, ge=1, le=60),
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
+    source: Optional[str] = Query(default=None),
+):
+    if openpyxl is None:
+        raise HTTPException(status_code=500, detail="openpyxl not available for export")
+
+    def _parse_date(value: Optional[str], fallback: dt.date) -> dt.date:
+        try:
+            if value:
+                return dt.date.fromisoformat(value)
+        except Exception:
+            pass
+        return fallback
+
+    def _business_days_since(start_date: dt.date, end_date: dt.date) -> int:
+        if not start_date:
+            return 0
+        day = start_date
+        count = 0
+        while day < end_date:
+            if day.weekday() < 5:
+                count += 1
+            day += dt.timedelta(days=1)
+        return count
+
+    today = dt.date.today()
+    default_start = today - dt.timedelta(days=30)
+    start_date = _parse_date(start, default_start)
+    end_date = _parse_date(end, today)
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    with get_session() as session:
+        q = select(Order).where(Order.merged_into_order_id.is_(None))
+        if source in ("bizim", "kargo"):
+            q = q.where(Order.source == source)
+        q = q.where(
+            or_(
+                and_(Order.shipment_date.is_not(None), Order.shipment_date >= start_date, Order.shipment_date <= end_date),
+                and_(Order.shipment_date.is_(None), Order.data_date.is_not(None), Order.data_date >= start_date, Order.data_date <= end_date),
+            )
+        )
+        rows = session.exec(q.order_by(Order.id.desc())).all()
+
+        # Prefetch clients
+        client_ids = sorted({o.client_id for o in rows if o.client_id})
+        clients = session.exec(select(Client).where(Client.id.in_(client_ids))).all() if client_ids else []
+        client_map = {c.id: c.name for c in clients if c.id is not None}
+
+        effective_map: dict[int, float] = {}
+        for o in rows:
+            if o.id is not None:
+                effective_map[int(o.id)] = get_effective_total(o)
+
+        problem_rows = []
         for o in rows:
             status_lc = str(o.status or "").lower()
             is_iade = status_lc == "iade_bekliyor"
@@ -734,17 +832,34 @@ def list_problem_orders(
                 }
             )
 
-        templates = request.app.state.templates
-        return templates.TemplateResponse(
-            "orders_problem.html",
-            {
-                "request": request,
-                "rows": problem_rows,
-                "bizdays": bizdays,
-                "start": start_date,
-                "end": end_date,
-                "source": source,
-            },
+        # Build workbook
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sorunlu Siparisler"
+        ws.append(["ID", "Takip", "Musteri", "Durum", "TanzimTutar", "KargoTarihi", "TeslimTarihi", "IsGunu", "EtkinToplam", "Kaynak"])
+        for row in problem_rows:
+            o = row["order"]
+            ws.append([
+                o.id,
+                o.tracking_no,
+                row["client_name"],
+                o.status,
+                o.tanzim_amount_manual,
+                o.shipment_date,
+                getattr(o, "delivery_date", None),
+                row["bizdays"],
+                row["effective_total"],
+                o.source,
+            ])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        ts = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        filename = f"problem_orders_{ts}.xlsx"
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
 

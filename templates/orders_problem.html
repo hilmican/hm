@@ -36,7 +36,12 @@
         <button class="btn primary" type="submit">Filtrele</button>
         <a class="btn" href="/orders/problem">Temizle</a>
         <a class="btn" href="/orders/table">Sipariş Tablosu</a>
+        <a class="btn" href="/orders/problem/export?start={{ start }}&end={{ end }}&bizdays={{ bizdays }}&source={{ source or '' }}">Excel'e aktar</a>
     </form>
+    <div class="card" style="margin-bottom:12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <span class="pill late">Toplam sorunlu sipariş: {{ order_count }}</span>
+        <span class="pill iade">Müşteri sayısı: {{ client_count }}</span>
+    </div>
     <div class="card">
         <table>
             <thead>
