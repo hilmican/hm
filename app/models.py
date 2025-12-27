@@ -52,19 +52,19 @@ class Order(SQLModel, table=True):
     paid_by_bank_transfer: Optional[bool] = Field(default=False, index=True, description="IBAN ödeme: True ise kargo ücreti sadece taban (89) olarak alınır")
     shipping_company: Optional[str] = Field(default=None, index=True, description="Kargo firması: mng|dhl|ptt|other")
     shipment_date: Optional[dt.date] = Field(default=None, index=True)
-	# Kargo Excel'lerinden gelen teslim tarihi (müşteriye ulaştığı tarih)
-	delivery_date: Optional[dt.date] = Field(default=None, index=True)
+    # Kargo Excel'lerinden gelen teslim tarihi (müşteriye ulaştığı tarih)
+    delivery_date: Optional[dt.date] = Field(default=None, index=True)
     data_date: Optional[dt.date] = Field(default=None, index=True)
     # date when return or switch (iade/degisim) happened
     return_or_switch_date: Optional[dt.date] = Field(default=None, index=True)
     payment_date: Optional[dt.date] = Field(default=None, index=True, description="Ödeme tarihi")
     status: Optional[str] = Field(default=None, index=True)
-	# Tanzim süreci: tanzim_bekliyor | tanzim_basari | tanzim_basarisiz
-	tanzim_status: Optional[str] = Field(default=None, index=True, description="tanzim_bekliyor|tanzim_basari|tanzim_basarisiz")
-	# Tanzim başarılı olduğunda manuel belirlenen tutar
-	tanzim_amount_manual: Optional[float] = Field(default=None, index=True)
-	# Toplam değiştiğinde eski tutarı saklamak için referans
-	tanzim_original_total: Optional[float] = Field(default=None, description="Tanzim öncesi orijinal toplam")
+    # Tanzim süreci: tanzim_bekliyor | tanzim_basari | tanzim_basarisiz
+    tanzim_status: Optional[str] = Field(default=None, index=True, description="tanzim_bekliyor|tanzim_basari|tanzim_basarisiz")
+    # Tanzim başarılı olduğunda manuel belirlenen tutar
+    tanzim_amount_manual: Optional[float] = Field(default=None, index=True)
+    # Toplam değiştiğinde eski tutarı saklamak için referans
+    tanzim_original_total: Optional[float] = Field(default=None, description="Tanzim öncesi orijinal toplam")
     notes: Optional[str] = None
     source: str = Field(index=True, description="bizim|kargo")
     # Link to Instagram conversation id (e.g., "dm:<ig_user_id>")
