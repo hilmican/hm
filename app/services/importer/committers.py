@@ -64,8 +64,8 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             order.total_amount = rec.get("total_amount")
         if rec.get("shipment_date") and not order.shipment_date:
             order.shipment_date = rec.get("shipment_date")
-		if rec.get("delivery_date") and not getattr(order, "delivery_date", None):
-			order.delivery_date = rec.get("delivery_date")
+        if rec.get("delivery_date") and not getattr(order, "delivery_date", None):
+            order.delivery_date = rec.get("delivery_date")
         # DO NOT update data_date from shipment_date - preserve original data_date (from bizim excel import)
         # data_date represents when the order data was imported, not the shipment date
         if rec.get("alici_kodu"):
