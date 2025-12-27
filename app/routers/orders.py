@@ -714,10 +714,27 @@ def list_problem_orders(
             if o.id is not None:
                 effective_map[int(o.id)] = get_effective_total(o)
 
+        # payments for paid/completed detection
+        order_ids = [o.id for o in rows if o.id]
+        pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
+        paid_map: dict[int, float] = {}
+        for p in pays:
+            if p.order_id is None:
+                continue
+            paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
+
+        # partial payment groups: sum payments on primary order id
+        partial_groups: dict[int, list[int]] = defaultdict(list)
+        for o in rows:
+            if o.partial_payment_group_id and o.id:
+                partial_groups[o.partial_payment_group_id].append(o.id)
+        for group_id, group_order_ids in partial_groups.items():
+            group_paid = sum(paid_map.get(oid, 0.0) for oid in group_order_ids)
+            paid_map[group_id] = group_paid
+
         problem_rows = []
         unique_clients: set[int] = set()
         final_statuses = {"refunded", "switched", "stitched", "cancelled"}
-        # Treat payment/tanzim-complete states as delivered/completed (even if delivery_date missing)
         success_statuses = {
             "paid",
             "partial_paid",
@@ -728,20 +745,43 @@ def list_problem_orders(
         refund_pending_statuses = {"iade_bekliyor"}
         for o in rows:
             status_lc = str(o.status or "").lower()
-            # Skip orders that are already in a final state; they are not “problem” anymore
+            oid = o.id or 0
+            total = float(effective_map.get(oid, o.total_amount or 0.0))
+
+            # Skip already-final states
             if status_lc in final_statuses:
                 continue
-            # Paid/collected orders are considered completed; do not treat as late
-            if status_lc in success_statuses:
-                continue
+
+            # Paid/completed detection (even if status is missing)
+            if o.partial_payment_group_id and o.partial_payment_group_id == oid:
+                paid = paid_map.get(oid, 0.0)
+            elif o.partial_payment_group_id:
+                paid = paid_map.get(o.partial_payment_group_id, paid_map.get(oid, 0.0))
+            else:
+                paid = paid_map.get(oid, 0.0)
+            is_paid = (
+                status_lc in success_statuses
+                or bool(o.paid_by_bank_transfer)
+                or (paid >= (total - 0.01))
+            )
+
             is_iade = status_lc in refund_pending_statuses
+            delivered = getattr(o, "delivery_date", None)
+            # Delivered orders are not problematic unless waiting refund
+            if delivered is not None and not is_iade:
+                continue
+            if is_paid and not is_iade:
+                continue
+
             # Only treat orders with an actual shipment date as “late”
             shipped = o.shipment_date
-            delivered = getattr(o, "delivery_date", None)
             bdays = _business_days_since(shipped, today) if shipped else None
             is_late = (delivered is None) and (bdays is not None) and (bdays >= bizdays)
+
+            # If neither refund-pending nor late, skip
             if not (is_iade or is_late):
                 continue
+
             if o.client_id:
                 unique_clients.add(int(o.client_id))
             problem_rows.append(
@@ -829,6 +869,23 @@ def export_problem_orders(
             if o.id is not None:
                 effective_map[int(o.id)] = get_effective_total(o)
 
+        # payments for paid/completed detection
+        order_ids = [o.id for o in rows if o.id]
+        pays = session.exec(select(Payment).where(Payment.order_id.in_(order_ids))).all() if order_ids else []
+        paid_map: dict[int, float] = {}
+        for p in pays:
+            if p.order_id is None:
+                continue
+            paid_map[p.order_id] = paid_map.get(p.order_id, 0.0) + float(p.amount or 0.0)
+
+        partial_groups: dict[int, list[int]] = defaultdict(list)
+        for o in rows:
+            if o.partial_payment_group_id and o.id:
+                partial_groups[o.partial_payment_group_id].append(o.id)
+        for group_id, group_order_ids in partial_groups.items():
+            group_paid = sum(paid_map.get(oid, 0.0) for oid in group_order_ids)
+            paid_map[group_id] = group_paid
+
         problem_rows = []
         final_statuses = {"refunded", "switched", "stitched", "cancelled"}
         success_statuses = {
@@ -841,13 +898,28 @@ def export_problem_orders(
         refund_pending_statuses = {"iade_bekliyor"}
         for o in rows:
             status_lc = str(o.status or "").lower()
+            oid = o.id or 0
+            total = float(effective_map.get(oid, o.total_amount or 0.0))
             if status_lc in final_statuses:
                 continue
-            if status_lc in success_statuses:
-                continue
+            if o.partial_payment_group_id and o.partial_payment_group_id == oid:
+                paid = paid_map.get(oid, 0.0)
+            elif o.partial_payment_group_id:
+                paid = paid_map.get(o.partial_payment_group_id, paid_map.get(oid, 0.0))
+            else:
+                paid = paid_map.get(oid, 0.0)
+            is_paid = (
+                status_lc in success_statuses
+                or bool(o.paid_by_bank_transfer)
+                or (paid >= (total - 0.01))
+            )
             is_iade = status_lc in refund_pending_statuses
-            shipped = o.shipment_date
             delivered = getattr(o, "delivery_date", None)
+            if delivered is not None and not is_iade:
+                continue
+            if is_paid and not is_iade:
+                continue
+            shipped = o.shipment_date
             bdays = _business_days_since(shipped, today) if shipped else None
             is_late = (delivered is None) and (bdays is not None) and (bdays >= bizdays)
             if not (is_iade or is_late):
