@@ -1,0 +1,360 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>{{ t(request, 'magaza_satis.title') }}</title>
+		<style>
+			:root { color-scheme: light; }
+			body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 20px; background:#f8fafc; }
+			h1 { margin: 0 0 16px 0; }
+			.grid { display: grid; gap: 16px; grid-template-columns: 1fr; }
+			@media (min-width: 1100px) { .grid { grid-template-columns: 1.1fr 0.9fr; } }
+			.card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:14px 16px; box-shadow:0 1px 2px rgba(0,0,0,0.03); }
+			.card h2 { margin:0 0 12px 0; font-size:16px; }
+			label { display:block; font-size:13px; color:#475569; margin-bottom:4px; }
+			input[type="text"], input[type="number"], textarea { width:100%; padding:8px 10px; border:1px solid #dfe3eb; border-radius:8px; font-size:14px; box-sizing:border-box; }
+			input[type="number"] { -moz-appearance:textfield; }
+			textarea { min-height:70px; resize:vertical; }
+			button { cursor:pointer; border:none; border-radius:8px; padding:8px 12px; font-size:14px; }
+			.btn-primary { background:#2563eb; color:#fff; }
+			.btn-secondary { background:#e2e8f0; color:#1f2937; }
+			.badge { display:inline-block; padding:3px 8px; border-radius:12px; font-size:12px; background:#eef2ff; color:#1e3a8a; border:1px solid #c7d2fe; }
+			.flex { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+			.table { width:100%; border-collapse: collapse; }
+			.table th, .table td { padding:8px; border-bottom:1px solid #f1f5f9; text-align:left; font-size:14px; }
+			.table th { background:#f8fafc; position:sticky; top:0; }
+			.small { font-size:12px; color:#475569; }
+			.row { display:flex; gap:10px; flex-wrap:wrap; }
+			.row > div { flex:1; min-width:180px; }
+			.section-title { font-weight:600; margin-bottom:6px; }
+			.pill { background:#0ea5e9; color:#fff; padding:2px 8px; border-radius:12px; font-size:12px; }
+			.status { margin-top:8px; font-size:13px; }
+			.status.ok { color:#16a34a; }
+			.status.err { color:#b91c1c; }
+			.mini-card { border:1px solid #e5e7eb; padding:10px; border-radius:10px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+			.res-list { display:grid; gap:8px; }
+			.total-box { display:flex; justify-content:space-between; align-items:center; font-weight:600; font-size:16px; padding:10px 0; }
+			.inline-input { width:90px; }
+			strong.label { display:inline-block; width:140px; color:#0f172a; }
+			#toast { position:fixed; right:16px; bottom:16px; padding:12px 14px; background:#0f172a; color:#fff; border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.2); opacity:0; pointer-events:none; transition:opacity .2s ease; }
+			#toast.show { opacity:1; pointer-events:auto; }
+		</style>
+	</head>
+	<body>
+		{% include "_nav.html" %}
+		<h1>{{ t(request, 'magaza_satis.title') }}</h1>
+
+		<div class="grid">
+			<div class="card">
+				<h2>{{ t(request, 'magaza_satis.client_title') }}</h2>
+				<div class="row" style="align-items:flex-end;">
+					<div>
+						<label>{{ t(request, 'magaza_satis.phone') }}</label>
+						<input id="phone" type="text" placeholder="05xx..." />
+					</div>
+					<div>
+						<button class="btn-secondary" onclick="lookupClient()">{{ t(request, 'magaza_satis.lookup') }}</button>
+					</div>
+				</div>
+				<div class="row">
+					<div>
+						<label>{{ t(request, 'magaza_satis.name') }}</label>
+						<input id="name" type="text" />
+					</div>
+					<div>
+						<label>{{ t(request, 'magaza_satis.city') }}</label>
+						<input id="city" type="text" />
+					</div>
+				</div>
+				<div class="row">
+					<div>
+						<label>{{ t(request, 'magaza_satis.address') }}</label>
+						<textarea id="address"></textarea>
+					</div>
+				</div>
+				<div class="status" id="clientStatus"></div>
+			</div>
+
+			<div class="card">
+				<h2>{{ t(request, 'magaza_satis.payment_title') }}</h2>
+				<div class="row">
+					<div>
+						<label>{{ t(request, 'magaza_satis.payment_method') }}</label>
+						<div class="flex">
+							<label class="flex"><input type="radio" name="payment_method" value="cash" checked /> {{ t(request, 'magaza_satis.cash') }}</label>
+							<label class="flex"><input type="radio" name="payment_method" value="bank_transfer" /> IBAN</label>
+						</div>
+					</div>
+					<div>
+						<label>{{ t(request, 'magaza_satis.discount') }}</label>
+						<input id="discount" type="number" min="0" step="0.01" value="0" />
+					</div>
+				</div>
+				<div>
+					<label>{{ t(request, 'magaza_satis.notes') }}</label>
+					<textarea id="notes" placeholder="{{ t(request, 'magaza_satis.notes_placeholder') }}"></textarea>
+				</div>
+				<div class="total-box">
+					<div>{{ t(request, 'magaza_satis.total_label') }}</div>
+					<div id="totalAmount">0.00</div>
+				</div>
+				<button class="btn-primary" style="width:100%; margin-top:10px;" onclick="checkout()">{{ t(request, 'magaza_satis.checkout') }}</button>
+				<div class="status" id="checkoutStatus"></div>
+			</div>
+		</div>
+
+		<div class="grid" style="margin-top:14px;">
+			<div class="card">
+				<h2>{{ t(request, 'magaza_satis.search_title') }}</h2>
+				<div class="row" style="align-items:flex-end;">
+					<div style="flex:2">
+						<label>{{ t(request, 'magaza_satis.search_placeholder') }}</label>
+						<input id="searchInput" type="text" placeholder="SKU / ürün / renk / beden" onkeydown="if(event.key==='Enter'){event.preventDefault(); searchItems();}" />
+					</div>
+					<div>
+						<button class="btn-secondary" onclick="searchItems()">{{ t(request, 'magaza_satis.search_btn') }}</button>
+					</div>
+				</div>
+				<div class="small" style="margin:10px 0;">{{ t(request, 'magaza_satis.quick_pick') }}</div>
+				<div id="quickList" class="res-list"></div>
+				<div class="small" style="margin:10px 0;">{{ t(request, 'magaza_satis.results') }}</div>
+				<div id="searchResults" class="res-list"></div>
+			</div>
+
+			<div class="card">
+				<h2>{{ t(request, 'magaza_satis.cart_title') }}</h2>
+				<div style="overflow:auto; max-height:380px;">
+					<table class="table">
+						<thead>
+							<tr>
+								<th>SKU</th>
+								<th>{{ t(request, 'magaza_satis.product') }}</th>
+								<th>{{ t(request, 'magaza_satis.qty') }}</th>
+								<th>{{ t(request, 'magaza_satis.price') }}</th>
+								<th>{{ t(request, 'magaza_satis.line_total') }}</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody id="cartBody"></tbody>
+					</table>
+				</div>
+				<div class="status" id="cartStatus"></div>
+			</div>
+		</div>
+
+		<div id="toast"></div>
+
+		<script>
+			const initialItems = {{ items | tojson }};
+			let cart = [];
+			let selectedClientId = null;
+
+			function showToast(msg) {
+				const el = document.getElementById('toast');
+				el.textContent = msg;
+				el.classList.add('show');
+				setTimeout(()=>el.classList.remove('show'), 2400);
+			}
+
+			function setStatus(id, msg, ok=true){
+				const el = document.getElementById(id);
+				if (!el) return;
+				el.textContent = msg || '';
+				el.className = 'status ' + (ok ? 'ok' : 'err');
+			}
+
+			function renderQuick(items){
+				const box = document.getElementById('quickList');
+				box.innerHTML = '';
+				(items || []).forEach(it=>{
+					const div = document.createElement('div');
+					div.className = 'mini-card';
+					div.innerHTML = `
+						<div>
+							<div><strong>${it.sku}</strong> - ${it.name}</div>
+							<div class="small">${it.color || ''} ${it.size || ''}</div>
+							<div class="small">{{ t(request, 'magaza_satis.stock') }}: ${it.on_hand ?? '-'}</div>
+						</div>
+						<button class="btn-primary" onclick='addToCart(${JSON.stringify(it).replace(/'/g,"&#39;")})'>{{ t(request, 'magaza_satis.add') }}</button>
+					`;
+					box.appendChild(div);
+				});
+			}
+
+			function renderResults(items){
+				const box = document.getElementById('searchResults');
+				box.innerHTML = '';
+				if (!items || !items.length){
+					box.innerHTML = `<div class="small">{{ t(request, 'magaza_satis.no_results') }}</div>`;
+					return;
+				}
+				items.forEach(it=>{
+					const div = document.createElement('div');
+					div.className = 'mini-card';
+					div.innerHTML = `
+						<div>
+							<div><strong>${it.sku}</strong> - ${it.name}</div>
+							<div class="small">${it.color || ''} ${it.size || ''}</div>
+							<div class="small">{{ t(request, 'magaza_satis.stock') }}: ${it.on_hand ?? '-'}</div>
+						</div>
+						<button class="btn-secondary" onclick='addToCart(${JSON.stringify(it).replace(/'/g,"&#39;")})'>{{ t(request, 'magaza_satis.add') }}</button>
+					`;
+					box.appendChild(div);
+				});
+			}
+
+			function addToCart(it){
+				const existing = cart.find(c => c.id === it.id);
+				if (existing){
+					existing.qty += 1;
+				} else {
+					cart.push({
+						id: it.id,
+						sku: it.sku,
+						name: it.name,
+						size: it.size,
+						color: it.color,
+						price: Number(it.price || 0),
+						qty: 1
+					});
+				}
+				renderCart();
+			}
+
+			function removeFromCart(id){
+				cart = cart.filter(c => c.id !== id);
+				renderCart();
+			}
+
+			function renderCart(){
+				const tbody = document.getElementById('cartBody');
+				tbody.innerHTML = '';
+				cart.forEach((c, idx)=>{
+					const tr = document.createElement('tr');
+					tr.innerHTML = `
+						<td>${c.sku}</td>
+						<td>${c.name} <div class="small">${c.color || ''} ${c.size || ''}</div></td>
+						<td><input class="inline-input" type="number" min="1" value="${c.qty}" onchange="updateQty(${idx}, this.value)" /></td>
+						<td><input class="inline-input" type="number" step="0.01" value="${c.price}" onchange="updatePrice(${idx}, this.value)" /></td>
+						<td>${(c.qty * c.price).toFixed(2)}</td>
+						<td><button class="btn-secondary" onclick="removeFromCart(${c.id})">x</button></td>
+					`;
+					tbody.appendChild(tr);
+				});
+				updateTotals();
+			}
+
+			function updateQty(idx, val){
+				const v = parseInt(val || '0', 10);
+				if (isNaN(v) || v <= 0) return;
+				cart[idx].qty = v;
+				renderCart();
+			}
+
+			function updatePrice(idx, val){
+				const v = parseFloat(val || '0');
+				if (isNaN(v) || v < 0) return;
+				cart[idx].price = v;
+				renderCart();
+			}
+
+			function updateTotals(){
+				const subtotal = cart.reduce((s, c)=> s + (c.qty * c.price), 0);
+				const discount = parseFloat(document.getElementById('discount').value || '0') || 0;
+				const total = Math.max(subtotal - Math.max(discount,0), 0);
+				document.getElementById('totalAmount').textContent = total.toFixed(2);
+			}
+
+			async function lookupClient(){
+				const phone = document.getElementById('phone').value;
+				if (!phone.trim()){
+					setStatus('clientStatus', '{{ t(request, 'magaza_satis.phone_required') }}', false);
+					return;
+				}
+				setStatus('clientStatus', '{{ t(request, 'magaza_satis.loading') }}', true);
+				try{
+					const res = await fetch(`/magaza-satis/api/client-lookup?phone=${encodeURIComponent(phone)}`);
+					const data = await res.json();
+					if (!data.found){
+						selectedClientId = null;
+						setStatus('clientStatus', '{{ t(request, 'magaza_satis.not_found_new') }}', false);
+						return;
+					}
+					selectedClientId = data.client.id;
+					document.getElementById('name').value = data.client.name || '';
+					document.getElementById('phone').value = data.client.phone || '';
+					document.getElementById('city').value = data.client.city || '';
+					document.getElementById('address').value = data.client.address || '';
+					setStatus('clientStatus', '{{ t(request, 'magaza_satis.found') }}', true);
+				}catch(err){
+					setStatus('clientStatus', err?.message || 'Hata', false);
+				}
+			}
+
+			async function searchItems(){
+				const q = document.getElementById('searchInput').value;
+				setStatus('cartStatus', '{{ t(request, 'magaza_satis.loading') }}', true);
+				try{
+					const res = await fetch(`/magaza-satis/api/items?q=${encodeURIComponent(q||'')}`);
+					const data = await res.json();
+					renderResults(data.items || []);
+					setStatus('cartStatus', '', true);
+				}catch(err){
+					setStatus('cartStatus', err?.message || 'Hata', false);
+				}
+			}
+
+			async function checkout(){
+				if (!cart.length){
+					setStatus('checkoutStatus', '{{ t(request, 'magaza_satis.cart_empty') }}', false);
+					return;
+				}
+				const name = document.getElementById('name').value.trim();
+				const phone = document.getElementById('phone').value.trim();
+				if (!name || !phone){
+					setStatus('checkoutStatus', '{{ t(request, 'magaza_satis.client_missing') }}', false);
+					return;
+				}
+				const payload = {
+					client_id: selectedClientId,
+					client: {
+						name,
+						phone,
+						city: document.getElementById('city').value.trim(),
+						address: document.getElementById('address').value.trim(),
+					},
+					cart: cart.map(c=>({ item_id: c.id, quantity: c.qty, unit_price: c.price })),
+					discount: parseFloat(document.getElementById('discount').value || '0') || 0,
+					payment_method: document.querySelector('input[name="payment_method"]:checked')?.value || 'cash',
+					notes: document.getElementById('notes').value.trim(),
+				};
+				setStatus('checkoutStatus', '{{ t(request, 'magaza_satis.loading') }}', true);
+				try{
+					const res = await fetch('/magaza-satis/api/checkout', {
+						method:'POST',
+						headers:{'Content-Type':'application/json'},
+						body: JSON.stringify(payload)
+					});
+					if (!res.ok){
+						const text = await res.text();
+						throw new Error(text || 'Hata');
+					}
+					const data = await res.json();
+					setStatus('checkoutStatus', '{{ t(request, 'magaza_satis.success') }} #' + data.order_id, true);
+					showToast('{{ t(request, 'magaza_satis.success_toast') }}');
+					cart = [];
+					renderCart();
+				}catch(err){
+					setStatus('checkoutStatus', err?.message || 'Hata', false);
+				}
+			}
+
+			// Init
+			renderQuick(initialItems || []);
+			renderCart();
+			document.getElementById('discount').addEventListener('input', updateTotals);
+		</script>
+	</body>
+</html>
+
