@@ -717,11 +717,22 @@ def list_problem_orders(
         problem_rows = []
         unique_clients: set[int] = set()
         final_statuses = {"refunded", "switched", "stitched", "cancelled"}
+        # Treat payment/tanzim-complete states as delivered/completed (even if delivery_date missing)
+        success_statuses = {
+            "paid",
+            "partial_paid",
+            "tanzim_bekliyor",
+            "tanzim_basari",
+            "tanzim_basarisiz",
+        }
         refund_pending_statuses = {"iade_bekliyor"}
         for o in rows:
             status_lc = str(o.status or "").lower()
             # Skip orders that are already in a final state; they are not “problem” anymore
             if status_lc in final_statuses:
+                continue
+            # Paid/collected orders are considered completed; do not treat as late
+            if status_lc in success_statuses:
                 continue
             is_iade = status_lc in refund_pending_statuses
             # Only treat orders with an actual shipment date as “late”
@@ -820,10 +831,19 @@ def export_problem_orders(
 
         problem_rows = []
         final_statuses = {"refunded", "switched", "stitched", "cancelled"}
+        success_statuses = {
+            "paid",
+            "partial_paid",
+            "tanzim_bekliyor",
+            "tanzim_basari",
+            "tanzim_basarisiz",
+        }
         refund_pending_statuses = {"iade_bekliyor"}
         for o in rows:
             status_lc = str(o.status or "").lower()
             if status_lc in final_statuses:
+                continue
+            if status_lc in success_statuses:
                 continue
             is_iade = status_lc in refund_pending_statuses
             shipped = o.shipment_date
