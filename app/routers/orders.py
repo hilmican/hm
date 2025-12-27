@@ -1409,6 +1409,15 @@ async def edit_order_apply(order_id: int, request: Request):
         if new_channel and new_channel != (o.channel or "instagram"):
             changes["channel"] = [o.channel, new_channel]
             o.channel = new_channel
+            if new_channel == "magaza":
+                prev_ship_fee = o.shipping_fee
+                prev_ship_comp = o.shipping_company
+                o.shipping_fee = 0.0
+                o.shipping_company = None
+                if (prev_ship_fee or 0.0) != 0.0:
+                    changes["shipping_fee"] = [prev_ship_fee, 0.0]
+                if prev_ship_comp is not None:
+                    changes["shipping_company"] = [prev_ship_comp, None]
         if new_notes != (o.notes or None):
             changes["notes"] = [o.notes, new_notes]
             o.notes = new_notes
