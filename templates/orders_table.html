@@ -74,6 +74,7 @@
         tr.tanzim_bekliyor { background: #e0f2fe; }
         tr.tanzim_basari { background: #dcfce7; }
         tr.tanzim_basarisiz { background: #fee2e2; }
+        tr.iade_bekliyor { background: #fef3c7; }
         tr.merged { opacity: 0.7; }
         
         @media (max-width: 768px){
@@ -129,6 +130,7 @@
                 <option value="cancelled" {{ 'selected' if status == 'cancelled' else '' }}>Gri (İptal Edildi)</option>
                 <option value="refunded" {{ 'selected' if status == 'refunded' else '' }}>Kirmizi (Iade)</option>
                 <option value="switched" {{ 'selected' if status == 'switched' else '' }}>Kahverengi (Degisim)</option>
+                <option value="iade_bekliyor" {{ 'selected' if status == 'iade_bekliyor' else '' }}>iade_bekliyor</option>
             </select>
             <select name="ig_linked">
                 <option value="" {{ 'selected' if not ig_linked else '' }}>IG: Hepsi</option>
@@ -274,6 +276,19 @@
                     <label>Yeni Toplam</label>
                     <input id="epTotal" type="number" step="0.01" inputmode="decimal" />
                 </div>
+            <div>
+                <label>Tanzim Durumu</label>
+                <select id="epTanzimStatus" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px;">
+                    <option value="">(boş)</option>
+                    <option value="tanzim_bekliyor">tanzim_bekliyor</option>
+                    <option value="tanzim_basari">tanzim_basari</option>
+                    <option value="tanzim_basarisiz">tanzim_basarisiz</option>
+                </select>
+            </div>
+            <div>
+                <label>Tanzim Manuel Tutar</label>
+                <input id="epTanzimAmount" type="number" step="0.01" inputmode="decimal" />
+            </div>
                 <div>
                     <label>Kargo Firması</label>
                     <select id="epShippingCompany" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px;">
@@ -297,6 +312,7 @@
                         <option value="cancelled">İptal</option>
                         <option value="refunded">İade</option>
                         <option value="switched">Değişim</option>
+                <option value="iade_bekliyor">iade_bekliyor</option>
                     </select>
                 </div>
                 <div>
@@ -404,18 +420,22 @@
     const epShippingCompany = document.getElementById('epShippingCompany');
     const epPaymentStatus = document.getElementById('epPaymentStatus');
     const epPaymentDate = document.getElementById('epPaymentDate');
+    const epTanzimStatus = document.getElementById('epTanzimStatus');
+    const epTanzimAmount = document.getElementById('epTanzimAmount');
     const epSave = document.getElementById('epSave');
     const epCancel = document.getElementById('epCancel');
     const epErr = document.getElementById('epError');
     let editingOrderId = null;
     function showOverlay(){ overlay.style.display = 'flex'; }
     function hideOverlay(){ overlay.style.display = 'none'; epErr.textContent=''; }
-    function editTotal(id, cur, isIban, shippingCompany, paymentStatus, paymentDate){
+    function editTotal(id, cur, isIban, shippingCompany, paymentStatus, paymentDate, tanzimStatus='', tanzimAmount=''){
         editingOrderId = id;
         epTotal.value = String(cur || '0.00');
         epIban.checked = !!isIban;
         epShippingCompany.value = shippingCompany || '';
         epPaymentStatus.value = paymentStatus || '';
+        epTanzimStatus.value = tanzimStatus || '';
+        epTanzimAmount.value = tanzimAmount || '';
         // Set payment date: if exists use it, otherwise default to today
         if(paymentDate && paymentDate.trim() !== ''){
             epPaymentDate.value = paymentDate;
@@ -444,6 +464,9 @@
         const shippingCompany = epShippingCompany.value || null;
         const paymentStatus = epPaymentStatus.value || null;
         const paymentDate = epPaymentDate.value || null;
+        const tanzimStatus = epTanzimStatus.value || null;
+        const tanzimAmountRaw = String(epTanzimAmount.value || '').trim();
+        const tanzimAmount = tanzimAmountRaw ? parseFloat(tanzimAmountRaw.replace(',', '.')) : null;
         try{
             const res = await fetch(`/orders/${id}/update-total`, {
                 method: 'POST',
@@ -453,7 +476,9 @@
                     paid_by_bank_transfer: isIban,
                     shipping_company: shippingCompany,
                     payment_status: paymentStatus,
-                    payment_date: paymentDate
+                    payment_date: paymentDate,
+                    tanzim_status: tanzimStatus,
+                    tanzim_amount_manual: tanzimAmount
                 })
             });
             if(!res.ok){

@@ -171,6 +171,8 @@ def list_orders_table(
             # refunded/switched/cancelled take precedence for row classes
             if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
                 status_map[oid] = str(o.status)
+            elif (o.status or "") == "iade_bekliyor":
+                status_map[oid] = "iade_bekliyor"
             elif (o.status or "") == "paid":
                 status_map[oid] = "paid"
             elif (o.status or "") == "partial_paid":
@@ -183,7 +185,7 @@ def list_orders_table(
                     status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
 
         # Optional status filter — ignored for quicksearch presets
-        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "partial_paid", "cancelled"):
+        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "partial_paid", "cancelled", "iade_bekliyor"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
 
         # Preset filters
@@ -539,13 +541,15 @@ def export_orders(
             paid = paid_map.get(oid, 0.0)
             if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
                 status_map[oid] = str(o.status)
+            elif (o.status or "") == "iade_bekliyor":
+                status_map[oid] = "iade_bekliyor"
             else:
                 # Treat IBAN (bank transfer) as paid/completed
                 if bool(o.paid_by_bank_transfer):
                     status_map[oid] = "paid"
                 else:
                     status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
-        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "cancelled"):
+        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "cancelled", "iade_bekliyor"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
         if preset == "overdue_unpaid_7":
             cutoff = today - dt.timedelta(days=7)
@@ -797,6 +801,20 @@ def update_total(order_id: int, body: dict):
         payment_status = str(payment_status_raw).strip() if payment_status_raw else None
         if payment_status == "":
             payment_status = None
+    # Optional tanzim status / amount
+    tanzim_status_raw = body.get("tanzim_status", None)
+    tanzim_status = None
+    if tanzim_status_raw is not None:
+        tanzim_status = str(tanzim_status_raw).strip() if tanzim_status_raw else None
+        if tanzim_status == "":
+            tanzim_status = None
+    tanzim_amount_raw = body.get("tanzim_amount_manual", None)
+    tanzim_amount = None
+    try:
+        if tanzim_amount_raw is not None and str(tanzim_amount_raw).strip() != "":
+            tanzim_amount = float(str(tanzim_amount_raw).replace(",", "."))
+    except Exception:
+        tanzim_amount = None
     # Optional payment date
     payment_date_raw = body.get("payment_date", None)
     payment_date = None
@@ -963,6 +981,20 @@ def update_total(order_id: int, body: dict):
         try:
             # log
             session.add(OrderEditLog(order_id=order_id, action="update_total", changes_json=str(changes)))
+        except Exception:
+            pass
+        # Tanzim updates
+        try:
+            if tanzim_status_raw is not None:
+                prev_ts = o.tanzim_status
+                if tanzim_status != prev_ts:
+                    o.tanzim_status = tanzim_status
+                    changes["tanzim_status"] = [prev_ts, tanzim_status]
+            if tanzim_amount_raw is not None:
+                prev_ta = o.tanzim_amount_manual
+                if tanzim_amount != prev_ta:
+                    o.tanzim_amount_manual = tanzim_amount
+                    changes["tanzim_amount_manual"] = [prev_ta, tanzim_amount]
         except Exception:
             pass
         return {"status": "ok"}
