@@ -150,7 +150,7 @@ def list_orders_table(
                 group_paid = sum(paid_map.get(oid, 0.0) for oid in group_order_ids)
                 paid_map[group_id] = group_paid
         
-        # Effective totals considering tanzim states
+        # Effective totals considering tanzim states (status carries tanzim values)
         effective_map: dict[int, float] = {}
         for o in rows:
             if o.id is not None:
@@ -161,7 +161,7 @@ def list_orders_table(
             oid = o.id or 0
             total = float(effective_map.get(oid, o.total_amount or 0.0))
             
-            primary_status = (o.tanzim_status or o.status or "").lower()
+            primary_status = (o.status or "").lower()
 
             # For partial payment groups, use group total payments
             if o.partial_payment_group_id and o.partial_payment_group_id == oid:
@@ -543,7 +543,7 @@ def export_orders(
             oid = o.id or 0
             total = float(effective_map.get(oid, o.total_amount or 0.0))
             paid = paid_map.get(oid, 0.0)
-            primary_status = (o.tanzim_status or o.status or "").lower()
+            primary_status = (o.status or "").lower()
             if primary_status in ("refunded", "switched", "stitched", "cancelled"):
                 status_map[oid] = primary_status
             elif primary_status == "iade_bekliyor":
@@ -808,13 +808,7 @@ def update_total(order_id: int, body: dict):
         payment_status = str(payment_status_raw).strip() if payment_status_raw else None
         if payment_status == "":
             payment_status = None
-    # Optional tanzim status / amount
-    tanzim_status_raw = body.get("tanzim_status", None)
-    tanzim_status = None
-    if tanzim_status_raw is not None:
-        tanzim_status = str(tanzim_status_raw).strip() if tanzim_status_raw else None
-        if tanzim_status == "":
-            tanzim_status = None
+    # Optional tanzim amount (status is driven by status/payment_status)
     tanzim_amount_raw = body.get("tanzim_amount_manual", None)
     tanzim_amount = None
     try:
@@ -876,10 +870,6 @@ def update_total(order_id: int, body: dict):
                 if payment_status != prev_status:
                     o.status = payment_status
                     changes["status"] = [prev_status, payment_status]
-                    # If this is a tanzim status and no explicit tanzim_status was sent, mirror it
-                    if payment_status in ("tanzim_bekliyor", "tanzim_basari", "tanzim_basarisiz") and tanzim_status_raw is None:
-                        o.tanzim_status = payment_status
-                        changes["tanzim_status"] = [o.tanzim_status, payment_status]
         except Exception:
             pass
         # Update payment date if provided
@@ -989,13 +979,8 @@ def update_total(order_id: int, body: dict):
                 o.total_cost = 0.0
         except Exception:
             pass
-        # Tanzim updates
+        # Tanzim amount update
         try:
-            if tanzim_status_raw is not None:
-                prev_ts = o.tanzim_status
-                if tanzim_status != prev_ts:
-                    o.tanzim_status = tanzim_status
-                    changes["tanzim_status"] = [prev_ts, tanzim_status]
             if tanzim_amount_raw is not None:
                 prev_ta = o.tanzim_amount_manual
                 if tanzim_amount != prev_ta:
@@ -1096,8 +1081,6 @@ async def edit_order_apply(order_id: int, request: Request):
     new_ship = _get("shipment_date")
     new_data = _get("data_date")
     new_status = _get("status") or None
-    new_tanzim_status = _get("tanzim_status") or None
-    new_tanzim_amount_manual = _get("tanzim_amount_manual")
     new_notes = _get("notes") or None
     new_source = _get("source") or None
     new_paid_by_bank_transfer = (_get("paid_by_bank_transfer").lower() in ("1","true","on","yes"))
@@ -1311,12 +1294,10 @@ async def edit_order_apply(order_id: int, request: Request):
             changes["notes"] = [o.notes, new_notes]
             o.notes = new_notes
         # tanzim fields
-        if new_tanzim_status != (o.tanzim_status or None):
-            changes["tanzim_status"] = [o.tanzim_status, new_tanzim_status]
-            o.tanzim_status = new_tanzim_status
         try:
-            if new_tanzim_amount_manual != "":
-                tval = float(str(new_tanzim_amount_manual).replace(",", "."))
+            amt_raw = _get("tanzim_amount_manual")
+            if amt_raw != "":
+                tval = float(str(amt_raw).replace(",", "."))
                 if tval != float(o.tanzim_amount_manual or 0.0):
                     changes["tanzim_amount_manual"] = [o.tanzim_amount_manual, tval]
                     o.tanzim_amount_manual = tval
@@ -1332,10 +1313,6 @@ async def edit_order_apply(order_id: int, request: Request):
         if new_status != prev_status:
             changes["status"] = [prev_status, new_status]
             o.status = new_status
-            # If status is a tanzim status and tanzim_status was not provided, mirror it
-            if new_status in ("tanzim_bekliyor", "tanzim_basari", "tanzim_basarisiz") and not new_tanzim_status:
-                o.tanzim_status = new_status
-                changes["tanzim_status"] = [o.tanzim_status, new_status]
 
         # apply inventory adjustments when item/quantity/status changed
         inv_touch = items_changed or any(k in changes for k in ("item_id", "quantity", "status"))

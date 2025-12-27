@@ -209,7 +209,7 @@
                     {% if (orig is not none) and (eff != orig) %}
                         <div style="font-size:11px; color:#6b7280;">Orj: {{ '%.2f'|format(orig or 0) }}</div>
                     {% endif %}
-                    <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(orig or 0) }}', {{ 'true' if (o.paid_by_bank_transfer or False) else 'false' }}, '{{ o.shipping_company or '' }}', '{{ o.status or '' }}', '{{ o.payment_date.isoformat() if o.payment_date else '' }}', '{{ o.tanzim_status or '' }}', '{{ '%.2f'|format(o.tanzim_amount_manual or 0) if o.tanzim_amount_manual is not none else '' }}')">Düzenle</button>
+                    <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(orig or 0) }}', {{ 'true' if (o.paid_by_bank_transfer or False) else 'false' }}, '{{ o.shipping_company or '' }}', '{{ o.status or '' }}', '{{ o.payment_date.isoformat() if o.payment_date else '' }}', '{{ '%.2f'|format(o.tanzim_amount_manual or 0) if o.tanzim_amount_manual is not none else '' }}')">Düzenle</button>
                 </td>
                 <td>{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
                 <td>{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
@@ -279,15 +279,6 @@
                     <label>Yeni Toplam</label>
                     <input id="epTotal" type="number" step="0.01" inputmode="decimal" />
                 </div>
-            <div>
-                <label>Tanzim Durumu</label>
-                <select id="epTanzimStatus" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px;">
-                    <option value="">(boş)</option>
-                    <option value="tanzim_bekliyor">tanzim_bekliyor</option>
-                    <option value="tanzim_basari">tanzim_basari</option>
-                    <option value="tanzim_basarisiz">tanzim_basarisiz</option>
-                </select>
-            </div>
             <div>
                 <label>Tanzim Manuel Tutar</label>
                 <input id="epTanzimAmount" type="number" step="0.01" inputmode="decimal" />
@@ -426,7 +417,6 @@
     const epShippingCompany = document.getElementById('epShippingCompany');
     const epPaymentStatus = document.getElementById('epPaymentStatus');
     const epPaymentDate = document.getElementById('epPaymentDate');
-    const epTanzimStatus = document.getElementById('epTanzimStatus');
     const epTanzimAmount = document.getElementById('epTanzimAmount');
     const epSave = document.getElementById('epSave');
     const epCancel = document.getElementById('epCancel');
@@ -434,13 +424,12 @@
     let editingOrderId = null;
     function showOverlay(){ overlay.style.display = 'flex'; }
     function hideOverlay(){ overlay.style.display = 'none'; epErr.textContent=''; }
-    function editTotal(id, cur, isIban, shippingCompany, paymentStatus, paymentDate, tanzimStatus='', tanzimAmount=''){
+    function editTotal(id, cur, isIban, shippingCompany, paymentStatus, paymentDate, tanzimAmount=''){
         editingOrderId = id;
         epTotal.value = String(cur || '0.00');
         epIban.checked = !!isIban;
         epShippingCompany.value = shippingCompany || '';
         epPaymentStatus.value = paymentStatus || '';
-        epTanzimStatus.value = tanzimStatus || '';
         epTanzimAmount.value = tanzimAmount || '';
         // Set payment date: if exists use it, otherwise default to today
         if(paymentDate && paymentDate.trim() !== ''){
@@ -470,7 +459,6 @@
         const shippingCompany = epShippingCompany.value || null;
         const paymentStatus = epPaymentStatus.value || null;
         const paymentDate = epPaymentDate.value || null;
-        const tanzimStatus = epTanzimStatus.value || null;
         const tanzimAmountRaw = String(epTanzimAmount.value || '').trim();
         const tanzimAmount = tanzimAmountRaw ? parseFloat(tanzimAmountRaw.replace(',', '.')) : null;
         try{
@@ -483,7 +471,6 @@
                     shipping_company: shippingCompany,
                     payment_status: paymentStatus,
                     payment_date: paymentDate,
-                    tanzim_status: tanzimStatus,
                     tanzim_amount_manual: tanzimAmount
                 })
             });

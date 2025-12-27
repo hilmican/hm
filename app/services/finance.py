@@ -291,7 +291,7 @@ def get_effective_total(order: Order) -> float:
 	- tanzim_basarisiz: revenue impact 0 (costs/fees remain)
 	- default: total_amount
 	"""
-	status = (order.tanzim_status or "").strip().lower()
+	status = (order.status or "").strip().lower()
 	total = float(order.total_amount or 0.0)
 	if status == "tanzim_bekliyor":
 		return round(total * 0.6, 2)
