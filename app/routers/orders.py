@@ -161,6 +161,8 @@ def list_orders_table(
             oid = o.id or 0
             total = float(effective_map.get(oid, o.total_amount or 0.0))
             
+            primary_status = (o.tanzim_status or o.status or "").lower()
+
             # For partial payment groups, use group total payments
             if o.partial_payment_group_id and o.partial_payment_group_id == oid:
                 # This is the primary order in a partial payment group
@@ -169,14 +171,16 @@ def list_orders_table(
                 paid = paid_map.get(oid, 0.0)
             
             # refunded/switched/cancelled take precedence for row classes
-            if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
-                status_map[oid] = str(o.status)
-            elif (o.status or "") == "iade_bekliyor":
+            if primary_status in ("refunded", "switched", "stitched", "cancelled"):
+                status_map[oid] = primary_status
+            elif primary_status == "iade_bekliyor":
                 status_map[oid] = "iade_bekliyor"
-            elif (o.status or "") == "paid":
+            elif primary_status == "paid":
                 status_map[oid] = "paid"
-            elif (o.status or "") == "partial_paid":
+            elif primary_status == "partial_paid":
                 status_map[oid] = "partial_paid"
+            elif primary_status in ("tanzim_bekliyor", "tanzim_basari", "tanzim_basarisiz"):
+                status_map[oid] = primary_status
             else:
                 # Consider IBAN (bank transfer) orders as completed/paid
                 if bool(o.paid_by_bank_transfer):
@@ -185,7 +189,7 @@ def list_orders_table(
                     status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
 
         # Optional status filter — ignored for quicksearch presets
-        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "partial_paid", "cancelled", "iade_bekliyor"):
+        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "partial_paid", "cancelled", "iade_bekliyor", "tanzim_bekliyor", "tanzim_basari", "tanzim_basarisiz"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
 
         # Preset filters
@@ -539,17 +543,20 @@ def export_orders(
             oid = o.id or 0
             total = float(effective_map.get(oid, o.total_amount or 0.0))
             paid = paid_map.get(oid, 0.0)
-            if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
-                status_map[oid] = str(o.status)
-            elif (o.status or "") == "iade_bekliyor":
+            primary_status = (o.tanzim_status or o.status or "").lower()
+            if primary_status in ("refunded", "switched", "stitched", "cancelled"):
+                status_map[oid] = primary_status
+            elif primary_status == "iade_bekliyor":
                 status_map[oid] = "iade_bekliyor"
+            elif primary_status in ("tanzim_bekliyor", "tanzim_basari", "tanzim_basarisiz"):
+                status_map[oid] = primary_status
             else:
                 # Treat IBAN (bank transfer) as paid/completed
                 if bool(o.paid_by_bank_transfer):
                     status_map[oid] = "paid"
                 else:
                     status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
-        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "cancelled", "iade_bekliyor"):
+        if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "cancelled", "iade_bekliyor", "tanzim_bekliyor", "tanzim_basari", "tanzim_basarisiz"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
         if preset == "overdue_unpaid_7":
             cutoff = today - dt.timedelta(days=7)
@@ -869,6 +876,10 @@ def update_total(order_id: int, body: dict):
                 if payment_status != prev_status:
                     o.status = payment_status
                     changes["status"] = [prev_status, payment_status]
+                    # If this is a tanzim status and no explicit tanzim_status was sent, mirror it
+                    if payment_status in ("tanzim_bekliyor", "tanzim_basari", "tanzim_basarisiz") and tanzim_status_raw is None:
+                        o.tanzim_status = payment_status
+                        changes["tanzim_status"] = [o.tanzim_status, payment_status]
         except Exception:
             pass
         # Update payment date if provided
@@ -978,11 +989,6 @@ def update_total(order_id: int, body: dict):
                 o.total_cost = 0.0
         except Exception:
             pass
-        try:
-            # log
-            session.add(OrderEditLog(order_id=order_id, action="update_total", changes_json=str(changes)))
-        except Exception:
-            pass
         # Tanzim updates
         try:
             if tanzim_status_raw is not None:
@@ -995,6 +1001,11 @@ def update_total(order_id: int, body: dict):
                 if tanzim_amount != prev_ta:
                     o.tanzim_amount_manual = tanzim_amount
                     changes["tanzim_amount_manual"] = [prev_ta, tanzim_amount]
+        except Exception:
+            pass
+        try:
+            # log
+            session.add(OrderEditLog(order_id=order_id, action="update_total", changes_json=str(changes)))
         except Exception:
             pass
         return {"status": "ok"}
@@ -1321,6 +1332,10 @@ async def edit_order_apply(order_id: int, request: Request):
         if new_status != prev_status:
             changes["status"] = [prev_status, new_status]
             o.status = new_status
+            # If status is a tanzim status and tanzim_status was not provided, mirror it
+            if new_status in ("tanzim_bekliyor", "tanzim_basari", "tanzim_basarisiz") and not new_tanzim_status:
+                o.tanzim_status = new_status
+                changes["tanzim_status"] = [o.tanzim_status, new_status]
 
         # apply inventory adjustments when item/quantity/status changed
         inv_touch = items_changed or any(k in changes for k in ("item_id", "quantity", "status"))

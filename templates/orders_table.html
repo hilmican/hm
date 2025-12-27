@@ -131,6 +131,9 @@
                 <option value="refunded" {{ 'selected' if status == 'refunded' else '' }}>Kirmizi (Iade)</option>
                 <option value="switched" {{ 'selected' if status == 'switched' else '' }}>Kahverengi (Degisim)</option>
                 <option value="iade_bekliyor" {{ 'selected' if status == 'iade_bekliyor' else '' }}>iade_bekliyor</option>
+                <option value="tanzim_bekliyor" {{ 'selected' if status == 'tanzim_bekliyor' else '' }}>tanzim_bekliyor</option>
+                <option value="tanzim_basari" {{ 'selected' if status == 'tanzim_basari' else '' }}>tanzim_basari</option>
+                <option value="tanzim_basarisiz" {{ 'selected' if status == 'tanzim_basarisiz' else '' }}>tanzim_basarisiz</option>
             </select>
             <select name="ig_linked">
                 <option value="" {{ 'selected' if not ig_linked else '' }}>IG: Hepsi</option>
@@ -313,6 +316,9 @@
                         <option value="refunded">İade</option>
                         <option value="switched">Değişim</option>
                 <option value="iade_bekliyor">iade_bekliyor</option>
+                <option value="tanzim_bekliyor">tanzim_bekliyor</option>
+                <option value="tanzim_basari">tanzim_basari</option>
+                <option value="tanzim_basarisiz">tanzim_basarisiz</option>
                     </select>
                 </div>
                 <div>
