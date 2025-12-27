@@ -1051,6 +1051,20 @@ def init_db() -> None:
                         conn.exec_driver_sql("ALTER TABLE ai_shadow_reply ADD COLUMN state_json LONGTEXT NULL")
                 except Exception:
                     pass
+                # Ensure order.channel exists
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'channel'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE `order` ADD COLUMN channel VARCHAR(64) NULL DEFAULT 'instagram'")
+                        conn.exec_driver_sql("CREATE INDEX idx_order_channel ON `order`(channel)")
+                except Exception:
+                    pass
                 # Add first_reply_notified_at column to ai_shadow_state
                 try:
                     row = conn.exec_driver_sql(

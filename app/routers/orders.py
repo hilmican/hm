@@ -1198,6 +1198,7 @@ async def edit_order_apply(order_id: int, request: Request):
     new_status = _get("status") or None
     new_notes = _get("notes") or None
     new_source = _get("source") or None
+    new_channel = _get("channel") or None
     new_paid_by_bank_transfer = (_get("paid_by_bank_transfer").lower() in ("1","true","on","yes"))
 
     with get_session() as session:
@@ -1405,6 +1406,9 @@ async def edit_order_apply(order_id: int, request: Request):
         if new_source and new_source != (o.source or None):
             changes["source"] = [o.source, new_source]
             o.source = new_source
+        if new_channel and new_channel != (o.channel or "instagram"):
+            changes["channel"] = [o.channel, new_channel]
+            o.channel = new_channel
         if new_notes != (o.notes or None):
             changes["notes"] = [o.notes, new_notes]
             o.notes = new_notes

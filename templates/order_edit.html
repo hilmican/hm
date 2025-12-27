@@ -121,11 +121,22 @@
                     <input name="tanzim_amount_manual" type="number" step="0.01" value="{{ order.tanzim_amount_manual or '' }}" />
                 </div>
                 <div>
-                    <label>Kanal</label>
+                    <label>Kaynak</label>
                     <select name="source">
                         {% set src = order.source or '' %}
                         <option value="bizim" {{ 'selected' if src=='bizim' else '' }}>bizim</option>
                         <option value="kargo" {{ 'selected' if src=='kargo' else '' }}>kargo</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Satış Kanalı</label>
+                    {% set ch = order.channel or 'instagram' %}
+                    <select name="channel">
+                        <option value="instagram" {{ 'selected' if ch=='instagram' else '' }}>instagram</option>
+                        <option value="magaza" {{ 'selected' if ch=='magaza' else '' }}>magaza</option>
+                        <option value="tiktok" {{ 'selected' if ch=='tiktok' else '' }}>tiktok</option>
+                        <option value="whatsapp" {{ 'selected' if ch=='whatsapp' else '' }}>whatsapp</option>
+                        <option value="other" {{ 'selected' if ch=='other' else '' }}>other</option>
                     </select>
                 </div>
                 <div>

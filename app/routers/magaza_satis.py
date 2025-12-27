@@ -248,11 +248,14 @@ def checkout(payload: dict = Body(...)):
 			unit_price=lines[0]["unit_price"],
 			total_amount=total_amount,
 			source="bizim",
+			channel="magaza",
 			status="paid",
 			paid_by_bank_transfer=(payment_method == "bank_transfer"),
 			payment_date=dt.date.today(),
 			data_date=dt.date.today(),
 			notes=notes,
+			shipping_fee=0.0,
+			shipping_company=None,
 		)
 		session.add(order)
 		session.flush()
