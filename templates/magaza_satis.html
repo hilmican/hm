@@ -314,8 +314,10 @@
 
 			function matchesQuery(it, q){
 				if (!q) return true;
-				const s = q.toLowerCase();
-				return [it.sku, it.name, it.color, it.size].some(v => (v || '').toLowerCase().includes(s));
+				const tokens = (q || '').toLowerCase().split(/\s+/).filter(Boolean);
+				if (!tokens.length) return true;
+				const hay = [it.sku, it.name, it.color, it.size].map(v => (v || '').toLowerCase()).join(' ');
+				return tokens.every(t => hay.includes(t));
 			}
 
 			function filterLocal(q){

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query, Request, Body
 from sqlmodel import select
+from sqlalchemy import or_, and_
 import datetime as dt
 from typing import Optional, List, Dict, Any
 
@@ -150,10 +151,20 @@ def search_items(q: Optional[str] = Query(default=None, description="SKU/isim/re
 			.limit(limit)
 		)
 		if q:
-			q_like = f"%{q}%"
-			query = query.where(
-				(Item.sku.ilike(q_like)) | (Item.name.ilike(q_like)) | (Item.color.ilike(q_like)) | (Item.size.ilike(q_like))
-			)
+			terms = [t for t in str(q).strip().split() if t]
+			if terms:
+				clauses = []
+				for t in terms:
+					pat = f"%{t}%"
+					clauses.append(
+						or_(
+							Item.sku.ilike(pat),
+							Item.name.ilike(pat),
+							Item.color.ilike(pat),
+							Item.size.ilike(pat),
+						)
+					)
+				query = query.where(and_(*clauses))
 		items = session.exec(query).all()
 		stock_map = get_stock_map(session)
 		return {
