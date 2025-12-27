@@ -292,8 +292,18 @@
 				}
 			}
 
+			function debounce(fn, delay){
+				let t;
+				return (...args)=>{
+					clearTimeout(t);
+					t = setTimeout(()=>fn(...args), delay);
+				};
+			}
+
+			const debouncedSearch = debounce(()=>searchItems(), 240);
+
 			async function searchItems(){
-				const q = document.getElementById('searchInput').value;
+				const q = (document.getElementById('searchInput').value || '').trim();
 				setStatus('cartStatus', '{{ t(request, 'magaza_satis.loading') }}', true);
 				try{
 					const res = await fetch(`/magaza-satis/api/items?q=${encodeURIComponent(q||'')}`);
@@ -354,6 +364,7 @@
 			renderQuick(initialItems || []);
 			renderCart();
 			document.getElementById('discount').addEventListener('input', updateTotals);
+			document.getElementById('searchInput').addEventListener('input', debouncedSearch);
 		</script>
 	</body>
 </html>
