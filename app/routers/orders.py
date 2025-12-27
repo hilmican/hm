@@ -716,10 +716,16 @@ def list_problem_orders(
 
         problem_rows = []
         unique_clients: set[int] = set()
+        final_statuses = {"refunded", "switched", "stitched", "cancelled"}
+        refund_pending_statuses = {"iade_bekliyor"}
         for o in rows:
             status_lc = str(o.status or "").lower()
-            is_iade = status_lc == "iade_bekliyor"
-            shipped = o.shipment_date or o.data_date
+            # Skip orders that are already in a final state; they are not “problem” anymore
+            if status_lc in final_statuses:
+                continue
+            is_iade = status_lc in refund_pending_statuses
+            # Only treat orders with an actual shipment date as “late”
+            shipped = o.shipment_date
             delivered = getattr(o, "delivery_date", None)
             bdays = _business_days_since(shipped, today) if shipped else None
             is_late = (delivered is None) and (bdays is not None) and (bdays >= bizdays)
@@ -813,10 +819,14 @@ def export_problem_orders(
                 effective_map[int(o.id)] = get_effective_total(o)
 
         problem_rows = []
+        final_statuses = {"refunded", "switched", "stitched", "cancelled"}
+        refund_pending_statuses = {"iade_bekliyor"}
         for o in rows:
             status_lc = str(o.status or "").lower()
-            is_iade = status_lc == "iade_bekliyor"
-            shipped = o.shipment_date or o.data_date
+            if status_lc in final_statuses:
+                continue
+            is_iade = status_lc in refund_pending_statuses
+            shipped = o.shipment_date
             delivered = getattr(o, "delivery_date", None)
             bdays = _business_days_since(shipped, today) if shipped else None
             is_late = (delivered is None) and (bdays is not None) and (bdays >= bizdays)
