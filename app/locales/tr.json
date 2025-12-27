@@ -116,7 +116,10 @@
     "cart_empty": "Sepet boş",
     "client_missing": "Müşteri adı ve telefon gerekli",
     "success": "Satış kaydedildi",
-    "success_toast": "Satış tamamlandı"
+    "success_toast": "Satış tamamlandı",
+    "stock_handling": "Stok İşlemi",
+    "skip_stock": "Stok düşmeden kaydet",
+    "skip_stock_hint": "Seçilirse stok değişmez, seçilmezse stok düşülür."
   },
   "status": {
     "tamamlandi": "Tamamlandı",

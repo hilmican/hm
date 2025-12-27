@@ -179,6 +179,7 @@ def checkout(payload: dict = Body(...)):
 		discount = 0.0
 
 	notes = (payload.get("notes") or "").strip() or None
+	skip_stock = bool(payload.get("skip_stock"))
 
 	with get_session() as session:
 		client = _ensure_client(
@@ -240,13 +241,14 @@ def checkout(payload: dict = Body(...)):
 				quantity=l["quantity"],
 			)
 			session.add(oi)
-			adjust_stock(
-				session,
-				item_id=l["item_id"],
-				delta=-l["quantity"],
-				related_order_id=order.id,
-				reason="magaza_satis",
-			)
+			if not skip_stock:
+				adjust_stock(
+					session,
+					item_id=l["item_id"],
+					delta=-l["quantity"],
+					related_order_id=order.id,
+					reason="magaza_satis",
+				)
 
 		payment = Payment(
 			client_id=client.id,  # type: ignore[arg-type]

@@ -116,7 +116,10 @@
     "cart_empty": "Cart is empty",
     "client_missing": "Customer name and phone required",
     "success": "Sale recorded",
-    "success_toast": "Sale completed"
+    "success_toast": "Sale completed",
+    "stock_handling": "Stock Handling",
+    "skip_stock": "Save without stock deduction",
+    "skip_stock_hint": "When checked, stock is not changed; otherwise stock is reduced."
   },
   "status": {
     "tamamlandi": "Completed",

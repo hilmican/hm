@@ -90,6 +90,13 @@
 						<label>{{ t(request, 'magaza_satis.discount') }}</label>
 						<input id="discount" type="number" min="0" step="0.01" value="0" />
 					</div>
+					<div style="min-width:180px;">
+						<label>{{ t(request, 'magaza_satis.stock_handling') }}</label>
+						<div class="flex">
+							<label class="flex"><input type="checkbox" id="skipStock" /> {{ t(request, 'magaza_satis.skip_stock') }}</label>
+						</div>
+						<div class="small">{{ t(request, 'magaza_satis.skip_stock_hint') }}</div>
+					</div>
 				</div>
 				<div>
 					<label>{{ t(request, 'magaza_satis.notes') }}</label>
@@ -358,6 +365,7 @@
 					cart: cart.map(c=>({ item_id: c.id, quantity: c.qty, unit_price: c.price })),
 					discount: parseFloat(document.getElementById('discount').value || '0') || 0,
 					payment_method: document.querySelector('input[name="payment_method"]:checked')?.value || 'cash',
+					skip_stock: !!document.getElementById('skipStock').checked,
 					notes: document.getElementById('notes').value.trim(),
 				};
 				setStatus('checkoutStatus', '{{ t(request, 'magaza_satis.loading') }}', true);
