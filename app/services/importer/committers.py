@@ -222,6 +222,20 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
     except Exception:
         pass
 
+    if order and run.source == "returns":
+        # If returns import carries a negative amount, ensure order status reflects refund
+        if rec.get("amount") is not None:
+            try:
+                amt_val = float(rec.get("amount") or 0.0)
+                if amt_val < 0 and (order.status or "").lower() not in {"refunded", "iade"}:
+                    order.status = "refunded"
+            except Exception:
+                pass
+        if rec.get("date") and not getattr(order, "return_or_switch_date", None):
+            order.return_or_switch_date = rec.get("date")
+        # For returns source, skip payment creation (no positive tahsilat expected)
+        return status, message, matched_client_id, matched_order_id
+
     if (amt_raw or 0.0) > 0 and pdate_legacy is not None and order is not None:
         amt = float(amt_raw or 0.0)
 
