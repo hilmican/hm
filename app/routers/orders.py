@@ -409,39 +409,6 @@ def refund_order(order_id: int):
             o.total_cost = 0.0
         except Exception:
             pass
-        # POS income account reassignment / creation (for magaza channel)
-        try:
-            if pos_income_account_id:
-                ref = f"POS order {order_id}"
-                incs = session.exec(select(Income).where(Income.reference == ref).where(Income.deleted_at.is_(None))).all()
-                if incs:
-                    updated = 0
-                    for inc in incs:
-                        if inc.account_id != pos_income_account_id:
-                            if "income_account" not in changes:
-                                changes["income_account"] = [inc.account_id, pos_income_account_id]
-                            inc.account_id = pos_income_account_id
-                            updated += 1
-                    if updated == 0 and "income_account" not in changes:
-                        changes["income_account"] = [pos_income_account_id, pos_income_account_id]
-                else:
-                    if (o.channel or "") == "magaza":
-                        pays = session.exec(select(Payment).where(Payment.order_id == order_id)).all()
-                        amt = sum(float(p.amount or 0.0) for p in pays)
-                        if amt > 0:
-                            inc = Income(
-                                account_id=pos_income_account_id,
-                                amount=amt,
-                                date=o.payment_date or dt.date.today(),
-                                source="pos_manual_magaza",
-                                reference=ref,
-                                notes=o.notes,
-                            )
-                            session.add(inc)
-                            changes["income_created"] = amt
-        except Exception:
-            pass
-
         return RedirectResponse(url=f"/orders/{order_id}/edit?status=ok", status_code=303)
 
 
@@ -1373,6 +1340,12 @@ async def edit_order_apply(order_id: int, request: Request):
     new_source = _get("source") or None
     new_channel = _get("channel") or None
     new_paid_by_bank_transfer = (_get("paid_by_bank_transfer").lower() in ("1","true","on","yes"))
+    def _parse_int(val: Optional[str]) -> Optional[int]:
+        try:
+            return int(str(val).strip())
+        except Exception:
+            return None
+    pos_income_account_id = _parse_int(_get("pos_income_account_id") or None)
     pos_income_account_id = _parse_int(_get("pos_income_account_id") or None)
 
     with get_session() as session:
@@ -1628,6 +1601,38 @@ async def edit_order_apply(order_id: int, request: Request):
                     removed += 1
                 if removed:
                     changes["income_removed"] = removed
+        except Exception:
+            pass
+
+        # POS income account reassignment / creation (manual override)
+        try:
+            if pos_income_account_id:
+                ref = f"POS order {order_id}"
+                incs_all = session.exec(select(Income).where(Income.reference == ref)).all()
+                active_incs = [i for i in incs_all if i.deleted_at is None]
+                target_incs = active_incs if active_incs else incs_all
+                if target_incs:
+                    for inc in target_incs:
+                        prev_acc = inc.account_id
+                        inc.account_id = pos_income_account_id
+                        if inc.deleted_at is not None:
+                            inc.deleted_at = None
+                        if prev_acc != pos_income_account_id:
+                            changes.setdefault("income_account", [prev_acc, pos_income_account_id])
+                else:
+                    pays = session.exec(select(Payment).where(Payment.order_id == order_id)).all()
+                    amt = sum(float(p.amount or 0.0) for p in pays)
+                    if amt > 0:
+                        inc = Income(
+                            account_id=pos_income_account_id,
+                            amount=amt,
+                            date=o.payment_date or dt.date.today(),
+                            source="pos_manual_magaza",
+                            reference=ref,
+                            notes=o.notes,
+                        )
+                        session.add(inc)
+                        changes["income_created"] = amt
         except Exception:
             pass
 
