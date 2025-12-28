@@ -1206,21 +1206,8 @@ def returns_apply(body: dict, request: Request):
 			message = None
 			matched_client_id = None
 			matched_order_id = None
-			# Idempotency: if an ImportRow with the same row_hash was already applied, skip
+			# Previously applied rows are allowed to re-run for status/date fix; restock guard below prevents double stock-in.
 			existing_applied = session.exec(select(ImportRow).where(ImportRow.row_hash == row_hash, ImportRow.status == "updated")).first()
-			if existing_applied:
-				ir = ImportRow(
-					import_run_id=run.id or 0,
-					row_index=idx,
-					row_hash=row_hash,
-					mapped_json=str(rec),
-					status="skipped",  # type: ignore
-					message="duplicate row",
-					matched_client_id=existing_applied.matched_client_id,
-					matched_order_id=existing_applied.matched_order_id,
-				)
-				session.add(ir)
-				continue
 			# resolve client id for logging
 			new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
 			old_uq = legacy_client_unique_key(rec.get("name"), rec.get("phone"))
@@ -1250,6 +1237,21 @@ def returns_apply(body: dict, request: Request):
 									adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id)
 						# Always update order fields from the spreadsheet (status/date/amount)
 						action = (rec.get("action") or "").strip()
+						if not action:
+							try:
+								amt_val = float(rec.get("amount") or 0.0)
+								if amt_val < 0:
+									action = "refund"
+							except Exception:
+								pass
+						action = (rec.get("action") or "").strip()
+						if not action:
+							try:
+								amt_val = float(rec.get("amount") or 0.0)
+								if amt_val < 0:
+									action = "refund"
+							except Exception:
+								pass
 						if action == "refund":
 							o.status = "refunded"
 						elif action == "switch":
