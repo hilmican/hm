@@ -5,7 +5,7 @@ import datetime as dt
 from typing import Optional, List, Dict, Any
 
 from ..db import get_session
-from ..models import Client, Item, Order, OrderItem, Payment, Product
+from ..models import Client, Item, Order, OrderItem, Payment, Product, SystemSetting, Income
 from ..services.inventory import adjust_stock, get_stock_map
 from ..utils.normalize import normalize_phone, client_unique_key
 
@@ -203,8 +203,11 @@ def checkout(payload: dict = Body(...)):
 
 	notes = (payload.get("notes") or "").strip() or None
 	skip_stock = bool(payload.get("skip_stock"))
-
 	with get_session() as session:
+		# load finance settings once
+		settings_rows = session.exec(select(SystemSetting)).all()
+		settings_map = {s.key: s.value for s in settings_rows}
+
 		client = _ensure_client(
 			session,
 			client_id=payload.get("client_id"),
@@ -285,6 +288,28 @@ def checkout(payload: dict = Body(...)):
 			net_amount=total_amount,
 		)
 		session.add(payment)
+
+		# Optional: create income entry mapped to configured account
+		try:
+			if payment_method == "cash":
+				acc_id = int(settings_map.get("pos_income_cash_account_id", "0"))
+				src = "pos_cash_magaza"
+			else:
+				acc_id = int(settings_map.get("pos_income_bank_account_id", "0"))
+				src = "pos_bank_magaza"
+			if acc_id > 0:
+				income = Income(
+					account_id=acc_id,
+					amount=total_amount,
+					date=dt.date.today(),
+					source=src,
+					reference=f"POS order {order.id}",
+					notes=notes,
+				)
+				session.add(income)
+		except Exception:
+			# Fail-safe: do not block order creation
+			pass
 
 		return {
 			"status": "ok",
