@@ -674,6 +674,17 @@ def commit_import(body: dict, request: Request):
 							client = session.exec(select(Client).where(Client.unique_key == new_uq)).first()
 						if not client and old_uq:
 							client = session.exec(select(Client).where(Client.unique_key == old_uq)).first()
+						# fallback: phone substring (last 6)
+						if not client and rec.get("phone"):
+							try:
+								ph = "".join([d for d in str(rec.get("phone")) if d.isdigit()])
+								sub = ph[-6:] if len(ph) >= 6 else ph
+								if sub:
+									cands = session.exec(select(Client).where(Client.phone.ilike(f"%{sub}%"))).all()
+									if len(cands) == 1:
+										client = cands[0]
+							except Exception:
+								pass
 						matched_client_id = client.id if client and client.id is not None else None
 
 						# find most relevant order for this client (most recent, try to match item base in notes or item name)
@@ -715,9 +726,24 @@ def commit_import(body: dict, request: Request):
 								already_in = session.exec(
 									select(StockMovement).where(StockMovement.related_order_id == chosen.id, StockMovement.direction == "in")
 								).first()
-								if (chosen.status or "") in ("refunded", "switched", "stitched") or already_in is not None or chosen.return_or_switch_date is not None:
-									status = "skipped"
-									message = "already_processed"
+								already_has_date = chosen.return_or_switch_date is not None
+								already_done = (chosen.status or "") in ("refunded", "switched", "stitched") or already_in is not None
+
+								# If previously partially processed (date set but status empty), allow status fix without restock
+								if already_done or already_has_date:
+									if (chosen.status or "").lower() not in ("refunded", "switched", "stitched"):
+										if action == "refund":
+											chosen.status = "refunded"
+										elif action == "switch":
+											chosen.status = "switched"
+										if not chosen.return_or_switch_date:
+											ret_date = rec.get("date") or run.data_date
+											chosen.return_or_switch_date = ret_date
+										status = "updated"
+										message = "status_fixed"
+									else:
+										status = "skipped"
+										message = "already_processed"
 									returns_skipped_cnt += 1
 								else:
 									restocked = 0
@@ -762,20 +788,6 @@ def commit_import(body: dict, request: Request):
 								status = "unmatched"
 								message = "no_matching_order"
 								returns_unmatched_cnt += 1
-								for oi in oitems:
-									if oi.item_id is None:
-										continue
-									qty = int(oi.quantity or 0)
-									if qty > 0:
-										_adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=chosen.id)
-								# set status and date
-								if action == "refund":
-									chosen.status = "refunded"
-								elif action == "switch":
-									# use new canonical term
-									chosen.status = "switched"
-								# set return/switch date from run.data_date if available
-								chosen.return_or_switch_date = run.data_date
 				except Exception as e:
 					status = "error"
 					message = str(e)
