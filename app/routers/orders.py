@@ -456,6 +456,23 @@ def cancel_order(order_id: int, body: dict = Body(default={})):
         except Exception:
             pass
 
+        # Remove POS income entry if exists
+        try:
+            ref = f"POS order {order_id}"
+            from ..models import Income as _Income
+            incs = session.exec(select(_Income).where(_Income.reference == ref)).all()
+            removed = 0
+            for inc in incs:
+                session.delete(inc)
+                removed += 1
+            if removed:
+                try:
+                    print(f"[orders.cancel] income_removed order={order_id} removed={removed}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         # Log the cancellation
         try:
             from ..models import OrderEditLog
@@ -464,7 +481,7 @@ def cancel_order(order_id: int, body: dict = Body(default={})):
                 OrderEditLog(
                     order_id=order_id,
                     action="cancel",
-                    changes_json=str({"restore_inventory": restore_inventory}),
+                    changes_json=str({"restore_inventory": restore_inventory, "income_removed": removed if 'removed' in locals() else 0}),
                 )
             )
         except Exception:
