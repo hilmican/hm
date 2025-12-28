@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<title>Excel Uploadları</title>
+	<style>
+		body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background:#f8fafc; color:#0f172a; }
+		h1 { margin: 0 0 8px 0; }
+		p.lead { margin: 0 0 20px 0; color:#475569; }
+		.card { border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; margin-bottom:16px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
+		.card-header { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; background:#f8fafc; border-bottom:1px solid #e2e8f0; }
+		.card-header h2 { margin:0; font-size:16px; }
+		.card-header p { margin:4px 0 0 0; color:#64748b; font-size:13px; }
+		.stat-chip { background:#e2e8f0; border-radius:999px; padding:6px 12px; font-size:13px; color:#0f172a; }
+		table { width:100%; border-collapse:collapse; }
+		th, td { padding:10px 12px; border-bottom:1px solid #f1f5f9; text-align:left; font-size:14px; }
+		th { background:#f8fafc; font-weight:600; color:#334155; }
+		.badge { display:inline-block; padding:3px 8px; border-radius:6px; background:#e0f2fe; color:#075985; font-size:12px; }
+		.empty { padding:14px 16px; color:#94a3b8; }
+		.download-link { color:#2563eb; text-decoration:none; font-weight:600; }
+		.download-link:hover { text-decoration:underline; }
+	</style>
+</head>
+<body>
+	{% include "_nav.html" %}
+	<h1>Excel Uploadları</h1>
+	<p class="lead">Upload ettiğimiz excel dosyalarını listeler ve hızlıca indirmenizi sağlar.</p>
+	<div class="card" style="margin-bottom:24px;">
+		<div class="card-header">
+			<div>
+				<h2>Özet</h2>
+				<p>Toplam {{ total_files }} dosya</p>
+			</div>
+		</div>
+	</div>
+
+	{% for src in sources %}
+	<div class="card">
+		<div class="card-header">
+			<div>
+				<h2>{{ src.label }}</h2>
+				<p>{{ src.folder_str }}</p>
+			</div>
+			<div class="stat-chip">{{ src.files|length }} dosya</div>
+		</div>
+		{% if src.files %}
+		<table>
+			<thead>
+				<tr>
+					<th>Dosya</th>
+					<th>Boyut</th>
+					<th>Yüklenme</th>
+					<th>İndir</th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for file in src.files %}
+				<tr>
+					<td>{{ file.name }}</td>
+					<td><span class="badge">{{ file.size_human }}</span></td>
+					<td>{{ file.modified.strftime('%Y-%m-%d %H:%M') }}</td>
+					<td><a class="download-link" href="/import/uploads/download?source={{ src.key }}&filename={{ file.name | urlencode }}" target="_blank">📥 İndir</a></td>
+				</tr>
+				{% endfor %}
+			</tbody>
+		</table>
+		{% else %}
+		<div class="empty">Bu kaynağa ait yüklenmiş dosya bulunamadı.</div>
+		{% endif %}
+	</div>
+	{% endfor %}
+</body>
+</html>
+

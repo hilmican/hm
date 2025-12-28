@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional
 import re
@@ -17,7 +18,7 @@ from ..utils.normalize import client_unique_key, legacy_client_unique_key, norma
 from ..utils.slugify import slugify
 from ..services.cache import bump_namespace
 from ..services.inventory import adjust_stock
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 
 router = APIRouter(prefix="")
 
@@ -26,6 +27,76 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BIZIM_DIR = PROJECT_ROOT / "bizimexcellerimiz"
 KARGO_DIR = PROJECT_ROOT / "kargocununexcelleri"
 IADE_DIR = PROJECT_ROOT / "iadeler"
+
+
+def _format_size(num: int) -> str:
+	"""Human-readable file size."""
+	size = float(num)
+	for unit in ("B", "KB", "MB", "GB", "TB"):
+		if size < 1024.0 or unit == "TB":
+			return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+		size /= 1024.0
+	return f"{size:.1f} TB"
+
+
+@router.get("/uploads", response_class=HTMLResponse)
+def list_uploaded_excels(request: Request):
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	sources: list[dict[str, Any]] = [
+		{"key": "bizim", "label": "Bizim Excel", "folder": BIZIM_DIR},
+		{"key": "kargo", "label": "Kargo Excel", "folder": KARGO_DIR},
+		{"key": "returns", "label": "İade Excel", "folder": IADE_DIR},
+	]
+	for src in sources:
+		folder = src["folder"]
+		files: list[dict[str, Any]] = []
+		if folder.exists():
+			paths = sorted(folder.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+			for p in paths:
+				try:
+					st = p.stat()
+				except FileNotFoundError:
+					continue
+				files.append({
+					"name": p.name,
+					"size_bytes": st.st_size,
+					"size_human": _format_size(st.st_size),
+					"modified": datetime.fromtimestamp(st.st_mtime),
+				})
+		src["files"] = files
+		src["folder_str"] = str(folder)
+	total_files = sum(len(s["files"]) for s in sources)
+	templates = request.app.state.templates
+	return templates.TemplateResponse(
+		"import_uploads.html",
+		{
+			"request": request,
+			"sources": sources,
+			"total_files": total_files,
+		},
+	)
+
+
+@router.get("/uploads/download")
+def download_uploaded_excel(source: str, filename: str, request: Request):
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	if source not in ("bizim", "kargo", "returns"):
+		raise HTTPException(status_code=400, detail="source must be 'bizim', 'kargo' or 'returns'")
+	folder = BIZIM_DIR if source == "bizim" else (KARGO_DIR if source == "kargo" else IADE_DIR)
+	safe_name = Path(filename).name
+	file_path = folder / safe_name
+	if not file_path.exists():
+		raise HTTPException(status_code=404, detail="File not found")
+	if file_path.suffix.lower() != ".xlsx":
+		raise HTTPException(status_code=400, detail="Only .xlsx files are allowed")
+	return FileResponse(
+		path=str(file_path),
+		filename=file_path.name,
+		media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	)
+
 
 def parse_item_details(text: str | None) -> tuple[str, int | None, int | None, list[str]]:
 	"""Extract base item name, height(cm), weight(kg), and extra notes.
