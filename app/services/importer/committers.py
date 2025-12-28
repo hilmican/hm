@@ -6,7 +6,7 @@ from sqlmodel import select
 from sqlalchemy import func
 
 from ...models import Client, Order, Payment, Item, Product, StockMovement, OrderItem
-from ...utils.normalize import client_unique_key, client_name_key
+from ...utils.normalize import client_unique_key, client_name_key, normalize_key
 from ...utils.slugify import slugify
 from ..matching import (
     find_order_by_tracking,
@@ -106,6 +106,22 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                             client = c2[0]
                     except Exception:
                         pass
+                # Last resort: exact normalized name match (single hit) to avoid creating wrong client
+                if client is None:
+                    try:
+                        nk = normalize_key(name_raw)
+                        if nk:
+                            all_clients = session.exec(select(Client)).all()
+                            cands = [c for c in all_clients if normalize_key(c.name) == nk]
+                            if len(cands) == 1:
+                                client = cands[0]
+                    except Exception:
+                        pass
+
+        # If still no client and there is a positive payment, avoid creating a new client/order; require manual match
+        if (client is None) and (rec.get("payment_amount") or 0.0) > 0:
+            return "unmatched", "payment row missing/ambiguous client; manual match needed", None, None
+
         if not client:
             client = Client(
                 name=rec.get("name") or "",
