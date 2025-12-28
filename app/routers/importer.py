@@ -580,6 +580,9 @@ def commit_import(body: dict, request: Request):
 						skip_due_to_duplicate = (existing_ir.matched_order_id is not None) or (prev_status in ("created","updated","merged"))
 					except Exception:
 						skip_due_to_duplicate = False
+				# For returns, allow reprocessing to fix status/date even if duplicate
+				if source == "returns":
+					skip_due_to_duplicate = False
 				if skip_due_to_duplicate:
 					ir = ImportRow(
 						import_run_id=run.id or 0,
