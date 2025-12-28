@@ -6,7 +6,7 @@ from typing import Optional
 from collections import defaultdict
 
 from ..db import get_session
-from ..models import Order, Payment, OrderItem, Item, Client, OrderEditLog, ShippingCompanyRate
+from ..models import Order, Payment, OrderItem, Item, Client, OrderEditLog, ShippingCompanyRate, Income, Account
 from ..services.inventory import get_or_create_item as _get_or_create_item
 from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
@@ -409,7 +409,40 @@ def refund_order(order_id: int):
             o.total_cost = 0.0
         except Exception:
             pass
-        return {"status": "ok"}
+        # POS income account reassignment / creation (for magaza channel)
+        try:
+            if pos_income_account_id:
+                ref = f"POS order {order_id}"
+                incs = session.exec(select(Income).where(Income.reference == ref).where(Income.deleted_at.is_(None))).all()
+                if incs:
+                    updated = 0
+                    for inc in incs:
+                        if inc.account_id != pos_income_account_id:
+                            if "income_account" not in changes:
+                                changes["income_account"] = [inc.account_id, pos_income_account_id]
+                            inc.account_id = pos_income_account_id
+                            updated += 1
+                    if updated == 0 and "income_account" not in changes:
+                        changes["income_account"] = [pos_income_account_id, pos_income_account_id]
+                else:
+                    if (o.channel or "") == "magaza":
+                        pays = session.exec(select(Payment).where(Payment.order_id == order_id)).all()
+                        amt = sum(float(p.amount or 0.0) for p in pays)
+                        if amt > 0:
+                            inc = Income(
+                                account_id=pos_income_account_id,
+                                amount=amt,
+                                date=o.payment_date or dt.date.today(),
+                                source="pos_manual_magaza",
+                                reference=ref,
+                                notes=o.notes,
+                            )
+                            session.add(inc)
+                            changes["income_created"] = amt
+        except Exception:
+            pass
+
+        return RedirectResponse(url=f"/orders/{order_id}/edit?status=ok", status_code=303)
 
 
 @router.post("/{order_id}/cancel")
@@ -457,13 +490,13 @@ def cancel_order(order_id: int, body: dict = Body(default={})):
             pass
 
         # Remove POS income entry if exists
+        removed = 0
         try:
             ref = f"POS order {order_id}"
             from ..models import Income as _Income
-            incs = session.exec(select(_Income).where(_Income.reference == ref)).all()
-            removed = 0
+            incs = session.exec(select(_Income).where(_Income.reference == ref).where(_Income.deleted_at.is_(None))).all()
             for inc in incs:
-                session.delete(inc)
+                inc.deleted_at = dt.datetime.utcnow()
                 removed += 1
             if removed:
                 try:
@@ -1237,6 +1270,11 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
+        accounts = session.exec(select(Account).where(Account.is_active == True).order_by(Account.name.asc())).all()
+        # current POS income account (if exists)
+        ref = f"POS order {order_id}"
+        pos_income = session.exec(select(Income).where(Income.reference == ref).where(Income.deleted_at.is_(None))).first()
+        pos_income_account_id = pos_income.account_id if pos_income else None
         # small reference lists for comboboxes
         clients = session.exec(select(Client).order_by(Client.id.desc()).limit(500)).all()
         items = session.exec(select(Item).order_by(Item.id.desc()).limit(500)).all()
@@ -1283,6 +1321,8 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
                 "client_disp": client_disp,
                 "item_disp": item_disp,
                 "merged_orders": merged_orders,
+                "accounts": accounts,
+                "pos_income_account_id": pos_income_account_id,
             },
         )
 
@@ -1308,6 +1348,17 @@ async def edit_order_apply(order_id: int, request: Request):
             return int(m.group(1))
         except Exception:
             return None
+    def _parse_int(val: Optional[str]) -> Optional[int]:
+        try:
+            return int(str(val).strip())
+        except Exception:
+            return None
+    def _redirect(status: str, msg: Optional[str] = None):
+        qs = f"?status={status}"
+        if msg:
+            qs += f"&msg={quote(msg[:200])}"
+        return RedirectResponse(url=f"/orders/{order_id}/edit{qs}", status_code=303)
+
     client_val = _get("client")
     item_val = _get("item")
     new_client_id = _parse_id(client_val)
@@ -1322,6 +1373,7 @@ async def edit_order_apply(order_id: int, request: Request):
     new_source = _get("source") or None
     new_channel = _get("channel") or None
     new_paid_by_bank_transfer = (_get("paid_by_bank_transfer").lower() in ("1","true","on","yes"))
+    pos_income_account_id = _parse_int(_get("pos_income_account_id") or None)
 
     with get_session() as session:
         o = session.exec(select(Order).where(Order.id == order_id)).first()
@@ -1564,15 +1616,15 @@ async def edit_order_apply(order_id: int, request: Request):
             changes["status"] = [prev_status, new_status]
             o.status = new_status
 
-        # If order is cancelled/refunded/switched/stitched, remove POS income entry (if any)
+        # If order is cancelled/refunded/switched/stitched, soft-delete POS income entry (if any)
         try:
             status_lc = str(o.status or "").lower()
             if status_lc in ("refunded", "switched", "stitched", "cancelled"):
                 ref = f"POS order {order_id}"
-                incs = session.exec(select(Income).where(Income.reference == ref)).all()
+                incs = session.exec(select(Income).where(Income.reference == ref).where(Income.deleted_at.is_(None))).all()
                 removed = 0
                 for inc in incs:
-                    session.delete(inc)
+                    inc.deleted_at = dt.datetime.utcnow()
                     removed += 1
                 if removed:
                     changes["income_removed"] = removed

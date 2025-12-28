@@ -717,6 +717,7 @@ class Income(SQLModel, table=True):
 	reference: Optional[str] = Field(default=None, description="Reference number or description")
 	notes: Optional[str] = Field(default=None, sa_column=Column(Text))
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+	deleted_at: Optional[dt.datetime] = Field(default=None, index=True, description="Soft delete timestamp; null = active")
 
 
 class OrderPayment(SQLModel, table=True):

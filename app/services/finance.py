@@ -23,6 +23,7 @@ def calculate_account_balance(session: Session, account_id: int) -> float:
 	income_total = session.exec(
 		select(func.sum(Income.amount))
 		.where(Income.account_id == account_id)
+		.where((Income.deleted_at.is_(None)))
 	).first()
 	if income_total:
 		balance += float(income_total or 0.0)

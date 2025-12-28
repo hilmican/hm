@@ -105,6 +105,7 @@
                         <option value="partial_paid" {{ 'selected' if st=='partial_paid' else '' }}>partial_paid (Kısmi Ödeme)</option>
                         <option value="refunded" {{ 'selected' if st=='refunded' else '' }}>refunded</option>
                         <option value="switched" {{ 'selected' if st=='switched' else '' }}>switched</option>
+                        <option value="cancelled" {{ 'selected' if st=='cancelled' else '' }}>cancelled</option>
                         <option value="iade_bekliyor" {{ 'selected' if st=='iade_bekliyor' else '' }}>iade_bekliyor</option>
                         <option value="tanzim_bekliyor" {{ 'selected' if st=='tanzim_bekliyor' else '' }}>tanzim_bekliyor</option>
                         <option value="tanzim_basari" {{ 'selected' if st=='tanzim_basari' else '' }}>tanzim_basari</option>
@@ -142,6 +143,17 @@
                         <option value="tiktok" {{ 'selected' if ch=='tiktok' else '' }}>tiktok</option>
                         <option value="whatsapp" {{ 'selected' if ch=='whatsapp' else '' }}>whatsapp</option>
                         <option value="other" {{ 'selected' if ch=='other' else '' }}>other</option>
+                    </select>
+                </div>
+                <div>
+                    <label>POS Gelir Hesabı (opsiyonel)</label>
+                    <select name="pos_income_account_id">
+                        <option value="">{{ '(boş bırak)' }}</option>
+                        {% for acc in accounts %}
+                        <option value="{{ acc.id }}" {% if pos_income_account_id and acc.id == pos_income_account_id %}selected{% endif %}>
+                            {{ acc.name }} ({{ acc.type }})
+                        </option>
+                        {% endfor %}
                     </select>
                 </div>
                 <div>

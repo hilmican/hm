@@ -1065,6 +1065,20 @@ def init_db() -> None:
                         conn.exec_driver_sql("CREATE INDEX idx_order_channel ON `order`(channel)")
                 except Exception:
                     pass
+                # Ensure income.deleted_at exists for soft delete
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'income' AND COLUMN_NAME = 'deleted_at'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE income ADD COLUMN deleted_at DATETIME NULL")
+                        conn.exec_driver_sql("CREATE INDEX idx_income_deleted_at ON income(deleted_at)")
+                except Exception:
+                    pass
                 # Add first_reply_notified_at column to ai_shadow_state
                 try:
                     row = conn.exec_driver_sql(

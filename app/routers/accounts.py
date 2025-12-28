@@ -139,8 +139,8 @@ def account_transactions(request: Request, account_id: int, start: Optional[str]
 		if not account:
 			return RedirectResponse(url="/accounts/table", status_code=303)
 		
-		# Get income entries
-		income_q = select(Income).where(Income.account_id == account_id)
+		# Get income entries (exclude soft-deleted)
+		income_q = select(Income).where(Income.account_id == account_id).where(Income.deleted_at.is_(None))
 		if start_date:
 			income_q = income_q.where(Income.date >= start_date)
 		if end_date:
