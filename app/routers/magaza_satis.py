@@ -207,6 +207,14 @@ def checkout(payload: dict = Body(...)):
 		# load finance settings once
 		settings_rows = session.exec(select(SystemSetting)).all()
 		settings_map = {s.key: s.value for s in settings_rows}
+		def _parse_int_setting(key: str) -> int:
+			val = settings_map.get(key)
+			if val is None:
+				return 0
+			try:
+				return int(str(val).strip() or 0)
+			except Exception:
+				return 0
 
 		client = _ensure_client(
 			session,
@@ -292,10 +300,10 @@ def checkout(payload: dict = Body(...)):
 		# Optional: create income entry mapped to configured account
 		try:
 			if payment_method == "cash":
-				acc_id = int(settings_map.get("pos_income_cash_account_id", "0"))
+				acc_id = _parse_int_setting("pos_income_cash_account_id")
 				src = "pos_cash_magaza"
 			else:
-				acc_id = int(settings_map.get("pos_income_bank_account_id", "0"))
+				acc_id = _parse_int_setting("pos_income_bank_account_id")
 				src = "pos_bank_magaza"
 			if acc_id > 0:
 				income = Income(
@@ -307,9 +315,16 @@ def checkout(payload: dict = Body(...)):
 					notes=notes,
 				)
 				session.add(income)
-		except Exception:
+				try:
+					print(f"[magaza_satis] income_created order={order.id} payment={payment_method} account={acc_id} amount={total_amount}")
+				except Exception:
+					pass
+		except Exception as e:
 			# Fail-safe: do not block order creation
-			pass
+			try:
+				print(f"[magaza_satis] income_create_failed order={order.id} err={e}")
+			except Exception:
+				pass
 
 		return {
 			"status": "ok",
@@ -317,4 +332,65 @@ def checkout(payload: dict = Body(...)):
 			"client_id": client.id,
 			"total_amount": total_amount,
 		}
+
+
+@router.post("/api/reconcile-incomes")
+def reconcile_incomes():
+	"""Backfill Income rows for POS (magaza) orders that have payments but missing income.
+	- Uses finance settings to choose accounts.
+	- Idempotent by reference: creates Income with reference 'POS order {order_id}' if not exists.
+	"""
+	with get_session() as session:
+		settings = {s.key: s.value for s in session.exec(select(SystemSetting)).all()}
+		def _parse_int_setting(key: str) -> int:
+			try:
+				return int(str(settings.get(key, "")).strip() or 0)
+			except Exception:
+				return 0
+		cash_acc = _parse_int_setting("pos_income_cash_account_id")
+		bank_acc = _parse_int_setting("pos_income_bank_account_id")
+		if cash_acc <= 0 and bank_acc <= 0:
+			raise HTTPException(status_code=400, detail="No POS income accounts configured")
+
+		orders = session.exec(
+			select(Order)
+			.where(Order.channel == "magaza")
+			.order_by(Order.id.desc())
+		).all()
+		created = 0
+		for o in orders:
+			if not o.id:
+				continue
+			# check existing income by reference
+			ref = f"POS order {o.id}"
+			exists = session.exec(select(Income).where(Income.reference == ref)).first()
+			if exists:
+				continue
+			# find payment(s) for this order
+			pays = session.exec(select(Payment).where(Payment.order_id == o.id)).all()
+			if not pays:
+				continue
+			amount = sum(float(p.amount or 0.0) for p in pays)
+			if amount <= 0:
+				continue
+			method = (pays[0].method or "").lower()
+			if method == "cash":
+				acc_id = cash_acc
+				src = "pos_cash_magaza"
+			else:
+				acc_id = bank_acc
+				src = "pos_bank_magaza"
+			if acc_id <= 0:
+				continue
+			inc = Income(
+				account_id=acc_id,
+				amount=amount,
+				date=o.payment_date or dt.date.today(),
+				source=src,
+				reference=ref,
+				notes=o.notes,
+			)
+			session.add(inc)
+			created += 1
+		return {"status": "ok", "created": created}
 
