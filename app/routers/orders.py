@@ -1547,6 +1547,21 @@ async def edit_order_apply(order_id: int, request: Request):
             changes["status"] = [prev_status, new_status]
             o.status = new_status
 
+        # If order is cancelled/refunded/switched/stitched, remove POS income entry (if any)
+        try:
+            status_lc = str(o.status or "").lower()
+            if status_lc in ("refunded", "switched", "stitched", "cancelled"):
+                ref = f"POS order {order_id}"
+                incs = session.exec(select(Income).where(Income.reference == ref)).all()
+                removed = 0
+                for inc in incs:
+                    session.delete(inc)
+                    removed += 1
+                if removed:
+                    changes["income_removed"] = removed
+        except Exception:
+            pass
+
         # apply inventory adjustments when item/quantity/status changed
         inv_touch = items_changed or any(k in changes for k in ("item_id", "quantity", "status"))
         if inv_touch and (not items_changed):
