@@ -10,6 +10,8 @@
         table { width:100%; border-collapse: collapse; }
         th, td { padding:8px 10px; border-bottom:1px solid #f0f0f0; text-align:left; font-size:13px; white-space: nowrap; }
         th { background:#fafafa; position: sticky; top:0; z-index:1; }
+        th.sortable { cursor:pointer; }
+        .sort-indicator { margin-left:4px; color:#9ca3af; }
         .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-size:12px; }
         .pill.iade { background:#fee2e2; color:#991b1b; }
         .pill.late { background:#e0f2fe; color:#075985; }
@@ -60,15 +62,15 @@
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
-                    <th>Takip</th>
-                    <th>Müşteri</th>
-                    <th>Status</th>
-                    <th>Tanzim</th>
-                    <th>Kargo Tarihi</th>
-                    <th>Teslim Tarihi</th>
-                    <th>İş Günü</th>
-                    <th>Etkin Toplam</th>
+                    <th class="sortable" data-sort-type="number">ID<span class="sort-indicator">⇅</span></th>
+                    <th class="sortable" data-sort-type="string">Takip<span class="sort-indicator">⇅</span></th>
+                    <th class="sortable" data-sort-type="string">Müşteri<span class="sort-indicator">⇅</span></th>
+                    <th class="sortable" data-sort-type="string">Status<span class="sort-indicator">⇅</span></th>
+                    <th class="sortable" data-sort-type="string">Tanzim<span class="sort-indicator">⇅</span></th>
+                    <th class="sortable" data-sort-type="date">Kargo Tarihi<span class="sort-indicator">⇅</span></th>
+                    <th class="sortable" data-sort-type="date">Teslim Tarihi<span class="sort-indicator">⇅</span></th>
+                    <th class="sortable" data-sort-type="number">İş Günü<span class="sort-indicator">⇅</span></th>
+                    <th class="sortable" data-sort-type="number">Etkin Toplam<span class="sort-indicator">⇅</span></th>
                 </tr>
             </thead>
             <tbody>
@@ -103,6 +105,52 @@
             </tbody>
         </table>
     </div>
+    <script>
+        (function() {
+            const tbody = document.querySelector("table tbody");
+            if (!tbody) return;
+            const headers = document.querySelectorAll("th.sortable");
+            let sortState = {};
+
+            const parseValue = (text, type) => {
+                if (type === "number") {
+                    const n = parseFloat(text.replace(/[^0-9.-]/g, ""));
+                    return isNaN(n) ? -Infinity : n;
+                }
+                if (type === "date") {
+                    const t = Date.parse(text);
+                    return isNaN(t) ? -Infinity : t;
+                }
+                return (text || "").toLowerCase();
+            };
+
+            headers.forEach((th, idx) => {
+                th.addEventListener("click", () => {
+                    const type = th.dataset.sortType || "string";
+                    const current = sortState[idx] || "desc";
+                    const next = current === "desc" ? "asc" : "desc";
+                    sortState = { [idx]: next };
+
+                    const rows = Array.from(tbody.querySelectorAll("tr"));
+                    rows.sort((a, b) => {
+                        const av = parseValue((a.cells[idx]?.innerText || "").trim(), type);
+                        const bv = parseValue((b.cells[idx]?.innerText || "").trim(), type);
+                        if (av === bv) return 0;
+                        return next === "asc" ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+                    });
+                    tbody.innerHTML = "";
+                    rows.forEach(r => tbody.appendChild(r));
+
+                    headers.forEach(h => {
+                        const indicator = h.querySelector(".sort-indicator");
+                        if (indicator) indicator.textContent = "⇅";
+                    });
+                    const ind = th.querySelector(".sort-indicator");
+                    if (ind) ind.textContent = next === "asc" ? "↑" : "↓";
+                });
+            });
+        })();
+    </script>
 </body>
 </html>
 
