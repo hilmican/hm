@@ -63,12 +63,21 @@ def suppliers_page(request: Request):
 				"remaining_debt": remaining_debt,
 			})
 		
+		# Aggregate totals across all suppliers for table footer
+		totals = {
+			"total_debt": sum(d["total_debt"] for d in supplier_data),
+			"total_closed": sum(d["total_closed"] for d in supplier_data),
+			"total_payment": sum(d["total_payment"] for d in supplier_data),
+			"remaining_debt": sum(d["remaining_debt"] for d in supplier_data),
+		}
+		
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"suppliers.html",
 			{
 				"request": request,
 				"supplier_data": supplier_data,
+				"totals": totals,
 			},
 		)
 

@@ -25,6 +25,8 @@
       .positive { color:#10b981; font-weight:600; }
       .negative { color:#dc2626; font-weight:600; }
       .neutral { color:#6b7280; }
+      .totals-row { background:#f9fafb; font-weight:700; }
+      .totals-row th, .totals-row td { border-top:2px solid #e5e7eb; }
       
       /* Mobile responsive styles */
       @media (max-width: 768px) {
@@ -121,6 +123,18 @@
             </tr>
             {% endif %}
           </tbody>
+          <tfoot>
+            <tr class="totals-row">
+              <th colspan="3">Toplam</th>
+              <th class="negative">{{ '%.2f'|format(totals.total_debt) }} ₺</th>
+              <th class="positive">{{ '%.2f'|format(totals.total_closed) }} ₺</th>
+              <th class="positive">{{ '%.2f'|format(totals.total_payment) }} ₺</th>
+              <th class="{% if totals.remaining_debt > 0 %}negative{% elif totals.remaining_debt < 0 %}positive{% else %}neutral{% endif %}">
+                {{ '%.2f'|format(totals.remaining_debt) }} ₺
+              </th>
+              <th></th>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </div>
