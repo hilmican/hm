@@ -2146,6 +2146,16 @@ def ai_settings_page(request: Request):
         intro_only_mode = False
         if intro_only_setting and intro_only_setting.value:
             intro_only_mode = str(intro_only_setting.value).strip().lower() in ("1","true","yes","on")
+
+        # Get shadow scope setting
+        shadow_scope_setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_shadow_scope")
+        ).first()
+        ai_shadow_scope = "all"
+        if shadow_scope_setting and shadow_scope_setting.value:
+            candidate = str(shadow_scope_setting.value).strip().lower()
+            if candidate in ("all", "linked_only", "off"):
+                ai_shadow_scope = candidate
     
     templates = request.app.state.templates
     return templates.TemplateResponse(
@@ -2158,6 +2168,7 @@ def ai_settings_page(request: Request):
             "ai_shadow_temperature": shadow_temperature,
             "ai_shadow_temp_opt_out": ai_shadow_temp_opt_out,
             "ai_reply_intro_only_mode": intro_only_mode,
+            "ai_shadow_scope": ai_shadow_scope,
             "model_groups": model_groups,
             "model_refresh_msg": status_msg,
         },
@@ -2172,6 +2183,7 @@ def save_ai_settings(
     ai_shadow_temperature: str = Form(default="0.1"),
     ai_shadow_temp_opt_out: str = Form(default="0"),
     ai_reply_intro_only_mode: str = Form(default="false"),
+    ai_shadow_scope: str = Form(default="all"),
 ):
     """Save global AI reply settings."""
     from ..models import SystemSetting
@@ -2195,6 +2207,9 @@ def save_ai_settings(
     shadow_temperature = _normalize_temp(ai_shadow_temperature)
     temp_opt_out = ai_shadow_temp_opt_out.lower() in ("true", "1", "yes", "on")
     intro_only_mode = ai_reply_intro_only_mode.lower() in ("true", "1", "yes", "on")
+    shadow_scope = (ai_shadow_scope or "all").strip().lower()
+    if shadow_scope not in ("all", "linked_only", "off"):
+        shadow_scope = "all"
 
     log.info(
         "Saving AI settings enabled=%s intro_only_mode=%s raw_model=%s raw_shadow=%s normalized_model=%s normalized_shadow=%s temp=%.2f",
@@ -2321,6 +2336,23 @@ def save_ai_settings(
                 description="If true, only send first intro messages (with images), subsequent messages will be shadow replies only",
             )
             session.add(intro_only_setting)
+
+        # Save shadow scope setting
+        shadow_scope_setting = session.exec(
+            select(SystemSetting).where(SystemSetting.key == "ai_shadow_scope")
+        ).first()
+        if shadow_scope_setting:
+            shadow_scope_setting.value = shadow_scope
+            shadow_scope_setting.updated_at = dt.datetime.utcnow()
+            session.add(shadow_scope_setting)
+        else:
+            session.add(
+                SystemSetting(
+                    key="ai_shadow_scope",
+                    value=shadow_scope,
+                    description="Scope for shadow replies: all|linked_only|off",
+                )
+            )
         
         session.commit()
     

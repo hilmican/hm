@@ -45,8 +45,8 @@
             Global AI Cevap Gönderme Aktif
           </label>
           <div class="meta">
-            Tüm ürünler için AI'ın gerçekten cevap göndermesine izin ver. 
-            Bu kapalıysa, hiçbir ürün için AI cevap göndermez (gölge cevaplar yine de çalışır).
+            Açık: AI gerçek mesaj gönderir (ürün bazlı yetki yine geçerli).<br>
+            Kapalı: AI mesaj göndermez, yalnızca gölge (shadow) üretir.
           </div>
         </div>
         <div class="field">
@@ -58,9 +58,19 @@
             Sadece İlk Tanıtım Mesajlarını Gönder (Resimler Dahil)
           </label>
           <div class="meta">
-            Bu seçenek aktifken AI sadece ilk tanıtım mesajlarını (resimler dahil) gönderir. 
-            Sonraki mesajlar için shadow reply üretilir ama gönderilmez. 
-            İlk mesajdan sonra müşteriden cevap geldiğinde admine bildirim gönderilir.
+            Açık: Sadece ilk tanıtım mesajı gönderilir; sonrası shadow olarak kalır (gönderilmez) ve operatöre bildirilir.<br>
+            Kapalı olduğunda, global açık ise sonraki mesajlar da gönderilebilir (güven eşiği/kurallara bağlı).
+          </div>
+        </div>
+        <div class="field">
+          <label for="ai_shadow_scope">Gölge Cevap Kapsamı</label>
+          <select name="ai_shadow_scope" id="ai_shadow_scope" style="width:100%; max-width:320px; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+            <option value="all" {% if ai_shadow_scope == "all" %}selected{% endif %}>Tüm konuşmalar (mevcut davranış)</option>
+            <option value="linked_only" {% if ai_shadow_scope == "linked_only" %}selected{% endif %}>Sadece seçili reklam/post yanıtları</option>
+            <option value="off" {% if ai_shadow_scope == "off" %}selected{% endif %}>Gölge cevap üretme</option>
+          </select>
+          <div class="meta">
+            “Sadece seçili reklam/post” seçerseniz, ad/post ile ilişkilendirilmemiş konuşmalar için shadow üretimi yapılmaz (quotayı korur).
           </div>
         </div>
         <div class="field">

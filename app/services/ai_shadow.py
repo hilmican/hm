@@ -35,6 +35,59 @@ def touch_shadow_state(
 		# Avoid corrupting queue with non-integer ids
 		return
 
+	def _get_shadow_scope() -> str:
+		try:
+			with get_session() as session_scope:
+				row = session_scope.exec(
+					_text("SELECT value FROM system_settings WHERE key='ai_shadow_scope' LIMIT 1")
+				).first()
+				if row:
+					val = row.value if hasattr(row, "value") else (row[0] if len(row) > 0 else None)
+					if val:
+						scope_val = str(val).strip().lower()
+						if scope_val in ("all", "linked_only", "off"):
+							return scope_val
+		except Exception:
+			pass
+		return "all"
+
+	def _conversation_has_link(c_id: int) -> bool:
+		"""Return True if conversation is linked to an ad/post via last_link/ad or any message.ad_id."""
+		try:
+			with get_session() as session_link:
+				row = session_link.exec(
+					_text(
+						"SELECT last_link_id, last_ad_id FROM conversations WHERE id=:cid LIMIT 1"
+					).params(cid=c_id)
+				).first()
+				if row:
+					last_link = (
+						row.last_link_id
+						if hasattr(row, "last_link_id")
+						else (row[0] if len(row) > 0 else None)
+					)
+					last_ad = (
+						row.last_ad_id
+						if hasattr(row, "last_ad_id")
+						else (row[1] if len(row) > 1 else None)
+					)
+					if last_link or last_ad:
+						return True
+				msg_row = session_link.exec(
+					_text(
+						"SELECT 1 FROM message WHERE conversation_id=:cid AND ad_id IS NOT NULL LIMIT 1"
+					).params(cid=c_id)
+				).first()
+				return bool(msg_row)
+		except Exception:
+			return False
+
+	scope = _get_shadow_scope()
+	if scope == "off":
+		return
+	if scope == "linked_only" and not _conversation_has_link(cid_int):
+		return
+
 	# Enable AI shadow for ALL conversations (removed ad/product restriction)
 	# The AI can detect product focus from messages even without explicit ad/product links
 	# This allows processing conversations like "Ürün hakkında detaylı bilgi alabilir miyim?"
