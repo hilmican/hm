@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Tuple, Optional, List
+import datetime as dt
 
 from sqlmodel import select
 from sqlalchemy import func
@@ -35,6 +36,109 @@ def _normalize_shipping_company(val: Optional[str]) -> str:
 		return "surat"
 	except Exception:
 		return "surat"
+
+
+def _maybe_rehome_payment(
+	session,
+	*,
+	client_id: Optional[int],
+	target_order_id: Optional[int],
+	amount: Optional[float],
+	date_hint: Optional[dt.date],
+) -> None:
+	"""
+	Move a payment that sits on a refunded/placeholder order (or is dangling)
+	to the current Bizim order when it is the best candidate.
+
+	Heuristics (conservative):
+	- Same client
+	- Payment amount matches within tolerance
+	- Source order (if any) is refunded/iade/cancelled/placeholder/negative
+	- Target order currently has no payments
+	- Date proximity within 14 days when available
+	"""
+	if not (client_id and target_order_id and amount and amount > 0):
+		return
+
+	# If target already has a payment, do nothing
+	existing_target = session.exec(
+		select(Payment).where(Payment.order_id == target_order_id)
+	).first()
+	if existing_target:
+		return
+
+	tol = max(5.0, 0.02 * float(amount))
+	window_days = 14
+	best: Optional[tuple[tuple[float, float, float], Payment, Optional[Order]]] = None
+
+	candidates = session.exec(
+		select(Payment).where(
+			Payment.client_id == client_id,
+			Payment.order_id != target_order_id,
+		)
+	).all()
+
+	for p in candidates:
+		try:
+			if abs(float(p.amount or 0.0) - float(amount)) > tol:
+				continue
+		except Exception:
+			continue
+
+		src_order = session.get(Order, p.order_id) if p.order_id else None
+		src_status = (src_order.status or "").lower() if src_order else ""
+
+		# Only move from "safe" sources to avoid stealing from healthy orders
+		can_move = (
+			(src_order is None)
+			or (src_status in {"refunded", "iade", "iade_bekliyor", "cancelled", "switched", "stitched"})
+			or ((src_order.source or "") == "kargo" and (src_order.status or "") == "placeholder")
+			or (src_order.total_amount is not None and float(src_order.total_amount) < 0)
+		)
+		if not can_move:
+			continue
+
+		pd = p.payment_date or p.date
+		if date_hint and pd:
+			if abs((pd - date_hint).days) > window_days:
+				continue
+
+		score = (
+			-abs(float(p.amount or 0.0) - float(amount)),  # tighter amount first
+			0 if not (date_hint and pd) else -abs((pd - date_hint).days),  # closer date
+			-(p.id or 0),  # deterministic tie-break
+		)
+		if best is None or score > best[0]:
+			best = (score, p, src_order)
+
+	if best:
+		_, payment, src_order = best
+		payment.order_id = target_order_id
+		# keep reference/payment_date as-is; client_id already matches
+		try:
+			if src_order and src_order.status == "placeholder":
+				src_order.status = "merged"
+		except Exception:
+			pass
+
+
+def _maybe_mark_order_paid(session, order: Optional[Order]) -> None:
+	"""
+	If total_amount is positive and collected payments cover it, mark as paid.
+	Skip refunded/iade/cancelled/switched/stitched orders and non-positive totals.
+	"""
+	if order is None or order.id is None or order.total_amount is None:
+		return
+	status = (order.status or "").lower()
+	if status in {"refunded", "iade", "cancelled", "switched", "stitched"}:
+		return
+	if float(order.total_amount or 0.0) <= 0:
+		return
+
+	pays = session.exec(select(Payment).where(Payment.order_id == order.id)).all()
+	paid = sum(float(p.amount or 0.0) for p in pays)
+	if paid >= float(order.total_amount or 0.0):
+		order.status = "paid"
 
 
 def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[int], Optional[int]]:
@@ -313,6 +417,11 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 existing.fee_iade = fee_iad
                 existing.fee_erken_odeme = fee_eok
                 existing.net_amount = net
+        # After creating/updating payment, auto-mark paid if fully covered
+        try:
+            _maybe_mark_order_paid(session, order)
+        except Exception:
+            pass
     return status, message, matched_client_id, matched_order_id
 
 
@@ -536,6 +645,20 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 order_obj = session.exec(_select(_Order).where(_Order.id == matched_order_id)).first()
                 if order_obj:
                     order_obj.total_cost = calculate_order_cost_fifo(session, matched_order_id)
+        except Exception:
+            pass
+
+        # If the Bizim order was created/merged successfully, try to move any misplaced
+        # payments that might be stuck on refunded/placeholder orders for the same client.
+        try:
+            if matched_order_id and matched_client_id and rec.get("total_amount"):
+                _maybe_rehome_payment(
+                    session,
+                    client_id=matched_client_id,
+                    target_order_id=matched_order_id,
+                    amount=float(rec.get("total_amount") or 0.0),
+                    date_hint=rec.get("shipment_date") or run.data_date,
+                )
         except Exception:
             pass
 

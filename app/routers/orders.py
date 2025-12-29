@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Query, Request, HTTPException, Body
 from sqlmodel import select
-from sqlalchemy import or_, and_, not_
+from sqlalchemy import or_, and_, not_, func
 import datetime as dt
+import math
 from typing import Optional
 from collections import defaultdict
 
@@ -57,6 +58,9 @@ def list_orders_table(
     preset: Optional[str] = Query(default=None),
     ig_linked: Optional[str] = Query(default=None, regex="^(linked|unlinked)?$"),
     repeat_customer: Optional[str] = Query(default=None, regex="^(multi)?$"),
+    search: Optional[str] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=10, le=500),
 ):
     def _parse_date_or_default(value: Optional[str], fallback: dt.date) -> dt.date:
         try:
@@ -122,6 +126,20 @@ def list_orders_table(
             q = q.where(Order.ig_conversation_id.is_not(None))
         elif ig_linked == "unlinked":
             q = q.where(Order.ig_conversation_id.is_(None))
+
+        search_term = (search or "").strip()
+        if search_term:
+            like_term = f"%{search_term.lower()}%"
+            q = (
+                q.join(Client, Client.id == Order.client_id)
+                .where(
+                    or_(
+                        func.lower(Client.name).like(like_term),
+                        func.lower(Client.phone).like(like_term),
+                        func.lower(Order.tracking_no).like(like_term),
+                    )
+                )
+            )
 
         rows = session.exec(q).all()
         
@@ -218,15 +236,6 @@ def list_orders_table(
                 client_order_counts[int(o.client_id)] += 1
             rows = [o for o in rows if (o.client_id is not None and client_order_counts.get(int(o.client_id), 0) >= 2)]
 
-        # build simple maps for names based on filtered rows
-        client_ids = sorted({o.client_id for o in rows if o.client_id})
-        item_ids = sorted({o.item_id for o in rows if o.item_id})
-        from ..models import Client, Item  # local import to avoid circulars
-        clients = session.exec(select(Client).where(Client.id.in_(client_ids))).all() if client_ids else []
-        items = session.exec(select(Item).where(Item.id.in_(item_ids))).all() if item_ids else []
-        client_map = {c.id: c.name for c in clients if c.id is not None}
-        item_map = {it.id: it.name for it in items if it.id is not None}
-
         # shipping_map based on Order.total_amount for display
         shipping_map: dict[int, float] = {}
         for o in rows:
@@ -290,6 +299,32 @@ def list_orders_table(
                 return cost >= 0.7 * total
             rows = [o for o in rows if _high_cost(o)]
 
+        sum_qty = sum(int(o.quantity or 0) for o in rows)
+        sum_total = sum(float(effective_map.get(o.id or 0, o.total_amount or 0.0)) for o in rows)
+        sum_cost = sum(float(cost_map.get(o.id or 0, 0.0)) for o in rows)
+        sum_shipping = sum(float(shipping_map.get(o.id or 0, 0.0)) for o in rows)
+
+        total_count = len(rows)
+        page_size = max(1, min(page_size, 500))
+        total_pages = max(1, math.ceil(total_count / page_size)) if total_count else 1
+        if page > total_pages:
+            page = total_pages
+        start_idx = max(0, (page - 1) * page_size)
+        end_idx = start_idx + page_size
+        page_rows = rows[start_idx:end_idx]
+
+        page_client_ids = sorted({o.client_id for o in page_rows if o.client_id})
+        clients = session.exec(select(Client).where(Client.id.in_(page_client_ids))).all() if page_client_ids else []
+        client_map = {c.id: c.name for c in clients if c.id is not None}
+        client_phone_map = {c.id: c.phone for c in clients if c.id is not None and c.phone}
+
+        page_ids = [o.id for o in page_rows if o.id]
+        page_status_map = {oid: status_map.get(oid, "") for oid in page_ids} if status_map else {}
+        page_effective_map = {oid: effective_map.get(oid, 0.0) for oid in page_ids} if effective_map else {}
+        page_shipping_map = {oid: shipping_map.get(oid, 0.0) for oid in page_ids}
+        page_cost_map = {oid: cost_map.get(oid, 0.0) for oid in page_ids}
+        rows = page_rows
+
         # Load active shipping companies for dropdown
         shipping_companies = session.exec(
             select(ShippingCompanyRate)
@@ -303,18 +338,22 @@ def list_orders_table(
             {
                 "request": request,
                 "rows": rows,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "page": page,
+                "page_size": page_size,
                 "client_map": client_map,
-                "item_map": item_map,
-                "status_map": status_map,
-                "effective_map": effective_map,
-                "shipping_map": shipping_map,
-                "cost_map": cost_map,
+                "client_phone_map": client_phone_map,
+                "status_map": page_status_map,
+                "effective_map": page_effective_map,
+                "shipping_map": page_shipping_map,
+                "cost_map": page_cost_map,
                 "shipping_companies": shipping_companies,
                 # totals over filtered rows
-                "sum_qty": sum(int(o.quantity or 0) for o in rows),
-                "sum_total": sum(float(effective_map.get(o.id or 0, o.total_amount or 0.0)) for o in rows),
-                "sum_cost": sum(float(cost_map.get(o.id or 0, 0.0)) for o in rows),
-                "sum_shipping": sum(float(shipping_map.get(o.id or 0, 0.0)) for o in rows),
+                "sum_qty": sum_qty,
+                "sum_total": sum_total,
+                "sum_cost": sum_cost,
+                "sum_shipping": sum_shipping,
                 # current filters
                 "start": start_date,
                 "end": end_date,
@@ -323,6 +362,7 @@ def list_orders_table(
                 "status": status,
                 "ig_linked": ig_linked,
                 "repeat_customer": repeat_customer,
+                "search": search_term,
                 # current preset
                 "preset": preset,
             },
