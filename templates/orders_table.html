@@ -17,7 +17,8 @@
             --danger-bg: #ffe5e5;
             --switch-bg: #ede0d4;
         }
-        html, body { background: var(--bg); }
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body { background: var(--bg); overflow-x: hidden; }
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; }
         .container { max-width: 100%; width: 100%; margin: 16px auto; padding: 0 16px; }
         .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
@@ -103,8 +104,9 @@
         .scroll-top svg { width: 20px; height: 20px; color: #111827; }
         @media (max-width: 900px){
             .toolbar { align-items: stretch; gap: 10px; }
-            .toolbar input[type="search"] { flex: 1 1 100%; }
-            .toolbar select, .toolbar input[type="date"] { flex: 1 1 48%; min-width: 140px; }
+            .toolbar input[type="search"] { flex: 1 1 100%; min-width: 0; }
+            .toolbar select, .toolbar input[type="date"] { flex: 1 1 calc(50% - 6px); min-width: 0; }
+            .toolbar .metrics, .toolbar-actions { width: 100%; }
             table { border: 0; }
             thead { display: none; }
             #ordersTbl tbody { display: block; }
