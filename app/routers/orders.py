@@ -129,17 +129,27 @@ def list_orders_table(
 
         search_term = (search or "").strip()
         if search_term:
-            like_term = f"%{search_term.lower()}%"
-            q = (
-                q.join(Client, Client.id == Order.client_id)
-                .where(
-                    or_(
-                        func.lower(Client.name).like(like_term),
-                        func.lower(Client.phone).like(like_term),
-                        func.lower(Order.tracking_no).like(like_term),
-                    )
-                )
-            )
+            id_terms: list[int] = []
+            text_terms: list[str] = []
+            for part in search_term.split(","):
+                p = part.strip()
+                if not p:
+                    continue
+                if p.isdigit():
+                    id_terms.append(int(p))
+                else:
+                    text_terms.append(p)
+            if id_terms:
+                q = q.where(Order.id.in_(id_terms))
+            if text_terms:
+                q = q.join(Client, Client.id == Order.client_id)
+                like_clauses = []
+                for term in text_terms:
+                    like_term = f"%{term}%"
+                    like_clauses.append(Client.name.ilike(like_term))
+                    like_clauses.append(Client.phone.ilike(like_term))
+                    like_clauses.append(Order.tracking_no.ilike(like_term))
+                q = q.where(or_(*like_clauses))
 
         rows = session.exec(q).all()
         

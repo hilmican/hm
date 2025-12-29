@@ -128,7 +128,7 @@
     {% include "_nav.html" %}
     <div class="toolbar card">
         <form method="get" action="/orders/table" class="filters-form" id="filtersForm">
-            <input id="search" name="search" type="search" value="{{ search or '' }}" placeholder="İsim, telefon, takip" />
+            <input id="search" name="search" type="search" value="{{ search or '' }}" placeholder="İsim, telefon, takip, ID (virgül ile çoklu)" />
             <select name="date_field">
                 <option value="shipment" {{ 'selected' if (date_field == 'shipment') else '' }}>Kargo Tarihi</option>
                 <option value="data" {{ 'selected' if (date_field == 'data') else '' }}>Data Tarihi</option>
