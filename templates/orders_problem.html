@@ -33,6 +33,16 @@
                 <option value="kargo" {{ 'selected' if source == 'kargo' else '' }}>kargo</option>
             </select>
         </label>
+        <label>Sırala:
+            <select name="sort">
+                <option value="bizdays_desc" {{ 'selected' if sort == 'bizdays_desc' else '' }}>İş günü ↓</option>
+                <option value="bizdays_asc" {{ 'selected' if sort == 'bizdays_asc' else '' }}>İş günü ↑</option>
+                <option value="total_desc" {{ 'selected' if sort == 'total_desc' else '' }}>Etkin toplam ↓</option>
+                <option value="total_asc" {{ 'selected' if sort == 'total_asc' else '' }}>Etkin toplam ↑</option>
+                <option value="id_desc" {{ 'selected' if sort == 'id_desc' else '' }}>ID ↓</option>
+                <option value="id_asc" {{ 'selected' if sort == 'id_asc' else '' }}>ID ↑</option>
+            </select>
+        </label>
         <label style="display:flex; gap:4px; align-items:center;">
             <input type="checkbox" name="exclude_iade" value="1" {{ 'checked' if exclude_iade else '' }}/>
             iade_bekliyor hariç
@@ -40,7 +50,7 @@
         <button class="btn primary" type="submit">Filtrele</button>
         <a class="btn" href="/orders/problem">Temizle</a>
         <a class="btn" href="/orders/table">Sipariş Tablosu</a>
-        <a class="btn" href="/orders/problem/export?start={{ start }}&end={{ end }}&bizdays={{ bizdays }}&source={{ source or '' }}&exclude_iade={{ 1 if exclude_iade else 0 }}">Excel'e aktar</a>
+        <a class="btn" href="/orders/problem/export?start={{ start }}&end={{ end }}&bizdays={{ bizdays }}&source={{ source or '' }}&exclude_iade={{ 1 if exclude_iade else 0 }}&sort={{ sort }}">Excel'e aktar</a>
     </form>
     <div class="card" style="margin-bottom:12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <span class="pill late">Toplam sorunlu sipariş: {{ order_count }}</span>

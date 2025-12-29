@@ -745,6 +745,10 @@ def list_problem_orders(
     end: Optional[str] = Query(default=None),
     source: Optional[str] = Query(default=None),
     exclude_iade: bool = Query(default=False),
+    sort: str = Query(
+        default="bizdays_desc",
+        pattern="^(bizdays_(asc|desc)|id_(asc|desc)|total_(asc|desc))$",
+    ),
 ):
     def _parse_date(value: Optional[str], fallback: dt.date) -> dt.date:
         try:
@@ -880,6 +884,19 @@ def list_problem_orders(
                 }
             )
 
+        # Sorting
+        def _sort_key(row):
+            if sort.startswith("bizdays_"):
+                val = row.get("bizdays")
+                return -1 if val is None else val
+            if sort.startswith("total_"):
+                return float(row.get("effective_total") or 0.0)
+            # default id
+            return int(row["order"].id or 0)
+
+        reverse = sort.endswith("_desc")
+        problem_rows = sorted(problem_rows, key=_sort_key, reverse=reverse)
+
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "orders_problem.html",
@@ -893,6 +910,7 @@ def list_problem_orders(
                 "end": end_date,
                 "source": source,
                 "exclude_iade": exclude_iade,
+                "sort": sort,
             },
         )
 
