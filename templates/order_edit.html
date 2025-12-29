@@ -5,22 +5,43 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Order Edit</title>
     <style>
-        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
-        .card { border:1px solid #e5e7eb; border-radius:10px; padding:16px; background:#fff; max-width: 1000px; }
-        .row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+        *, *::before, *::after { box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #f5f6fa; color:#111827; }
+        .page { max-width: 1080px; margin: 16px auto 32px; padding: 0 16px; }
+        h2, h3 { margin: 12px 0; }
+        .card { border:1px solid #e5e7eb; border-radius:12px; padding:16px; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+        .card + .card { margin-top: 12px; }
+        .row { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:12px; }
         label { display:block; font-size:12px; color:#6b7280; margin-bottom:4px; }
-        input, select, textarea { width:100%; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; }
+        input, select, textarea { width:100%; padding:10px 12px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; font-size:14px; }
         textarea { min-height: 80px; }
-        .toolbar { display:flex; gap:8px; margin-bottom:12px; }
-        table { width:100%; border-collapse: collapse; }
-        th, td { padding:8px 10px; border-bottom:1px solid #f0f0f0; text-align:left; font-size: 13px; }
+        .toolbar { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; align-items:center; }
+        .btn { padding:8px 12px; border:1px solid #d1d5db; border-radius:8px; background:#fff; cursor:pointer; font-size:13px; }
+        .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+        .pill-muted { color:#6b7280; font-size:12px; }
+        .table-wrap { width:100%; overflow-x:auto; border:1px solid #e5e7eb; border-radius:10px; background:#fff; }
+        table { width:100%; border-collapse: collapse; min-width: 640px; }
+        th, td { padding:10px 12px; border-bottom:1px solid #f0f0f0; text-align:left; font-size: 13px; white-space: nowrap; }
+        th { background:#f9fafb; position: sticky; top: 0; z-index:1; }
+        pre { font-size:12px; white-space: pre-wrap; }
+        @media (max-width: 900px){
+            .row { grid-template-columns: 1fr; }
+            table { min-width: 520px; }
+            body { background:#f7f7fb; }
+        }
+        @media (max-width: 640px){
+            .page { padding: 0 12px; }
+            .toolbar { flex-direction: column; align-items: flex-start; }
+            table { min-width: 480px; }
+        }
     </style>
 </head>
 <body>
     {% include "_nav.html" %}
+    <div class="page">
     <h2>Order #{{ order.id }} Düzenle</h2>
     {% if status_param %}
-    <div style="margin:10px 0; padding:10px 12px; border-radius:8px; border:1px solid {{ 'transparent' if status_param=='ok' else '#fecdd3' }}; background: {{ '#ecfdf3' if status_param=='ok' else '#fef2f2' }}; color: {{ '#166534' if status_param=='ok' else '#b91c1c' }};">
+    <div style="margin:10px 0; padding:10px 12px; border-radius:10px; border:1px solid {{ 'transparent' if status_param=='ok' else '#fecdd3' }}; background: {{ '#ecfdf3' if status_param=='ok' else '#fef2f2' }}; color: {{ '#166534' if status_param=='ok' else '#b91c1c' }};">
         {{ status_msg or ('Kaydedildi' if status_param=='ok' else 'Kaydedilemedi') }}
     </div>
     {% endif %}
@@ -172,23 +193,25 @@
 
             <h3 style="margin-top:16px;">Sipariş Kalemleri</h3>
             <div>
-                <table id="orderItemsTbl">
-                    <thead>
-                        <tr><th>Item</th><th>Adet</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                        {% for row in (order_items or []) %}
-                        <tr>
-                            <td><input name="item_display" list="items_all" value="{{ (row.item.id ~ ' | ' ~ row.item.sku ~ ' | ' ~ row.item.name) if row.item else '' }}" /></td>
-                            <td><input name="item_qty" type="number" step="1" min="1" value="{{ row.quantity }}" /></td>
-                            <td><button type="button" onclick="removeRow(this)">Sil</button></td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+                <div class="table-wrap">
+                    <table id="orderItemsTbl">
+                        <thead>
+                            <tr><th>Item</th><th>Adet</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            {% for row in (order_items or []) %}
+                            <tr>
+                                <td><input name="item_display" list="items_all" value="{{ (row.item.id ~ ' | ' ~ row.item.sku ~ ' | ' ~ row.item.name) if row.item else '' }}" /></td>
+                                <td><input name="item_qty" type="number" step="1" min="1" value="{{ row.quantity }}" /></td>
+                                <td><button class="btn" type="button" onclick="removeRow(this)">Sil</button></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
                 <div class="toolbar">
-                    <button type="button" onclick="addRow()">Satır Ekle</button>
-                    <span style="color:#6b7280;">Toplam tutar elle girilir, otomatik hesaplanmaz.</span>
+                    <button class="btn primary" type="button" onclick="addRow()">Satır Ekle</button>
+                    <span class="pill-muted">Toplam tutar elle girilir, otomatik hesaplanmaz.</span>
                 </div>
                 <datalist id="items_all">
                     {% for it in (items_all or []) %}
@@ -197,7 +220,7 @@
                 </datalist>
             </div>
             <div class="toolbar">
-                <button type="submit">Kaydet</button>
+                <button class="btn primary" type="submit">Kaydet</button>
                 <a href="/orders/table" class="btn">Geri</a>
             </div>
         </form>
@@ -205,84 +228,90 @@
 
     <h3>Kaynak & Ödeme İzleme</h3>
     <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
             <div style="font-size:13px;color:#374151;">Bu siparişe ait excel ve ödeme hareketleri</div>
             <a href="/excel-tracker?order_id={{ order.id }}" target="_blank" rel="noopener" style="color:#2563eb;">Excel Tracker'da aç</a>
         </div>
         <div style="margin-bottom:6px;font-weight:600;">Excel Kayıtları (Bizim/Kargo)</div>
-        <table>
-            <thead>
-                <tr><th>Kaynak</th><th>Dosya</th><th>Run</th><th>Satır</th><th>Durum</th><th>Data Tarihi</th><th>Başlangıç</th><th>Mesaj</th></tr>
-            </thead>
-            <tbody>
-            {% if import_rows %}
-                {% for row in import_rows %}
-                <tr>
-                    <td>{{ row.source }}</td>
-                    <td>
-                        {{ row.filename }}
-                        {% if row.import_run_id %}
-                            <a href="/excel-tracker/download/{{ row.import_run_id }}" target="_blank" rel="noopener" style="color:#2563eb;">indir</a>
-                        {% endif %}
-                    </td>
-                    <td>#{{ row.import_run_id }}</td>
-                    <td>{{ row.row_index }}</td>
-                    <td>{{ row.status }}</td>
-                    <td>{{ row.data_date or '-' }}</td>
-                    <td>{{ row.started_at or '-' }}</td>
-                    <td style="max-width:240px; white-space:pre-wrap;">{{ row.message or '-' }}</td>
-                </tr>
-                {% endfor %}
-            {% else %}
-                <tr><td colspan="8" style="color:#6b7280;">Bu siparişle eşleşen excel kaydı bulunamadı.</td></tr>
-            {% endif %}
-            </tbody>
-        </table>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th>Kaynak</th><th>Dosya</th><th>Run</th><th>Satır</th><th>Durum</th><th>Data Tarihi</th><th>Başlangıç</th><th>Mesaj</th></tr>
+                </thead>
+                <tbody>
+                {% if import_rows %}
+                    {% for row in import_rows %}
+                    <tr>
+                        <td>{{ row.source }}</td>
+                        <td>
+                            {{ row.filename }}
+                            {% if row.import_run_id %}
+                                <a href="/excel-tracker/download/{{ row.import_run_id }}" target="_blank" rel="noopener" style="color:#2563eb;">indir</a>
+                            {% endif %}
+                        </td>
+                        <td>#{{ row.import_run_id }}</td>
+                        <td>{{ row.row_index }}</td>
+                        <td>{{ row.status }}</td>
+                        <td>{{ row.data_date or '-' }}</td>
+                        <td>{{ row.started_at or '-' }}</td>
+                        <td style="max-width:240px; white-space:pre-wrap;">{{ row.message or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr><td colspan="8" style="color:#6b7280;">Bu siparişle eşleşen excel kaydı bulunamadı.</td></tr>
+                {% endif %}
+                </tbody>
+            </table>
+        </div>
         <div style="margin:12px 0 6px;font-weight:600;">Ödeme Detayları</div>
-        <table>
-            <thead>
-                <tr><th>Tutar</th><th>Tarih</th><th>Yöntem</th><th>Referans</th><th>Net</th></tr>
-            </thead>
-            <tbody>
-            {% for p in payments %}
-                <tr>
-                    <td>{{ p.amount }}</td>
-                    <td>{{ p.payment_date or p.date or '-' }}</td>
-                    <td>{{ p.method or '-' }}</td>
-                    <td>{{ p.reference or '-' }}</td>
-                    <td>{{ p.net_amount or '-' }}</td>
-                </tr>
-            {% else %}
-                <tr><td colspan="5" style="color:#6b7280;">Ödeme kaydı yok.</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th>Tutar</th><th>Tarih</th><th>Yöntem</th><th>Referans</th><th>Net</th></tr>
+                </thead>
+                <tbody>
+                {% for p in payments %}
+                    <tr>
+                        <td>{{ p.amount }}</td>
+                        <td>{{ p.payment_date or p.date or '-' }}</td>
+                        <td>{{ p.method or '-' }}</td>
+                        <td>{{ p.reference or '-' }}</td>
+                        <td>{{ p.net_amount or '-' }}</td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="5" style="color:#6b7280;">Ödeme kaydı yok.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
         <div style="margin-top:6px;font-size:12px;color:#6b7280;">Ödeme satırları kargo excelinden geldiyse yukarıdaki kargo kayıtlarında ilgili dosyayı görebilirsiniz.</div>
     </div>
 
     <h3>Değişiklik Günlüğü</h3>
     <div class="card">
-        <table>
-            <thead>
-                <tr><th>Zaman</th><th>Kullanıcı</th><th>Aksiyon</th><th>Değişiklikler</th></tr>
-            </thead>
-            <tbody>
-            {% for lg in logs %}
-                <tr>
-                    <td>{{ lg.created_at }}</td>
-                    <td>
-                        {% if lg.editor_user_id %}
-                            {{ users_by_id.get(lg.editor_user_id) or ('#' ~ lg.editor_user_id) }}
-                        {% else %}
-                            -
-                        {% endif %}
-                    </td>
-                    <td>{{ lg.action }}</td>
-                    <td><pre style="margin:0; white-space: pre-wrap;">{{ lg.changes_json }}</pre></td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th>Zaman</th><th>Kullanıcı</th><th>Aksiyon</th><th>Değişiklikler</th></tr>
+                </thead>
+                <tbody>
+                {% for lg in logs %}
+                    <tr>
+                        <td>{{ lg.created_at }}</td>
+                        <td>
+                            {% if lg.editor_user_id %}
+                                {{ users_by_id.get(lg.editor_user_id) or ('#' ~ lg.editor_user_id) }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>{{ lg.action }}</td>
+                        <td><pre style="margin:0;">{{ lg.changes_json }}</pre></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
     <script>
     const form = document.querySelector('form[action="/orders/{{ order.id }}/edit"]');
@@ -322,6 +351,7 @@
     }
     
     </script>
+    </div>
 </body>
 </html>
 
