@@ -7,11 +7,12 @@
     <style>
         *, *::before, *::after { box-sizing: border-box; }
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #f5f6fa; color:#111827; }
-        .page { max-width: 1080px; margin: 16px auto 32px; padding: 0 16px; }
+        .page { max-width: 960px; margin: 16px auto 32px; padding: 0 16px; }
         h2, h3 { margin: 12px 0; }
         .card { border:1px solid #e5e7eb; border-radius:12px; padding:16px; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
         .card + .card { margin-top: 12px; }
         .row { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:12px; }
+        .field { display:flex; flex-direction:column; gap:4px; min-width: 0; }
         label { display:block; font-size:12px; color:#6b7280; margin-bottom:4px; }
         input, select, textarea { width:100%; padding:10px 12px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; font-size:14px; }
         textarea { min-height: 80px; }
@@ -24,15 +25,18 @@
         th, td { padding:10px 12px; border-bottom:1px solid #f0f0f0; text-align:left; font-size: 13px; white-space: nowrap; }
         th { background:#f9fafb; position: sticky; top: 0; z-index:1; }
         pre { font-size:12px; white-space: pre-wrap; }
+        .checkbox-row { display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; flex-wrap:wrap; }
+        .checkbox-row input[type="checkbox"] { width:18px; height:18px; }
         @media (max-width: 900px){
             .row { grid-template-columns: 1fr; }
-            table { min-width: 520px; }
+            table { min-width: 480px; }
             body { background:#f7f7fb; }
         }
         @media (max-width: 640px){
             .page { padding: 0 12px; }
             .toolbar { flex-direction: column; align-items: flex-start; }
-            table { min-width: 480px; }
+            table { min-width: 360px; }
+            input, select, textarea { font-size:15px; padding:12px; }
         }
     </style>
 </head>
@@ -79,7 +83,7 @@
     <div class="card">
         <form method="post" action="/orders/{{ order.id }}/edit">
             <div class="row">
-                <div>
+                <div class="field">
                     <label>Müşteri</label>
                     <input name="client" list="clients" value="{{ client_disp or order.client_id }}" />
                     <datalist id="clients">
@@ -88,11 +92,11 @@
                         {% endfor %}
                     </datalist>
                 </div>
-                <div>
+                <div class="field">
                     <label>Takip No</label>
                     <input name="tracking_no" value="{{ order.tracking_no or '' }}" />
                 </div>
-                <div>
+                <div class="field">
                     <label>Ürün (Item)</label>
                     <input name="item" list="items" value="{{ item_disp or (order.item_id or '') }}" />
                     <datalist id="items">
@@ -101,22 +105,22 @@
                         {% endfor %}
                     </datalist>
                 </div>
-                <div>
+                <div class="field">
                     <label>Adet</label>
                     <input name="quantity" type="number" step="1" value="{{ order.quantity or 1 }}" />
                 </div>
-                <div>
+                <div class="field">
                     <label>Toplam</label>
                     <input name="total_amount" type="number" step="0.01" value="{{ order.total_amount or 0 }}" />
                 </div>
-                <div>
+                <div class="field">
                     <label>Ödeme Şekli</label>
-                    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;">
+                    <div class="checkbox-row">
                         <input id="ibanPaid" name="paid_by_bank_transfer" type="checkbox" {{ 'checked' if (order.paid_by_bank_transfer or False) else '' }} />
-                        <label for="ibanPaid" style="margin:0;cursor:pointer;">IBAN ödemesi (banka havalesi)</label>
+                        <label for="ibanPaid" style="margin:0;cursor:pointer; font-size:14px; color:#111827;">IBAN ödemesi (banka havalesi)</label>
                     </div>
                 </div>
-                <div>
+                <div class="field">
                     <label>Durum</label>
                     <select name="status">
                         {% set st = order.status or '' %}
@@ -133,7 +137,7 @@
                         <option value="tanzim_basarisiz" {{ 'selected' if st=='tanzim_basarisiz' else '' }}>tanzim_basarisiz</option>
                     </select>
                 </div>
-                <div>
+                <div class="field">
                     <label>Tanzim Durumu</label>
                     {% set tz = order.tanzim_status or '' %}
                     <select name="tanzim_status">
@@ -143,11 +147,11 @@
                         <option value="tanzim_basarisiz" {{ 'selected' if tz=='tanzim_basarisiz' else '' }}>tanzim_basarisiz</option>
                     </select>
                 </div>
-                <div>
+                <div class="field">
                     <label>Tanzim Manuel Tutar</label>
                     <input name="tanzim_amount_manual" type="number" step="0.01" value="{{ order.tanzim_amount_manual or '' }}" />
                 </div>
-                <div>
+                <div class="field">
                     <label>Kaynak</label>
                     <select name="source">
                         {% set src = order.source or '' %}
@@ -155,7 +159,7 @@
                         <option value="kargo" {{ 'selected' if src=='kargo' else '' }}>kargo</option>
                     </select>
                 </div>
-                <div>
+                <div class="field">
                     <label>Satış Kanalı</label>
                     {% set ch = order.channel or 'instagram' %}
                     <select name="channel">
@@ -166,7 +170,7 @@
                         <option value="other" {{ 'selected' if ch=='other' else '' }}>other</option>
                     </select>
                 </div>
-                <div>
+                <div class="field">
                     <label>POS Gelir Hesabı (opsiyonel)</label>
                     <select name="pos_income_account_id">
                         <option value="">{{ '(boş bırak)' }}</option>
@@ -177,15 +181,15 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div>
+                <div class="field">
                     <label>Kargo Tarihi</label>
                     <input name="shipment_date" type="date" value="{{ order.shipment_date }}" />
                 </div>
-                <div>
+                <div class="field">
                     <label>Data Tarihi</label>
                     <input name="data_date" type="date" value="{{ order.data_date }}" />
                 </div>
-                <div style="grid-column:1/-1;">
+                <div class="field" style="grid-column:1/-1;">
                     <label>Notlar</label>
                     <textarea name="notes">{{ order.notes or '' }}</textarea>
                 </div>
