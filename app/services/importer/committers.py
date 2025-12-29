@@ -337,7 +337,9 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 str(rec.get("notes") or ""),
                 str(getattr(order, "notes", "") or ""),
             ]).lower()
-            if IADE_HINT in note_source and (str(order.status or "").lower() not in ("refunded", "switched", "stitched", "cancelled", "iade")):
+            current_status = (order.status or "").lower()
+            final_states = {"refunded", "iade", "cancelled", "switched", "stitched"}
+            if IADE_HINT in note_source and current_status not in final_states:
                 order.status = "iade_bekliyor"
     except Exception:
         pass
@@ -347,7 +349,8 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
         if rec.get("amount") is not None:
             try:
                 amt_val = float(rec.get("amount") or 0.0)
-                if amt_val < 0 and (order.status or "").lower() not in {"refunded", "iade"}:
+                if amt_val < 0:
+                    # Always force to refunded for negative return rows (completed return)
                     order.status = "refunded"
             except Exception:
                 pass
