@@ -744,6 +744,7 @@ def list_problem_orders(
     start: Optional[str] = Query(default=None),
     end: Optional[str] = Query(default=None),
     source: Optional[str] = Query(default=None),
+    exclude_iade: bool = Query(default=False),
 ):
     def _parse_date(value: Optional[str], fallback: dt.date) -> dt.date:
         try:
@@ -828,6 +829,9 @@ def list_problem_orders(
             oid = o.id or 0
             total = float(effective_map.get(oid, o.total_amount or 0.0))
 
+            if exclude_iade and status_lc in refund_pending_statuses:
+                continue
+
             # Skip already-final states
             if status_lc in final_statuses:
                 continue
@@ -887,6 +891,7 @@ def list_problem_orders(
                 "start": start_date,
                 "end": end_date,
                 "source": source,
+                "exclude_iade": exclude_iade,
             },
         )
 
@@ -897,6 +902,7 @@ def export_problem_orders(
     start: Optional[str] = Query(default=None),
     end: Optional[str] = Query(default=None),
     source: Optional[str] = Query(default=None),
+    exclude_iade: bool = Query(default=False),
 ):
     if openpyxl is None:
         raise HTTPException(status_code=500, detail="openpyxl not available for export")
@@ -980,6 +986,8 @@ def export_problem_orders(
             status_lc = str(o.status or "").lower()
             oid = o.id or 0
             total = float(effective_map.get(oid, o.total_amount or 0.0))
+            if exclude_iade and status_lc in refund_pending_statuses:
+                continue
             if status_lc in final_statuses:
                 continue
             if o.partial_payment_group_id and o.partial_payment_group_id == oid:

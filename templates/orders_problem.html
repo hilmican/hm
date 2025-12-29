@@ -33,10 +33,14 @@
                 <option value="kargo" {{ 'selected' if source == 'kargo' else '' }}>kargo</option>
             </select>
         </label>
+        <label style="display:flex; gap:4px; align-items:center;">
+            <input type="checkbox" name="exclude_iade" value="1" {{ 'checked' if exclude_iade else '' }}/>
+            iade_bekliyor hariç
+        </label>
         <button class="btn primary" type="submit">Filtrele</button>
         <a class="btn" href="/orders/problem">Temizle</a>
         <a class="btn" href="/orders/table">Sipariş Tablosu</a>
-        <a class="btn" href="/orders/problem/export?start={{ start }}&end={{ end }}&bizdays={{ bizdays }}&source={{ source or '' }}">Excel'e aktar</a>
+        <a class="btn" href="/orders/problem/export?start={{ start }}&end={{ end }}&bizdays={{ bizdays }}&source={{ source or '' }}&exclude_iade={{ 1 if exclude_iade else 0 }}">Excel'e aktar</a>
     </form>
     <div class="card" style="margin-bottom:12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <span class="pill late">Toplam sorunlu sipariş: {{ order_count }}</span>
