@@ -99,6 +99,22 @@
         .status-chip.status-unknown { background: #e5e7eb; color: #374151; border-color: #cbd5e1; }
         .status-note { font-size: 11px; color: #6b7280; margin-top: 4px; }
         .status-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 12px; align-items: center; }
+        @media (max-width: 900px){
+            .toolbar { align-items: stretch; gap: 10px; }
+            .toolbar input[type="search"] { flex: 1 1 100%; }
+            .toolbar select, .toolbar input[type="date"] { flex: 1 1 48%; min-width: 140px; }
+            table { border: 0; }
+            thead { display: none; }
+            #ordersTbl tbody { display: block; }
+            #ordersTbl tbody tr { display: block; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); overflow: hidden; }
+            #ordersTbl tbody tr td { display: block; border-bottom: 1px solid var(--border); padding: 10px 12px; white-space: normal; text-overflow: unset; overflow: visible; }
+            #ordersTbl tbody tr td:last-child { border-bottom: 0; }
+            #ordersTbl tbody tr td::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; font-weight: 600; letter-spacing: 0.01em; }
+            .mobile-inline { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+            .mobile-actions { display: flex; gap: 6px; justify-content: flex-end; }
+            .mobile-hide { display: none !important; }
+            .pagination { justify-content: center; }
+        }
         
         @media (max-width: 768px){
             th, td { font-size: 13px; padding: 8px 10px; }
@@ -211,7 +227,7 @@
     </div>
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th class="tracking">Takip</th><th class="client">Musteri</th><th class="product">Urun</th><th>Adet</th><th>Toplam (etkin)</th><th>Maliyet</th><th>Kargo</th><th>Kargo Firması</th><th>Kargo Tarihi</th><th>Data Tarihi</th><th>I/D Tarihi</th><th>Kanali</th><th>IG DM</th><th>Durum</th><th></th></tr>
+            <tr><th>ID</th><th class="tracking">Takip</th><th class="client">Musteri</th><th class="product">Urun</th><th>Adet</th><th>Toplam (etkin)</th><th class="mobile-hide">Maliyet</th><th class="mobile-hide">Kargo</th><th class="mobile-hide">Kargo Firması</th><th class="mobile-hide">Kargo Tarihi</th><th class="mobile-hide">Data Tarihi</th><th class="mobile-hide">I/D Tarihi</th><th class="mobile-hide">Kanali</th><th class="mobile-hide">IG DM</th><th>Durum</th><th></th></tr>
             <tr>
                 <th colspan="4" style="text-align:right">Toplamlar:</th>
                 <th data-type="num">{{ sum_qty }}</th>
@@ -231,7 +247,7 @@
                 {% set rowcls = rowcls + ' merged' if rowcls else 'merged' %}
             {% endif %}
             <tr class="{{ rowcls }}">
-                <td>
+                <td data-label="ID">
                     <a href="/orders/{{ o.id }}/edit" title="Düzenle #{{ o.id }}">{{ o.id }}</a>
                     {% if o.merged_into_order_id %}
                         <span style="color: #92400e; font-size: 10px;" title="Birleştirilmiş sipariş">🔗</span>
@@ -240,14 +256,14 @@
                         <span style="color: #ea580c; font-size: 10px;" title="Kısmi ödeme">💰</span>
                     {% endif %}
                 </td>
-                <td class="tracking" data-sort="{{ o.tracking_no or '' }}">
+                <td class="tracking" data-label="Takip" data-sort="{{ o.tracking_no or '' }}">
                     {% if o.tracking_no %}
                         <span title="{{ o.tracking_no }}">{{ (o.tracking_no or '')[:6] }}</span>
                     {% else %}
                         -
                     {% endif %}
                 </td>
-                <td class="client">
+                <td class="client" data-label="Musteri">
                     {% set cname = client_map.get(o.client_id) if client_map else o.client_id %}
                     {% set cphone = client_phone_map.get(o.client_id) if client_phone_map else None %}
                     <a href="/clients/{{ o.client_id }}">{{ (cname or '')[:40] }}</a>
@@ -255,20 +271,20 @@
                         <span class="phone">{{ cphone }}</span>
                     {% endif %}
                 </td>
-                <td class="product">{{ o.notes or '' }}</td>
-                <td>{{ o.quantity }}</td>
+                <td class="product" data-label="Urun">{{ o.notes or '' }}</td>
+                <td data-label="Adet">{{ o.quantity }}</td>
                 {% set eff = (effective_map.get(o.id) if effective_map else o.total_amount) %}
                 {% set orig = o.total_amount %}
-                <td data-sort="{{ eff }}">
+                <td data-label="Toplam (etkin)" data-sort="{{ eff }}">
                     <span id="tot-{{ o.id }}">{{ '%.2f'|format(eff or 0) }}</span>
                     {% if (orig is not none) and (eff != orig) %}
                         <div style="font-size:11px; color:#6b7280;">Orj: {{ '%.2f'|format(orig or 0) }}</div>
                     {% endif %}
                     <button class="btn" onclick="editTotal({{ o.id }}, '{{ '%.2f'|format(orig or 0) }}', {{ 'true' if (o.paid_by_bank_transfer or False) else 'false' }}, '{{ o.shipping_company or '' }}', '{{ o.status or '' }}', '{{ o.payment_date.isoformat() if o.payment_date else '' }}', '{{ '%.2f'|format(o.tanzim_amount_manual or 0) if o.tanzim_amount_manual is not none else '' }}')">Düzenle</button>
                 </td>
-                <td>{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
-                <td>{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
-                <td>
+                <td class="mobile-hide" data-label="Maliyet">{{ (cost_map.get(o.id) if cost_map else o.total_cost) }}</td>
+                <td class="mobile-hide" data-label="Kargo">{{ '%.2f'|format((shipping_map.get(o.id, 0.0) if shipping_map else 0.0)) }}</td>
+                <td class="mobile-hide" data-label="Kargo Firması">
                     {% if o.shipping_company %}
                         {% if o.shipping_company == 'surat' %}Sürat
                         {% elif o.shipping_company == 'mng' %}MNG
@@ -280,11 +296,11 @@
                         <span style="color: #9ca3af;">Sürat</span>
                     {% endif %}
                 </td>
-                <td>{{ o.shipment_date }}</td>
-                <td>{{ o.data_date }}</td>
-                <td>{{ o.return_or_switch_date }}</td>
-                <td>{{ o.source }}</td>
-                <td>
+                <td class="mobile-hide" data-label="Kargo Tarihi">{{ o.shipment_date }}</td>
+                <td class="mobile-hide" data-label="Data Tarihi">{{ o.data_date }}</td>
+                <td class="mobile-hide" data-label="I/D Tarihi">{{ o.return_or_switch_date }}</td>
+                <td class="mobile-hide" data-label="Kanali">{{ o.source }}</td>
+                <td class="mobile-hide" data-label="IG DM">
                     {% if o.ig_conversation_id %}
                         <a class="icon-btn" title="IG Konuşma" aria-label="IG Konuşma" href="/ig/inbox/{{ o.ig_conversation_id }}">
                             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 2h10a5 5 0 0 1 5 5v6a5 5 0 0 1-5 5h-3l-4 4v-4H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z"></path></svg>
@@ -293,7 +309,7 @@
                         -
                     {% endif %}
                 </td>
-                <td>
+                <td data-label="Durum">
                     {% set primary_status = status_map.get(o.id) if status_map else '' %}
                     <div class="status-stack">
                         {% if primary_status %}
@@ -316,8 +332,8 @@
                         <div class="status-note">-</div>
                     {% endif %}
                 </td>
-                <td>
-                    <div class="icon-actions">
+                <td class="actions" data-label="İşlemler">
+                    <div class="icon-actions mobile-actions">
                         <button class="icon-btn warn" title="İptal Et" aria-label="İptal Et" onclick="cancelOrder({{ o.id }})">
                             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
                         </button>
