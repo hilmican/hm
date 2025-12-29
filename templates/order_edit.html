@@ -203,7 +203,62 @@
         </form>
     </div>
 
-    
+    <h3>Kaynak & Ödeme İzleme</h3>
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="font-size:13px;color:#374151;">Bu siparişe ait excel ve ödeme hareketleri</div>
+            <a href="/excel-tracker?order_id={{ order.id }}" target="_blank" rel="noopener" style="color:#2563eb;">Excel Tracker'da aç</a>
+        </div>
+        <div style="margin-bottom:6px;font-weight:600;">Excel Kayıtları (Bizim/Kargo)</div>
+        <table>
+            <thead>
+                <tr><th>Kaynak</th><th>Dosya</th><th>Run</th><th>Satır</th><th>Durum</th><th>Data Tarihi</th><th>Başlangıç</th><th>Mesaj</th></tr>
+            </thead>
+            <tbody>
+            {% if import_rows %}
+                {% for row in import_rows %}
+                <tr>
+                    <td>{{ row.source }}</td>
+                    <td>
+                        {{ row.filename }}
+                        {% if row.import_run_id %}
+                            <a href="/excel-tracker/download/{{ row.import_run_id }}" target="_blank" rel="noopener" style="color:#2563eb;">indir</a>
+                        {% endif %}
+                    </td>
+                    <td>#{{ row.import_run_id }}</td>
+                    <td>{{ row.row_index }}</td>
+                    <td>{{ row.status }}</td>
+                    <td>{{ row.data_date or '-' }}</td>
+                    <td>{{ row.started_at or '-' }}</td>
+                    <td style="max-width:240px; white-space:pre-wrap;">{{ row.message or '-' }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr><td colspan="8" style="color:#6b7280;">Bu siparişle eşleşen excel kaydı bulunamadı.</td></tr>
+            {% endif %}
+            </tbody>
+        </table>
+        <div style="margin:12px 0 6px;font-weight:600;">Ödeme Detayları</div>
+        <table>
+            <thead>
+                <tr><th>Tutar</th><th>Tarih</th><th>Yöntem</th><th>Referans</th><th>Net</th></tr>
+            </thead>
+            <tbody>
+            {% for p in payments %}
+                <tr>
+                    <td>{{ p.amount }}</td>
+                    <td>{{ p.payment_date or p.date or '-' }}</td>
+                    <td>{{ p.method or '-' }}</td>
+                    <td>{{ p.reference or '-' }}</td>
+                    <td>{{ p.net_amount or '-' }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="5" style="color:#6b7280;">Ödeme kaydı yok.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <div style="margin-top:6px;font-size:12px;color:#6b7280;">Ödeme satırları kargo excelinden geldiyse yukarıdaki kargo kayıtlarında ilgili dosyayı görebilirsiniz.</div>
+    </div>
 
     <h3>Değişiklik Günlüğü</h3>
     <div class="card">
@@ -215,7 +270,13 @@
             {% for lg in logs %}
                 <tr>
                     <td>{{ lg.created_at }}</td>
-                    <td>{{ lg.editor_user_id or '-' }}</td>
+                    <td>
+                        {% if lg.editor_user_id %}
+                            {{ users_by_id.get(lg.editor_user_id) or ('#' ~ lg.editor_user_id) }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
                     <td>{{ lg.action }}</td>
                     <td><pre style="margin:0; white-space: pre-wrap;">{{ lg.changes_json }}</pre></td>
                 </tr>

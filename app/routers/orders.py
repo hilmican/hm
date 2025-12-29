@@ -7,7 +7,20 @@ from typing import Optional
 from collections import defaultdict
 
 from ..db import get_session
-from ..models import Order, Payment, OrderItem, Item, Client, OrderEditLog, ShippingCompanyRate, Income, Account
+from ..models import (
+    Order,
+    Payment,
+    OrderItem,
+    Item,
+    Client,
+    OrderEditLog,
+    ShippingCompanyRate,
+    Income,
+    Account,
+    ImportRow,
+    ImportRun,
+    User,
+)
 from ..services.inventory import get_or_create_item as _get_or_create_item
 from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
@@ -1304,6 +1317,35 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
             order_items.append({"item": it, "quantity": int(oi.quantity or 0)})
         items_all = session.exec(select(Item).order_by(Item.id.desc()).limit(5000)).all()
         logs = session.exec(select(OrderEditLog).where(OrderEditLog.order_id == order_id).order_by(OrderEditLog.id.desc()).limit(100)).all()
+        payments = session.exec(select(Payment).where(Payment.order_id == order_id).order_by(Payment.id.desc())).all()
+        import_rows_raw = session.exec(
+            select(ImportRow, ImportRun)
+            .join(ImportRun, ImportRun.id == ImportRow.import_run_id)
+            .where(ImportRow.matched_order_id == order_id)
+            .order_by(ImportRow.id.desc())
+            .limit(20)
+        ).all()
+        import_rows = []
+        for ir, run in import_rows_raw:
+            import_rows.append(
+                {
+                    "import_row_id": ir.id,
+                    "import_run_id": ir.import_run_id,
+                    "row_index": ir.row_index,
+                    "status": ir.status,
+                    "message": ir.message,
+                    "source": run.source,
+                    "filename": run.filename,
+                    "data_date": run.data_date,
+                    "started_at": run.started_at,
+                    "completed_at": run.completed_at,
+                }
+            )
+        users_by_id: dict[int, str] = {}
+        user_ids = [lg.editor_user_id for lg in logs if lg.editor_user_id]
+        if user_ids:
+            users = session.exec(select(User).where(User.id.in_(user_ids))).all()
+            users_by_id = {int(u.id): u.username for u in users if u.id is not None}
         
         # Load merged orders (orders merged into this one, or this order merged into another)
         merged_orders = []
@@ -1335,6 +1377,9 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
                 "order_items": order_items,
                 "items_all": items_all,
                 "logs": logs,
+                "payments": payments,
+                "import_rows": import_rows,
+                "users_by_id": users_by_id,
                 "client_disp": client_disp,
                 "item_disp": item_disp,
                 "merged_orders": merged_orders,
