@@ -5,13 +5,52 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Client {{ client.id }}</title>
     <style>
-        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        :root {
+            --bg: #f7f7fb;
+            --card: #ffffff;
+            --border: #e5e7eb;
+            --muted: #6b7280;
+            --primary: #2563eb;
+            --primary-100: #eef2ff;
+            --success-bg: #eaffea;
+            --warn-bg: #fff9db;
+            --danger-bg: #ffe5e5;
+            --switch-bg: #ede0d4;
+        }
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background: var(--bg); }
         h1 { margin-bottom: 8px; }
-        .meta { color: #6b7280; margin-bottom: 16px; }
+        .meta { color: var(--muted); margin-bottom: 16px; }
         table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; white-space: nowrap; }
         th { background: #fafafa; position: sticky; top: 0; }
-        a { color: #2563eb; text-decoration: none; }
+        th.item, td.item { white-space: normal; max-width: 340px; }
+        th.item { width: 40%; }
+        a { color: var(--primary); text-decoration: none; }
+        tr.paid { background: var(--success-bg); }
+        tr.unpaid { background: var(--warn-bg); }
+        tr.refunded { color: #b91c1c; background: var(--danger-bg); }
+        tr.switched, tr.stitched { color: #92400e; background: var(--switch-bg); }
+        tr.cancelled { color: #6b7280; background: #f3f4f6; text-decoration: line-through; }
+        tr.partial_paid { background: #fff4e6; }
+        tr.tanzim_bekliyor { background: #e0f2fe; }
+        tr.tanzim_basari { background: #dcfce7; }
+        tr.tanzim_basarisiz { background: #fee2e2; }
+        tr.iade_bekliyor { background: #fef3c7; }
+        .status-stack { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+        .status-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent; }
+        .status-chip.status-paid { background: var(--success-bg); color: #166534; border-color: #86efac; }
+        .status-chip.status-unpaid { background: var(--warn-bg); color: #92400e; border-color: #fbbf24; }
+        .status-chip.status-partial_paid { background: #fff4e6; color: #b45309; border-color: #fb923c; }
+        .status-chip.status-refunded { background: var(--danger-bg); color: #b91c1c; border-color: #fca5a5; }
+        .status-chip.status-switched,
+        .status-chip.status-stitched { background: var(--switch-bg); color: #92400e; border-color: #d6bfa5; }
+        .status-chip.status-cancelled { background: #f3f4f6; color: #4b5563; border-color: #e5e7eb; text-decoration: line-through; }
+        .status-chip.status-iade_bekliyor { background: #fef3c7; color: #b45309; border-color: #fcd34d; }
+        .status-chip.status-tanzim_bekliyor { background: #e0f2fe; color: #0369a1; border-color: #7dd3fc; }
+        .status-chip.status-tanzim_basari { background: #dcfce7; color: #166534; border-color: #86efac; }
+        .status-chip.status-tanzim_basarisiz { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
+        .status-chip.status-unknown { background: #e5e7eb; color: #374151; border-color: #cbd5e1; }
+        .status-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 12px; align-items: center; }
     </style>
 </head>
 <body>
@@ -20,19 +59,54 @@
     <div class="meta">Tel: {{ client.phone }} · City: {{ client.city }} · Height: {{ client.height_cm }} · Weight: {{ client.weight_kg }}</div>
 
     <h2>Orders</h2>
+    {% set status_labels = {
+        'paid': 'Ödendi',
+        'unpaid': 'Ödenmedi',
+        'partial_paid': 'Kısmi Ödeme',
+        'refunded': 'İade',
+        'switched': 'Değişim',
+        'stitched': 'Değişim',
+        'cancelled': 'İptal',
+        'iade_bekliyor': 'İade Bekliyor',
+        'tanzim_bekliyor': 'Tanzim Bekliyor',
+        'tanzim_basari': 'Tanzim Başarılı',
+        'tanzim_basarisiz': 'Tanzim Başarısız'
+    } %}
+    <div class="status-legend" aria-label="Durum renkleri">
+        {% for key in ['paid','unpaid','partial_paid','refunded','switched','cancelled','iade_bekliyor','tanzim_bekliyor','tanzim_basari','tanzim_basarisiz'] %}
+            <span class="status-chip status-{{ key }}">{{ status_labels.get(key, key) }}</span>
+        {% endfor %}
+    </div>
     <table>
         <thead>
-            <tr><th>ID</th><th>Tracking</th><th>Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Source</th></tr>
+            <tr><th>ID</th><th>Tracking</th><th class="item">Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Status</th><th>Source</th></tr>
         </thead>
         <tbody>
             {% for o in orders %}
-            <tr>
+            {% set rowcls = status_map.get(o.id) if status_map else '' %}
+            {% if o.tanzim_status %}
+                {% set rowcls = (rowcls + ' ' + o.tanzim_status) if rowcls else o.tanzim_status %}
+            {% endif %}
+            <tr class="{{ rowcls }}">
                 <td>{{ o.id }}</td>
                 <td>{{ o.tracking_no }}</td>
-                <td>{{ item_map.get(o.item_id).name if o.item_id in item_map else o.item_id }}</td>
+                <td class="item">{{ item_map.get(o.item_id).name if o.item_id in item_map else o.item_id }}</td>
                 <td>{{ o.quantity }}</td>
                 <td>{{ o.total_amount }}</td>
                 <td>{{ o.shipment_date }}</td>
+                <td>
+                    {% set primary_status = status_map.get(o.id) if status_map else '' %}
+                    <div class="status-stack">
+                        {% if primary_status %}
+                            <span class="status-chip status-{{ primary_status }}">{{ status_labels.get(primary_status, primary_status) }}</span>
+                        {% else %}
+                            <span class="status-chip status-unknown">Durum yok</span>
+                        {% endif %}
+                        {% if o.tanzim_status %}
+                            <span class="status-chip status-{{ o.tanzim_status }}">{{ status_labels.get(o.tanzim_status, o.tanzim_status) }}</span>
+                        {% endif %}
+                    </div>
+                </td>
                 <td>{{ o.source }}</td>
             </tr>
             {% endfor %}
