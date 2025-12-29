@@ -338,6 +338,43 @@ AUTO_RETRY_MAX = max(
 	int(os.getenv("AI_REPLY_AUTO_RETRY_MAX", str(POSTPONE_MAX))),
 )
 
+def _get_shadow_scope() -> str:
+	"""Return ai_shadow_scope setting: all|linked_only|off."""
+	try:
+		with get_session() as session:
+			row = session.exec(
+				select(SystemSetting).where(SystemSetting.key == "ai_shadow_scope")
+			).first()
+			if row and getattr(row, "value", None):
+				val = str(row.value).strip().lower()
+				if val in ("all", "linked_only", "off"):
+					return val
+	except Exception:
+		pass
+	return "all"
+
+
+def _conversation_has_link(cid: int) -> bool:
+	"""Return True if conversation is linked to an ad/post via last_link/ad or any message.ad_id."""
+	try:
+		with get_session() as session:
+			row = session.exec(
+				_text(
+					"SELECT last_link_id, last_ad_id FROM conversations WHERE id=:cid LIMIT 1"
+				).params(cid=cid)
+			).first()
+			if row:
+				last_link = row.last_link_id if hasattr(row, "last_link_id") else (row[0] if len(row) > 0 else None)
+				last_ad = row.last_ad_id if hasattr(row, "last_ad_id") else (row[1] if len(row) > 1 else None)
+				if last_link or last_ad:
+					return True
+			msg_row = session.exec(
+				_text("SELECT 1 FROM message WHERE conversation_id=:cid AND ad_id IS NOT NULL LIMIT 1").params(cid=cid)
+			).first()
+			return bool(msg_row)
+	except Exception:
+		return False
+
 
 def _is_ai_reply_sending_enabled(conversation_id: int) -> tuple[bool, bool, bool]:
 	"""
@@ -538,6 +575,8 @@ def main() -> None:
 				pass
 			time.sleep(0.5)
 			continue
+		# Apply global shadow scope guard to avoid processing when scope is off or unlinked.
+		shadow_scope = _get_shadow_scope()
 
 		if not due:
 			time.sleep(0.5)
@@ -567,6 +606,19 @@ def main() -> None:
 			except Exception:
 				cid = None
 			if not cid:
+				continue
+			# Shadow scope guard: skip/exhaust when scope is off, or when linked_only and convo has no link.
+			if shadow_scope == "off":
+				try:
+					_set_status(cid, "exhausted", state_json=st.get("state_json"))
+				except Exception:
+					pass
+				continue
+			if shadow_scope == "linked_only" and not _conversation_has_link(cid):
+				try:
+					_set_status(cid, "exhausted", state_json=st.get("state_json"))
+				except Exception:
+					pass
 				continue
 			# Skip rows that are still marked as error or running
 			try:
