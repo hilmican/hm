@@ -858,8 +858,9 @@ def list_problem_orders(
                 continue
 
             # Only treat orders with an actual shipment date as “late”
-            shipped = o.shipment_date
-            bdays = _business_days_since(shipped, today) if shipped else None
+            # Treat data_date as fallback when shipment_date is missing so late calc still works
+            base_date = o.shipment_date or o.data_date
+            bdays = _business_days_since(base_date, end_date) if base_date else None
             is_late = (delivered is None) and (bdays is not None) and (bdays >= bizdays)
 
             # If neither refund-pending nor late, skip
@@ -1007,8 +1008,8 @@ def export_problem_orders(
                 continue
             if is_paid and not is_iade:
                 continue
-            shipped = o.shipment_date
-            bdays = _business_days_since(shipped, today) if shipped else None
+            base_date = o.shipment_date or o.data_date
+            bdays = _business_days_since(base_date, end_date) if base_date else None
             is_late = (delivered is None) and (bdays is not None) and (bdays >= bizdays)
             if not (is_iade or is_late):
                 continue
