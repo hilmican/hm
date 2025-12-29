@@ -99,6 +99,8 @@
         .status-chip.status-unknown { background: #e5e7eb; color: #374151; border-color: #cbd5e1; }
         .status-note { font-size: 11px; color: #6b7280; margin-top: 4px; }
         .status-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 12px; align-items: center; }
+        .scroll-top { position: fixed; bottom: 16px; right: 16px; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--border); background: var(--card); box-shadow: 0 4px 12px rgba(0,0,0,0.12); display: none; align-items: center; justify-content: center; cursor: pointer; z-index: 60; }
+        .scroll-top svg { width: 20px; height: 20px; color: #111827; }
         @media (max-width: 900px){
             .toolbar { align-items: stretch; gap: 10px; }
             .toolbar input[type="search"] { flex: 1 1 100%; }
@@ -114,6 +116,7 @@
             .mobile-actions { display: flex; gap: 6px; justify-content: flex-end; }
             .mobile-hide { display: none !important; }
             .pagination { justify-content: center; }
+            .scroll-top { display: inline-flex; }
         }
         
         @media (max-width: 768px){
@@ -180,6 +183,7 @@
                 <option value="multi" {{ 'selected' if repeat_customer == 'multi' else '' }}>1'den fazla sipariş</option>
             </select>
             <select name="page_size" id="pageSize">
+                <option value="10" {{ 'selected' if page_size == 10 else '' }}>10 / sayfa</option>
                 <option value="25" {{ 'selected' if page_size == 25 else '' }}>25 / sayfa</option>
                 <option value="50" {{ 'selected' if page_size == 50 else '' }}>50 / sayfa</option>
                 <option value="100" {{ 'selected' if page_size == 100 else '' }}>100 / sayfa</option>
@@ -354,6 +358,9 @@
         <span>Sayfa {{ page }} / {{ total_pages }}</span>
         <button class="btn" onclick="goPage({{ page + 1 }})" {% if page >= total_pages %}disabled{% endif %}>Sonraki</button>
     </div>
+    <button id="scrollTopBtn" class="scroll-top" title="Yukarı dön" aria-label="Yukarı dön">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 4l7 7-1.4 1.4L13 8.8V20h-2V8.8L6.4 12.4 5 11z"/></svg>
+    </button>
     <!-- Inline modal panel -->
     <div id="editOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
         <div class="modal">
@@ -433,6 +440,8 @@
     const searchInput = document.getElementById('search');
     const pageInput = document.getElementById('pageInput');
     const pageSizeSelect = document.getElementById('pageSize');
+    const scrollTopBtn = document.getElementById('scrollTopBtn');
+    const isMobileView = window.matchMedia('(max-width: 900px)').matches;
     let searchTimer = null;
     function submitWithPage(targetPage){
         if(pageInput){ pageInput.value = String(targetPage); }
@@ -448,6 +457,18 @@
         if(!filtersForm || p < 1 || p > maxPage){ return; }
         submitWithPage(p);
     }
+    if(isMobileView && pageSizeSelect && Number(pageSizeSelect.value) > 10){
+        pageSizeSelect.value = '10';
+        submitWithPage(1);
+    }
+    function toggleScrollBtn(){
+        if(!scrollTopBtn) return;
+        const show = window.scrollY > 200;
+        scrollTopBtn.style.display = show ? 'inline-flex' : 'none';
+    }
+    scrollTopBtn?.addEventListener('click', ()=>{ window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    window.addEventListener('scroll', toggleScrollBtn, { passive: true });
+    toggleScrollBtn();
 
     async function recalc(){
         try{
