@@ -544,7 +544,10 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
             existing_order.shipment_date = rec.get("shipment_date") or existing_order.shipment_date
             existing_order.data_date = existing_order.data_date or run.data_date
             existing_order.source = "bizim"
-            existing_order.status = "merged"
+            # Preserve refund/return statuses; only mark merged if previously placeholder/blank
+            current_status = (existing_order.status or "").lower()
+            if current_status in ("", "placeholder", "merged"):
+                existing_order.status = "merged"
             # ensure original name is preserved in notes
             if item_name_raw:
                 cur = existing_order.notes or None
