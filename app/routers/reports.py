@@ -406,10 +406,6 @@ def daily_report(
 				"recent_imports": recent_imports,
 				"qty_in": qty_in,
 				"qty_out": qty_out,
-				# filtered orders and maps for listing
-				"orders": orders,
-				"client_map": client_map,
-				"item_map": item_map,
 				# refund (iade) KPIs
 				"refund_count": refund_count,
 				"refund_total_amount": refund_total_amount,
