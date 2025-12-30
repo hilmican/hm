@@ -6,7 +6,7 @@ from fastapi.responses import RedirectResponse
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Account, Income, Cost
+from ..models import Account, Income, Cost, CostType, Supplier
 from ..services.finance import calculate_account_balance, get_account_balances
 
 router = APIRouter()
@@ -155,6 +155,18 @@ def account_transactions(request: Request, account_id: int, start: Optional[str]
 			expense_q = expense_q.where(Cost.date <= end_date)
 		expenses = session.exec(expense_q.order_by(Cost.date.desc(), Cost.id.desc())).all()
 		
+		# Prefetch cost type and supplier names for display
+		type_ids = sorted({exp.type_id for exp in expenses if exp.type_id})
+		supplier_ids = sorted({exp.supplier_id for exp in expenses if exp.supplier_id})
+		type_map = (
+			{t.id: t.name for t in session.exec(select(CostType).where(CostType.id.in_(type_ids))).all() if t.id is not None}
+			if type_ids else {}
+		)
+		supplier_map = (
+			{s.id: s.name for s in session.exec(select(Supplier).where(Supplier.id.in_(supplier_ids))).all() if s.id is not None}
+			if supplier_ids else {}
+		)
+		
 		# Combine and sort by date
 		transactions = []
 		for inc in incomes:
@@ -165,6 +177,8 @@ def account_transactions(request: Request, account_id: int, start: Optional[str]
 				"amount": inc.amount,
 				"description": f"{inc.source} - {inc.reference or ''}",
 				"notes": inc.notes,
+				"cost_type_name": None,
+				"supplier_name": None,
 			})
 		for exp in expenses:
 			transactions.append({
@@ -174,6 +188,8 @@ def account_transactions(request: Request, account_id: int, start: Optional[str]
 				"amount": -exp.amount,  # Negative for expenses
 				"description": exp.details or "",
 				"notes": None,
+				"cost_type_name": type_map.get(exp.type_id),
+				"supplier_name": supplier_map.get(exp.supplier_id),
 			})
 		
 		# Sort by date descending

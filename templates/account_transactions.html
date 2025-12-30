@@ -92,6 +92,8 @@
             <tr>
               <th>Tarih</th>
               <th>Tür</th>
+              <th>Gider Türü</th>
+              <th>Cari</th>
               <th>Açıklama</th>
               <th>Tutar</th>
               <th>Bakiye</th>
@@ -102,6 +104,8 @@
             <tr class="{{ 'income-row' if txn.type == 'income' else 'expense-row' }}">
               <td>{{ txn.date }}</td>
               <td>{{ 'Gelir' if txn.type == 'income' else 'Gider' }}</td>
+              <td>{{ txn.cost_type_name if txn.cost_type_name else '-' }}</td>
+              <td>{{ txn.supplier_name if txn.supplier_name else '-' }}</td>
               <td>{{ txn.description }}</td>
               <td class="{% if txn.amount > 0 %}balance-positive{% else %}balance-negative{% endif %}">
                 {{ '%.2f'|format(txn.amount) }} ₺
@@ -113,7 +117,7 @@
             {% endfor %}
             {% if not transactions %}
             <tr>
-              <td colspan="5" style="text-align: center; color: #6b7280; padding: 24px;">
+              <td colspan="7" style="text-align: center; color: #6b7280; padding: 24px;">
                 Bu dönemde işlem bulunamadı.
               </td>
             </tr>
