@@ -444,15 +444,20 @@
     const pageSizeSelect = document.getElementById('pageSize');
     const scrollTopBtn = document.getElementById('scrollTopBtn');
     const isMobileView = window.matchMedia('(max-width: 900px)').matches;
-    let searchTimer = null;
     function submitWithPage(targetPage){
         if(pageInput){ pageInput.value = String(targetPage); }
         filtersForm?.submit();
     }
-    searchInput?.addEventListener('input', ()=>{
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(()=>submitWithPage(1), 450);
-    });
+// Enter ile ya da filtre butonu ile arama; her tuşta yeniden yükleme yok
+searchInput?.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter'){
+        e.preventDefault();
+        submitWithPage(1);
+    }
+});
+filtersForm?.addEventListener('submit', ()=>{
+    if(pageInput){ pageInput.value = '1'; }
+});
     pageSizeSelect?.addEventListener('change', ()=>submitWithPage(1));
     function goPage(p){
         const maxPage = {{ total_pages }};
