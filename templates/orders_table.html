@@ -242,7 +242,7 @@
     </div>
     <table id="ordersTbl">
         <thead>
-            <tr><th>ID</th><th class="tracking">Takip</th><th class="client">Musteri</th><th class="product">Urun</th><th>Adet</th><th>Toplam (etkin)</th><th class="mobile-hide">Maliyet</th><th class="mobile-hide">Kargo</th><th class="mobile-hide">Kargo Firması</th><th class="mobile-hide">Kargo Tarihi</th><th class="mobile-hide">Data Tarihi</th><th>Durum</th><th></th></tr>
+            <tr><th>ID</th><th class="client">Musteri</th><th class="product">Urun</th><th>Adet</th><th>Toplam (etkin)</th><th class="mobile-hide">Maliyet</th><th class="mobile-hide">Kargo</th><th class="mobile-hide">K Firma</th><th class="mobile-hide">Kargo Tarihi</th><th class="mobile-hide">Data Tarihi</th><th>Durum</th><th></th></tr>
             <tr>
                 <th colspan="4" style="text-align:right">Toplamlar:</th>
                 <th data-type="num">{{ sum_qty }}</th>
@@ -269,13 +269,6 @@
                     {% endif %}
                     {% if o.is_partial_payment %}
                         <span style="color: #ea580c; font-size: 10px;" title="Kısmi ödeme">💰</span>
-                    {% endif %}
-                </td>
-                <td class="tracking" data-label="Takip" data-sort="{{ o.tracking_no or '' }}">
-                    {% if o.tracking_no %}
-                        <span title="{{ o.tracking_no }}">{{ (o.tracking_no or '')[:6] }}</span>
-                    {% else %}
-                        -
                     {% endif %}
                 </td>
                 <td class="client" data-label="Musteri">
