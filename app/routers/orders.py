@@ -67,6 +67,7 @@ def list_orders_table(
     end: Optional[str] = Query(default=None),
     date_field: str = Query(default="shipment", regex="^(shipment|data|both)$"),
     source: Optional[str] = Query(default=None),
+    shipping_company: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
     preset: Optional[str] = Query(default=None),
     ig_linked: Optional[str] = Query(default=None, regex="^(linked|unlinked)?$"),
@@ -139,6 +140,14 @@ def list_orders_table(
             q = q.where(Order.ig_conversation_id.is_not(None))
         elif ig_linked == "unlinked":
             q = q.where(Order.ig_conversation_id.is_(None))
+
+        # Optional shipping company filter (treat None as Sürat for compatibility)
+        shipping_company_filter = (shipping_company or "").strip().lower()
+        if shipping_company_filter:
+            if shipping_company_filter == "surat":
+                q = q.where(or_(Order.shipping_company == "surat", Order.shipping_company.is_(None)))
+            else:
+                q = q.where(Order.shipping_company == shipping_company_filter)
 
         search_term = (search or "").strip()
         if search_term:
@@ -382,6 +391,7 @@ def list_orders_table(
                 "end": end_date,
                 "date_field": date_field,
                 "source": source,
+                "shipping_company": shipping_company_filter or None,
                 "status": status,
                 "ig_linked": ig_linked,
                 "repeat_customer": repeat_customer,
@@ -559,6 +569,7 @@ def export_orders(
     end: Optional[str] = Query(default=None),
     date_field: str = Query(default="shipment", regex="^(shipment|data|both)$"),
     source: Optional[str] = Query(default=None),
+    shipping_company: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
     preset: Optional[str] = Query(default=None),
     repeat_customer: Optional[str] = Query(default=None, regex="^(multi)?$"),
@@ -605,6 +616,12 @@ def export_orders(
             )
         if (preset not in ("overdue_unpaid_7", "all")) and source in ("bizim", "kargo"):
             q = q.where(Order.source == source)
+        shipping_company_filter = (shipping_company or "").strip().lower()
+        if shipping_company_filter:
+            if shipping_company_filter == "surat":
+                q = q.where(or_(Order.shipping_company == "surat", Order.shipping_company.is_(None)))
+            else:
+                q = q.where(Order.shipping_company == shipping_company_filter)
         rows = session.exec(q).all()
         # effective totals map for paid/unpaid logic and potential export
         effective_map: dict[int, float] = {}

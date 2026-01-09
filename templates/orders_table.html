@@ -162,6 +162,15 @@
                 <option value="bizim" {{ 'selected' if source == 'bizim' else '' }}>bizim</option>
                 <option value="kargo" {{ 'selected' if source == 'kargo' else '' }}>kargo</option>
             </select>
+            <select name="shipping_company">
+                <option value="" {{ 'selected' if not shipping_company else '' }}>Tüm Kargo Firmaları</option>
+                <option value="surat" {{ 'selected' if shipping_company == 'surat' else '' }}>Sürat Kargo</option>
+                {% for company in shipping_companies %}
+                    {% if company.company_code != 'surat' %}
+                        <option value="{{ company.company_code }}" {{ 'selected' if shipping_company == company.company_code else '' }}>{{ company.company_name }}</option>
+                    {% endif %}
+                {% endfor %}
+            </select>
             <select name="status">
                 <option value="" {{ 'selected' if not status else '' }}>Tum Durumlar</option>
                 <option value="paid" {{ 'selected' if status == 'paid' else '' }}>Yesil (Odendi)</option>
