@@ -142,12 +142,14 @@ def list_orders_table(
             q = q.where(Order.ig_conversation_id.is_(None))
 
         # Optional shipping company filter (treat None as Sürat for compatibility)
-        shipping_company_filter = (shipping_company or "").strip().lower()
+        shipping_company_raw = (shipping_company or "").strip()
+        shipping_company_filter = shipping_company_raw.lower()
         if shipping_company_filter:
+            order_company = func.lower(Order.shipping_company)
             if shipping_company_filter == "surat":
-                q = q.where(or_(Order.shipping_company == "surat", Order.shipping_company.is_(None)))
+                q = q.where(or_(order_company == "surat", Order.shipping_company.is_(None)))
             else:
-                q = q.where(Order.shipping_company == shipping_company_filter)
+                q = q.where(order_company == shipping_company_filter)
 
         search_term = (search or "").strip()
         if search_term:
@@ -391,7 +393,7 @@ def list_orders_table(
                 "end": end_date,
                 "date_field": date_field,
                 "source": source,
-                "shipping_company": shipping_company_filter or None,
+                "shipping_company": shipping_company_raw or None,
                 "status": status,
                 "ig_linked": ig_linked,
                 "repeat_customer": repeat_customer,
@@ -616,12 +618,14 @@ def export_orders(
             )
         if (preset not in ("overdue_unpaid_7", "all")) and source in ("bizim", "kargo"):
             q = q.where(Order.source == source)
-        shipping_company_filter = (shipping_company or "").strip().lower()
+        shipping_company_raw = (shipping_company or "").strip()
+        shipping_company_filter = shipping_company_raw.lower()
         if shipping_company_filter:
+            order_company = func.lower(Order.shipping_company)
             if shipping_company_filter == "surat":
-                q = q.where(or_(Order.shipping_company == "surat", Order.shipping_company.is_(None)))
+                q = q.where(or_(order_company == "surat", Order.shipping_company.is_(None)))
             else:
-                q = q.where(Order.shipping_company == shipping_company_filter)
+                q = q.where(order_company == shipping_company_filter)
         rows = session.exec(q).all()
         # effective totals map for paid/unpaid logic and potential export
         effective_map: dict[int, float] = {}

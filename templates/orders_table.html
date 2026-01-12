@@ -164,10 +164,10 @@
             </select>
             <select name="shipping_company">
                 <option value="" {{ 'selected' if not shipping_company else '' }}>Tüm Kargo Firmaları</option>
-                <option value="surat" {{ 'selected' if shipping_company == 'surat' else '' }}>Sürat Kargo</option>
+                <option value="surat" {{ 'selected' if shipping_company and (shipping_company|lower == 'surat') else '' }}>Sürat Kargo</option>
                 {% for company in shipping_companies %}
-                    {% if company.company_code != 'surat' %}
-                        <option value="{{ company.company_code }}" {{ 'selected' if shipping_company == company.company_code else '' }}>{{ company.company_name }}</option>
+                    {% if company.company_code|lower != 'surat' %}
+                        <option value="{{ company.company_code }}" {{ 'selected' if shipping_company and (shipping_company|lower == company.company_code|lower) else '' }}>{{ company.company_name }}</option>
                     {% endif %}
                 {% endfor %}
             </select>
