@@ -666,19 +666,19 @@ def export_orders(
                     continue
                 client_order_counts[int(o.client_id)] += 1
             rows = [o for o in rows if (o.client_id is not None and client_order_counts.get(int(o.client_id), 0) >= 2)]
-		# Build cost_map similar to table for high_cost filtering (prefer FIFO stock movements)
-		from ..services.inventory import calculate_order_cost_fifo
-		cost_map: dict[int, float] = {}
-		for o in rows:
-			if o.total_cost is not None:
-				cost_map[o.id or 0] = float(o.total_cost or 0.0)
-		missing_ids = [o.id for o in rows if (o.id and (o.id not in cost_map))]
-		if missing_ids:
-			for oid in missing_ids:
-				try:
-					cost_map[int(oid)] = float(calculate_order_cost_fifo(session, int(oid)))
-				except Exception:
-					cost_map[int(oid)] = 0.0
+        # Build cost_map similar to table for high_cost filtering (prefer FIFO stock movements)
+        from ..services.inventory import calculate_order_cost_fifo
+        cost_map: dict[int, float] = {}
+        for o in rows:
+            if o.total_cost is not None:
+                cost_map[o.id or 0] = float(o.total_cost or 0.0)
+        missing_ids = [o.id for o in rows if (o.id and (o.id not in cost_map))]
+        if missing_ids:
+            for oid in missing_ids:
+                try:
+                    cost_map[int(oid)] = float(calculate_order_cost_fifo(session, int(oid)))
+                except Exception:
+                    cost_map[int(oid)] = 0.0
         # Force zero cost for refunded/switched/cancelled orders
         for o in rows:
             if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
