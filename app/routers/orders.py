@@ -289,20 +289,20 @@ def list_orders_table(
                 )
             shipping_map[oid] = round(float(pre_tax or 0.0) * 1.20, 2)
 
-		# Use stored total_cost; if missing, compute via FIFO using stock movements (unit_cost)
-		from sqlmodel import select as _select
-		from ..services.inventory import calculate_order_cost_fifo
+        # Use stored total_cost; if missing, compute via FIFO using stock movements (unit_cost)
+        from sqlmodel import select as _select
+        from ..services.inventory import calculate_order_cost_fifo
         cost_map: dict[int, float] = {}
         for o in rows:
             if o.total_cost is not None:
                 cost_map[o.id or 0] = float(o.total_cost or 0.0)
         missing_ids = [o.id for o in rows if (o.id and (o.id not in cost_map))]
-		if missing_ids:
-			for oid in missing_ids:
-				try:
-					cost_map[int(oid)] = float(calculate_order_cost_fifo(session, int(oid)))
-				except Exception:
-					cost_map[int(oid)] = 0.0
+        if missing_ids:
+            for oid in missing_ids:
+                try:
+                    cost_map[int(oid)] = float(calculate_order_cost_fifo(session, int(oid)))
+                except Exception:
+                    cost_map[int(oid)] = 0.0
 
         # For refunded/switched/cancelled orders, force cost to zero for display/aggregates
         for o in rows:
