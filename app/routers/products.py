@@ -83,7 +83,7 @@ def create_product(
 
 @router.get("/table")
 def products_table(request: Request, limit: int = Query(default=10000, ge=1, le=100000)):
-    with get_session() as session:
+	with get_session() as session:
 		rows = session.exec(select(Product).order_by(Product.id.desc()).limit(limit)).all()
 		suppliers = session.exec(select(Supplier).order_by(Supplier.name.asc())).all()
 		templates = request.app.state.templates
