@@ -1,4 +1,5 @@
 from typing import Optional
+import uuid
 import datetime as dt
 
 from fastapi import APIRouter, Request, Query, Form, HTTPException
@@ -257,13 +258,14 @@ def transfer_between_accounts(
 		virman_type_id = _get_or_create_transfer_cost_type(session)
 
 		detail_text = notes.strip() if notes else f"Virman {source.name} -> {dest.name}"
+		ref = f"transfer:{uuid.uuid4()}"
 
 		out_cost = Cost(
 			type_id=virman_type_id,
 			account_id=source_account_id,
 			amount=float(amount),
 			date=when,
-			details=detail_text,
+			details=f"{detail_text} [{ref}]",
 			is_payment_to_supplier=False,
 		)
 		in_income = Income(
@@ -271,8 +273,8 @@ def transfer_between_accounts(
 			amount=float(amount),
 			date=when,
 			source="internal_transfer",
-			reference=f"{source.name} -> {dest.name}",
-			notes=notes.strip() if notes else "Virman",
+			reference=ref,
+			notes=detail_text,
 		)
 		session.add(out_cost)
 		session.add(in_income)

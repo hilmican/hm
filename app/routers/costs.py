@@ -1,6 +1,7 @@
 from typing import Optional, List, Dict, Any
 import datetime as dt
 import json
+import re
 
 from fastapi import APIRouter, Request, Query, Form, HTTPException
 from fastapi.responses import RedirectResponse, JSONResponse
@@ -8,7 +9,7 @@ from sqlmodel import select
 from sqlalchemy import or_
 
 from ..db import get_session
-from ..models import Cost, CostType, Account, Supplier, Product, CostHistoryLog
+from ..models import Cost, CostType, Account, Supplier, Product, CostHistoryLog, Income, IncomeHistoryLog, OrderPayment
 
 
 router = APIRouter()
@@ -56,6 +57,31 @@ def _cost_to_dict(cost: Cost) -> Dict:
 		"date": cost.date.isoformat() if cost.date else None,
 		"details": cost.details,
 	}
+
+
+def _extract_transfer_ref(details: Optional[str]) -> Optional[str]:
+	if not details:
+		return None
+	m = re.search(r"(transfer:[a-f0-9-]{8,})", details, re.IGNORECASE)
+	return m.group(1).lower() if m else None
+
+
+def _delete_transfer_income(session, transfer_ref: Optional[str]) -> None:
+	"""Best-effort: if a transfer income exists for given ref, delete it (and its links)."""
+	if not transfer_ref:
+		return
+	inc = session.exec(select(Income).where(Income.reference == transfer_ref)).first()
+	if not inc or not inc.id:
+		return
+	# Remove order payments linked to this income (same logic as income.delete)
+	ops = session.exec(select(OrderPayment).where(OrderPayment.income_id == inc.id)).all()
+	for op in ops:
+		session.delete(op)
+	# Remove history logs if any
+	logs = session.exec(select(IncomeHistoryLog).where(IncomeHistoryLog.income_id == inc.id)).all()
+	for log in logs:
+		session.delete(log)
+	session.delete(inc)
 
 
 @router.get("")
@@ -267,12 +293,14 @@ def delete_costs(
 			# Soft delete: set deleted_at timestamp
 			now = dt.datetime.utcnow()
 			for cost in costs_to_delete:
+				transfer_ref = _extract_transfer_ref(cost.details)
 				# Store old data for logging
 				old_data = _cost_to_dict(cost)
 				
 				# Soft delete: set deleted_at
 				cost.deleted_at = now
 				session.add(cost)
+				_delete_transfer_income(session, transfer_ref)
 				
 				# Log deletion
 				if cost.id:
@@ -483,6 +511,7 @@ def delete_cost(
 		# Soft delete: set deleted_at timestamp
 		cost.deleted_at = dt.datetime.utcnow()
 		session.add(cost)
+		_delete_transfer_income(session, _extract_transfer_ref(cost.details))
 		
 		# Log deletion
 		user_id = None  # TODO: Get from session if auth is implemented
