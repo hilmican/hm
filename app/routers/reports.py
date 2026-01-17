@@ -146,9 +146,14 @@ def daily_report(
 				.where(or_(Cost.type_id != 9, Cost.type_id.is_(None)))
 			).all()
 			
+			# Exclude internal transfers (Virman) from operational costs
+			virman_type_ids = {t.id for t in cost_types if (t.id is not None) and (str(t.name or "").strip().lower() == "virman")}
+
 			# Group by type
 			for cost in operational_costs:
 				type_id = cost.type_id
+				if type_id in virman_type_ids:
+					continue
 				type_name = type_map.get(type_id, f"Type {type_id}")
 				if type_name not in operational_costs_by_type:
 					operational_costs_by_type[type_name] = 0.0
