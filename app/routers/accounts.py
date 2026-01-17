@@ -1,7 +1,7 @@
 from typing import Optional
 import datetime as dt
 
-from fastapi import APIRouter, Request, Query, Form
+from fastapi import APIRouter, Request, Query, Form, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlmodel import select
 
@@ -52,6 +52,7 @@ def accounts_table(request: Request):
 				"request": request,
 				"accounts": accounts,
 				"balances": balances,
+				"today": dt.date.today(),
 			},
 		)
 
@@ -215,6 +216,69 @@ def account_transactions(request: Request, account_id: int, start: Optional[str]
 				"end": end_date,
 			},
 		)
+
+
+def _get_or_create_transfer_cost_type(session) -> int:
+	"""Ensure a CostType named 'Virman' exists and return its id."""
+	ct = session.exec(select(CostType).where(CostType.name == "Virman")).first()
+	if ct and ct.id:
+		return ct.id
+	new_ct = CostType(name="Virman")
+	session.add(new_ct)
+	session.flush()
+	if not new_ct.id:
+		raise HTTPException(status_code=500, detail="Virman maliyet türü oluşturulamadı")
+	return new_ct.id
+
+
+@router.post("/transfer")
+def transfer_between_accounts(
+	source_account_id: int = Form(...),
+	dest_account_id: int = Form(...),
+	amount: float = Form(...),
+	date: Optional[str] = Form(default=None),
+	notes: Optional[str] = Form(default=None),
+):
+	"""Create a single-step internal transfer (cost + income)."""
+	if source_account_id == dest_account_id:
+		raise HTTPException(status_code=400, detail="Kaynak ve hedef hesap aynı olamaz")
+	try:
+		when = dt.date.fromisoformat(date) if date else dt.date.today()
+	except Exception:
+		when = dt.date.today()
+	if amount <= 0:
+		raise HTTPException(status_code=400, detail="Tutar 0'dan büyük olmalı")
+
+	with get_session() as session:
+		source = session.exec(select(Account).where(Account.id == source_account_id)).first()
+		dest = session.exec(select(Account).where(Account.id == dest_account_id)).first()
+		if not source or not dest:
+			raise HTTPException(status_code=404, detail="Hesap bulunamadı")
+		virman_type_id = _get_or_create_transfer_cost_type(session)
+
+		detail_text = notes.strip() if notes else f"Virman {source.name} -> {dest.name}"
+
+		out_cost = Cost(
+			type_id=virman_type_id,
+			account_id=source_account_id,
+			amount=float(amount),
+			date=when,
+			details=detail_text,
+			is_payment_to_supplier=False,
+		)
+		in_income = Income(
+			account_id=dest_account_id,
+			amount=float(amount),
+			date=when,
+			source="internal_transfer",
+			reference=f"{source.name} -> {dest.name}",
+			notes=notes.strip() if notes else "Virman",
+		)
+		session.add(out_cost)
+		session.add(in_income)
+		session.commit()
+
+	return RedirectResponse(url="/accounts/table", status_code=303)
 
 
 @router.get("/{account_id}/balance")

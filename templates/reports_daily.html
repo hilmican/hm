@@ -114,6 +114,7 @@
                                 <tr style="border-bottom:1px solid #e5e7eb;">
                                     <th style="text-align:left; padding:6px 0; color:#6b7280; font-weight:600;">Tür</th>
                                     <th style="text-align:right; padding:6px 0; color:#6b7280; font-weight:600;">Tutar</th>
+                                    <th style="text-align:right; padding:6px 0; color:#6b7280; font-weight:600;">Toplam Maliyete Oran</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -121,6 +122,8 @@
                                 <tr style="border-bottom:1px solid #f3f4f6;">
                                     <td style="padding:6px 0;">{{ type_name }}</td>
                                     <td style="text-align:right; padding:6px 0; font-weight:500;">{{ '%.2f'|format(amount) }} ₺</td>
+                                    {% set pct = ((amount or 0.0) / (total_cost or 1.0) * 100) if (total_cost or 0) else 0 %}
+                                    <td style="text-align:right; padding:6px 0; color:#6b7280;">{{ '%.1f'|format(pct) }}%</td>
                                 </tr>
                                 {% endfor %}
                             </tbody>

@@ -93,6 +93,53 @@
           </form>
         </div>
       </div>
+      <div class="card" id="transfer">
+        <h2>Hesaplar Arası Virman</h2>
+        <div class="body">
+          <form method="post" action="/accounts/transfer" class="row">
+            <div class="field" style="min-width:220px; flex:1">
+              <label>Kaynak Hesap</label>
+              <select name="source_account_id" required>
+                <option value="">Seçiniz</option>
+                {% for acc in accounts %}
+                {% if acc.id %}
+                <option value="{{ acc.id }}">{{ acc.name }} ({{ acc.type }})</option>
+                {% endif %}
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field" style="min-width:220px; flex:1">
+              <label>Hedef Hesap</label>
+              <select name="dest_account_id" required>
+                <option value="">Seçiniz</option>
+                {% for acc in accounts %}
+                {% if acc.id %}
+                <option value="{{ acc.id }}">{{ acc.name }} ({{ acc.type }})</option>
+                {% endif %}
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label>Tutar</label>
+              <input type="number" step="0.01" min="0.01" name="amount" placeholder="örn. 1000" required />
+            </div>
+            <div class="field">
+              <label>Tarih</label>
+              <input type="date" name="date" value="{{ today }}" />
+            </div>
+            <div class="field" style="min-width:280px; flex:1">
+              <label>Not</label>
+              <input type="text" name="notes" placeholder="Opsiyonel açıklama" />
+            </div>
+            <div style="align-self:flex-end">
+              <button class="btn" type="submit">Virmanı Oluştur</button>
+            </div>
+          </form>
+          <div class="muted" style="margin-top:8px;">
+            Tek form ile kaynak hesaptan maliyet, hedef hesaba gelir kaydı açılır.
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="card" style="margin-top:18px;">
