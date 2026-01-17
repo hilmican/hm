@@ -47,6 +47,12 @@
             <select id="productId" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:220px;">
                 <option value="">Urun</option>
             </select>
+            <select id="supplierId" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:200px;">
+                <option value="">Cari (opsiyonel)</option>
+                {% for s in suppliers %}
+                    <option value="{{ s.id }}">{{ s.name }}</option>
+                {% endfor %}
+            </select>
             <div style="display:flex; flex-direction:column; gap:6px;">
                 <div style="display:flex; gap:6px; align-items:center;">
                     <select id="sizes" multiple size="4" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:200px;"></select>
@@ -207,8 +213,10 @@ async function restoreFilterState(){
 document.addEventListener('DOMContentLoaded', async ()=>{
     await loadProducts();
     await restoreFilterState();
+    const supplierSel = document.getElementById('supplierId');
     const prodSel = document.getElementById('productId');
-    if (prodSel) prodSel.addEventListener('change', e=>{ const pid=e.target.value; if(pid) loadAttributes(pid); applyInventoryFilter(); });
+    if (prodSel) prodSel.addEventListener('change', e=>{ const pid=e.target.value; if(pid) loadAttributes(pid); applyInventoryFilter(); suggestCostFromSupplier(); });
+    if (supplierSel) supplierSel.addEventListener('change', suggestCostFromSupplier);
         const sas = document.getElementById('selectAllSizes'); if (sas) sas.addEventListener('click', ()=>{ selectAll('sizes'); applyInventoryFilter(); });
         const sac = document.getElementById('selectAllColors'); if (sac) sac.addEventListener('click', ()=>{ selectAll('colors'); applyInventoryFilter(); });
         const asz = document.getElementById('addSize'); if (asz) asz.addEventListener('click', ()=>{ addCustom('sizes','customSize'); applyInventoryFilter(); });
@@ -219,9 +227,28 @@ document.addEventListener('DOMContentLoaded', async ()=>{
         applyInventoryFilter();
 });
 
+async function suggestCostFromSupplier(){
+    const pid = Number(document.getElementById('productId')?.value || 0);
+    const supplierId = Number(document.getElementById('supplierId')?.value || 0);
+    if (!pid || !supplierId) return;
+    try{
+        const r = await fetch(`/products/${pid}/supplier-prices`);
+        if(!r.ok) return;
+        const j = await r.json();
+        const entry = (j.supplier_prices||[]).find(sp=>Number(sp.supplier_id)===supplierId && (sp.item_id===null || sp.item_id===undefined));
+        if (entry){
+            const costEl = document.getElementById('cost');
+            const priceEl = document.getElementById('price');
+            if (costEl && entry.cost != null) costEl.value = entry.cost;
+            if (priceEl && entry.price != null) priceEl.value = entry.price;
+        }
+    } catch(e){}
+}
+
 if (btn) {
     btn.addEventListener('click', async () => {
         const pid = Number(document.getElementById('productId').value || 0);
+        const supplierId = Number(document.getElementById('supplierId').value || 0) || null;
         const sizes = getSelected('sizes');
         const colors = getSelected('colors'); // empty means default no-color will be used server-side
         const qty = Number(document.getElementById('qty').value || 0);
@@ -231,7 +258,7 @@ if (btn) {
         const costVal = document.getElementById('cost').value;
         const cost = costVal ? Number(costVal) : null;
         if (!pid || !sizes.length || qty <= 0) { alert('product_id, sizes ve qty gereklidir'); return; }
-        const body = { product_id: pid, sizes, colors, quantity_per_variant: qty, price, cost };
+        const body = { product_id: pid, sizes, colors, quantity_per_variant: qty, price, cost, supplier_id: supplierId };
         try {
             const r = await fetch('/inventory/series', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
             if (!r.ok) throw new Error(await r.text());

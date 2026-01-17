@@ -115,6 +115,12 @@ class StockMovement(SQLModel, table=True):
     item_id: int = Field(foreign_key="item.id")
     direction: str = Field(description="in|out")
     quantity: int
+    supplier_id: Optional[int] = Field(
+        default=None,
+        foreign_key="supplier.id",
+        index=True,
+        description="Which supplier (cari) this purchase came from; only for direction='in'",
+    )
     unit_cost: Optional[float] = Field(
         default=None,
         description="Purchase cost per unit (only for direction='in' purchases from producer)"
@@ -681,6 +687,24 @@ class SupplierPaymentAllocation(SQLModel, table=True):
 	debt_cost_id: int = Field(foreign_key="cost.id", index=True, description="Debt cost entry being closed")
 	amount: float = Field(description="Amount allocated from payment to this debt")
 	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
+class SupplierProductPrice(SQLModel, table=True):
+    """Supplier (cari) bazlı ürün/variant alış fiyatı."""
+
+    __tablename__ = "supplier_product_price"
+    __table_args__ = (
+        UniqueConstraint("supplier_id", "product_id", "item_id", name="uq_supplier_product_item"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    supplier_id: int = Field(foreign_key="supplier.id", index=True, description="Cari/Supplier ID")
+    product_id: int = Field(foreign_key="product.id", index=True, description="Product ID")
+    item_id: Optional[int] = Field(default=None, foreign_key="item.id", index=True, description="Optional variant")
+    price: Optional[float] = Field(default=None, description="Satış fiyatı önerisi (opsiyonel)")
+    cost: Optional[float] = Field(default=None, description="Alış maliyeti (birim)")
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+    updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 
 
 class CostHistoryLog(SQLModel, table=True):

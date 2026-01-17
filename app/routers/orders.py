@@ -289,33 +289,20 @@ def list_orders_table(
                 )
             shipping_map[oid] = round(float(pre_tax or 0.0) * 1.20, 2)
 
-        # Use stored total_cost; if missing, compute via batch-loaded OrderItems and Items
-        from sqlmodel import select as _select
+		# Use stored total_cost; if missing, compute via FIFO using stock movements (unit_cost)
+		from sqlmodel import select as _select
+		from ..services.inventory import calculate_order_cost_fifo
         cost_map: dict[int, float] = {}
         for o in rows:
             if o.total_cost is not None:
                 cost_map[o.id or 0] = float(o.total_cost or 0.0)
         missing_ids = [o.id for o in rows if (o.id and (o.id not in cost_map))]
-        if missing_ids:
-            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id.in_(missing_ids))).all()
-            order_item_map: dict[int, list[tuple[int, int]]] = {}
-            item_ids_needed: set[int] = set()
-            for oi in oitems:
-                if oi.order_id is None or oi.item_id is None:
-                    continue
-                order_item_map.setdefault(int(oi.order_id), []).append((int(oi.item_id), int(oi.quantity or 0)))
-                item_ids_needed.add(int(oi.item_id))
-            item_cost_map: dict[int, float] = {}
-            if item_ids_needed:
-                cost_items = session.exec(_select(Item).where(Item.id.in_(sorted(item_ids_needed)))).all()
-                for it in cost_items:
-                    if it.id is not None:
-                        item_cost_map[int(it.id)] = float(it.cost or 0.0)
-            for oid in missing_ids:
-                acc = 0.0
-                for (iid, qty) in order_item_map.get(int(oid), []):
-                    acc += float(item_cost_map.get(int(iid), 0.0)) * int(qty or 0)
-                cost_map[int(oid)] = round(acc, 2)
+		if missing_ids:
+			for oid in missing_ids:
+				try:
+					cost_map[int(oid)] = float(calculate_order_cost_fifo(session, int(oid)))
+				except Exception:
+					cost_map[int(oid)] = 0.0
 
         # For refunded/switched/cancelled orders, force cost to zero for display/aggregates
         for o in rows:
@@ -679,33 +666,19 @@ def export_orders(
                     continue
                 client_order_counts[int(o.client_id)] += 1
             rows = [o for o in rows if (o.client_id is not None and client_order_counts.get(int(o.client_id), 0) >= 2)]
-        # Build cost_map similar to table for high_cost filtering
-        from sqlmodel import select as _select
-        cost_map: dict[int, float] = {}
-        for o in rows:
-            if o.total_cost is not None:
-                cost_map[o.id or 0] = float(o.total_cost or 0.0)
-        missing_ids = [o.id for o in rows if (o.id and (o.id not in cost_map))]
-        if missing_ids:
-            oitems = session.exec(_select(OrderItem).where(OrderItem.order_id.in_(missing_ids))).all()
-            order_item_map: dict[int, list[tuple[int, int]]] = {}
-            item_ids_needed: set[int] = set()
-            for oi in oitems:
-                if oi.order_id is None or oi.item_id is None:
-                    continue
-                order_item_map.setdefault(int(oi.order_id), []).append((int(oi.item_id), int(oi.quantity or 0)))
-                item_ids_needed.add(int(oi.item_id))
-            item_cost_map: dict[int, float] = {}
-            if item_ids_needed:
-                cost_items = session.exec(_select(Item).where(Item.id.in_(sorted(item_ids_needed)))).all()
-                for it in cost_items:
-                    if it.id is not None:
-                        item_cost_map[int(it.id)] = float(it.cost or 0.0)
-            for oid in missing_ids:
-                acc = 0.0
-                for (iid, qty) in order_item_map.get(int(oid), []):
-                    acc += float(item_cost_map.get(int(iid), 0.0)) * int(qty or 0)
-                cost_map[int(oid)] = round(acc, 2)
+		# Build cost_map similar to table for high_cost filtering (prefer FIFO stock movements)
+		from ..services.inventory import calculate_order_cost_fifo
+		cost_map: dict[int, float] = {}
+		for o in rows:
+			if o.total_cost is not None:
+				cost_map[o.id or 0] = float(o.total_cost or 0.0)
+		missing_ids = [o.id for o in rows if (o.id and (o.id not in cost_map))]
+		if missing_ids:
+			for oid in missing_ids:
+				try:
+					cost_map[int(oid)] = float(calculate_order_cost_fifo(session, int(oid)))
+				except Exception:
+					cost_map[int(oid)] = 0.0
         # Force zero cost for refunded/switched/cancelled orders
         for o in rows:
             if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):

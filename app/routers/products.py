@@ -5,7 +5,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Product, Item, ProductUpsell, ProductSizeChart, SizeChart
+from ..models import Product, Item, ProductUpsell, ProductSizeChart, SizeChart, SupplierProductPrice, Supplier
 from ..utils.slugify import slugify
 
 
@@ -84,13 +84,114 @@ def create_product(
 @router.get("/table")
 def products_table(request: Request, limit: int = Query(default=10000, ge=1, le=100000)):
     with get_session() as session:
-        rows = session.exec(select(Product).order_by(Product.id.desc()).limit(limit)).all()
-        templates = request.app.state.templates
-        return templates.TemplateResponse(
-            "products_table.html",
-            {"request": request, "rows": rows, "limit": limit},
-        )
+		rows = session.exec(select(Product).order_by(Product.id.desc()).limit(limit)).all()
+		suppliers = session.exec(select(Supplier).order_by(Supplier.name.asc())).all()
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"products_table.html",
+			{"request": request, "rows": rows, "suppliers": suppliers, "limit": limit},
+		)
 
+
+@router.get("/{product_id}/supplier-prices")
+def list_supplier_prices(product_id: int):
+	with get_session() as session:
+		prod = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not prod:
+			raise HTTPException(status_code=404, detail="Product not found")
+		rows = session.exec(
+			select(SupplierProductPrice, Supplier)
+			.join(Supplier, SupplierProductPrice.supplier_id == Supplier.id, isouter=True)
+			.where(SupplierProductPrice.product_id == product_id)
+			.order_by(Supplier.name.asc(), SupplierProductPrice.id.asc())
+		).all()
+		return {
+			"product_id": product_id,
+			"supplier_prices": [
+				{
+					"id": spp.id,
+					"supplier_id": spp.supplier_id,
+					"supplier_name": sup.name if sup else None,
+					"item_id": spp.item_id,
+					"price": spp.price,
+					"cost": spp.cost,
+				}
+				for spp, sup in rows
+			],
+		}
+
+
+@router.post("/{product_id}/supplier-prices")
+def create_supplier_price(product_id: int, body: dict):
+	supplier_id = body.get("supplier_id")
+	price = body.get("price")
+	cost = body.get("cost")
+	item_id = body.get("item_id")
+	if not supplier_id:
+		raise HTTPException(status_code=400, detail="supplier_id required")
+	with get_session() as session:
+		prod = session.exec(select(Product).where(Product.id == product_id)).first()
+		if not prod:
+			raise HTTPException(status_code=404, detail="Product not found")
+		supp = session.exec(select(Supplier).where(Supplier.id == supplier_id)).first()
+		if not supp:
+			raise HTTPException(status_code=404, detail="Supplier not found")
+		# Optional: validate item belongs to product
+		if item_id is not None:
+			it = session.exec(select(Item).where(Item.id == item_id)).first()
+			if not it or int(it.product_id or 0) != int(product_id):
+				raise HTTPException(status_code=400, detail="item_id does not belong to product")
+		spp = SupplierProductPrice(
+			supplier_id=supplier_id,
+			product_id=product_id,
+			item_id=item_id,
+			price=float(price) if price is not None else None,
+			cost=float(cost) if cost is not None else None,
+		)
+		session.add(spp)
+		session.flush()
+		return {"status": "ok", "id": spp.id}
+
+
+@router.put("/supplier-prices/{spp_id}")
+def update_supplier_price(spp_id: int, body: dict):
+	with get_session() as session:
+		spp = session.exec(select(SupplierProductPrice).where(SupplierProductPrice.id == spp_id)).first()
+		if not spp:
+			raise HTTPException(status_code=404, detail="Supplier price not found")
+		if "price" in body:
+			val = body.get("price")
+			spp.price = float(val) if val is not None else None
+		if "cost" in body:
+			val = body.get("cost")
+			spp.cost = float(val) if val is not None else None
+		if "supplier_id" in body:
+			sid = body.get("supplier_id")
+			if sid:
+				supp = session.exec(select(Supplier).where(Supplier.id == sid)).first()
+				if not supp:
+					raise HTTPException(status_code=404, detail="Supplier not found")
+				spp.supplier_id = sid
+		if "item_id" in body:
+			item_id = body.get("item_id")
+			if item_id is None:
+				spp.item_id = None
+			else:
+				it = session.exec(select(Item).where(Item.id == item_id)).first()
+				if not it:
+					raise HTTPException(status_code=404, detail="Item not found")
+				spp.item_id = item_id
+		return {"status": "ok"}
+
+
+@router.delete("/supplier-prices/{spp_id}")
+def delete_supplier_price(spp_id: int):
+	with get_session() as session:
+		spp = session.exec(select(SupplierProductPrice).where(SupplierProductPrice.id == spp_id)).first()
+		if not spp:
+			raise HTTPException(status_code=404, detail="Supplier price not found")
+		session.delete(spp)
+		return {"status": "ok"}
 
 @router.get("/upsells")
 def products_upsells_page(request: Request):

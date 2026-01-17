@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Item, Product, StockMovement, Order, ProductSizeChart
+from ..models import Item, Product, StockMovement, Order, ProductSizeChart, Supplier
 from ..services.inventory import get_stock_map, recalc_orders_from_mappings, adjust_stock
 
 
@@ -98,10 +98,18 @@ def stock_table(request: Request, product_id: Optional[int] = Query(default=None
 			for p in prows:
 				if p.id is not None:
 					pmap[p.id] = p.name
+		suppliers = session.exec(select(Supplier).order_by(Supplier.name.asc())).all()
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"inventory_table.html",
-			{"request": request, "rows": rows, "stock_map": stock_map, "product_map": pmap, "limit": limit},
+			{
+				"request": request,
+				"rows": rows,
+				"stock_map": stock_map,
+				"product_map": pmap,
+				"suppliers": suppliers,
+				"limit": limit,
+			},
 		)
 
 
@@ -112,6 +120,7 @@ def create_movement(body: Dict[str, Any]):
     direction = body.get("direction")
     quantity = body.get("quantity")
     unit_cost = body.get("unit_cost")  # Purchase cost when adding inventory
+    supplier_id = body.get("supplier_id")
     if item_id is None:
         raise HTTPException(status_code=400, detail="item_id required")
     # Support either {delta} (may be negative) or {direction, quantity>0}
@@ -126,7 +135,14 @@ def create_movement(body: Dict[str, Any]):
             it = session.exec(select(Item).where(Item.id == item_id)).first()
             if not it:
                 raise HTTPException(status_code=404, detail="Item not found")
-            adjust_stock(session, item_id=item_id, delta=d, related_order_id=None, unit_cost=unit_cost)
+            adjust_stock(
+                session,
+                item_id=item_id,
+                delta=d,
+                related_order_id=None,
+                unit_cost=unit_cost,
+                supplier_id=supplier_id,
+            )
             return {"status": "ok"}
     # Fallback to direction/quantity path
     if direction not in ("in", "out") or not isinstance(quantity, int) or quantity <= 0:
@@ -139,7 +155,8 @@ def create_movement(body: Dict[str, Any]):
             item_id=item_id,
             direction=direction,
             quantity=quantity,
-            unit_cost=unit_cost if direction == "in" else None  # Only store cost for purchases
+            unit_cost=unit_cost if direction == "in" else None,  # Only store cost for purchases
+            supplier_id=supplier_id if direction == "in" else None,
         )
         session.add(mv)
         return {"status": "ok", "movement_id": mv.id or 0}
@@ -263,6 +280,7 @@ def series_add(body: Dict[str, Any]):
 	quantity_per_variant: int = body.get("quantity_per_variant") or 0
 	price = body.get("price")
 	cost = body.get("cost")  # This is the purchase cost from producer
+	supplier_id = body.get("supplier_id")
 	if not product_id or quantity_per_variant <= 0 or not sizes:
 		raise HTTPException(status_code=400, detail="product_id, sizes[], quantity_per_variant>0 required")
 	with get_session() as session:
@@ -283,7 +301,8 @@ def series_add(body: Dict[str, Any]):
 					item_id=it.id,
 					direction="in",
 					quantity=quantity_per_variant,
-					unit_cost=cost  # IMPORTANT: Store purchase cost here
+					unit_cost=cost,  # IMPORTANT: Store purchase cost here
+					supplier_id=supplier_id,
 				)
 				session.add(mv)
 				created.append(it.id or 0)

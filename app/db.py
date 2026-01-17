@@ -276,6 +276,45 @@ def init_db() -> None:
                             conn.exec_driver_sql("ALTER TABLE `order` MODIFY COLUMN notes LONGTEXT NULL")
                 except Exception:
                     pass
+                # Ensure stockmovement.supplier_id column exists for cari bazlı maliyet
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stockmovement' AND COLUMN_NAME = 'supplier_id'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE stockmovement ADD COLUMN supplier_id INT NULL")
+                        conn.exec_driver_sql("CREATE INDEX idx_stockmovement_supplier ON stockmovement(supplier_id)")
+                except Exception:
+                    pass
+                # Ensure supplier_product_price table exists
+                try:
+                    conn.exec_driver_sql(
+                        """
+                        CREATE TABLE IF NOT EXISTS supplier_product_price (
+                            id INT PRIMARY KEY AUTO_INCREMENT,
+                            supplier_id INT NOT NULL,
+                            product_id INT NOT NULL,
+                            item_id INT NULL,
+                            price DOUBLE NULL,
+                            cost DOUBLE NULL,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            CONSTRAINT uq_supplier_product_item UNIQUE (supplier_id, product_id, item_id),
+                            INDEX idx_spp_supplier (supplier_id),
+                            INDEX idx_spp_product (product_id),
+                            INDEX idx_spp_item (item_id),
+                            FOREIGN KEY (supplier_id) REFERENCES supplier(id) ON DELETE CASCADE,
+                            FOREIGN KEY (product_id) REFERENCES product(id) ON DELETE CASCADE,
+                            FOREIGN KEY (item_id) REFERENCES item(id) ON DELETE SET NULL
+                        )
+                        """
+                    )
+                except Exception:
+                    pass
                 # Ensure ig_ai_run table exists (MySQL)
                 try:
                     conn.exec_driver_sql(

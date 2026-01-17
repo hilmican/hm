@@ -5,6 +5,7 @@ import ast
 import datetime as dt
 
 from sqlmodel import Session, select
+from sqlalchemy import and_
 from sqlalchemy import func, case, delete
 from sqlalchemy.exc import IntegrityError
 
@@ -88,71 +89,103 @@ def get_or_create_item(session: Session, *, product_id: int, size: Optional[str]
     )
 
 
+def _fifo_cost_for_item(session: Session, *, item_id: int, target_order_id: int) -> float:
+	"""Compute FIFO cost for a given item, allocating only the out-movement linked to target_order_id.
+
+	We simulate stock consumption across all movements in chronological order, so each purchase batch
+	is consumed once globally. When we encounter the out movement tied to target_order_id, we allocate
+	cost from the current FIFO queue. If inventory is insufficient, we fall back to item.cost.
+	"""
+	movs = session.exec(
+		_select(StockMovement)
+		.where(StockMovement.item_id == item_id)
+		.order_by(StockMovement.created_at.asc(), StockMovement.id.asc())
+	).all()
+	if not movs:
+		return 0.0
+	fifo: list[tuple[int, float]] = []  # (remaining_qty, unit_cost)
+	cost_acc = 0.0
+	# Preload fallback cost
+	item = session.exec(_select(Item).where(Item.id == item_id)).first()
+	fallback_cost = float(item.cost or 0.0) if item else 0.0
+
+	for mv in movs:
+		if mv.direction == "in":
+			fifo.append([int(mv.quantity or 0), float(mv.unit_cost or 0.0)])  # type: ignore[list-item]
+			continue
+
+		need = int(mv.quantity or 0)
+		if need <= 0:
+			continue
+
+		def consume(amount: int, price: float, is_target: bool):
+			nonlocal cost_acc
+			if is_target:
+				cost_acc += amount * price
+
+		is_target_out = (mv.related_order_id == target_order_id)
+		while need > 0 and fifo:
+			batch_qty, batch_cost = fifo[0]
+			take = min(batch_qty, need)
+			consume(take, batch_cost, is_target_out)
+			batch_qty -= take
+			need -= take
+			if batch_qty == 0:
+				fifo.pop(0)
+			else:
+				fifo[0][0] = batch_qty  # type: ignore[index]
+
+		if need > 0:
+			# Negative inventory; allocate remainder at fallback cost for target order only
+			consume(need, fallback_cost, is_target_out)
+
+	return round(cost_acc, 2)
+
+
 def calculate_order_cost_fifo(session: Session, order_id: int) -> float:
-    """Calculate order total cost using FIFO method.
-    
-    For each item sold, match it to the oldest available purchase batch
-    based on StockMovement.unit_cost from when inventory was purchased.
-    """
-    from sqlalchemy import and_
-    
-    order = session.exec(_select(Order).where(Order.id == order_id)).first()
-    if not order:
-        return 0.0
-    
-    order_items = session.exec(_select(OrderItem).where(OrderItem.order_id == order_id)).all()
-    if not order_items:
-        return 0.0
-    
-    total_cost = 0.0
-    
-    for oi in order_items:
-        item_id = oi.item_id
-        qty_needed = oi.quantity
-        
-        # Get all "in" movements (purchases) for this item, ordered by date (FIFO)
-        # These contain the purchase costs from when inventory was bought
-        purchases = session.exec(
-            _select(StockMovement)
-            .where(
-                and_(
-                    StockMovement.item_id == item_id,
-                    StockMovement.direction == "in",
-                    StockMovement.unit_cost.is_not(None)
-                )
-            )
-            .order_by(StockMovement.created_at.asc())
-        ).all()
-        
-        # Track remaining quantity to allocate
-        remaining_qty = qty_needed
-        
-        for purchase in purchases:
-            if remaining_qty <= 0:
-                break
-            
-            # How much is available from this purchase batch?
-            # For simplicity, we'll use the full quantity
-            # In a more sophisticated system, you'd track how much was already sold
-            available = purchase.quantity
-            cost_per_unit = purchase.unit_cost or 0.0
-            
-            # Allocate from this batch
-            allocate = min(remaining_qty, available)
-            total_cost += allocate * cost_per_unit
-            remaining_qty -= allocate
-        
-        # If we still need more but ran out of purchase batches, 
-        # fall back to Item.cost as last resort
-        if remaining_qty > 0:
-            item = session.exec(_select(Item).where(Item.id == item_id)).first()
-            if item and item.cost:
-                total_cost += remaining_qty * item.cost
-    
-    return round(total_cost, 2)
+	"""Calculate order total cost using FIFO with global movement consumption.
+
+	- Uses StockMovement chronology (created_at, id) to ensure each purchase batch is consumed once.
+	- If inventory deficit occurs, falls back to Item.cost for the remaining units of the target order.
+	- Status handling: refunded/switched/stitched/cancelled => cost 0; negative totals => 0.
+	"""
+	order = session.exec(_select(Order).where(Order.id == order_id)).first()
+	if not order:
+		return 0.0
+
+	status_lc = str(order.status or "").lower()
+	if status_lc in ("refunded", "switched", "stitched", "cancelled"):
+		return 0.0
+	if float(order.total_amount or 0.0) < 0.0:
+		return 0.0
+
+	order_items = session.exec(_select(OrderItem).where(OrderItem.order_id == order_id)).all()
+
+	# Single-item fallback if no OrderItem rows
+	if not order_items:
+		if order.item_id and order.quantity:
+			return _fifo_cost_for_item(session, item_id=int(order.item_id), target_order_id=order_id)
+		return 0.0
+
+	total_cost = 0.0
+	for oi in order_items:
+		if not oi.item_id:
+			continue
+		total_cost += _fifo_cost_for_item(session, item_id=int(oi.item_id), target_order_id=order_id)
+
+	return round(total_cost, 2)
 
 
-def adjust_stock(session: Session, *, item_id: int, delta: int, related_order_id: Optional[int] = None, reason: Optional[str] = None, unit_cost: Optional[float] = None) -> None:
+def adjust_stock(
+	session: Session,
+	*,
+	item_id: int,
+	delta: int,
+	related_order_id: Optional[int] = None,
+	reason: Optional[str] = None,
+	unit_cost: Optional[float] = None,
+	supplier_id: Optional[int] = None,
+) -> None:
     """Record a stock movement for the given item.
 
     Positive delta => direction "in"; Negative delta => direction "out".
@@ -168,7 +201,8 @@ def adjust_stock(session: Session, *, item_id: int, delta: int, related_order_id
         quantity=qty,
         related_order_id=related_order_id,
         reason=reason,
-        unit_cost=unit_cost if direction == "in" else None
+		unit_cost=unit_cost if direction == "in" else None,
+		supplier_id=supplier_id if direction == "in" else None,
     )
     session.add(mv)
 

@@ -9,7 +9,7 @@ import os
 from ..db import get_session
 from ..models import Order, Payment, Item, Client, ImportRun, StockMovement, OrderItem, Cost, Account, Income
 from ..services.shipping import compute_shipping_fee
-from ..services.inventory import get_stock_map
+from ..services.inventory import get_stock_map, calculate_order_cost_fifo
 from ..services.cache import cached_json
 from ..services.finance import get_account_balances, detect_payment_leaks, get_effective_total
 
@@ -83,30 +83,17 @@ def daily_report(
 				effective_map[int(o.id)] = get_effective_total(o)
 		total_sales = sum(float(effective_map.get(o.id or 0, o.total_amount or 0.0)) for o in orders)
 
-		# Prefetch items for name display (Order.item_id) and also prefetch OrderItems for cost fallback
+		# Prefetch items for name display (Order.item_id)
 		item_ids = sorted({o.item_id for o in orders if o.item_id})
 		items = session.exec(select(Item).where(Item.id.in_(item_ids))).all() if item_ids else []
 		item_map = {it.id: it for it in items if it.id is not None}
-		order_ids = [o.id for o in orders if o.id]
-		order_items = session.exec(select(OrderItem).where(OrderItem.order_id.in_(order_ids))).all() if order_ids else []
-		# Build order -> list of (item_id, qty) and collect all item ids for cost lookup
-		order_item_map: dict[int, list[tuple[int, int]]] = {}
-		all_oi_item_ids: set[int] = set()
-		for oi in order_items:
-			if oi.order_id is None or oi.item_id is None:
-				continue
-			order_item_map.setdefault(int(oi.order_id), []).append((int(oi.item_id), int(oi.quantity or 0)))
-			all_oi_item_ids.add(int(oi.item_id))
-		# Prefetch costs for all items appearing in order items
-		cost_items = session.exec(select(Item).where(Item.id.in_(sorted(all_oi_item_ids)))).all() if all_oi_item_ids else []
-		cost_map: dict[int, float] = {it.id: float(it.cost or 0.0) for it in cost_items if it.id is not None}
 
 		# Prefetch clients for top clients section
 		client_ids = sorted({o.client_id for o in orders if o.client_id})
 		clients = session.exec(select(Client).where(Client.id.in_(client_ids))).all() if client_ids else []
 		client_map = {c.id: c for c in clients if c.id is not None}
 
-		# Compute order costs (prefer stored per-order total_cost; otherwise sum over OrderItems * item.cost)
+		# Compute order costs (prefer stored per-order total_cost; otherwise FIFO from stock movements)
 		order_costs = 0.0
 		for o in orders:
 			# For refunded/switch/stitched or negative totals, treat product cost as zero for reporting
@@ -116,14 +103,11 @@ def daily_report(
 			if o.total_cost is not None:
 				order_costs += float(o.total_cost or 0.0)
 			else:
-				acc = 0.0
-				if o.id and (o.id in order_item_map):
-					for (iid, qty) in order_item_map.get(o.id, []):
-						acc += float(cost_map.get(iid, 0.0)) * int(qty or 0)
-				elif o.item_id and (o.item_id in item_map):
-					# fallback to single-item orders if present
-					acc = float(item_map[o.item_id].cost or 0.0) * int(o.quantity or 0)
-				order_costs += acc
+				if o.id:
+					try:
+						order_costs += float(calculate_order_cost_fifo(session, int(o.id)))
+					except Exception:
+						order_costs += 0.0
 
 		# Calculate operational costs from Cost table within the period, grouped by type
 		# Exclude payments to suppliers, MERTER MAL ALIM (type_id=9) costs, and soft-deleted costs

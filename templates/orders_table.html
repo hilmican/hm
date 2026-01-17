@@ -216,6 +216,7 @@
             <button class="btn" onclick="presetHighCost70()">Maliyet ≥ %70</button>
             <button class="btn" onclick="presetAll()">Tüm siparişler</button>
             <button class="btn" onclick="exportExcel()">Excel'e aktar</button>
+            <button class="btn primary" type="button" onclick="recalcCosts()">Maliyetleri (FIFO) güncelle</button>
             <a class="btn" href="/orders/duplicates">Potansiyel Çiftler</a>
             <a class="btn" href="/orders/partial-payments">Kısmi Ödemeler</a>
             <a class="btn" href="/orders/problem">Sorunlu Siparişler</a>
@@ -478,6 +479,10 @@ filtersForm?.addEventListener('submit', ()=>{
             }
             location.reload();
         }catch(e){ alert('Ag hatasi: ' + e); }
+    }
+
+    async function recalcCosts(){
+        return recalc();
     }
 
     async function refund(id){
