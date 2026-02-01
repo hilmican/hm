@@ -3,6 +3,7 @@ from sqlmodel import select
 from sqlalchemy import or_, and_, not_, func
 import datetime as dt
 import math
+import json
 from typing import Optional
 from collections import defaultdict
 
@@ -10,6 +11,7 @@ from ..db import get_session
 from ..models import (
     Order,
     Payment,
+    PaymentHistoryLog,
     OrderItem,
     Item,
     Client,
@@ -24,7 +26,7 @@ from ..models import (
 from ..services.inventory import get_or_create_item as _get_or_create_item
 from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
-from ..services.finance import get_effective_total
+from ..services.finance import get_effective_total, ensure_iban_income
 from fastapi.responses import StreamingResponse, RedirectResponse
 from urllib.parse import quote
 import io
@@ -35,6 +37,38 @@ except Exception:
 
 router = APIRouter()
 
+
+def _payment_to_dict(p: Payment) -> dict:
+    return {
+        "id": p.id,
+        "client_id": p.client_id,
+        "order_id": p.order_id,
+        "amount": p.amount,
+        "payment_date": p.payment_date.isoformat() if p.payment_date else None,
+        "date": p.date.isoformat() if p.date else None,
+        "method": p.method,
+        "reference": p.reference,
+        "fee_komisyon": p.fee_komisyon,
+        "fee_hizmet": p.fee_hizmet,
+        "fee_kargo": p.fee_kargo,
+        "fee_iade": p.fee_iade,
+        "fee_erken_odeme": p.fee_erken_odeme,
+        "net_amount": p.net_amount,
+    }
+
+
+def _log_payment_change(session, payment_id: int, action: str, old_data=None, new_data=None):
+    try:
+        session.add(
+            PaymentHistoryLog(
+                payment_id=payment_id,
+                action=action,
+                old_data_json=json.dumps(old_data) if old_data else None,
+                new_data_json=json.dumps(new_data) if new_data else None,
+            )
+        )
+    except Exception:
+        pass
 
 @router.get("")
 @router.get("/")
@@ -392,7 +426,9 @@ def list_orders_table(
 
 
 @router.post("/recalc-financials")
-def recalc_financials():
+def recalc_financials(confirm: bool = Query(default=False, description="Set true to run, ensures manual confirmation")):
+    if not confirm:
+        raise HTTPException(status_code=400, detail="confirm=true is required before running recalc-financials")
     with get_session() as session:
         from sqlmodel import select as _select
         rows = session.exec(select(Order)).all()
@@ -427,7 +463,9 @@ def recalc_financials():
 
 
 @router.post("/recalc-costs")
-def recalc_costs():
+def recalc_costs(confirm: bool = Query(default=False, description="Set true to run, ensures manual confirmation")):
+    if not confirm:
+        raise HTTPException(status_code=400, detail="confirm=true is required before running recalc-costs")
     with get_session() as session:
         rows = session.exec(select(Order)).all()
         from ..services.inventory import calculate_order_cost_fifo
@@ -1217,6 +1255,7 @@ def update_total(order_id: int, body: dict):
                     if existing_payments:
                         # Update existing payment (use the first one if multiple)
                         payment = existing_payments[0]
+                        old_snap = _payment_to_dict(payment)
                         prev_amount = payment.amount
                         prev_date = payment.payment_date or payment.date
                         payment.amount = new_total_rounded
@@ -1224,12 +1263,15 @@ def update_total(order_id: int, body: dict):
                         payment.date = effective_payment_date  # Update legacy field too
                         payment.net_amount = new_total_rounded  # Simple: net = amount (no fees)
                         session.add(payment)
+                        _log_payment_change(session, payment.id or 0, "update", old_snap, _payment_to_dict(payment))
                         changes["payment"] = [f"updated: {prev_amount} -> {new_total_rounded}, {prev_date} -> {effective_payment_date}"]
                         
                         # Delete other payment records if there are multiple
                         if len(existing_payments) > 1:
                             for extra_payment in existing_payments[1:]:
+                                old_extra = _payment_to_dict(extra_payment)
                                 session.delete(extra_payment)
+                                _log_payment_change(session, extra_payment.id or 0, "delete", old_extra, None)
                             changes["payment"] = changes.get("payment", "") + f", deleted {len(existing_payments)-1} duplicate(s)"
                     else:
                         # Create new payment record
@@ -1244,13 +1286,17 @@ def update_total(order_id: int, body: dict):
                                 method=None,  # Can be set later if needed
                             )
                             session.add(payment)
+                            session.flush()
+                            _log_payment_change(session, payment.id or 0, "create", None, _payment_to_dict(payment))
                             changes["payment"] = [f"created: {new_total_rounded} on {effective_payment_date}"]
                 
                 elif payment_status == "unpaid":
                     # Delete all payment records for this order
                     if existing_payments:
                         for payment in existing_payments:
+                            old_snap = _payment_to_dict(payment)
                             session.delete(payment)
+                            _log_payment_change(session, payment.id or 0, "delete", old_snap, None)
                         changes["payment"] = [f"deleted {len(existing_payments)} payment record(s)"]
                 
                 # For other statuses (partial_paid, etc.), keep existing payments as-is
@@ -1279,6 +1325,12 @@ def update_total(order_id: int, body: dict):
         except Exception as e:
             # Log error but don't fail the request
             changes["payment_error"] = [str(e)]
+            pass
+        # Ensure IBAN payments are reflected in Garanti account
+        try:
+            if bool(o.paid_by_bank_transfer):
+                ensure_iban_income(session, o, float(o.total_amount or new_total_rounded or 0.0))
+        except Exception:
             pass
         # Recompute shipping_fee pre-tax based on flag, company, and new total
         try:
@@ -1634,6 +1686,9 @@ async def edit_order_apply(order_id: int, request: Request):
             if new_total != "":
                 tv = round(float(new_total.replace(",", ".")), 2)
                 if tv != float(o.total_amount or 0.0):
+                    status_lc = (o.status or "").lower()
+                    if tv == 0.0 and status_lc not in ("refunded", "switched", "stitched", "cancelled"):
+                        raise HTTPException(status_code=400, detail="total_amount=0 only allowed for refunded/switched/stitched/cancelled")
                     prev_total_val = float(o.total_amount or 0.0)
                     changes["total_amount"] = [o.total_amount, tv]
                     if o.tanzim_original_total is None:

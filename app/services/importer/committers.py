@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Tuple, Optional, List
 import datetime as dt
+import json
 
 from sqlmodel import select
 from sqlalchemy import func
 
-from ...models import Client, Order, Payment, Item, Product, StockMovement, OrderItem
+from ...models import Client, Order, Payment, PaymentHistoryLog, Item, Product, StockMovement, OrderItem
 from ...utils.normalize import client_unique_key, client_name_key, normalize_key
 from ...utils.slugify import slugify
 from ..matching import (
@@ -17,6 +18,7 @@ from ..matching import find_recent_placeholder_kargo_for_client
 from ..mapping import resolve_mapping, find_or_create_variant
 from ..inventory import adjust_stock
 from ..shipping import compute_shipping_fee
+from ..finance import ensure_iban_income
 
 
 def _normalize_shipping_company(val: Optional[str]) -> str:
@@ -36,6 +38,20 @@ def _normalize_shipping_company(val: Optional[str]) -> str:
 		return "surat"
 	except Exception:
 		return "surat"
+
+
+def _log_payment(session, payment_id: int, action: str, old=None, new=None):
+	try:
+		session.add(
+			PaymentHistoryLog(
+				payment_id=payment_id,
+				action=action,
+				old_data_json=json.dumps(old) if old else None,
+				new_data_json=json.dumps(new) if new else None,
+			)
+		)
+	except Exception:
+		pass
 
 
 def _maybe_rehome_payment(
@@ -408,8 +424,21 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 net_amount=net,
             )
             session.add(pmt)
+            session.flush()
+            _log_payment(session, pmt.id or 0, "create", None, {
+                "amount": amt,
+                "method": pmt.method,
+                "payment_date": pmt.payment_date.isoformat() if pmt.payment_date else None,
+                "reference": pmt.reference,
+            })
             run.created_payments += 1
         else:
+            old_snap = {
+                "amount": existing.amount,
+                "method": existing.method,
+                "payment_date": (existing.payment_date or existing.date).isoformat() if (existing.payment_date or existing.date) else None,
+                "reference": existing.reference,
+            }
             if amt > float(existing.amount or 0.0):
                 existing.amount = amt
                 existing.method = rec.get("payment_method") or existing.method
@@ -420,9 +449,20 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 existing.fee_iade = fee_iad
                 existing.fee_erken_odeme = fee_eok
                 existing.net_amount = net
+                _log_payment(session, existing.id or 0, "update", old_snap, {
+                    "amount": existing.amount,
+                    "method": existing.method,
+                    "payment_date": (existing.payment_date or existing.date).isoformat() if (existing.payment_date or existing.date) else None,
+                    "reference": existing.reference,
+                })
         # After creating/updating payment, auto-mark paid if fully covered
         try:
             _maybe_mark_order_paid(session, order)
+        except Exception:
+            pass
+        try:
+            if bool(getattr(order, "paid_by_bank_transfer", False)):
+                ensure_iban_income(session, order, float(order.total_amount or amt or 0.0))
         except Exception:
             pass
     return status, message, matched_client_id, matched_order_id

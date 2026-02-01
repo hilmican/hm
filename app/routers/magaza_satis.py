@@ -3,14 +3,30 @@ from sqlmodel import select
 from sqlalchemy import or_, and_
 import datetime as dt
 from typing import Optional, List, Dict, Any
+import json
 
 from ..db import get_session
-from ..models import Client, Item, Order, OrderItem, Payment, Product, SystemSetting, Income
+from ..models import Client, Item, Order, OrderItem, Payment, PaymentHistoryLog, Product, SystemSetting, Income
 from ..services.inventory import adjust_stock, get_stock_map
+from ..services.finance import ensure_iban_income
 from ..utils.normalize import normalize_phone, client_unique_key
 
 
 router = APIRouter(prefix="/magaza-satis", tags=["magaza-satis"])
+
+
+def _log_payment(session, payment_id: int, action: str, old=None, new=None):
+	try:
+		session.add(
+			PaymentHistoryLog(
+				payment_id=payment_id,
+				action=action,
+				old_data_json=json.dumps(old) if old else None,
+				new_data_json=json.dumps(new) if new else None,
+			)
+		)
+	except Exception:
+		pass
 
 
 def _serialize_client(c: Client) -> Dict[str, Any]:
@@ -296,29 +312,43 @@ def checkout(payload: dict = Body(...)):
 			net_amount=total_amount,
 		)
 		session.add(payment)
+		session.flush()
+		_log_payment(session, payment.id or 0, "create", None, {
+			"amount": total_amount,
+			"method": payment.method,
+			"payment_date": payment.payment_date.isoformat() if payment.payment_date else None,
+		})
 
 		# Optional: create income entry mapped to configured account
 		try:
 			if payment_method == "cash":
 				acc_id = _parse_int_setting("pos_income_cash_account_id")
 				src = "pos_cash_magaza"
+				if acc_id > 0:
+					income = Income(
+						account_id=acc_id,
+						amount=total_amount,
+						date=dt.date.today(),
+						source=src,
+						reference=f"POS order {order.id}",
+						notes=notes,
+					)
+					session.add(income)
 			else:
-				acc_id = _parse_int_setting("pos_income_bank_account_id")
-				src = "pos_bank_magaza"
-			if acc_id > 0:
-				income = Income(
-					account_id=acc_id,
-					amount=total_amount,
-					date=dt.date.today(),
-					source=src,
-					reference=f"POS order {order.id}",
-					notes=notes,
-				)
-				session.add(income)
-				try:
-					print(f"[magaza_satis] income_created order={order.id} payment={payment_method} account={acc_id} amount={total_amount}")
-				except Exception:
-					pass
+				# IBAN -> Garanti bank income
+				acc_id = ensure_iban_income(session, order, float(total_amount))
+				if not acc_id:
+					acc_id = _parse_int_setting("pos_income_bank_account_id")
+					if acc_id > 0:
+						income = Income(
+							account_id=acc_id,
+							amount=total_amount,
+							date=dt.date.today(),
+							source="pos_bank_magaza",
+							reference=f"POS order {order.id}",
+							notes=notes,
+						)
+						session.add(income)
 		except Exception as e:
 			# Fail-safe: do not block order creation
 			try:

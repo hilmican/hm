@@ -1,11 +1,22 @@
 from typing import Dict, List, Optional, Tuple
 import datetime as dt
+import json
+import os
 from collections import defaultdict
 
 from sqlmodel import Session, select, func
 from sqlalchemy import case, text
 
-from ..models import Account, Income, Cost, OrderPayment, Order, Payment
+from ..models import (
+	Account,
+	Income,
+	IncomeHistoryLog,
+	Cost,
+	OrderPayment,
+	Order,
+	Payment,
+	SystemSetting,
+)
 
 
 def calculate_account_balance(session: Session, account_id: int) -> float:
@@ -44,6 +55,134 @@ def get_account_balances(session: Session) -> Dict[int, float]:
 	"""Get current balances for all active accounts."""
 	accounts = session.exec(select(Account).where(Account.is_active == True)).all()
 	return {acc.id: calculate_account_balance(session, acc.id) for acc in accounts if acc.id is not None}
+
+
+def _find_or_create_garanti_account(session: Session) -> Optional[Account]:
+	"""
+	Locate Garanti bank account using, in order:
+	1) Env GARANTI_ACCOUNT_ID
+	2) SystemSetting key 'garanti_account_id'
+	3) Name ilike '%garanti%' (active)
+	4) Create fallback account 'Garanti Bankası'
+	"""
+	def _get_by_id(val) -> Optional[Account]:
+		try:
+			vid = int(str(val)) if val is not None else None
+		except Exception:
+			vid = None
+		if vid:
+			acc = session.get(Account, vid)
+			if acc and acc.is_active:
+				return acc
+		return None
+
+	# 1) Env
+	env_id = os.getenv("GARANTI_ACCOUNT_ID")
+	if env_id:
+		if acc := _get_by_id(env_id):
+			return acc
+
+	# 2) SystemSetting
+	try:
+		ss = session.exec(select(SystemSetting).where(SystemSetting.key == "garanti_account_id")).first()
+		if ss and ss.value:
+			if acc := _get_by_id(ss.value):
+				return acc
+	except Exception:
+		pass
+
+	# 3) Name match
+	acc = session.exec(
+		select(Account)
+		.where(func.lower(Account.name).like("%garanti%"))
+		.where(Account.is_active == True)
+		.order_by(Account.id.desc())
+	).first()
+	if acc:
+		return acc
+
+	# 4) Create fallback
+	acc = Account(
+		name="Garanti Bankası",
+		type="bank",
+		iban=None,
+		initial_balance=0.0,
+		is_active=True,
+	)
+	session.add(acc)
+	session.flush()
+	return acc
+
+
+def ensure_iban_income(session: Session, order: Order, amount: float) -> Optional[int]:
+	"""
+	Ensure IBAN payments reflect as Income on Garanti account.
+	- Creates/updates Income with reference 'IBAN order {order_id}'
+	- Logs via IncomeHistoryLog
+	"""
+	if not order or not order.id or amount is None or float(amount) <= 0:
+		return None
+	acc = _find_or_create_garanti_account(session)
+	if not acc or not acc.id:
+		return None
+	ref = f"IBAN order {order.id}"
+	existing = session.exec(
+		select(Income).where(Income.reference == ref).where(Income.deleted_at.is_(None))
+	).first()
+	when = order.payment_date or order.data_date or dt.date.today()
+	if existing:
+		old = {
+			"id": existing.id,
+			"account_id": existing.account_id,
+			"amount": existing.amount,
+			"date": existing.date.isoformat() if existing.date else None,
+			"source": existing.source,
+			"reference": existing.reference,
+			"notes": existing.notes,
+		}
+		existing.account_id = acc.id
+		existing.amount = float(amount)
+		existing.date = when
+		existing.source = existing.source or "iban_customer"
+		session.add(
+			IncomeHistoryLog(
+				income_id=existing.id,
+				action="update",
+				old_data_json=json.dumps(old),
+				new_data_json=json.dumps(old | {"account_id": acc.id, "amount": float(amount), "date": when.isoformat()}),
+			)
+		)
+		return acc.id
+	inc = Income(
+		account_id=acc.id,
+		amount=float(amount),
+		date=when,
+		source="iban_customer",
+		reference=ref,
+		notes=order.notes,
+	)
+	session.add(inc)
+	session.flush()
+	if inc.id:
+		session.add(
+			IncomeHistoryLog(
+				income_id=inc.id,
+				action="create",
+				old_data_json=None,
+				new_data_json=json.dumps(
+					{
+						"id": inc.id,
+						"account_id": inc.account_id,
+						"amount": inc.amount,
+						"date": inc.date.isoformat() if inc.date else None,
+						"source": inc.source,
+						"reference": inc.reference,
+						"notes": inc.notes,
+					}
+				),
+			)
+		)
+	return acc.id
 
 
 def get_unpaid_orders(session: Session, start_date: Optional[dt.date] = None, end_date: Optional[dt.date] = None) -> List[Order]:
