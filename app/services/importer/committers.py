@@ -179,9 +179,14 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
     if order:
         matched_order_id = order.id
         matched_client_id = order.client_id
-        # enrich order if missing data
-        if rec.get("total_amount") and not order.total_amount:
-            order.total_amount = rec.get("total_amount")
+        # enrich order if missing data (do not overwrite existing non-null values)
+        derived_total = rec.get("total_amount")
+        if derived_total is None and (rec.get("payment_amount") or 0.0) > 0:
+            derived_total = float(rec.get("payment_amount") or 0.0)
+        if derived_total and not order.total_amount:
+            order.total_amount = derived_total
+        if rec.get("unit_price") and not order.unit_price and (order.quantity or 1):
+            order.unit_price = rec.get("unit_price")
         if rec.get("shipment_date") and not order.shipment_date:
             order.shipment_date = rec.get("shipment_date")
         if rec.get("delivery_date") and not getattr(order, "delivery_date", None):
@@ -297,21 +302,32 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 cur = order.notes or None
                 order.notes = f"{cur} | {rec.get('notes')}" if cur else rec.get("notes")
         else:
+            # derive amount/unit_price when only payment is present (common when payment Excel arrives before bizim)
+            derived_total = rec.get("total_amount")
+            if derived_total is None and (rec.get("payment_amount") or 0.0) > 0:
+                derived_total = float(rec.get("payment_amount") or 0.0)
+            qty_val = rec.get("quantity") or 1
+            derived_unit_price = rec.get("unit_price")
+            if derived_unit_price is None and derived_total is not None and qty_val:
+                try:
+                    derived_unit_price = round(float(derived_total) / float(qty_val), 2)
+                except Exception:
+                    derived_unit_price = None
             # create placeholder kargo order
             order_notes = rec.get("notes") or None
             if rec.get("alici_kodu"):
                 order_notes = f"{order_notes} | AliciKodu:{rec.get('alici_kodu')}" if order_notes else f"AliciKodu:{rec.get('alici_kodu')}"
             company_code = _normalize_shipping_company(rec.get("shipping_company"))
             shipping_fee = None
-            if rec.get("total_amount") is not None:
-                shipping_fee = compute_shipping_fee(float(rec.get("total_amount") or 0.0), company_code=company_code, paid_by_bank_transfer=bool(rec.get("paid_by_bank_transfer")))
+            if derived_total is not None:
+                shipping_fee = compute_shipping_fee(float(derived_total or 0.0), company_code=company_code, paid_by_bank_transfer=bool(rec.get("paid_by_bank_transfer")))
             order = Order(
                 tracking_no=rec.get("tracking_no"),
                 client_id=client.id,  # type: ignore
                 item_id=None,
                 quantity=rec.get("quantity") or 1,
-                unit_price=rec.get("unit_price"),
-                total_amount=rec.get("total_amount"),
+                unit_price=derived_unit_price,
+                total_amount=derived_total,
                 shipping_company=company_code,
                 shipping_fee=shipping_fee,
                 shipment_date=rec.get("shipment_date"),  # kargo tarihi from Excel row
@@ -567,8 +583,13 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
 
         # merge/create order
         existing_order = None
+        tracking_no = rec.get("tracking_no")
+        if tracking_no:
+            tracking_match = find_order_by_tracking(session, tracking_no)
+            if tracking_match and (((tracking_match.source or "").lower() == "kargo") or ((tracking_match.status or "").lower() == "placeholder")):
+                existing_order = tracking_match
         date_hint = rec.get("shipment_date") or run.data_date
-        if date_hint:
+        if date_hint and not existing_order:
             existing_order = find_order_by_client_and_date(session, client.id, date_hint)
 
         # Note: order-level idempotency checks are applied later once chosen_item_id is known
