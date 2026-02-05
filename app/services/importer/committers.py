@@ -477,6 +477,17 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
         except Exception:
             pass
         try:
+            # If order total is missing, backfill from payment amount (common when payment Excel arrives first)
+            if (order.total_amount is None) or (float(order.total_amount or 0.0) == 0.0 and amt > 0):
+                order.total_amount = amt
+                if (order.quantity or 0) > 0 and not order.unit_price:
+                    try:
+                        order.unit_price = round(float(order.total_amount) / float(order.quantity), 2)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        try:
             if bool(getattr(order, "paid_by_bank_transfer", False)):
                 ensure_iban_income(session, order, float(order.total_amount or amt or 0.0))
         except Exception:

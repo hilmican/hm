@@ -24,7 +24,12 @@
         th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; white-space: nowrap; }
         th { background: #fafafa; position: sticky; top: 0; }
         th.item, td.item { white-space: normal; max-width: 340px; }
-        th.item { width: 40%; }
+        th.item { width: 30%; }
+        .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 999px; background: #eef2ff; color: #1d4ed8; border: 1px solid #dbeafe; font-size: 12px; margin: 2px 0; }
+        .chip.small { padding: 2px 6px; }
+        .chip.source-bizim { background: #ecfdf3; color: #15803d; border-color: #bbf7d0; }
+        .chip.source-kargo { background: #eff6ff; color: #1d4ed8; border-color: #dbeafe; }
+        .chip.source-returns { background: #fff7ed; color: #9a3412; border-color: #fed7aa; }
         a { color: var(--primary); text-decoration: none; }
         tr.paid { background: var(--success-bg); }
         tr.unpaid { background: var(--warn-bg); }
@@ -79,7 +84,7 @@
     </div>
     <table>
         <thead>
-            <tr><th>ID</th><th>Tracking</th><th class="item">Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Status</th><th>Source</th></tr>
+            <tr><th>ID</th><th>Tracking</th><th class="item">Item</th><th>Qty</th><th>Total</th><th>Ship Date</th><th>Status</th><th>Source</th><th>Excel Kaynağı</th></tr>
         </thead>
         <tbody>
             {% for o in orders %}
@@ -108,6 +113,18 @@
                     </div>
                 </td>
                 <td>{{ o.source }}</td>
+                <td>
+                    {% set imports = order_imports.get(o.id) if order_imports else [] %}
+                    {% if imports %}
+                        {% for imp in imports %}
+                            <a class="chip small source-{{ imp.source|lower }}" href="/excel-tracker/download/{{ imp.run_id }}" title="İndir">
+                                {{ imp.source }} · {{ imp.filename }}
+                            </a>
+                        {% endfor %}
+                    {% else %}
+                        <span style="color:#9ca3af;">—</span>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>

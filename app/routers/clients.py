@@ -3,7 +3,7 @@ from sqlmodel import select
 from sqlalchemy import func
 
 from ..db import get_session
-from ..models import Client, Order, Item, Payment
+from ..models import Client, Order, Item, Payment, ImportRun, ImportRow
 from ..services.finance import get_effective_total
 
 router = APIRouter()
@@ -110,6 +110,29 @@ def client_detail(client_id: int, request: Request):
 				else:
 					status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
 
+		# Import provenance per order (which Excel/run created or touched it)
+		order_imports: dict[int, list[dict]] = {}
+		if order_ids:
+			rows_with_runs = session.exec(
+				select(ImportRow, ImportRun)
+				.join(ImportRun, ImportRun.id == ImportRow.import_run_id)
+				.where(ImportRow.matched_order_id.in_(order_ids))
+				.order_by(ImportRun.id.desc(), ImportRow.row_index)
+			).all()
+			for ir, run in rows_with_runs:
+				if ir.matched_order_id is None:
+					continue
+				oid = int(ir.matched_order_id)
+				order_imports.setdefault(oid, []).append(
+					{
+						"run_id": run.id,
+						"source": run.source,
+						"filename": run.filename,
+						"status": ir.status,
+						"row_index": ir.row_index,
+					}
+				)
+
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"client_detail.html",
@@ -119,5 +142,6 @@ def client_detail(client_id: int, request: Request):
 				"orders": orders,
 				"item_map": item_map,
 				"status_map": status_map,
+				"order_imports": order_imports,
 			},
 		)
