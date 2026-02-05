@@ -138,6 +138,75 @@ def _maybe_rehome_payment(
 			pass
 
 
+def _maybe_rehome_payment_cross_client_by_name(
+	session,
+	*,
+	target_order_id: Optional[int],
+	target_client_name: str | None,
+	amount: Optional[float],
+	date_hint,
+	tol_ratio: float = 0.02,
+	window_days: int = 14,
+) -> None:
+	"""
+	Move a payment sitting on placeholder/kargo orders of a *different* client,
+	when name matches (case-insensitive exact) and amount/dates align.
+
+	Use when kargo Excel has no phone (new client created) but Bizim Excel has phone.
+	"""
+	if not (target_order_id and target_client_name and amount and amount > 0):
+		return
+	from datetime import timedelta
+	name_norm = (target_client_name or "").strip().lower()
+	if not name_norm:
+		return
+	tol = max(5.0, tol_ratio * float(amount))
+	with session.no_autoflush:
+		from ...models import Order as _Order, Payment as _Payment, Client as _Client
+		orders = session.exec(
+			select(_Order, _Client)
+			.join(_Client, _Order.client_id == _Client.id)
+			.where(
+				_Order.id != target_order_id,
+				(_Order.status.in_(["placeholder", "merged"]) | (_Order.source == "kargo")),
+			)
+		).all()
+		best = None
+		for o, c in orders:
+			try:
+				if (c.name or "").strip().lower() != name_norm:
+					continue
+				pays = session.exec(select(_Payment).where(_Payment.order_id == o.id)).all()
+				for p in pays:
+					if abs(float(p.amount or 0.0) - float(amount)) > tol:
+						continue
+					if date_hint and p.date:
+						if abs((p.date - date_hint).days) > window_days:
+							continue
+					score = (
+						-abs(float(p.amount or 0.0) - float(amount)),
+						0 if not (date_hint and p.date) else -abs((p.date - date_hint).days),
+						-(p.id or 0),
+					)
+					if best is None or score > best[0]:
+						best = (score, p, o)
+			except Exception:
+				continue
+		if best:
+			_, pay, src_order = best
+			pay.order_id = target_order_id
+			try:
+				# if target has no tracking, adopt from source
+				target = session.get(_Order, target_order_id)
+				if target and (not target.tracking_no) and src_order.tracking_no:
+					target.tracking_no = src_order.tracking_no
+				if src_order and src_order.status == "placeholder":
+					src_order.status = "merged"
+					src_order.total_amount = 0.0
+			except Exception:
+				pass
+
+
 def _maybe_mark_order_paid(session, order: Optional[Order]) -> None:
 	"""
 	If total_amount is positive and collected payments cover it, mark as paid.
@@ -243,10 +312,7 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                     except Exception:
                         pass
 
-        # If still no client and there is a positive payment, avoid creating a new client/order; require manual match
-        if (client is None) and (rec.get("payment_amount") or 0.0) > 0:
-            return "unmatched", "payment row missing/ambiguous client; manual match needed", None, None
-
+        # Allow creating client even if phone is missing (kargo excel often lacks phone)
         if not client:
             client = Client(
                 name=rec.get("name") or "",
@@ -734,6 +800,14 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                     session,
                     client_id=matched_client_id,
                     target_order_id=matched_order_id,
+                    amount=float(rec.get("total_amount") or 0.0),
+                    date_hint=rec.get("shipment_date") or run.data_date,
+                )
+                # Cross-client rescue by name when kargo has no phone and created a different client
+                _maybe_rehome_payment_cross_client_by_name(
+                    session,
+                    target_order_id=matched_order_id,
+                    target_client_name=client.name,
                     amount=float(rec.get("total_amount") or 0.0),
                     date_hint=rec.get("shipment_date") or run.data_date,
                 )

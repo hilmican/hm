@@ -18,6 +18,7 @@ from ..utils.normalize import client_unique_key, legacy_client_unique_key, norma
 from ..utils.slugify import slugify
 from ..services.cache import bump_namespace
 from ..services.inventory import adjust_stock
+from ..services.shipping import compute_shipping_fee
 from fastapi.responses import HTMLResponse, FileResponse
 
 router = APIRouter(prefix="")
@@ -27,6 +28,74 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BIZIM_DIR = PROJECT_ROOT / "bizimexcellerimiz"
 KARGO_DIR = PROJECT_ROOT / "kargocununexcelleri"
 IADE_DIR = PROJECT_ROOT / "iadeler"
+
+
+def _enrich_duplicate_row(rec: dict, run: ImportRun, existing_ir: ImportRow | None, session, source: str) -> None:
+	"""
+	If a row is skipped as duplicate, try to hydrate missing payment/total/dates on the matched order.
+	Safe/idempotent: only fills empty fields or adds a payment when not already present.
+	"""
+	try:
+		order = None
+		if existing_ir and existing_ir.matched_order_id:
+			order = session.get(Order, existing_ir.matched_order_id)
+		if (order is None) and rec.get("tracking_no"):
+			order = session.exec(select(Order).where(Order.tracking_no == rec.get("tracking_no"))).first()
+		if order is None:
+			return
+
+		pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
+		amt = rec.get("payment_amount") or 0.0
+		if amt and amt > 0 and pdate:
+			existing_pay = session.exec(
+				select(Payment).where(
+					Payment.order_id == order.id,
+					Payment.amount == float(amt),
+					Payment.date == pdate,
+				)
+			).first()
+			if existing_pay is None:
+				fee_kom = rec.get("fee_komisyon") or 0.0
+				fee_hiz = rec.get("fee_hizmet") or 0.0
+				fee_iad = rec.get("fee_iade") or 0.0
+				fee_eok = rec.get("fee_erken_odeme") or 0.0
+				fee_kar = compute_shipping_fee(float(amt))
+				net = round(float(amt) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok]), 2)
+				pmt = Payment(
+					client_id=order.client_id,
+					order_id=order.id,
+					amount=float(amt),
+					date=pdate,
+					payment_date=pdate,
+					method=rec.get("payment_method") or (source if source in ("kargo", "bizim") else "import"),
+					reference=rec.get("tracking_no"),
+					fee_komisyon=fee_kom,
+					fee_hizmet=fee_hiz,
+					fee_kargo=fee_kar,
+					fee_iade=fee_iad,
+					fee_erken_odeme=fee_eok,
+					net_amount=net,
+				)
+				session.add(pmt)
+
+		if (order.total_amount is None) or (float(order.total_amount or 0.0) == 0.0):
+			if rec.get("total_amount") is not None:
+				order.total_amount = rec.get("total_amount")
+			elif amt and amt > 0:
+				order.total_amount = float(amt)
+
+		if (order.quantity or 0) and (not order.unit_price) and order.total_amount is not None:
+			try:
+				order.unit_price = round(float(order.total_amount) / float(order.quantity), 2)
+			except Exception:
+				pass
+
+		if rec.get("shipment_date") and not order.shipment_date:
+			order.shipment_date = rec.get("shipment_date")
+		if rec.get("delivery_date") and not getattr(order, "delivery_date", None):
+			order.delivery_date = rec.get("delivery_date")
+	except Exception:
+		return
 
 
 def _format_size(num: int) -> str:
@@ -586,6 +655,11 @@ def commit_import(body: dict, request: Request):
 					skip_due_to_duplicate = False
 					existing_ir = None
 				if skip_due_to_duplicate:
+					# even though we mark skipped, try to enrich the existing order with any new data/payments
+					try:
+						_enrich_duplicate_row(rec, run, existing_ir, session, source)
+					except Exception:
+						pass
 					ir = ImportRow(
 						import_run_id=run.id or 0,
 						row_index=idx,
