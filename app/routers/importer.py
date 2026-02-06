@@ -2,8 +2,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional
 import re
+import json
+import ast
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request, Query
 from sqlmodel import select
 
 from ..db import get_session, engine
@@ -678,6 +680,7 @@ def commit_import(body: dict, request: Request):
 				message = None
 				matched_client_id = None
 				matched_order_id = None
+				candidates: list = []
 
 				try:
 					# DEBUG: log each row minimal mapping state
@@ -695,55 +698,14 @@ def commit_import(body: dict, request: Request):
 							"delivery_date": rec.get("delivery_date"),
 						})
 					if source == "bizim":
-						new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
-						old_uq = legacy_client_unique_key(rec.get("name"), rec.get("phone"))
-						client = None
-						if new_uq:
-							client = session.exec(select(Client).where(Client.unique_key == new_uq)).first()
-						if not client and old_uq:
-							client = session.exec(select(Client).where(Client.unique_key == old_uq)).first()
-						if not client:
-							client = Client(
-								name=rec_name or "",
-								phone=rec.get("phone"),
-								address=rec.get("address"),
-								city=rec.get("city"),
-								unique_key=new_uq or None,
-							)
-							session.add(client)
-							session.flush()
-							run.created_clients += 1
-							# Bizim created client initially missing kargo
-							client.status = client.status or "missing-kargo"
-						else:
-							# migrate legacy key to new format if needed
-							if new_uq and client.unique_key != new_uq:
-								client.unique_key = new_uq
-							updated = False
-							for f in ("phone", "address", "city"):
-								val = rec.get(f)
-								if val:
-									setattr(client, f, val)
-									updated = True
-							if updated:
-								run.updated_clients += 1
-						matched_client_id = client.id
-
 						item_name_raw = rec.get("item_name") or "Genel Ürün"
 						base_name, height_cm, weight_kg, extra_notes = parse_item_details(item_name_raw)
-						# update client with parsed metrics if present
-						if height_cm is not None:
-							client.height_cm = client.height_cm or height_cm
-						if weight_kg is not None:
-							client.weight_kg = client.weight_kg or weight_kg
-						# pass base name explicitly for mapping; keep original for notes
 						rec["item_name_base"] = base_name
-						# Bizim branch: delegate mapping/stock to committer
-						status, message, matched_client_id, matched_order_id = process_bizim_row(session, run, rec)
+						status, message, matched_client_id, matched_order_id, candidates = process_bizim_row(session, run, rec)
 
 					# Kargo branch extracted into service function
 					elif source == "kargo":
-						status, message, matched_client_id, matched_order_id = process_kargo_row(session, run, rec)
+						status, message, matched_client_id, matched_order_id, candidates = process_kargo_row(session, run, rec)
 					elif source == "returns":
 						# resolve client (best-effort)
 						new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
@@ -870,6 +832,23 @@ def commit_import(body: dict, request: Request):
 				except Exception as e:
 					status = "error"
 					message = str(e)
+
+				if status == "ambiguous":
+					ir = ImportRow(
+						import_run_id=run.id or 0,
+						row_index=idx,
+						row_hash=row_hash,
+						mapped_json=str(rec),
+						status=status,  # type: ignore
+						message=message,
+						matched_client_id=None,
+						matched_order_id=None,
+						candidates_json=json.dumps(candidates or []),
+					)
+					session.add(ir)
+					run.unmatched_count += 1
+					rows_unmatched_cnt += 1
+					continue
 
 				ir = ImportRow(
 					import_run_id=run.id or 0,
@@ -1085,6 +1064,100 @@ def returns_review(filename: str, request: Request):
 		"returns_review.html",
 		{"request": request, "filename": filename, "rows": rows},
 	)
+
+
+@router.get("/ambiguous", response_class=HTMLResponse)
+def list_ambiguous(
+	request: Request,
+	search: str | None = Query(default=None),
+	source: str | None = Query(default=None),
+	limit: int = Query(default=200, ge=1, le=1000),
+):
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	with get_session() as session:
+		q = (
+			select(ImportRow, ImportRun)
+			.join(ImportRun, ImportRun.id == ImportRow.import_run_id)
+			.where(ImportRow.status == "ambiguous")
+			.order_by(ImportRow.id.desc())
+			.limit(limit)
+		)
+		if source in ("bizim", "kargo", "returns"):
+			q = q.where(ImportRun.source == source)
+		rows = session.exec(q).all()
+		items = []
+		for ir, run in rows:
+			try:
+				cands = json.loads(ir.candidates_json or "[]")
+			except Exception:
+				cands = []
+			if search:
+				slc = search.lower()
+				if slc not in (ir.mapped_json or "").lower() and slc not in (run.filename or "").lower():
+					continue
+			items.append(
+				{
+					"import_row": ir,
+					"run": run,
+					"candidates": cands,
+				}
+			)
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"import_ambiguous.html",
+			{"request": request, "rows": items, "search": search or "", "source": source or ""},
+		)
+
+
+@router.post("/ambiguous/resolve")
+def resolve_ambiguous(
+	import_row_id: int = Form(...),
+	client_id: int = Form(...),
+):
+	with get_session() as session:
+		ir = session.get(ImportRow, int(import_row_id))
+		if not ir:
+			raise HTTPException(status_code=404, detail="ImportRow not found")
+		run = session.get(ImportRun, ir.import_run_id)
+		if not run:
+			raise HTTPException(status_code=404, detail="ImportRun not found")
+		try:
+			rec = ast.literal_eval(ir.mapped_json)
+		except Exception:
+			raise HTTPException(status_code=400, detail="mapped_json parse failed")
+		if not isinstance(rec, dict):
+			raise HTTPException(status_code=400, detail="mapped_json is not a dict")
+		status = "error"
+		message = None
+		matched_client_id = None
+		matched_order_id = None
+		candidates = []
+		if run.source == "kargo":
+			status, message, matched_client_id, matched_order_id, candidates = process_kargo_row(
+				session, run, rec, force_client_id=int(client_id)
+			)
+		elif run.source == "bizim":
+			status, message, matched_client_id, matched_order_id, candidates = process_bizim_row(
+				session, run, rec, force_client_id=int(client_id)
+			)
+		else:
+			raise HTTPException(status_code=400, detail="Only bizim/kargo supported for resolution")
+		ir.status = status
+		ir.message = message
+		ir.matched_client_id = matched_client_id
+		ir.matched_order_id = matched_order_id
+		if status != "ambiguous":
+			ir.candidates_json = None
+		session.add(ir)
+		session.commit()
+		return {
+			"import_row_id": ir.id,
+			"status": ir.status,
+			"matched_client_id": matched_client_id,
+			"matched_order_id": matched_order_id,
+			"message": ir.message,
+		}
 
 
 @router.get("/result", response_class=HTMLResponse)

@@ -230,8 +230,8 @@ def _maybe_mark_order_paid(session, order: Optional[Order]) -> None:
 		order.status = "paid"
 
 
-def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[int], Optional[int]]:
-    """Process a single Kargo record. Returns (status, message, matched_client_id, matched_order_id).
+def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = None) -> Tuple[str, Optional[str], Optional[int], Optional[int], Optional[list]]:
+    """Process a single Kargo record. Returns (status, message, matched_client_id, matched_order_id, candidates).
 
     This function mutates the session (creating/updating Orders/Clients/Payments) and updates run counters.
     """
@@ -239,6 +239,7 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
     message = None
     matched_client_id = None
     matched_order_id = None
+    candidates: list = []
 
     # never treat kargo item_name as an item; push into notes if exists
     if rec.get("item_name"):
@@ -280,13 +281,50 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
         # resolve client by unique key (name + optional surname + phone)
         new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
         client = None
-        if new_uq:
+        if force_client_id:
+            client = session.get(Client, force_client_id)
+        if new_uq and client is None:
             client = session.exec(select(Client).where(Client.unique_key == new_uq)).first()
 
         # When phone is missing and strict match fails, fall back to name-only matching
         if (client is None) and (not rec.get("phone")):
             name_raw = (rec.get("name") or "").strip()
             if name_raw:
+                # Gather candidates by normalized name to decide ambiguity
+                try:
+                    norm = normalize_key(name_raw)
+                    cand_q = select(Client).where(Client.soft_deleted == False)
+                    if norm:
+                        all_clients = session.exec(cand_q).all()
+                        norm_matches = [c for c in all_clients if normalize_key(c.name) == norm]
+                        # Guard: if this run's date matches previous kargo runs and a client exists, avoid creating new
+                        if len(norm_matches) >= 1 and run.data_date:
+                            return "ambiguous", "existing client(s) same name on same-day import", None, None, [
+                                {
+                                    "id": c.id,
+                                    "name": c.name,
+                                    "phone": c.phone,
+                                    "city": c.city,
+                                }
+                                for c in norm_matches
+                                if c.id is not None
+                            ]
+                        if len(norm_matches) > 1:
+                            candidates = [
+                                {
+                                    "id": c.id,
+                                    "name": c.name,
+                                    "phone": c.phone,
+                                    "city": c.city,
+                                }
+                                for c in norm_matches if c.id is not None
+                            ]
+                            return "ambiguous", "multiple clients same name (kargo, no phone)", None, None, candidates
+                        elif len(norm_matches) == 1:
+                            client = norm_matches[0]
+                    # continue trying exact matches
+                except Exception:
+                    pass
                 # Try unique_key prefix match using normalized name key
                 try:
                     nkey = client_name_key(name_raw)
@@ -459,7 +497,7 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
         if rec.get("date") and not getattr(order, "return_or_switch_date", None):
             order.return_or_switch_date = rec.get("date")
         # For returns source, skip payment creation (no positive tahsilat expected)
-        return status, message, matched_client_id, matched_order_id
+        return status, message, matched_client_id, matched_order_id, candidates
 
     if (amt_raw or 0.0) > 0 and pdate_legacy is not None and order is not None:
         amt = float(amt_raw or 0.0)
@@ -562,22 +600,44 @@ def process_kargo_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                 ensure_iban_income(session, order, float(order.total_amount or amt or 0.0))
         except Exception:
             pass
-    return status, message, matched_client_id, matched_order_id
+    return status, message, matched_client_id, matched_order_id, candidates
 
 
-def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[int], Optional[int]]:
-    """Process a single Bizim record. Returns (status, message, matched_client_id, matched_order_id)."""
+def process_bizim_row(session, run, rec, *, force_client_id: Optional[int] = None) -> Tuple[str, Optional[str], Optional[int], Optional[int], Optional[list]]:
+    """Process a single Bizim record. Returns (status, message, matched_client_id, matched_order_id, candidates)."""
     try:
         status = "created"
         message = None
         matched_client_id: Optional[int] = None
         matched_order_id: Optional[int] = None
+        candidates: list = []
 
         # resolve or create client
         new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
         client = None
-        if new_uq:
+        if force_client_id:
+            client = session.get(Client, force_client_id)
+        if new_uq and client is None:
             client = session.exec(select(Client).where(Client.unique_key == new_uq)).first()
+        if (client is None) and (not rec.get("phone")):
+            name_raw = (rec.get("name") or "").strip()
+            if name_raw:
+                try:
+                    norm = normalize_key(name_raw)
+                    cand_q = select(Client).where(Client.soft_deleted == False)
+                    all_clients = session.exec(cand_q).all()
+                    norm_matches = [c for c in all_clients if normalize_key(c.name) == norm]
+                    if len(norm_matches) > 1:
+                        candidates = [
+                            {"id": c.id, "name": c.name, "phone": c.phone, "city": c.city}
+                            for c in norm_matches if c.id is not None
+                        ]
+                        return "ambiguous", "multiple clients same name (bizim, no phone)", None, None, candidates
+                    elif len(norm_matches) == 1:
+                        client = norm_matches[0]
+                except Exception:
+                    pass
+
         if not client:
             client = Client(
                 name=(rec.get("name") or ""),
@@ -744,7 +804,7 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
                             status = "skipped"
                             message = "duplicate bizim row (order exists)"
                             matched_order_id = dup.id
-                            return status, message, matched_client_id, matched_order_id
+                            return status, message, matched_client_id, matched_order_id, candidates
                 except Exception:
                     pass
                 order = Order(
@@ -832,6 +892,6 @@ def process_bizim_row(session, run, rec) -> Tuple[str, Optional[str], Optional[i
         print(f"[BIZIM ROW ERROR] {rec.get('name', 'unknown')}: {e}")
         import traceback
         traceback.print_exc()
-    return status, message, matched_client_id, matched_order_id
+    return status, message, matched_client_id, matched_order_id, candidates
 
 

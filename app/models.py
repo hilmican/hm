@@ -10,6 +10,7 @@ class Client(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     phone: Optional[str] = Field(default=None, index=True)
+    soft_deleted: bool = Field(default=False, index=True, description="If true, hide from UI/reports")
     email: Optional[str] = None
     tax_id: Optional[str] = None
     address: Optional[str] = None
@@ -293,10 +294,11 @@ class ImportRow(SQLModel, table=True):
     row_index: int
     row_hash: str = Field(index=True)
     mapped_json: str = Field(sa_column=Column(Text))
-    status: str = Field(index=True, description="created|updated|skipped|unmatched|error")
+    status: str = Field(index=True, description="created|updated|skipped|unmatched|ambiguous|error")
     message: Optional[str] = Field(default=None, sa_column=Column(Text))
     matched_client_id: Optional[int] = Field(default=None, foreign_key="client.id")
     matched_order_id: Optional[int] = Field(default=None, foreign_key="order.id")
+    candidates_json: Optional[str] = Field(default=None, sa_column=Column(Text), description="JSON list of candidate clients/orders for manual resolution")
 
 
 class ItemMappingRule(SQLModel, table=True):

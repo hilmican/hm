@@ -13,7 +13,7 @@ router = APIRouter()
 @router.get("/")
 def list_clients(limit: int = Query(default=100, ge=1, le=1000)):
 	with get_session() as session:
-		rows = session.exec(select(Client).order_by(Client.id.desc()).limit(limit)).all()
+		rows = session.exec(select(Client).where(Client.soft_deleted == False).order_by(Client.id.desc()).limit(limit)).all()
 		return {
 			"clients": [
 				{
@@ -32,7 +32,7 @@ def list_clients(limit: int = Query(default=100, ge=1, le=1000)):
 @router.get("/table")
 def list_clients_table(request: Request):
 	with get_session() as session:
-		rows = session.exec(select(Client).order_by(Client.id.desc())).all()
+		rows = session.exec(select(Client).where(Client.soft_deleted == False).order_by(Client.id.desc())).all()
 		# order counts per client
 		counts = session.exec(select(Order.client_id, func.count().label("cnt")).group_by(Order.client_id)).all()
 		order_counts = {cid: cnt for cid, cnt in counts}

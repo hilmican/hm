@@ -110,6 +110,23 @@ def init_db() -> None:
                             conn.exec_driver_sql("CREATE INDEX idx_client_merged_into ON client(merged_into_client_id)")
                         except Exception:
                             pass
+                    # soft_deleted flag
+                    row_sd = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'client' AND COLUMN_NAME = 'soft_deleted'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row_sd is None:
+                        try:
+                            conn.exec_driver_sql("ALTER TABLE client ADD COLUMN soft_deleted TINYINT(1) NOT NULL DEFAULT 0")
+                        except Exception:
+                            pass
+                        try:
+                            conn.exec_driver_sql("CREATE INDEX idx_client_soft_deleted ON client(soft_deleted)")
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 # Ensure raw_events table exists (MySQL)
@@ -152,6 +169,19 @@ def init_db() -> None:
                         maxlen = row[1]
                         if dtype in ("varchar", "char") or dtype == "text":
                             conn.exec_driver_sql("ALTER TABLE importrow MODIFY COLUMN mapped_json LONGTEXT")
+                except Exception:
+                    pass
+                # candidates_json for ambiguity tracking
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'importrow' AND COLUMN_NAME = 'candidates_json'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql("ALTER TABLE importrow ADD COLUMN candidates_json LONGTEXT NULL")
                 except Exception:
                     pass
                 try:

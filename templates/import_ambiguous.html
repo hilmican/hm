@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Ambiguous Imports</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background: #f7f7fb; }
+        table { width:100%; border-collapse: collapse; }
+        th, td { padding: 8px 10px; border-bottom: 1px solid #eee; text-align: left; font-size: 13px; vertical-align: top; }
+        th { background: #fafafa; position: sticky; top: 0; }
+        .card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin-bottom:16px; }
+        .btn { padding:6px 10px; border:1px solid #d1d5db; border-radius:8px; background:#fff; cursor:pointer; font-size:12px; }
+        .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+        .pill { display:inline-block; padding:3px 8px; border-radius:999px; background:#eef2ff; color:#1d4ed8; font-size:11px; margin-right:4px; }
+        textarea { width:100%; min-height:80px; font-family:monospace; font-size:12px; }
+        select, input { padding:6px 8px; border:1px solid #d1d5db; border-radius:8px; }
+        .cands { display:flex; flex-wrap:wrap; gap:6px; }
+        .cand { border:1px solid #e5e7eb; padding:6px 8px; border-radius:8px; background:#f9fafb; font-size:12px; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <h1>Ambiguous Imports</h1>
+    <div class="card">
+        <form method="get" action="/importer/ambiguous" style="display:flex; gap:8px; flex-wrap:wrap;">
+            <input type="text" name="search" placeholder="Search (name, filename)" value="{{ search or '' }}" />
+            <select name="source">
+                <option value="" {% if not source %}selected{% endif %}>All sources</option>
+                <option value="bizim" {% if source=='bizim' %}selected{% endif %}>bizim</option>
+                <option value="kargo" {% if source=='kargo' %}selected{% endif %}>kargo</option>
+            </select>
+            <button class="btn" type="submit">Filter</button>
+        </form>
+    </div>
+
+    <table>
+        <thead>
+            <tr><th>Row</th><th>Run</th><th>Mapped</th><th>Candidates</th><th>Resolve</th></tr>
+        </thead>
+        <tbody>
+            {% for item in rows %}
+            {% set ir = item.import_row %}
+            {% set run = item.run %}
+            <tr>
+                <td>
+                    <div>ID: {{ ir.id }}</div>
+                    <div>row: {{ ir.row_index }}</div>
+                    <div>status: {{ ir.status }}</div>
+                    <div style="color:#6b7280;">{{ ir.message }}</div>
+                </td>
+                <td>
+                    <div>run: {{ run.id }}</div>
+                    <div>source: {{ run.source }}</div>
+                    <div>file: {{ run.filename }}</div>
+                    <div>data_date: {{ run.data_date }}</div>
+                </td>
+                <td style="max-width:280px; white-space:pre-line; font-family:monospace; font-size:12px;">{{ ir.mapped_json }}</td>
+                <td style="max-width:220px;">
+                    <div class="cands">
+                        {% for c in item.candidates %}
+                            <div class="cand">
+                                <div>ID: {{ c.id }}</div>
+                                <div>{{ c.name }}</div>
+                                {% if c.phone %}<div>{{ c.phone }}</div>{% endif %}
+                                {% if c.city %}<div>{{ c.city }}</div>{% endif %}
+                            </div>
+                        {% endfor %}
+                        {% if not item.candidates %}
+                            <span style="color:#9ca3af;">None</span>
+                        {% endif %}
+                    </div>
+                </td>
+                <td>
+                    <form method="post" action="/importer/ambiguous/resolve" style="display:flex; flex-direction:column; gap:6px; min-width:200px;">
+                        <input type="hidden" name="import_row_id" value="{{ ir.id }}" />
+                        <label>Client ID:
+                            <input type="number" name="client_id" required />
+                        </label>
+                        <button class="btn primary" type="submit">Resolve</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

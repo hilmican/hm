@@ -139,6 +139,7 @@ def list_orders_table(
             end_date = today
 
         # Build base query with date filter logic similar to reports
+        joined_client = False
         if date_field == "both":
             q = (
                 select(Order)
@@ -166,6 +167,9 @@ def list_orders_table(
 
         # Always exclude merged orders from listing/sums to avoid double-count
         q = q.where(Order.merged_into_order_id.is_(None))
+        # Hide orders for soft-deleted clients
+        q = q.join(Client).where(Client.soft_deleted == False)
+        joined_client = True
 
         # Optional source filter (bizim|kargo) — ignored for quicksearch presets
         if (preset not in ("overdue_unpaid_7", "all")) and source in ("bizim", "kargo"):
@@ -203,7 +207,9 @@ def list_orders_table(
             if id_terms:
                 q = q.where(Order.id.in_(id_terms))
             if text_terms:
-                q = q.join(Client, Client.id == Order.client_id)
+                if not joined_client:
+                    q = q.join(Client, Client.id == Order.client_id)
+                    joined_client = True
                 like_clauses = []
                 for term in text_terms:
                     like_term = f"%{term}%"
