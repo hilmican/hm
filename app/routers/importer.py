@@ -21,6 +21,7 @@ from ..utils.slugify import slugify
 from ..services.cache import bump_namespace
 from ..services.inventory import adjust_stock
 from ..services.shipping import compute_shipping_fee
+from ..services.mapping import resolve_mapping
 from fastapi.responses import HTMLResponse, FileResponse
 
 router = APIRouter(prefix="")
@@ -1160,6 +1161,34 @@ def resolve_ambiguous(
 			"matched_order_id": matched_order_id,
 			"message": ir.message,
 		}
+
+
+@router.get("/map-debug", response_class=HTMLResponse)
+@router.get("/import/map-debug", response_class=HTMLResponse)
+def map_debug(request: Request, q: str | None = Query(default=None)):
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	results = None
+	base_name = None
+	if q:
+		base_name, _, _, _ = parse_item_details(q)
+		with get_session() as session:
+			try:
+				outs, rule = resolve_mapping(session, base_name)
+			except Exception as e:
+				outs, rule = [], None
+				results = {"error": str(e)}
+			else:
+				results = {
+					"base_name": base_name,
+					"outputs": outs,
+					"rule": rule,
+				}
+	templates = request.app.state.templates
+	return templates.TemplateResponse(
+		"import_map_debug.html",
+		{"request": request, "q": q or "", "base": base_name, "results": results},
+	)
 
 
 @router.get("/result", response_class=HTMLResponse)
