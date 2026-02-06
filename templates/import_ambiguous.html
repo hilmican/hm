@@ -22,7 +22,7 @@
     {% include "_nav.html" %}
     <h1>Ambiguous Imports</h1>
     <div class="card">
-        <form method="get" action="/importer/ambiguous" style="display:flex; gap:8px; flex-wrap:wrap;">
+        <form method="get" action="/import/ambiguous" style="display:flex; gap:8px; flex-wrap:wrap;">
             <input type="text" name="search" placeholder="Search (name, filename)" value="{{ search or '' }}" />
             <select name="source">
                 <option value="" {% if not source %}selected{% endif %}>All sources</option>
@@ -71,7 +71,7 @@
                     </div>
                 </td>
                 <td>
-                    <form method="post" action="/importer/ambiguous/resolve" style="display:flex; flex-direction:column; gap:6px; min-width:200px;">
+                    <form method="post" action="/import/ambiguous/resolve" style="display:flex; flex-direction:column; gap:6px; min-width:200px;">
                         <input type="hidden" name="import_row_id" value="{{ ir.id }}" />
                         <label>Client ID:
                             <input type="number" name="client_id" required />
