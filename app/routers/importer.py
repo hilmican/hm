@@ -1067,6 +1067,7 @@ def returns_review(filename: str, request: Request):
 
 
 @router.get("/ambiguous", response_class=HTMLResponse)
+@router.get("/importer/ambiguous", response_class=HTMLResponse)
 def list_ambiguous(
 	request: Request,
 	search: str | None = Query(default=None),
@@ -1111,6 +1112,7 @@ def list_ambiguous(
 
 
 @router.post("/ambiguous/resolve")
+@router.post("/importer/ambiguous/resolve")
 def resolve_ambiguous(
 	import_row_id: int = Form(...),
 	client_id: int = Form(...),
