@@ -54,6 +54,10 @@
 				</select>
 				<input type="file" name="files" multiple accept=".xlsx" required style="margin-left:6px" />
 				<button type="submit" style="margin-left:6px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer">{{ t(request, 'dashboard.upload') }}</button>
+				<label style="margin-left:10px; font-size:12px; color:#475569;">
+					<input type="checkbox" name="skip_duplicates" id="skipDupDash" checked />
+					Duplicate satırları skip et
+				</label>
 			</form>
 		</div>
 
@@ -134,6 +138,7 @@
 				const data = new FormData(form);
 				result.textContent = labels.uploading;
 				try {
+					// pass skip_duplicates flag
 					const res = await fetch('/import/upload', { method: 'POST', body: data });
 					if (!res.ok) throw new Error(labels.upload_failed);
 					const json = await res.json();
@@ -163,11 +168,12 @@
                     }
 
 					// Offer to commit each file sequentially (date prompt only for bizim)
+					const skipDup = document.getElementById('skipDupDash')?.checked;
 					if (confirm(labels.confirm_import_all)) {
 						const totals = { created_orders:0, created_clients:0, created_items:0, created_payments:0, unmatched:0, enriched_orders:0, payments_existing:0, payments_skipped_zero:0 };
 						const runIds = [];
 						for (const f of json.files) {
-							let body = { source: json.source, filename: f.filename };
+							let body = { source: json.source, filename: f.filename, skip_duplicates: skipDup };
 							// returns are handled via interactive review; skip commit here
 							if (json.source === 'returns') { continue; }
 						// For 'bizim', data_date will be derived from filename (first 10 chars)
