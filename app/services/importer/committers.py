@@ -132,8 +132,10 @@ def _maybe_rehome_payment(
 		payment.order_id = target_order_id
 		# keep reference/payment_date as-is; client_id already matches
 		try:
-			if src_order and src_order.status == "placeholder":
-				src_order.status = "merged"
+			if src_order:
+				src_order.merged_into_order_id = target_order_id
+				if src_order.status == "placeholder":
+					src_order.status = "merged"
 		except Exception:
 			pass
 
@@ -200,8 +202,10 @@ def _maybe_rehome_payment_cross_client_by_name(
 				target = session.get(_Order, target_order_id)
 				if target and (not target.tracking_no) and src_order.tracking_no:
 					target.tracking_no = src_order.tracking_no
-				if src_order and src_order.status == "placeholder":
-					src_order.status = "merged"
+				if src_order:
+					src_order.merged_into_order_id = target_order_id
+					if src_order.status == "placeholder":
+						src_order.status = "merged"
 					src_order.total_amount = 0.0
 			except Exception:
 				pass

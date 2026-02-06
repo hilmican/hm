@@ -164,6 +164,9 @@ def list_orders_table(
                 .order_by(Order.id.desc())
             )
 
+        # Always exclude merged orders from listing/sums to avoid double-count
+        q = q.where(Order.merged_into_order_id.is_(None))
+
         # Optional source filter (bizim|kargo) — ignored for quicksearch presets
         if (preset not in ("overdue_unpaid_7", "all")) and source in ("bizim", "kargo"):
             q = q.where(Order.source == source)
