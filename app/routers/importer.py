@@ -497,6 +497,7 @@ def commit_import(body: dict, request: Request):
 	source = body.get("source")
 	filename = body.get("filename")
 	filenames = body.get("filenames")
+	skip_duplicates = body.get("skip_duplicates", True)
 	data_date_raw = body.get("data_date")  # ISO YYYY-MM-DD string, may apply to all
 	data_dates_map = body.get("data_dates") or {}  # optional per-filename map
 	if source not in ("bizim", "kargo", "returns"):
@@ -544,7 +545,7 @@ def commit_import(body: dict, request: Request):
 			})
 
 	# helper to process a single file name
-	def _commit_single(fn: str, dd_raw: str | None) -> dict:
+	def _commit_single(fn: str, dd_raw: str | None, *, skip_duplicates: bool = True) -> dict:
 		folder_loc = BIZIM_DIR if source == "bizim" else KARGO_DIR
 		if source == "returns":
 			folder_loc = IADE_DIR
@@ -657,7 +658,7 @@ def commit_import(body: dict, request: Request):
 				if source == "returns":
 					skip_due_to_duplicate = False
 					existing_ir = None
-				if skip_due_to_duplicate:
+				if skip_due_to_duplicate and skip_duplicates:
 					# even though we mark skipped, try to enrich the existing order with any new data/payments
 					try:
 						_enrich_duplicate_row(rec, run, existing_ir, session, source)
@@ -927,7 +928,7 @@ def commit_import(body: dict, request: Request):
 		}
 		for fn in file_list:
 			dd = (data_dates_map.get(fn) if isinstance(data_dates_map, dict) else None) or data_date_raw
-			res = _commit_single(fn, dd)
+			res = _commit_single(fn, dd, skip_duplicates=skip_duplicates)
 			agg["runs"].append({"filename": fn, **res})
 			for k in ("row_count","created_orders","created_clients","created_items","created_payments","unmatched","enriched_orders","payments_existing","payments_skipped_zero","rows_created","rows_skipped","rows_unmatched","rows_error","rows_duplicates"):
 				agg[k] += (res.get(k) or 0)
@@ -938,7 +939,7 @@ def commit_import(body: dict, request: Request):
 	# single-file fallback (original behavior)
 	if not filename:
 		raise HTTPException(status_code=400, detail="filename is required for single commit")
-	res_single = _commit_single(filename, data_date_raw)
+	res_single = _commit_single(filename, data_date_raw, skip_duplicates=skip_duplicates)
 	# Invalidate all cached reads after commit
 	bump_namespace()
 	return res_single
@@ -958,6 +959,7 @@ async def upload_excel(
 	source: str = Form(..., description="'bizim' or 'kargo'"),
 	files: Optional[List[UploadFile]] = File(None),
 	file: Optional[UploadFile] = File(None),
+	skip_duplicates: bool = Form(default=True, description="If false, reprocess duplicate rows (advanced)"),
 	request: Request = None,
 ):
 	# Starlette injects Request when declared as a parameter
@@ -1005,7 +1007,7 @@ async def upload_excel(
 
 	# Invalidate all cached reads after new data is uploaded
 	bump_namespace()
-	return {"status": "ok", "source": source, "files": saved}
+	return {"status": "ok", "source": source, "files": saved, "skip_duplicates": skip_duplicates}
 
 
 # ---------- Returns interactive review before commit ----------

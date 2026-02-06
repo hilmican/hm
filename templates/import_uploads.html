@@ -43,6 +43,14 @@
 			</div>
 			<div class="stat-chip">{{ src.files|length }} dosya</div>
 		</div>
+		<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+			<label style="font-size:12px; color:#475569;">
+				<input type="checkbox" id="skipDup" checked />
+				Duplicate satırları skip et (varsayılan). İşaretini kaldırırsan aynı satırları yeniden işler.
+			</label>
+			<button class="download-link" style="border:none; background:none; cursor:pointer; font-weight:600;"
+				onclick="commitAll()">📤 Listelenen tüm dosyaları yeniden işle</button>
+		</div>
 		{% if src.files %}
 		<table>
 			<thead>
@@ -59,7 +67,11 @@
 					<td>{{ file.name }}</td>
 					<td><span class="badge">{{ file.size_human }}</span></td>
 					<td>{{ file.modified.strftime('%Y-%m-%d %H:%M') }}</td>
-					<td><a class="download-link" href="/import/uploads/download?source={{ src.key }}&filename={{ file.name | urlencode }}" target="_blank">📥 İndir</a></td>
+					<td>
+						<a class="download-link" href="/import/uploads/download?source={{ src.key }}&filename={{ file.name | urlencode }}" target="_blank">📥 İndir</a>
+						<button class="download-link" style="border:none; background:none; cursor:pointer; color:#2563eb; font-weight:600;"
+							onclick="commitSingle('{{ src.key }}','{{ file.name | urlencode }}')">📤 Tekrar İşle</button>
+					</td>
 				</tr>
 				{% endfor %}
 			</tbody>
@@ -69,6 +81,68 @@
 		{% endif %}
 	</div>
 	{% endfor %}
+	<script>
+		async function commitSingle(source, filename){
+			const skipDup = document.getElementById('skipDup')?.checked;
+			const body = {
+				source: source,
+				filename: filename,
+				skip_duplicates: skipDup
+			};
+			const res = await fetch('/import/commit', {
+				method:'POST',
+				headers:{'Content-Type':'application/json'},
+				body: JSON.stringify(body)
+			});
+			if(res.ok){
+				alert('Import başlatıldı (skip_duplicates=' + skipDup + '). Lütfen Excel tracker/ambiguous kontrol edin.');
+			}else{
+				const txt = await res.text();
+				alert('Hata: ' + txt);
+			}
+		}
+
+		async function commitAll(){
+			const skipDup = document.getElementById('skipDup')?.checked;
+			// build list per source from table rows
+			const rows = Array.from(document.querySelectorAll('table tbody tr'));
+			const bySource = {};
+			rows.forEach(tr=>{
+				const sourceLabel = tr.closest('.card')?.querySelector('h2')?.textContent || '';
+				// infer source key from header text
+				let srcKey = null;
+				if(sourceLabel.toLowerCase().includes('bizim')) srcKey = 'bizim';
+				else if(sourceLabel.toLowerCase().includes('kargo')) srcKey = 'kargo';
+				else if(sourceLabel.toLowerCase().includes('iade')) srcKey = 'returns';
+				const fnameCell = tr.querySelector('td');
+				if(srcKey && fnameCell){
+					const fn = fnameCell.textContent.trim();
+					if(fn){
+						bySource[srcKey] = bySource[srcKey] || [];
+						bySource[srcKey].push(fn);
+					}
+				}
+			});
+			for(const [src, files] of Object.entries(bySource)){
+				if(!files.length) continue;
+				const body = {
+					source: src,
+					filenames: files,
+					skip_duplicates: skipDup
+				};
+				const res = await fetch('/import/commit', {
+					method:'POST',
+					headers:{'Content-Type':'application/json'},
+					body: JSON.stringify(body)
+				});
+				if(!res.ok){
+					const txt = await res.text();
+					alert('Hata ('+src+'): ' + txt);
+				}
+			}
+			alert('Toplu import tetiklendi (skip_duplicates='+skipDup+'). Lütfen Excel tracker/ambiguous kontrol edin.');
+		}
+	</script>
 </body>
 </html>
 
