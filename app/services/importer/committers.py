@@ -423,6 +423,59 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
         # Prefer orders with matching payment_amount if available
         payment_amount = rec.get("payment_amount")
         order = find_order_by_client_and_date(session, client.id, rec.get("shipment_date"), preferred_amount=payment_amount)
+
+        # cross-client rescue by normalized name (kargo client often lacks phone)
+        if order is None and payment_amount:
+            try:
+                name_norm = normalize_key(rec.get("name"))
+                if name_norm:
+                    tol_amt = max(5.0, 0.02 * float(payment_amount or 0.0))
+                    ship = rec.get("shipment_date") or run.data_date
+                    window_days = 7
+                    start_dt = (ship - dt.timedelta(days=window_days)) if ship else None
+                    end_dt = (ship + dt.timedelta(days=window_days)) if ship else None
+                    q = (
+                        select(Order, Client)
+                        .join(Client, Order.client_id == Client.id)
+                        .where(Order.source == "bizim")
+                    )
+                    if start_dt and end_dt:
+                        q = q.where(Order.data_date >= start_dt).where(Order.data_date <= end_dt)
+                    cands = session.exec(q).all() or []
+                    best = None
+                    for o, c in cands:
+                        try:
+                            c_norm = normalize_key(c.name)
+                            if c_norm != name_norm:
+                                continue
+                            if o.total_amount is not None:
+                                if abs(float(o.total_amount or 0.0) - float(payment_amount)) > tol_amt:
+                                    continue
+                            score = (
+                                -abs(float(o.total_amount or 0.0) - float(payment_amount or 0.0)),
+                                -(o.id or 0),
+                            )
+                            if best is None or score > best[0]:
+                                best = (score, o, c)
+                        except Exception:
+                            continue
+                    if best:
+                        _, o, c = best
+                        order = o
+                        matched_order_id = o.id
+                        matched_client_id = o.client_id
+                        try:
+                            # merge kargo client into the richer bizim client
+                            if client.id != o.client_id:
+                                client.merged_into_client_id = o.client_id
+                        except Exception:
+                            pass
+                        try:
+                            print(f"[KARGO-NAME-MERGE] target_order={o.id} target_client={o.client_id} kargo_client={client.id} name_norm={name_norm} amount={payment_amount}")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         if order:
             matched_order_id = order.id
             matched_client_id = client.id
