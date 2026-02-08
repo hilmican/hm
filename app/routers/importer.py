@@ -1312,10 +1312,10 @@ def rollback_import_run(run_id: int, request: Request, preview: bool = True):
 					ph_target = target_order_id
 					if not ph_target and pcid:
 						ph_target = _get_or_create_placeholder(int(pcid))
-					session.exec(
-						text("UPDATE payment SET order_id=:ph, reference=:ref WHERE id=:pid"),
-						{"ph": ph_target, "ref": ref_new, "pid": pid},
+					stmt = text("UPDATE payment SET order_id=:ph, reference=:ref WHERE id=:pid").bindparams(
+						ph=ph_target, ref=ref_new, pid=pid
 					)
+					session.exec(stmt)
 			# Cancel order
 			prev_notes = order.notes or ""
 			tag = f"[rolled back run {run_id}]"
