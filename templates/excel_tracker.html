@@ -167,7 +167,7 @@
 			modal.style.display = 'flex';
 			content.textContent = 'Yükleniyor...';
 			applyBtn.disabled = true;
-			fetch(`/imports/runs/${runId}/rollback?preview=1`, { method: 'POST' })
+			fetch(`/import/imports/runs/${runId}/rollback?preview=1`, { method: 'POST' })
 			.then(async res => {
 				if(!res.ok){ throw new Error(await res.text() || res.status); }
 				return res.json();
@@ -208,7 +208,7 @@
 			const applyBtn = document.getElementById('rbApplyBtn');
 			if(content) content.textContent = 'Rollback uygulanıyor...';
 			if(applyBtn) applyBtn.disabled = true;
-			fetch(`/imports/runs/${rollbackRunId}/rollback?preview=0`, { method: 'POST' })
+			fetch(`/import/imports/runs/${rollbackRunId}/rollback?preview=0`, { method: 'POST' })
 			.then(async res => {
 				if(!res.ok){ throw new Error(await res.text() || res.status); }
 				return res.json();
