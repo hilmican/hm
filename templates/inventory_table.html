@@ -47,11 +47,8 @@
             <select id="productId" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:220px;">
                 <option value="">Urun</option>
             </select>
-            <select id="supplierId" style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:200px;">
-                <option value="">Cari (opsiyonel)</option>
-                {% for s in suppliers %}
-                    <option value="{{ s.id }}">{{ s.name }}</option>
-                {% endfor %}
+            <select id="supplierId" required style="padding:6px 8px; border:1px solid #ddd; border-radius:6px; min-width:200px;">
+                <option value="">Cari seçin</option>
             </select>
             <div style="display:flex; flex-direction:column; gap:6px;">
                 <div style="display:flex; gap:6px; align-items:center;">
@@ -115,6 +112,22 @@
 <script>
 const btn = document.getElementById('seriesBtn');
 const msg = document.getElementById('seriesMsg');
+const productSuppliers = {{ product_suppliers|tojson }};
+const supplierMap = {{ supplier_map|tojson }};
+
+function populateSuppliers(pid){
+    const sel = document.getElementById('supplierId');
+    if (!sel) return;
+    const key = pid ? String(pid) : '';
+    const list = key ? (productSuppliers[key] || []) : [];
+    sel.innerHTML = '';
+    if (!list.length){
+        sel.innerHTML = '<option value="">Bu ürün için cari maliyeti yok</option>';
+        return;
+    }
+    sel.innerHTML = '<option value="">Cari seçin</option>' + list.map(id => `<option value="${id}">${supplierMap[id]?.name || id}</option>`).join('');
+    if (list.length === 1) sel.value = String(list[0]);
+}
 
 async function loadProducts(){
     try {
@@ -133,6 +146,7 @@ async function loadAttributes(pid){
         const fill = (elId, arr)=>{ const el=document.getElementById(elId); el.innerHTML = (arr||[]).map(v=>`<option value="${v}">${v}</option>`).join(''); };
         fill('sizes', j.sizes || []);
         fill('colors', j.colors || []);
+        populateSuppliers(pid);
     } catch {}
 }
     function selectAll(elId){ const el=document.getElementById(elId); for(const o of el.options) o.selected = true; }
@@ -157,6 +171,7 @@ async function restoreFilterState(){
             const prodSel = document.getElementById('productId');
             if (prodSel) prodSel.value = String(st.pid);
             await loadAttributes(st.pid);
+            populateSuppliers(st.pid);
         }
         const sizesEl = document.getElementById('sizes');
         const colorsEl = document.getElementById('colors');
@@ -215,7 +230,17 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     await restoreFilterState();
     const supplierSel = document.getElementById('supplierId');
     const prodSel = document.getElementById('productId');
-    if (prodSel) prodSel.addEventListener('change', e=>{ const pid=e.target.value; if(pid) loadAttributes(pid); applyInventoryFilter(); suggestCostFromSupplier(); });
+    if (prodSel) prodSel.addEventListener('change', async e=>{
+        const pid=e.target.value;
+        if(pid){
+            await loadAttributes(pid);
+            populateSuppliers(pid);
+        } else {
+            populateSuppliers(null);
+        }
+        applyInventoryFilter();
+        suggestCostFromSupplier();
+    });
     if (supplierSel) supplierSel.addEventListener('change', suggestCostFromSupplier);
         const sas = document.getElementById('selectAllSizes'); if (sas) sas.addEventListener('click', ()=>{ selectAll('sizes'); applyInventoryFilter(); });
         const sac = document.getElementById('selectAllColors'); if (sac) sac.addEventListener('click', ()=>{ selectAll('colors'); applyInventoryFilter(); });
@@ -258,6 +283,7 @@ if (btn) {
         const costVal = document.getElementById('cost').value;
         const cost = costVal ? Number(costVal) : null;
         if (!pid || !sizes.length || qty <= 0) { alert('product_id, sizes ve qty gereklidir'); return; }
+        if (!supplierId) { alert('Cari seçimi zorunlu'); return; }
         const body = { product_id: pid, sizes, colors, quantity_per_variant: qty, price, cost, supplier_id: supplierId };
         try {
             const r = await fetch('/inventory/series', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});

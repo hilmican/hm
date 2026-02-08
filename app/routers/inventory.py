@@ -98,7 +98,16 @@ def stock_table(request: Request, product_id: Optional[int] = Query(default=None
 			for p in prows:
 				if p.id is not None:
 					pmap[p.id] = p.name
+		# Suppliers with cost per product
+		from ..models import SupplierProductPrice
+		spp_rows = session.exec(select(SupplierProductPrice).where(SupplierProductPrice.cost != None)).all()
+		product_suppliers: dict[int, set[int]] = {}
+		for sp in spp_rows:
+			if sp.product_id and sp.supplier_id:
+				product_suppliers.setdefault(int(sp.product_id), set()).add(int(sp.supplier_id))
 		suppliers = session.exec(select(Supplier).order_by(Supplier.name.asc())).all()
+		supplier_map = {int(s.id): {"id": int(s.id), "name": s.name} for s in suppliers if s.id is not None}
+		product_suppliers_serializable = {pid: sorted(list(sids)) for pid, sids in product_suppliers.items()}
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"inventory_table.html",
@@ -108,6 +117,8 @@ def stock_table(request: Request, product_id: Optional[int] = Query(default=None
 				"stock_map": stock_map,
 				"product_map": pmap,
 				"suppliers": suppliers,
+				"supplier_map": supplier_map,
+				"product_suppliers": product_suppliers_serializable,
 				"limit": limit,
 			},
 		)
