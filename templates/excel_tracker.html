@@ -25,6 +25,15 @@
 		.order-header p { margin: 4px 0; color: #6b7280; font-size: 14px; }
 		.download-link { color: #3b82f6; text-decoration: none; padding: 4px 8px; border-radius: 4px; }
 		.download-link:hover { background: #eff6ff; }
+		.btn { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; font-size: 12px; }
+		.btn:hover { background: #f8fafc; }
+		.btn.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+		.btn.danger { border-color: #b91c1c; color: #b91c1c; }
+		.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.3); display: none; align-items: center; justify-content: center; z-index: 200; }
+		.modal { background: #fff; border-radius: 10px; padding: 16px; width: min(600px, 90vw); box-shadow: 0 10px 30px rgba(0,0,0,0.15); }
+		.modal h4 { margin: 0 0 10px 0; }
+		.flex-end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+		.small { font-size: 12px; color: #6b7280; }
 		.mapped-data { font-family: monospace; font-size: 12px; background: #f9fafb; padding: 8px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; max-width: 600px; }
 		.file-missing { color: #ef4444; font-style: italic; }
 	</style>
@@ -73,6 +82,7 @@
 						<th>Tarih</th>
 						<th>Dosya</th>
 						<th>Eşleşen Veri</th>
+						<th>İşlem</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -106,6 +116,13 @@
 								{% endif %}
 							</div>
 						</td>
+						<td>
+							{% if row.source == 'bizim' %}
+								<button class="btn" onclick="showRollbackPreview({{ row.import_run_id }})">Rollback (önizleme)</button>
+							{% else %}
+								<span class="small" style="color:#6b7280;">-</span>
+							{% endif %}
+						</td>
 					</tr>
 					{% endfor %}
 				</tbody>
@@ -125,6 +142,88 @@
 			</div>
 		</div>
 	{% endif %}
+
+	<div id="rbModal" class="modal-backdrop" role="dialog" aria-modal="true">
+		<div class="modal">
+			<h4>Rollback Önizleme</h4>
+			<div id="rbContent" class="small">Yükleniyor...</div>
+			<div class="flex-end">
+				<button class="btn" onclick="hideRollback()">Kapat</button>
+				<button id="rbApplyBtn" class="btn danger" onclick="applyRollback()" disabled>Rollback Uygula</button>
+			</div>
+		</div>
+	</div>
+
+	<script>
+		let rollbackRunId = null;
+		let rollbackCandidates = [];
+		function showRollbackPreview(runId){
+			rollbackRunId = runId;
+			rollbackCandidates = [];
+			const modal = document.getElementById('rbModal');
+			const content = document.getElementById('rbContent');
+			const applyBtn = document.getElementById('rbApplyBtn');
+			if(!modal || !content || !applyBtn) return;
+			modal.style.display = 'flex';
+			content.textContent = 'Yükleniyor...';
+			applyBtn.disabled = true;
+			fetch(`/imports/runs/${runId}/rollback?preview=1`, { method: 'POST' })
+			.then(async res => {
+				if(!res.ok){ throw new Error(await res.text() || res.status); }
+				return res.json();
+			})
+			.then(data=>{
+				rollbackCandidates = data?.candidates || [];
+				const kept = data?.kept || [];
+				const candCount = rollbackCandidates.length;
+				const keptCount = kept.length;
+				let html = `<div><strong>Run #${runId}</strong></div>`;
+				html += `<div>İptal edilecek aday: <strong>${candCount}</strong></div>`;
+				if(keptCount>0){
+					html += `<div>Dokunulmayacak (daha eski runlarda da var): <strong>${keptCount}</strong></div>`;
+				}
+				if(candCount){
+					html += '<ul>';
+					rollbackCandidates.forEach(c=>{
+						html += `<li>Sipariş #${c.order_id} · Toplam ${c.total_amount} · Status ${c.status || '-'} · Payments ${c.payments?.length||0}</li>`;
+					});
+					html += '</ul>';
+					applyBtn.disabled = false;
+				} else {
+					html += '<div>Rollback adayı yok.</div>';
+				}
+				content.innerHTML = html;
+			})
+			.catch(err=>{
+				content.textContent = `Hata: ${err.message || err}`;
+			});
+		}
+		function hideRollback(){
+			const modal = document.getElementById('rbModal');
+			if(modal) modal.style.display = 'none';
+		}
+		function applyRollback(){
+			if(!rollbackRunId) return;
+			const content = document.getElementById('rbContent');
+			const applyBtn = document.getElementById('rbApplyBtn');
+			if(content) content.textContent = 'Rollback uygulanıyor...';
+			if(applyBtn) applyBtn.disabled = true;
+			fetch(`/imports/runs/${rollbackRunId}/rollback?preview=0`, { method: 'POST' })
+			.then(async res => {
+				if(!res.ok){ throw new Error(await res.text() || res.status); }
+				return res.json();
+			})
+			.then(data=>{
+				if(content){
+					content.innerHTML = `Tamamlandı. Rolled back: ${data?.rolled_back_orders?.length || 0}. Kept: ${data?.kept_orders?.length || 0}. Sayfayı yenileyin.`;
+				}
+			})
+			.catch(err=>{
+				if(content) content.textContent = `Hata: ${err.message || err}`;
+				if(applyBtn) applyBtn.disabled = false;
+			});
+		}
+	</script>
 </body>
 </html>
 

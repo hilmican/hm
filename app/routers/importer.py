@@ -598,8 +598,14 @@ def commit_import(body: dict, request: Request):
 					prefix = str(fn)[:10]
 					run.data_date = _dt.date.fromisoformat(prefix)
 				except Exception:
-					# Leave as None if filename doesn't contain a valid ISO date
-					pass
+						# Fallback: handle DD-MM-YYYY style prefixes (e.g. 26-01-2026 ...)
+						try:
+							import datetime as _dt
+							prefix = str(fn)[:10]
+							run.data_date = _dt.datetime.strptime(prefix, "%d-%m-%Y").date()
+						except Exception:
+							# Leave as None if filename doesn't contain a recognizable date
+							pass
 			else:  # returns -> expect dd_raw provided by caller (commit body)
 				if dd_raw:
 					try:
@@ -1168,6 +1174,115 @@ def resolve_ambiguous(
 			"matched_client_id": matched_client_id,
 			"matched_order_id": matched_order_id,
 			"message": ir.message,
+		}
+
+
+@router.post("/imports/runs/{run_id}/rollback")
+def rollback_import_run(run_id: int, request: Request, preview: bool = True):
+	"""
+	Roll back a Bizim import run.
+	- Preview mode: lists orders whose earliest ImportRow belongs to this run (likely created by it).
+	- Apply mode: cancels those orders, deletes payments/out movements, and restocks.
+	"""
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+
+	with get_session() as session:
+		run = session.get(ImportRun, run_id)
+		if not run:
+			raise HTTPException(status_code=404, detail="ImportRun not found")
+		if (run.source or "").lower() != "bizim":
+			raise HTTPException(status_code=400, detail="Rollback currently only supports Bizim imports")
+
+		irs = session.exec(
+			select(ImportRow).where(ImportRow.import_run_id == run_id, ImportRow.matched_order_id.is_not(None))
+		).all()
+		if not irs:
+			return {"run_id": run_id, "candidates": [], "kept": [], "message": "No matched orders for this run."}
+
+		order_ids = sorted({int(ir.matched_order_id) for ir in irs if ir.matched_order_id})
+		candidates = []
+		kept = []
+
+		def _first_run_for_order(oid: int) -> int | None:
+			first_ir = session.exec(
+				select(ImportRow)
+				.where(ImportRow.matched_order_id == oid)
+				.order_by(ImportRow.id.asc())
+			).first()
+			return first_ir.import_run_id if first_ir else None
+
+		for oid in order_ids:
+			order = session.get(Order, oid)
+			if not order:
+				continue
+			first_run_id = _first_run_for_order(oid)
+			is_new = first_run_id == run_id
+			payments = session.exec(select(Payment).where(Payment.order_id == oid)).all()
+			movs = session.exec(
+				select(StockMovement).where(StockMovement.related_order_id == oid, StockMovement.direction == "out")
+			).all()
+			info = {
+				"order_id": oid,
+				"client_id": order.client_id,
+				"tracking": order.tracking_no,
+				"total_amount": order.total_amount,
+				"status": order.status,
+				"source": order.source,
+				"channel": order.channel,
+				"payments": [{"id": p.id, "amount": p.amount, "method": p.method, "payment_date": p.payment_date} for p in payments],
+				"stock_movements": [{"id": m.id, "item_id": m.item_id, "qty": m.quantity} for m in movs],
+				"first_run_id": first_run_id,
+			}
+			if is_new:
+				candidates.append(info)
+			else:
+				kept.append(info)
+
+		if preview:
+			return {"run_id": run_id, "candidates": candidates, "kept": kept, "message": "Preview only"}
+
+		# Apply rollback for candidates
+		for c in candidates:
+			oid = c["order_id"]
+			order = session.get(Order, oid)
+			if not order:
+				continue
+			# Restock if possible (based on order.item_id/quantity)
+			try:
+				if order.item_id and int(order.quantity or 0) > 0:
+					adjust_stock(
+						session,
+						item_id=int(order.item_id),
+						delta=int(order.quantity or 0),
+						related_order_id=order.id,
+						reason=f"rollback-run-{run_id}",
+					)
+			except Exception:
+				pass
+			# Delete out movements
+			movs = session.exec(
+				select(StockMovement).where(StockMovement.related_order_id == oid, StockMovement.direction == "out")
+			).all()
+			for mv in movs:
+				session.delete(mv)
+			# Delete payments
+			payments = session.exec(select(Payment).where(Payment.order_id == oid)).all()
+			for p in payments:
+				session.delete(p)
+			# Cancel order
+			prev_notes = order.notes or ""
+			tag = f"[rolled back run {run_id}]"
+			if tag not in prev_notes:
+				order.notes = (prev_notes + " " + tag).strip()
+			order.status = "cancelled"
+		session.commit()
+
+		return {
+			"run_id": run_id,
+			"rolled_back_orders": [c["order_id"] for c in candidates],
+			"kept_orders": [k["order_id"] for k in kept],
+			"message": f"Rolled back {len(candidates)} orders; kept {len(kept)}",
 		}
 
 
