@@ -14,6 +14,7 @@ from ..models import (
     PaymentHistoryLog,
     OrderItem,
     Item,
+    Product,
     Client,
     OrderEditLog,
     ShippingCompanyRate,
