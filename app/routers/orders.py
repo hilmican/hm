@@ -252,6 +252,15 @@ def list_orders_table(
         for o in rows:
             if o.id is not None:
                 effective_map[int(o.id)] = get_effective_total(o)
+        for o in rows:
+            if (o.status or "").lower() in ("refunded", "switched", "stitched", "cancelled"):
+                if o.id is not None:
+                    effective_map[int(o.id)] = 0.0
+        # Refund/switch/cancel should not contribute revenue
+        for o in rows:
+            if (o.status or "").lower() in ("refunded", "switched", "stitched", "cancelled"):
+                if o.id is not None:
+                    effective_map[int(o.id)] = 0.0
 
         status_map: dict[int, str] = {}
         for o in rows:
@@ -1874,6 +1883,34 @@ async def edit_order_apply(order_id: int, request: Request):
                     adjust_stock(session, item_id=int(o.item_id), delta=int(o.quantity or 0), related_order_id=order_id, reason=f"order-edit:{order_id}:status={o.status}")
                 if not o.return_or_switch_date:
                     o.return_or_switch_date = _dt.date.today()
+
+        # Backfill missing POS stock movements for magaza channel (no out movements recorded)
+        try:
+            status_lc = str(o.status or "").lower()
+            if (o.channel or "") == "magaza" and status_lc not in ("refunded", "switched", "stitched", "cancelled"):
+                from sqlmodel import select as _select
+                from ..models import StockMovement as _SM
+                has_out = session.exec(
+                    _select(_SM.id).where(
+                        _SM.related_order_id == order_id,
+                        _SM.direction == "out",
+                    )
+                ).first()
+                if not has_out:
+                    # Ensure OrderItem rows exist
+                    current_items = session.exec(_select(OrderItem).where(OrderItem.order_id == order_id)).all()
+                    if (not current_items) and o.item_id and int(o.quantity or 0) > 0:
+                        oi = OrderItem(order_id=order_id, item_id=int(o.item_id), quantity=int(o.quantity or 0))
+                        session.add(oi)
+                        current_items = [oi]
+                    for oi in current_items:
+                        qty = int(oi.quantity or 0)
+                        if oi.item_id and qty > 0:
+                            adjust_stock(session, item_id=int(oi.item_id), delta=-qty, related_order_id=order_id, reason=f"pos-backfill:{order_id}")
+                    if current_items:
+                        changes["inventory_backfilled"] = len(current_items)
+        except Exception:
+            pass
 
         # write log
         try:

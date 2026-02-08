@@ -171,19 +171,67 @@ def calculate_order_cost_fifo(session: Session, order_id: int) -> float:
 	if float(order.total_amount or 0.0) < 0.0:
 		return 0.0
 
+	def _default_unit_cost(item_id: int) -> float:
+		item = session.exec(_select(Item).where(Item.id == item_id)).first()
+		if item and item.product_id:
+			prod = session.exec(_select(Product).where(Product.id == item.product_id)).first()
+			if prod and getattr(prod, "default_cost", None) is not None:
+				try:
+					return float(prod.default_cost or 0.0)
+				except Exception:
+					return 0.0
+		return 0.0
+
 	order_items = session.exec(_select(OrderItem).where(OrderItem.order_id == order_id)).all()
 
 	# Single-item fallback if no OrderItem rows
 	if not order_items:
 		if order.item_id and order.quantity:
-			return _fifo_cost_for_item(session, item_id=int(order.item_id), target_order_id=order_id)
+			cost = _fifo_cost_for_item(session, item_id=int(order.item_id), target_order_id=order_id)
+			if cost > 0:
+				return cost
+			has_out = session.exec(
+				_select(StockMovement.id)
+				.where(
+					StockMovement.item_id == order.item_id,
+					StockMovement.direction == "out",
+					StockMovement.related_order_id == order_id,
+				)
+				.limit(1)
+			).first()
+			if not has_out:
+				unit_cost = _default_unit_cost(int(order.item_id))
+				if unit_cost > 0:
+					return round(unit_cost * int(order.quantity or 0), 2)
 		return 0.0
 
 	total_cost = 0.0
 	for oi in order_items:
 		if not oi.item_id:
 			continue
-		total_cost += _fifo_cost_for_item(session, item_id=int(oi.item_id), target_order_id=order_id)
+		qty = int(oi.quantity or 0)
+		if qty <= 0:
+			continue
+		base_cost = _fifo_cost_for_item(session, item_id=int(oi.item_id), target_order_id=order_id)
+		if base_cost > 0:
+			total_cost += base_cost
+			continue
+		# If no stock movement exists for this order/item, fall back to default cost * qty
+		has_out = session.exec(
+			_select(StockMovement.id)
+			.where(
+				StockMovement.item_id == oi.item_id,
+				StockMovement.direction == "out",
+				StockMovement.related_order_id == order_id,
+			)
+			.limit(1)
+		).first()
+		if not has_out:
+			unit_cost = _default_unit_cost(int(oi.item_id))
+			if unit_cost > 0:
+				total_cost += round(unit_cost * qty, 2)
+				continue
+		total_cost += base_cost
 
 	return round(total_cost, 2)
 
