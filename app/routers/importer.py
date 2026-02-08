@@ -583,8 +583,14 @@ def commit_import(body: dict, request: Request):
 						prefix = str(fn)[:10]
 						run.data_date = _dt.date.fromisoformat(prefix)
 					except Exception:
-						# Leave as None if filename doesn't contain a valid ISO date
-						pass
+						# Fallback: handle DD-MM-YYYY style prefixes (e.g. 26-01-2026 ...)
+						try:
+							import datetime as _dt
+							prefix = str(fn)[:10]
+							run.data_date = _dt.datetime.strptime(prefix, "%d-%m-%Y").date()
+						except Exception:
+							# Leave as None if filename doesn't contain a recognizable date
+							pass
 			elif source == "kargo":  # derive from filename (when kargo Excel was imported/received)
 				# Extract date from filename (first 10 characters expected to be YYYY-MM-DD)
 				try:
