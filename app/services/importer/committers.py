@@ -636,6 +636,21 @@ def process_bizim_row(session, run, rec, *, force_client_id: Optional[int] = Non
             client = session.get(Client, force_client_id)
         if new_uq and client is None:
             client = session.exec(select(Client).where(Client.unique_key == new_uq)).first()
+        # Fallback: if phone is present but we didn't find the phone-aware unique_key,
+        # try to reuse an existing client with the same normalized name that lacks a phone.
+        if client is None and rec.get("phone"):
+            name_raw = (rec.get("name") or "").strip()
+            if name_raw:
+                try:
+                    norm = normalize_key(name_raw)
+                    if norm:
+                        all_clients = session.exec(select(Client).where(Client.soft_deleted == False)).all()
+                        norm_matches = [c for c in all_clients if normalize_key(c.name) == norm]
+                        phone_missing = [c for c in norm_matches if not c.phone]
+                        if len(phone_missing) == 1:
+                            client = phone_missing[0]
+                except Exception:
+                    pass
         if (client is None) and (not rec.get("phone")):
             name_raw = (rec.get("name") or "").strip()
             if name_raw:
