@@ -44,7 +44,7 @@
             {% if not sid_list and prod %}{% set sid_list = prod_supplier_ids.get(prod.id) %}{% endif %}
             {% set row_class = '' %}
             {% if not sid_list %}{% set row_class = 'no-supplier' %}{% endif %}
-            <tr data-id="{{ mv.id }}" class="{{ row_class }}">
+            <tr data-id="{{ mv.id }}" data-item-id="{{ it.id if it else mv.item_id }}" data-prod-id="{{ prod.id if prod else '' }}" class="{{ row_class }}">
                 <td><input type="checkbox" class="rowSel" {% if sid_list %}checked{% endif %} /></td>
                 <td>{{ mv.id }}</td>
                 <td>{{ mv.created_at }}</td>
@@ -133,9 +133,8 @@ for (const tr of document.querySelectorAll('tbody tr[data-id]')) {
     const sel = tr.querySelector('.supplier');
     const costInput = tr.querySelector('.cost');
     if (!sel) continue;
-    const itemId = tr.querySelector('strong')?.textContent?.replace('#','').trim() || tr.cells[2]?.textContent?.replace('#','').trim();
-    const prodNameCell = tr.children[3];
-    const prodIdAttr = prodNameCell?.getAttribute('data-prodid');
+    const itemId = tr.getAttribute('data-item-id');
+    const prodIdAttr = tr.getAttribute('data-prod-id');
     function fillFromMap(){
         const sid = sel.value;
         if (!sid) return;
@@ -151,7 +150,7 @@ for (const tr of document.querySelectorAll('tbody tr[data-id]')) {
         }
     }
     sel.addEventListener('change', fillFromMap);
-    fillFromMap();
+    fillFromMap(); // initial auto-fill if available
 }
 </script>
 </body>
