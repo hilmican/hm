@@ -338,8 +338,9 @@ def list_orders_table(
         from ..services.inventory import calculate_order_cost_fifo
         cost_map: dict[int, float] = {}
         for o in rows:
-            if o.total_cost is not None:
-                cost_map[o.id or 0] = float(o.total_cost or 0.0)
+            # Use persisted cost only if it is positive; otherwise recompute below
+            if o.total_cost is not None and float(o.total_cost) > 0:
+                cost_map[o.id or 0] = float(o.total_cost)
         missing_ids = [o.id for o in rows if (o.id and (o.id not in cost_map))]
         if missing_ids:
             for oid in missing_ids:
