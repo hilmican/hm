@@ -199,13 +199,25 @@ def _maybe_rehome_payment_cross_client_by_name(
 			try:
 				c_name_norm = normalize_key(c.name) or (c.name or "").strip().lower()
 				if c_name_norm != name_norm:
+					try:
+						print(f"[REHOME-XC-NAME-MISMATCH] target={name_norm} cand={c_name_norm} order={o.id} client={c.id}")
+					except Exception:
+						pass
 					continue
 				pays = session.exec(select(_Payment).where(_Payment.order_id == o.id)).all()
 				for p in pays:
 					if abs(float(p.amount or 0.0) - float(amount)) > tol:
+						try:
+							print(f"[REHOME-XC-AMOUNT-MISMATCH] target_amt={amount} pay_amt={p.amount} tol={tol} order={o.id} pay={p.id}")
+						except Exception:
+							pass
 						continue
 					if date_hint and p.date:
 						if abs((p.date - date_hint).days) > window_days:
+							try:
+								print(f"[REHOME-XC-DATE-MISMATCH] target_date={date_hint} pay_date={p.date} window={window_days} order={o.id} pay={p.id}")
+							except Exception:
+								pass
 							continue
 					score = (
 						-abs(float(p.amount or 0.0) - float(amount)),
@@ -229,6 +241,15 @@ def _maybe_rehome_payment_cross_client_by_name(
 					if src_order.status == "placeholder":
 						src_order.status = "merged"
 					src_order.total_amount = 0.0
+				try:
+					print(f"[REHOME-XC-MOVED] pay={pay.id} from_order={src_order.id if src_order else None} to_order={target_order_id} client={c.id if 'c' in locals() else None}")
+				except Exception:
+					pass
+			except Exception:
+				pass
+		else:
+			try:
+				print(f"[REHOME-XC-NO-CANDIDATE] target_order={target_order_id} target_client={target_client_name} name_norm={name_norm} amount={amount} date_hint={date_hint}")
 			except Exception:
 				pass
 
