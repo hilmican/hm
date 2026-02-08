@@ -250,7 +250,7 @@ def movements_table(request: Request, start: Optional[str] = Query(default=None)
 
 
 @router.get("/movements/missing-cost")
-def movements_missing_cost(request: Request, limit: int = Query(default=200, ge=1, le=2000)):
+def movements_missing_cost(request: Request, limit: int = Query(default=500, ge=1, le=2000)):
     with get_session() as session:
         q = (
             select(StockMovement, Item, Product, Supplier)
