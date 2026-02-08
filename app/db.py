@@ -836,6 +836,12 @@ def init_db() -> None:
                         conn.exec_driver_sql("CREATE INDEX idx_product_pretext_id ON product(pretext_id)")
                     if 'ai_reply_sending_enabled' not in have_cols:
                         conn.exec_driver_sql("ALTER TABLE product ADD COLUMN ai_reply_sending_enabled TINYINT(1) NOT NULL DEFAULT 1")
+                    if 'default_cost' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN default_cost DOUBLE NULL")
+                        try:
+                            conn.exec_driver_sql("CREATE INDEX idx_product_default_cost ON product(default_cost)")
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 # Ensure ai_pretext table exists

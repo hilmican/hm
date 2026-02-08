@@ -7,7 +7,7 @@ from sqlalchemy import or_, and_, text, func
 import os
 
 from ..db import get_session
-from ..models import Order, Payment, Item, Client, ImportRun, StockMovement, OrderItem, Cost, Account, Income
+from ..models import Order, Payment, Item, Client, ImportRun, StockMovement, OrderItem, Cost, Account, Income, Product
 from ..services.shipping import compute_shipping_fee
 from ..services.inventory import get_stock_map, calculate_order_cost_fifo
 from ..services.cache import cached_json
@@ -333,12 +333,21 @@ def daily_report(
 		stock_map = get_stock_map(session)
 		inv_item_ids = [iid for iid, qty in stock_map.items() if int(qty or 0) > 0]
 		inv_items = session.exec(select(Item).where(Item.id.in_(inv_item_ids))).all() if inv_item_ids else []
+		prod_ids = sorted({it.product_id for it in inv_items if it.product_id})
+		prod_map = {}
+		if prod_ids:
+			prod_rows = session.exec(select(Product).where(Product.id.in_(prod_ids))).all()
+			prod_map = {p.id: p for p in prod_rows if p.id is not None}
 		inventory_value = 0.0
 		for it in inv_items:
 			if it.id is None:
 				continue
 			qty = int(stock_map.get(int(it.id), 0) or 0)
-			cost = float(it.cost or 0.0)
+			prod = prod_map.get(it.product_id)
+			try:
+				cost = float(prod.default_cost) if prod and prod.default_cost is not None else 0.0
+			except Exception:
+				cost = 0.0
 			if qty > 0 and cost > 0:
 				inventory_value += qty * cost
 		inventory_item_count = len(inv_item_ids)

@@ -28,6 +28,7 @@ def list_products(limit: int = Query(default=500, ge=1, le=5000)):
 					"default_unit": p.default_unit,
 					"default_color": p.default_color,
 					"default_price": p.default_price,
+			"default_cost": p.default_cost,
 					"ai_variant_exclusions": p.ai_variant_exclusions,
 					"size_chart_id": assignment_map.get(p.id or 0),
 				}
@@ -41,6 +42,7 @@ def create_product(
     name: str = Form(...),
     default_unit: str = Form("adet"),
     default_price: float | None = Form(None),
+    default_cost: float | None = Form(None),
     default_color: str | None = Form(None),
     ai_variant_exclusions: str | None = Form(None),
 	size_chart_id: int | None = Form(None),
@@ -57,6 +59,7 @@ def create_product(
 			slug=slug,
 			default_unit=default_unit,
 			default_price=default_price,
+			default_cost=default_cost,
 			default_color=default_color,
 			ai_variant_exclusions=ai_variant_exclusions,
 		)
@@ -75,6 +78,7 @@ def create_product(
 			"slug": p.slug,
 			"default_unit": p.default_unit,
 			"default_price": p.default_price,
+			"default_cost": p.default_cost,
 			"default_color": p.default_color,
 			"ai_variant_exclusions": p.ai_variant_exclusions,
 			"size_chart_id": size_chart_id,
@@ -350,7 +354,7 @@ def delete_product_upsell(upsell_id: int):
 
 @router.put("/{product_id}")
 def update_product(product_id: int, body: dict):
-    allowed = {"name", "default_unit", "default_price", "default_color", "ai_variant_exclusions", "size_chart_id"}
+    allowed = {"name", "default_unit", "default_price", "default_cost", "default_color", "ai_variant_exclusions", "size_chart_id"}
     with get_session() as session:
         p = session.exec(select(Product).where(Product.id == product_id)).first()
         if not p:
@@ -372,6 +376,12 @@ def update_product(product_id: int, body: dict):
                 p.default_price = float(val) if val is not None else None
             except Exception:
                 raise HTTPException(status_code=400, detail="Invalid default_price")
+        if "default_cost" in body:
+            try:
+                val = body.get("default_cost")
+                p.default_cost = float(val) if val is not None else None
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid default_cost")
         if "default_color" in body:
             p.default_color = body.get("default_color") or None
         if "ai_variant_exclusions" in body:

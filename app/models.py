@@ -138,6 +138,11 @@ class Product(SQLModel, table=True):
     default_unit: Optional[str] = Field(default="adet")
     default_color: Optional[str] = None
     default_price: Optional[float] = None
+    default_cost: Optional[float] = Field(
+        default=None,
+        description="Fallback unit cost when no stock movement cost exists",
+        index=True,
+    )
     # AI prompt fields (optional, per-product overrides)
     ai_system_msg: Optional[str] = Field(default=None, sa_column=Column(Text))
     ai_prompt_msg: Optional[str] = Field(default=None, sa_column=Column(Text))

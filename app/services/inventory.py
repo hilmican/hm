@@ -107,7 +107,15 @@ def _fifo_cost_for_item(session: Session, *, item_id: int, target_order_id: int)
 	cost_acc = 0.0
 	# Preload fallback cost
 	item = session.exec(_select(Item).where(Item.id == item_id)).first()
-	fallback_cost = float(item.cost or 0.0) if item else 0.0
+	product_cost = None
+	if item and item.product_id:
+		prod = session.exec(_select(Product).where(Product.id == item.product_id)).first()
+		if prod and getattr(prod, "default_cost", None) is not None:
+			try:
+				product_cost = float(prod.default_cost) if prod.default_cost is not None else None
+			except Exception:
+				product_cost = None
+	fallback_cost = product_cost if product_cost is not None else 0.0
 
 	for mv in movs:
 		if mv.direction == "in":
