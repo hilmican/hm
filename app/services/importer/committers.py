@@ -180,7 +180,7 @@ def _maybe_rehome_payment_cross_client_by_name(
 	if not (target_order_id and target_client_name and amount and amount > 0):
 		return
 	from datetime import timedelta
-	name_norm = (target_client_name or "").strip().lower()
+	name_norm = normalize_key(target_client_name) or (target_client_name or "").strip().lower()
 	if not name_norm:
 		return
 	tol = max(5.0, tol_ratio * float(amount))
@@ -197,7 +197,8 @@ def _maybe_rehome_payment_cross_client_by_name(
 		best = None
 		for o, c in orders:
 			try:
-				if (c.name or "").strip().lower() != name_norm:
+				c_name_norm = normalize_key(c.name) or (c.name or "").strip().lower()
+				if c_name_norm != name_norm:
 					continue
 				pays = session.exec(select(_Payment).where(_Payment.order_id == o.id)).all()
 				for p in pays:
