@@ -359,7 +359,7 @@ def list_orders_table(
         if preset == "zero_total":
             def _is_zero(o: Order) -> bool:
                 eff = float(effective_map.get(o.id or 0, o.total_amount or 0.0))
-                return eff <= 0.0
+                return eff == 0.0
             rows = [o for o in rows if _is_zero(o)]
 
         # Filter for high cost ratio (>= 70% of Toplam)
@@ -744,7 +744,7 @@ def export_orders(
         if preset == "zero_total":
             def _is_zero(o: Order) -> bool:
                 eff = float(effective_map.get(o.id or 0, o.total_amount or 0.0))
-                return eff <= 0.0
+                return eff == 0.0
             rows = [o for o in rows if _is_zero(o)]
         # Apply high_cost_70 preset if requested
         if preset == "high_cost_70":
