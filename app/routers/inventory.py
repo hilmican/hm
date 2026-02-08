@@ -328,8 +328,6 @@ def update_movement_cost(movement_id: int, body: Dict[str, Any]):
             raise HTTPException(status_code=404, detail="Movement not found")
         if mv.direction != "in":
             raise HTTPException(status_code=400, detail="Only inbound movements can be edited here")
-        if mv.related_order_id:
-            raise HTTPException(status_code=400, detail="Order-linked movement cannot be edited here")
         if supplier_id is not None:
             supp = session.exec(select(Supplier).where(Supplier.id == supplier_id)).first()
             if not supp:
