@@ -296,6 +296,71 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
     if order:
         matched_order_id = order.id
         matched_client_id = order.client_id
+        try:
+            # If the tracking matches a kargo placeholder, but there is a Bizim order with same normalized name/amount/date window, rehome here
+            name_norm = normalize_key(rec.get("name"))
+            payment_amount = rec.get("payment_amount") or rec.get("total_amount")
+            ship = rec.get("shipment_date") or run.data_date
+            window_days = 7
+            tol_amt = None
+            if payment_amount:
+                try:
+                    tol_amt = max(5.0, 0.02 * float(payment_amount))
+                except Exception:
+                    tol_amt = None
+            if name_norm and payment_amount and ship and (order.source == "kargo"):
+                from ...models import Client as _Client
+                q = (
+                    select(Order, _Client)
+                    .join(_Client, Order.client_id == _Client.id)
+                    .where(Order.source == "bizim")
+                    .where(Order.data_date >= (ship - dt.timedelta(days=window_days)))
+                    .where(Order.data_date <= (ship + dt.timedelta(days=window_days)))
+                )
+                cands = session.exec(q).all() or []
+                best = None
+                for o_biz, c_biz in cands:
+                    try:
+                        if normalize_key(c_biz.name) != name_norm:
+                            continue
+                        if tol_amt is not None and o_biz.total_amount is not None:
+                            if abs(float(o_biz.total_amount or 0.0) - float(payment_amount)) > tol_amt:
+                                continue
+                        score = (
+                            -abs(float(o_biz.total_amount or 0.0) - float(payment_amount or 0.0)) if o_biz.total_amount is not None else 0,
+                            -(o_biz.id or 0),
+                        )
+                        if best is None or score > best[0]:
+                            best = (score, o_biz, c_biz)
+                    except Exception:
+                        continue
+                if best:
+                    _, o_biz, c_biz = best
+                    # move payments on existing kargo order to the Bizim order
+                    pays = session.exec(select(Payment).where(Payment.order_id == order.id)).all()
+                    for p in pays:
+                        p.order_id = o_biz.id
+                        p.client_id = o_biz.client_id
+                    # mark kargo order merged
+                    order.merged_into_order_id = o_biz.id
+                    order.status = "merged"
+                    order.total_amount = 0.0
+                    # merge client link
+                    try:
+                        if order.client_id and order.client_id != o_biz.client_id:
+                            cli = session.get(Client, order.client_id)
+                            if cli:
+                                cli.merged_into_client_id = o_biz.client_id
+                    except Exception:
+                        pass
+                    matched_order_id = o_biz.id
+                    matched_client_id = o_biz.client_id
+                    try:
+                        print(f"[KARGO-TRACK-REHOME] tracking={rec.get('tracking_no')} kargo_order={order.id} bizim_order={o_biz.id} client_kargo={order.client_id} client_bizim={o_biz.client_id} name_norm={name_norm} amount={payment_amount}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         # enrich order if missing data (do not overwrite existing non-null values)
         derived_total = rec.get("total_amount")
         if derived_total is None and (rec.get("payment_amount") or 0.0) > 0:
