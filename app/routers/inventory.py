@@ -263,12 +263,21 @@ def movements_missing_cost(request: Request, limit: int = Query(default=200, ge=
             .limit(limit)
         )
         rows = session.exec(q).all() or []
-        # Only suppliers that have at least one supplier_product_price.cost set
+        # Collect item/product ids from rows
+        item_ids = sorted({mv.item_id for mv, _, _, _ in rows if mv and mv.item_id})
+        prod_ids = sorted({it.product_id for _, it, _, _ in rows if it and it.product_id})
         from ..models import SupplierProductPrice
-        costs_rows = session.exec(
-            select(SupplierProductPrice)
-            .where(SupplierProductPrice.cost != None)
-        ).all()
+        spp_query = select(SupplierProductPrice).where(SupplierProductPrice.cost != None)
+        if item_ids or prod_ids:
+            clauses = []
+            if item_ids:
+                clauses.append(SupplierProductPrice.item_id.in_(item_ids))
+            if prod_ids:
+                clauses.append(SupplierProductPrice.product_id.in_(prod_ids))
+            if clauses:
+                from sqlalchemy import or_
+                spp_query = spp_query.where(or_(*clauses))
+        costs_rows = session.exec(spp_query).all()
         supplier_ids = sorted({c.supplier_id for c in costs_rows if c.supplier_id})
         suppliers = session.exec(select(Supplier).where(Supplier.id.in_(supplier_ids)).order_by(Supplier.name.asc())).all() if supplier_ids else []
         # Build cost map keyed by supplier_id and item_id/product_id for auto-fill
