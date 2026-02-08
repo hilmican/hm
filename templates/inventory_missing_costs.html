@@ -25,13 +25,17 @@
     </div>
     <p style="color:#6b7280;font-size:13px;">Yalnızca direction='in' ve unit_cost<=0 olan hareketler listelenir. Cari ve maliyet girip kaydedin.</p>
     <div class="toolbar-actions">
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+            <input id="selectAll" type="checkbox" checked />
+            Tümünü seç
+        </label>
         <button id="bulkSave">Toplu Kaydet</button>
-        <span style="font-size:12px;color:#6b7280;">Seçili satırlarda cari+maliyet dolu olanları sırayla kaydeder.</span>
+        <span style="font-size:12px;color:#6b7280;">Yalnızca seçili ve cari+maliyet dolu satırlar kaydedilir.</span>
     </div>
     <table>
         <thead>
             <tr>
-                <th>ID</th><th>Tarih</th><th>Item</th><th>Ürün</th><th>Miktar</th><th>Cari</th><th>Maliyet</th><th>Kaydet</th>
+                <th>Seç</th><th>ID</th><th>Tarih</th><th>Item</th><th>Ürün</th><th>Miktar</th><th>Cari</th><th>Maliyet</th><th>Kaydet</th>
             </tr>
         </thead>
         <tbody>
@@ -41,6 +45,7 @@
             {% set row_class = '' %}
             {% if not sid_list %}{% set row_class = 'no-supplier' %}{% endif %}
             <tr data-id="{{ mv.id }}" class="{{ row_class }}">
+                <td><input type="checkbox" class="rowSel" {% if sid_list %}checked{% endif %} /></td>
                 <td>{{ mv.id }}</td>
                 <td>{{ mv.created_at }}</td>
                 <td>
@@ -94,7 +99,7 @@ for (const btn of document.querySelectorAll('.saveBtn')) {
 
 // Bulk save
 document.getElementById('bulkSave')?.addEventListener('click', async () => {
-    const rows = Array.from(document.querySelectorAll('tbody tr[data-id]'));
+    const rows = Array.from(document.querySelectorAll('tbody tr[data-id]')).filter(tr => tr.querySelector('.rowSel')?.checked);
     let ok = 0, fail = 0;
     for (const tr of rows) {
         const id = tr.getAttribute('data-id');
@@ -114,6 +119,15 @@ document.getElementById('bulkSave')?.addEventListener('click', async () => {
     }
     alert(`Toplu kaydet tamamlandı. Başarılı: ${ok}, Hatalı/atlanan: ${fail}`);
 });
+
+// Select all toggle
+const selAll = document.getElementById('selectAll');
+if (selAll) {
+    selAll.addEventListener('change', () => {
+        const checked = selAll.checked;
+        document.querySelectorAll('.rowSel').forEach(cb => { cb.checked = checked; });
+    });
+}
 
 for (const tr of document.querySelectorAll('tbody tr[data-id]')) {
     const sel = tr.querySelector('.supplier');
