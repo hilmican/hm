@@ -7,6 +7,7 @@ import ast
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request, Query
 from sqlmodel import select
+from sqlalchemy import text
 
 from ..db import get_session, engine
 from ..models import Client, Item, Order, Payment, ImportRun, ImportRow, StockMovement, Product, OrderItem
@@ -1243,6 +1244,38 @@ def rollback_import_run(run_id: int, request: Request, preview: bool = True):
 			return {"run_id": run_id, "candidates": candidates, "kept": kept, "message": "Preview only"}
 
 		# Apply rollback for candidates
+		placeholder_cache: dict[int, int] = {}  # client_id -> placeholder order id
+
+		def _get_or_create_placeholder(client_id: int) -> int:
+			if client_id in placeholder_cache:
+				return placeholder_cache[client_id]
+			tag = f"[rollback placeholder run {run_id}]"
+			ph = session.exec(
+				select(Order).where(
+					Order.client_id == client_id,
+					Order.status == "placeholder",
+					Order.channel == "rollback",
+					Order.notes.contains(tag),
+				)
+			).first()
+			if not ph:
+				ph = Order(
+					client_id=client_id,
+					source="bizim",
+					channel="rollback",
+					status="placeholder",
+					total_amount=0.0,
+					quantity=0,
+					item_id=None,
+					unit_price=None,
+					notes=tag,
+					data_date=run.data_date,
+				)
+				session.add(ph)
+				session.flush()
+			placeholder_cache[client_id] = ph.id  # type: ignore
+			return ph.id  # type: ignore
+
 		for c in candidates:
 			oid = c["order_id"]
 			order = session.get(Order, oid)
@@ -1266,10 +1299,23 @@ def rollback_import_run(run_id: int, request: Request, preview: bool = True):
 			).all()
 			for mv in movs:
 				session.delete(mv)
-			# Delete payments
-			payments = session.exec(select(Payment).where(Payment.order_id == oid)).all()
-			for p in payments:
-				session.delete(p)
+			# Reattach payments via raw update to avoid ORM deleting them
+			pay_rows = session.exec(select(Payment.id, Payment.reference, Payment.client_id).where(Payment.order_id == oid)).all()
+			if pay_rows:
+				target_order_id = None
+				if order.client_id:
+					target_order_id = _get_or_create_placeholder(int(order.client_id))
+				for pid, pref, pcid in pay_rows:
+					ref_new = pref or ""
+					if f"[rb{run_id}]" not in ref_new:
+						ref_new = (ref_new + " " if ref_new else "") + f"[rb{run_id}->#{oid}]"
+					ph_target = target_order_id
+					if not ph_target and pcid:
+						ph_target = _get_or_create_placeholder(int(pcid))
+					session.exec(
+						text("UPDATE payment SET order_id=:ph, reference=:ref WHERE id=:pid"),
+						{"ph": ph_target, "ref": ref_new, "pid": pid},
+					)
 			# Cancel order
 			prev_notes = order.notes or ""
 			tag = f"[rolled back run {run_id}]"
