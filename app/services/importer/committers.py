@@ -54,6 +54,27 @@ def _log_payment(session, payment_id: int, action: str, old=None, new=None):
 		pass
 
 
+def _is_zero_early_payment_deduction(rec: dict) -> bool:
+	"""
+	Detect zero-amount early payment deduction rows in kargo Excel.
+	These rows should not create placeholder orders.
+	"""
+	try:
+		total_val = rec.get("total_amount")
+		payment_val = rec.get("payment_amount")
+		total_zero = total_val is not None and float(total_val or 0.0) == 0.0
+		payment_zero = payment_val is not None and float(payment_val or 0.0) == 0.0
+		notes_blob = " ".join(
+			str(rec.get(k) or "")
+			for k in ("notes", "description", "aciklama")
+		).lower()
+		notes_compact = notes_blob.replace(" ", "")
+		hint = ("erkenodeme" in notes_compact) and ("kesinti" in notes_compact)
+		return hint and (total_zero or payment_zero)
+	except Exception:
+		return False
+
+
 def _maybe_rehome_payment(
 	session,
 	*,
@@ -278,6 +299,10 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
             if note_val and (not cur or (note_val not in cur)):
                 order.notes = f"{cur} | {note_val}" if cur else note_val
     else:
+        # Skip zero-amount ErkenOdemeKesintisi rows to avoid placeholder creation
+        if _is_zero_early_payment_deduction(rec):
+            return "skipped", "ignored zero-amount early payment deduction row", None, None, []
+
         # resolve client by unique key (name + optional surname + phone)
         new_uq = client_unique_key(rec.get("name"), rec.get("phone"))
         client = None
@@ -297,29 +322,21 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
                     if norm:
                         all_clients = session.exec(cand_q).all()
                         norm_matches = [c for c in all_clients if normalize_key(c.name) == norm]
-                        # Guard: if this run's date matches previous kargo runs and a client exists, avoid creating new
-                        if len(norm_matches) >= 1 and run.data_date:
-                            return "ambiguous", "existing client(s) same name on same-day import", None, None, [
-                                {
-                                    "id": c.id,
-                                    "name": c.name,
-                                    "phone": c.phone,
-                                    "city": c.city,
-                                }
-                                for c in norm_matches
-                                if c.id is not None
-                            ]
+                        amt = rec.get("payment_amount") or 0.0
                         if len(norm_matches) > 1:
-                            candidates = [
-                                {
-                                    "id": c.id,
-                                    "name": c.name,
-                                    "phone": c.phone,
-                                    "city": c.city,
-                                }
-                                for c in norm_matches if c.id is not None
-                            ]
-                            return "ambiguous", "multiple clients same name (kargo, no phone)", None, None, candidates
+                            if amt and amt > 0:
+                                # choose best candidate: prefer one with phone, else highest id
+                                cand_sorted = sorted(
+                                    norm_matches,
+                                    key=lambda c: (0 if c.phone else 1, -(c.id or 0))
+                                )
+                                client = cand_sorted[0]
+                            else:
+                                candidates = [
+                                    {"id": c.id, "name": c.name, "phone": c.phone, "city": c.city}
+                                    for c in norm_matches if c.id is not None
+                                ]
+                                return "ambiguous", "multiple clients same name (kargo, no phone)", None, None, candidates
                         elif len(norm_matches) == 1:
                             client = norm_matches[0]
                     # continue trying exact matches
