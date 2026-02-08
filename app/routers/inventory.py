@@ -280,15 +280,20 @@ def movements_missing_cost(request: Request, limit: int = Query(default=200, ge=
         costs_rows = session.exec(spp_query).all()
         supplier_ids = sorted({c.supplier_id for c in costs_rows if c.supplier_id})
         suppliers = session.exec(select(Supplier).where(Supplier.id.in_(supplier_ids)).order_by(Supplier.name.asc())).all() if supplier_ids else []
+        supplier_map = {s.id: s for s in suppliers if s.id is not None}
         # Build cost map keyed by supplier_id and item_id/product_id for auto-fill
         cost_map: dict[str, float] = {}
+        item_supplier_ids: dict[int, set[int]] = {}
+        prod_supplier_ids: dict[int, set[int]] = {}
         for c in costs_rows:
             key_item = f"{c.supplier_id}:item:{c.item_id}" if c.supplier_id and c.item_id else None
             key_prod = f"{c.supplier_id}:prod:{c.product_id}" if c.supplier_id and c.product_id else None
             if key_item and c.cost is not None:
                 cost_map[key_item] = float(c.cost)
+                item_supplier_ids.setdefault(int(c.item_id), set()).add(int(c.supplier_id))
             if key_prod and c.cost is not None:
                 cost_map[key_prod] = float(c.cost)
+                prod_supplier_ids.setdefault(int(c.product_id), set()).add(int(c.supplier_id))
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "inventory_missing_costs.html",
@@ -296,6 +301,9 @@ def movements_missing_cost(request: Request, limit: int = Query(default=200, ge=
                 "request": request,
                 "rows": rows,
                 "suppliers": suppliers,
+                "supplier_map": supplier_map,
+                "item_supplier_ids": {k: list(v) for k, v in item_supplier_ids.items()},
+                "prod_supplier_ids": {k: list(v) for k, v in prod_supplier_ids.items()},
                 "cost_map": cost_map,
                 "limit": limit,
             },

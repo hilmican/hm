@@ -38,11 +38,16 @@
                 </td>
                 <td data-prodid="{{ prod.id if prod else '' }}">{{ prod.name if prod else '' }}</td>
                 <td>{{ mv.quantity }}</td>
+                {% set sid_list = item_supplier_ids.get(it.id) if it else None %}
+                {% if not sid_list and prod %}{% set sid_list = prod_supplier_ids.get(prod.id) %}{% endif %}
                 <td>
                     <select class="supplier" required>
-                        {% for s in suppliers %}
-                            <option value="{{ s.id }}" {% if supp and s.id == supp.id %}selected{% endif %}>{{ s.name }}</option>
-                        {% endfor %}
+                        {% if sid_list %}
+                            {% for sid in sid_list %}
+                                {% set s = supplier_map.get(sid) %}
+                                {% if s %}<option value="{{ s.id }}" {% if supp and s.id == supp.id %}selected{% endif %}>{{ s.name }}</option>{% endif %}
+                            {% endfor %}
+                        {% endif %}
                     </select>
                 </td>
                 <td><input class="cost" type="number" step="0.01" placeholder="Birim maliyet" /></td>
