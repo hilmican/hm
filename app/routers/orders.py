@@ -355,6 +355,13 @@ def list_orders_table(
                 if o.id is not None:
                     cost_map[int(o.id)] = 0.0
 
+        # Filter for zero effective total
+        if preset == "zero_total":
+            def _is_zero(o: Order) -> bool:
+                eff = float(effective_map.get(o.id or 0, o.total_amount or 0.0))
+                return eff <= 0.0
+            rows = [o for o in rows if _is_zero(o)]
+
         # Filter for high cost ratio (>= 70% of Toplam)
         if preset == "high_cost_70":
             def _high_cost(o: Order) -> bool:
@@ -733,6 +740,12 @@ def export_orders(
             if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
                 if o.id is not None:
                     cost_map[int(o.id)] = 0.0
+        # Apply zero-total preset if requested
+        if preset == "zero_total":
+            def _is_zero(o: Order) -> bool:
+                eff = float(effective_map.get(o.id or 0, o.total_amount or 0.0))
+                return eff <= 0.0
+            rows = [o for o in rows if _is_zero(o)]
         # Apply high_cost_70 preset if requested
         if preset == "high_cost_70":
             def _high_cost(o: Order) -> bool:

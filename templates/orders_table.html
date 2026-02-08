@@ -214,6 +214,7 @@
             <button class="btn primary" onclick="recalc()">Tazele</button>
             <button class="btn" onclick="presetOverdue7()">7 gün+ ödeme yok</button>
             <button class="btn" onclick="presetHighCost70()">Maliyet ≥ %70</button>
+            <button class="btn" onclick="presetZeroTotal()">Tutarı 0</button>
             <button class="btn" onclick="presetAll()">Tüm siparişler</button>
             <button class="btn" onclick="exportExcel()">Excel'e aktar</button>
             <button class="btn primary" type="button" onclick="recalcCosts()">Maliyetleri (FIFO) güncelle</button>
@@ -647,6 +648,19 @@ filtersForm?.addEventListener('submit', ()=>{
         const params = new URLSearchParams();
         params.set('preset','high_cost_70');
         params.set('date_field','both');
+        window.location.href = '/orders/table?' + params.toString();
+    }
+
+    function presetZeroTotal(){
+        const params = new URLSearchParams();
+        params.set('preset','zero_total');
+        params.set('date_field','both');
+        const now = new Date();
+        const pad = (n)=> String(n).padStart(2,'0');
+        const endStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+        const startStr = `2000-01-01`;
+        params.set('start', startStr);
+        params.set('end', endStr);
         window.location.href = '/orders/table?' + params.toString();
     }
 
