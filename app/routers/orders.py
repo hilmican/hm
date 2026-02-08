@@ -1394,9 +1394,25 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
         from sqlmodel import select as _select
         oitems = session.exec(_select(OrderItem).where(OrderItem.order_id == order_id)).all()
         order_items: list[dict] = []
+        # collect product ids to show product info alongside item
+        prod_ids: set[int] = set()
+        items_by_id: dict[int, Item] = {}
         for oi in oitems:
-            it = session.exec(_select(Item).where(Item.id == oi.item_id)).first() if oi.item_id is not None else None
-            order_items.append({"item": it, "quantity": int(oi.quantity or 0)})
+            if oi.item_id is None:
+                continue
+            it = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
+            if it:
+                items_by_id[int(it.id)] = it
+                if it.product_id:
+                    prod_ids.add(int(it.product_id))
+        prod_map: dict[int, Product] = {}
+        if prod_ids:
+            prows = session.exec(select(Product).where(Product.id.in_(prod_ids))).all()
+            prod_map = {int(p.id): p for p in prows if p.id is not None}
+        for oi in oitems:
+            it = items_by_id.get(int(oi.item_id)) if oi.item_id is not None else None
+            prod = prod_map.get(int(it.product_id)) if it and it.product_id else None
+            order_items.append({"item": it, "product": prod, "quantity": int(oi.quantity or 0)})
         items_all = session.exec(select(Item).order_by(Item.id.desc()).limit(5000)).all()
         logs = session.exec(select(OrderEditLog).where(OrderEditLog.order_id == order_id).order_by(OrderEditLog.id.desc()).limit(100)).all()
         payments = session.exec(select(Payment).where(Payment.order_id == order_id).order_by(Payment.id.desc())).all()
@@ -1458,6 +1474,7 @@ def edit_order_page(order_id: int, request: Request, base: Optional[str] = Query
                 "items": items,
                 "order_items": order_items,
                 "items_all": items_all,
+                "product_map": prod_map,
                 "logs": logs,
                 "payments": payments,
                 "import_rows": import_rows,

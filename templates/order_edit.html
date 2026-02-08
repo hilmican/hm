@@ -200,12 +200,20 @@
                 <div class="table-wrap">
                     <table id="orderItemsTbl">
                         <thead>
-                            <tr><th>Item</th><th>Adet</th><th></th></tr>
+                            <tr><th>Item</th><th>Product</th><th>Maliyet</th><th>Adet</th><th></th></tr>
                         </thead>
                         <tbody>
                             {% for row in (order_items or []) %}
                             <tr>
                                 <td><input name="item_display" list="items_all" value="{{ (row.item.id ~ ' | ' ~ row.item.sku ~ ' | ' ~ row.item.name) if row.item else '' }}" /></td>
+                                <td>
+                                    {% if row.product %}
+                                        <a href="/products?product_id={{ row.product.id }}" target="_blank" rel="noopener">#{{ row.product.id }} {{ row.product.name }}</a>
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>{{ row.product.default_cost if row.product and row.product.default_cost is not none else '-' }}</td>
                                 <td><input name="item_qty" type="number" step="1" min="1" value="{{ row.quantity }}" /></td>
                                 <td><button class="btn" type="button" onclick="removeRow(this)">Sil</button></td>
                             </tr>
@@ -324,6 +332,8 @@
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td><input name="item_display" list="items_all" value="${itemDisplay}" /></td>
+            <td>-</td>
+            <td>-</td>
             <td><input name="item_qty" type="number" step="1" min="1" value="${qty}" /></td>
             <td><button type="button" onclick="removeRow(this)">Sil</button></td>
         `;
