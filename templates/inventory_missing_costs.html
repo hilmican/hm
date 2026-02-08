@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Maliyetsiz Stok Girişleri</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; font-size: 14px; }
+        th { background: #fafafa; position: sticky; top: 0; }
+        tr:nth-child(even) { background: #fcfcfd; }
+        .toolbar { margin: 12px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .pill { font-size: 12px; padding: 2px 8px; background: #eef2ff; color: #4338ca; border-radius: 999px; }
+        input, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; }
+        button { padding: 6px 10px; border-radius: 6px; border: 1px solid #ddd; background: #f9fafb; cursor: pointer; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <div class="toolbar">
+        <h2 style="margin:0;">Maliyetsiz Stok Girişleri</h2>
+        <span class="pill">{{ rows|length }} hareket</span>
+    </div>
+    <p style="color:#6b7280;font-size:13px;">Yalnızca direction='in' ve unit_cost<=0 olan hareketler listelenir. Cari ve maliyet girip kaydedin.</p>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th><th>Tarih</th><th>Item</th><th>Ürün</th><th>Miktar</th><th>Cari</th><th>Maliyet</th><th>Kaydet</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for mv, it, prod, supp in rows %}
+            <tr data-id="{{ mv.id }}">
+                <td>{{ mv.id }}</td>
+                <td>{{ mv.created_at }}</td>
+                <td>
+                    {% if it %}<strong>#{{ it.id }}</strong> {{ it.name }}{% else %}#{{ mv.item_id }}{% endif %}
+                </td>
+                <td data-prodid="{{ prod.id if prod else '' }}">{{ prod.name if prod else '' }}</td>
+                <td>{{ mv.quantity }}</td>
+                <td>
+                    <select class="supplier" required>
+                        {% for s in suppliers %}
+                            <option value="{{ s.id }}" {% if supp and s.id == supp.id %}selected{% endif %}>{{ s.name }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
+                <td><input class="cost" type="number" step="0.01" placeholder="Birim maliyet" /></td>
+                <td><button class="saveBtn">Kaydet</button></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+<script>
+const costMap = {{ cost_map|tojson }};
+for (const btn of document.querySelectorAll('.saveBtn')) {
+    btn.addEventListener('click', async (e) => {
+        const tr = e.target.closest('tr');
+        const id = tr.getAttribute('data-id');
+        const cost = tr.querySelector('.cost').value;
+        const supplierId = tr.querySelector('.supplier').value || null;
+        if (!supplierId) { alert('Cari seçin'); return; }
+        if (!cost) { alert('Maliyet girin'); return; }
+        try{
+            const r = await fetch(`/inventory/movements/${id}/cost`, {
+                method:'PATCH',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ unit_cost: Number(cost), supplier_id: supplierId ? Number(supplierId) : null })
+            });
+            if(!r.ok){
+                const t = await r.text();
+                alert('Kaydedilemedi: ' + t);
+                return;
+            }
+            tr.style.background = '#ecfdf3';
+        }catch(err){
+            alert('Hata: ' + err);
+        }
+    });
+}
+
+for (const tr of document.querySelectorAll('tbody tr[data-id]')) {
+    const sel = tr.querySelector('.supplier');
+    const costInput = tr.querySelector('.cost');
+    if (!sel) continue;
+    const itemId = tr.querySelector('strong')?.textContent?.replace('#','').trim() || tr.cells[2]?.textContent?.replace('#','').trim();
+    const prodNameCell = tr.children[3];
+    const prodIdAttr = prodNameCell?.getAttribute('data-prodid');
+    function fillFromMap(){
+        const sid = sel.value;
+        if (!sid) return;
+        const itemKey = `${sid}:item:${itemId || ''}`;
+        const prodKey = `${sid}:prod:${prodIdAttr || ''}`;
+        if (itemKey in costMap) {
+            costInput.value = costMap[itemKey];
+            return;
+        }
+        if (prodKey in costMap) {
+            costInput.value = costMap[prodKey];
+            return;
+        }
+    }
+    sel.addEventListener('change', fillFromMap);
+    fillFromMap();
+}
+</script>
+</body>
+</html>

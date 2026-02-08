@@ -119,7 +119,11 @@ def _fifo_cost_for_item(session: Session, *, item_id: int, target_order_id: int)
 
 	for mv in movs:
 		if mv.direction == "in":
-			fifo.append([int(mv.quantity or 0), float(mv.unit_cost or 0.0)])  # type: ignore[list-item]
+			cost_in = mv.unit_cost
+			if cost_in is None:
+				# if purchase cost missing, fall back to product/item default cost to avoid zero-cost batches
+				cost_in = fallback_cost
+			fifo.append([int(mv.quantity or 0), float(cost_in or 0.0)])  # type: ignore[list-item]
 			continue
 
 		need = int(mv.quantity or 0)
@@ -203,6 +207,12 @@ def adjust_stock(
     qty = abs(int(delta))
     if qty <= 0:
         return
+    if direction == "in":
+        try:
+            if unit_cost is None or float(unit_cost) <= 0:
+                raise ValueError("unit_cost must be provided and > 0 for inbound stock")
+        except Exception:
+            raise
     mv = StockMovement(
         item_id=item_id,
         direction=direction,

@@ -131,6 +131,14 @@ def create_movement(body: Dict[str, Any]):
             raise HTTPException(status_code=400, detail="delta must be integer")
         if d == 0:
             return {"status": "noop"}
+        if d > 0:
+            try:
+                if unit_cost is None or float(unit_cost) <= 0:
+                    raise HTTPException(status_code=400, detail="unit_cost > 0 required for inbound stock")
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=400, detail="unit_cost must be numeric")
         with get_session() as session:
             it = session.exec(select(Item).where(Item.id == item_id)).first()
             if not it:
@@ -147,6 +155,14 @@ def create_movement(body: Dict[str, Any]):
     # Fallback to direction/quantity path
     if direction not in ("in", "out") or not isinstance(quantity, int) or quantity <= 0:
         raise HTTPException(status_code=400, detail="Provide delta or direction in|out and quantity>0")
+    if direction == "in":
+        try:
+            if unit_cost is None or float(unit_cost) <= 0:
+                raise HTTPException(status_code=400, detail="unit_cost > 0 required for inbound stock")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="unit_cost must be numeric")
     with get_session() as session:
         it = session.exec(select(Item).where(Item.id == item_id)).first()
         if not it:
@@ -231,6 +247,79 @@ def movements_table(request: Request, start: Optional[str] = Query(default=None)
                 "related_order_id": related_order_id,
             },
         )
+
+
+@router.get("/movements/missing-cost")
+def movements_missing_cost(request: Request, limit: int = Query(default=200, ge=1, le=2000)):
+    with get_session() as session:
+        q = (
+            select(StockMovement, Item, Product, Supplier)
+            .join(Item, StockMovement.item_id == Item.id, isouter=True)
+            .join(Product, Item.product_id == Product.id, isouter=True)
+            .join(Supplier, StockMovement.supplier_id == Supplier.id, isouter=True)
+            .where(StockMovement.direction == "in")
+            .where((StockMovement.unit_cost == None) | (StockMovement.unit_cost <= 0))
+            .order_by(StockMovement.created_at.desc())
+            .limit(limit)
+        )
+        rows = session.exec(q).all() or []
+        # Only suppliers that have at least one supplier_product_price.cost set
+        from ..models import SupplierProductPrice
+        costs_rows = session.exec(
+            select(SupplierProductPrice)
+            .where(SupplierProductPrice.cost != None)
+        ).all()
+        supplier_ids = sorted({c.supplier_id for c in costs_rows if c.supplier_id})
+        suppliers = session.exec(select(Supplier).where(Supplier.id.in_(supplier_ids)).order_by(Supplier.name.asc())).all() if supplier_ids else []
+        # Build cost map keyed by supplier_id and item_id/product_id for auto-fill
+        cost_map: dict[str, float] = {}
+        for c in costs_rows:
+            key_item = f"{c.supplier_id}:item:{c.item_id}" if c.supplier_id and c.item_id else None
+            key_prod = f"{c.supplier_id}:prod:{c.product_id}" if c.supplier_id and c.product_id else None
+            if key_item and c.cost is not None:
+                cost_map[key_item] = float(c.cost)
+            if key_prod and c.cost is not None:
+                cost_map[key_prod] = float(c.cost)
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "inventory_missing_costs.html",
+            {
+                "request": request,
+                "rows": rows,
+                "suppliers": suppliers,
+                "cost_map": cost_map,
+                "limit": limit,
+            },
+        )
+
+
+@router.patch("/movements/{movement_id}/cost")
+def update_movement_cost(movement_id: int, body: Dict[str, Any]):
+    """Update cost/supplier for inbound movements with missing cost."""
+    unit_cost = body.get("unit_cost")
+    supplier_id = body.get("supplier_id")
+    try:
+        if unit_cost is None or float(unit_cost) <= 0:
+            raise HTTPException(status_code=400, detail="unit_cost > 0 required")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="unit_cost must be numeric")
+    with get_session() as session:
+        mv = session.exec(select(StockMovement).where(StockMovement.id == movement_id)).first()
+        if not mv:
+            raise HTTPException(status_code=404, detail="Movement not found")
+        if mv.direction != "in":
+            raise HTTPException(status_code=400, detail="Only inbound movements can be edited here")
+        if mv.related_order_id:
+            raise HTTPException(status_code=400, detail="Order-linked movement cannot be edited here")
+        if supplier_id is not None:
+            supp = session.exec(select(Supplier).where(Supplier.id == supplier_id)).first()
+            if not supp:
+                raise HTTPException(status_code=404, detail="Supplier not found")
+            mv.supplier_id = supplier_id  # type: ignore
+        mv.unit_cost = float(unit_cost)
+        return {"status": "ok"}
 
 
 @router.patch("/movements/{movement_id}")
