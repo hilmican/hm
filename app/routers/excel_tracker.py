@@ -18,7 +18,7 @@ IADE_DIR = PROJECT_ROOT / "iadeler"
 
 
 @router.get("/excel-tracker", response_class=HTMLResponse)
-def excel_tracker_page(request: Request, order_id: int | None = None, q: str | None = None):
+def excel_tracker_page(request: Request, order_id: str | None = None, q: str | None = None):
     """Page to search orders and see which Excel files they came from."""
     if not request.session.get("uid"):
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -27,10 +27,17 @@ def excel_tracker_page(request: Request, order_id: int | None = None, q: str | N
     
     with get_session() as session:
         orders = []
-        
-        if order_id:
+
+        order_id_val = None
+        if order_id is not None:
+            try:
+                order_id_val = int(str(order_id).strip())
+            except Exception:
+                order_id_val = None
+
+        if order_id_val:
             # Direct order ID search
-            order = session.exec(select(Order).where(Order.id == order_id)).first()
+            order = session.exec(select(Order).where(Order.id == order_id_val)).first()
             if order:
                 orders = [order]
         elif q:
