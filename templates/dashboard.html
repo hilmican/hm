@@ -312,6 +312,7 @@
 
 			canvas.addEventListener('mousemove', (e) => {
 				const rect = canvas.getBoundingClientRect();
+				const parentRect = canvas.parentElement.getBoundingClientRect();
 				const mx = e.clientX - rect.left;
 				const my = e.clientY - rect.top;
 				let best = null;
@@ -331,8 +332,8 @@
 					return `<span style="color:${ds.color};font-weight:600">${ds.label}</span>: ${formatVal(v)}`;
 				});
 				tip.innerHTML = `<div style="font-weight:700;margin-bottom:4px;">${dateLabel}</div>${lines.join('<br>')}`;
-				tip.style.left = (mx + 10) + 'px';
-				tip.style.top = Math.max(0, my - 10) + 'px';
+				tip.style.left = (e.clientX - parentRect.left + 10) + 'px';
+				tip.style.top = Math.max(0, e.clientY - parentRect.top - 10) + 'px';
 				tip.style.display = 'block';
 			});
 
