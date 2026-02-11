@@ -3,11 +3,13 @@ from sqlmodel import select
 from sqlalchemy import text, func, or_, not_
 import os
 import datetime as dt
+from collections import defaultdict
 
 from ..db import get_session
 from ..models import Client, Item, Order, Payment, ImportRow, ImportRun, StockMovement
 from ..services.shipping import compute_shipping_fee
 from ..services.cache import cached_json
+from ..services.finance import get_effective_total
 
 router = APIRouter()
 
@@ -390,6 +392,77 @@ def dashboard(request: Request, days: int = 30):
 			if len(low_stock_best) >= 10:
 				break
 
+		# Daily series for charts (orders & finance)
+		def _compute_daily_series():
+			orders = session.exec(select(Order).where(
+				Order.merged_into_order_id.is_(None),
+				order_base_date.is_not(None),
+				order_base_date >= since_date,
+			)).all()
+			count_map: dict[dt.date, dict[str, float]] = defaultdict(lambda: {"sales": 0, "cancelled": 0, "refunded": 0})
+			fin_map: dict[dt.date, dict[str, float]] = defaultdict(lambda: {"revenue": 0.0, "cost": 0.0})
+			for o in orders:
+				day = o.shipment_date or o.data_date
+				if not day:
+					continue
+				status = (o.status or "").strip().lower()
+				is_cancelled = status == "cancelled"
+				is_refund = status in ("refunded", "iade_bekliyor")
+				is_skip = status in ("switched", "stitched")
+
+				if is_cancelled:
+					count_map[day]["cancelled"] += 1
+				elif is_refund:
+					count_map[day]["refunded"] += 1
+				elif not is_skip:
+					count_map[day]["sales"] += 1
+
+				# Financials: include only active sales (exclude cancelled/refunded/degisim)
+				if is_cancelled or is_refund or is_skip:
+					continue
+				try:
+					revenue = float(get_effective_total(o) or 0.0)
+				except Exception:
+					revenue = float(o.total_amount or 0.0) if o.total_amount is not None else 0.0
+				try:
+					cost = float(o.total_cost or 0.0)
+				except Exception:
+					cost = 0.0
+				try:
+					shipping_cost = float(o.shipping_fee or 0.0)
+				except Exception:
+					shipping_cost = 0.0
+				fin_map[day]["revenue"] += revenue
+				fin_map[day]["cost"] += (cost + shipping_cost)
+
+			daily_counts = []
+			daily_financials = []
+			today = dt.date.today()
+			span_days = (today - since_date).days
+			for i in range(span_days + 1):
+				day = since_date + dt.timedelta(days=i)
+				c = count_map.get(day, {"sales": 0, "cancelled": 0, "refunded": 0})
+				f = fin_map.get(day, {"revenue": 0.0, "cost": 0.0})
+				revenue = float(f.get("revenue", 0.0) or 0.0)
+				cost = float(f.get("cost", 0.0) or 0.0)
+				daily_counts.append({
+					"date": day.isoformat(),
+					"sales": int(c.get("sales", 0) or 0),
+					"cancelled": int(c.get("cancelled", 0) or 0),
+					"refunded": int(c.get("refunded", 0) or 0),
+				})
+				daily_financials.append({
+					"date": day.isoformat(),
+					"revenue": revenue,
+					"cost": cost,
+					"profit": revenue - cost,
+				})
+			return {"counts": daily_counts, "financials": daily_financials}
+
+		daily_series = cached_json(f"dash:daily_series:{since_date.isoformat()}:{days}", ttl, _compute_daily_series)
+		daily_counts = daily_series.get("counts", []) if isinstance(daily_series, dict) else []
+		daily_financials = daily_series.get("financials", []) if isinstance(daily_series, dict) else []
+
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
 			"dashboard.html",
@@ -405,5 +478,7 @@ def dashboard(request: Request, days: int = 30):
 				"ongoing_status_counts": ongoing_status_counts,
 				"lifecycle_distribution": lifecycle_distribution,
 				"low_stock_best": low_stock_best,
+				"daily_counts": daily_counts,
+				"daily_financials": daily_financials,
 			},
 		)

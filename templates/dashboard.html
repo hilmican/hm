@@ -64,6 +64,22 @@
 		<div id="uploadResult" class="caption"></div>
 		<div class="grid">
 			<div class="card">
+				<h2>Günlük Sipariş Akışı</h2>
+				<div style="padding:12px;">
+					<canvas id="dailyCountsChart" width="520" height="320" style="width:100%; max-width:100%;"></canvas>
+					<div id="dailyCountsLegend" class="caption" style="padding:8px 0;"></div>
+				</div>
+			</div>
+
+			<div class="card">
+				<h2>Günlük Ciro / Kâr / Maliyet</h2>
+				<div style="padding:12px;">
+					<canvas id="dailyFinancialsChart" width="520" height="320" style="width:100%; max-width:100%;"></canvas>
+					<div id="dailyFinancialsLegend" class="caption" style="padding:8px 0;"></div>
+				</div>
+			</div>
+
+			<div class="card">
 <h2>{{ t(request, 'dashboard.order_status_distribution') }}</h2>
 				<canvas id="statusPie" width="400" height="260" style="display:block;margin:8px auto;"></canvas>
 				<div id="statusLegend" class="caption" style="padding:8px 16px;"></div>
@@ -114,6 +130,8 @@
 			unmatched_found_prompt: "{{ t(request, 'dashboard.unmatched_found_prompt') }}",
 			import_failed_for: "{{ t(request, 'dashboard.import_failed_for') }}"
 		};
+		const DAILY_COUNTS = {{ (daily_counts or []) | tojson }};
+		const DAILY_FINANCIALS = {{ (daily_financials or []) | tojson }};
 		const STATUS_LABELS = {
 			"tamamlandi": "{{ t(request, 'status.tamamlandi') }}",
 			"dagitimda": "{{ t(request, 'status.dagitimda') }}",
@@ -199,6 +217,99 @@
 				}
 			});
 		}
+
+		function renderLineChart(canvasId, labelsArr, datasets, legendId) {
+			if (!labelsArr || !labelsArr.length || !datasets || !datasets.length) return;
+			const canvas = document.getElementById(canvasId);
+			if (!canvas) return;
+			const ctx = canvas.getContext('2d');
+			const w = canvas.width;
+			const h = canvas.height;
+			const pad = 36;
+			const usableW = w - pad * 2;
+			const usableH = h - pad * 2;
+			const allValues = datasets.flatMap(d => d.data).map(v => Number(v || 0));
+			if (!allValues.length) return;
+			const maxVal = Math.max(...allValues, 1);
+			const xCount = labelsArr.length;
+			const xStep = xCount > 1 ? usableW / (xCount - 1) : 0;
+			const yTicks = 4;
+
+			ctx.clearRect(0, 0, w, h);
+			ctx.font = '12px system-ui';
+			ctx.strokeStyle = '#e5e7eb';
+			ctx.lineWidth = 1;
+
+			for (let i = 0; i <= yTicks; i++) {
+				const frac = i / yTicks;
+				const y = h - pad - frac * usableH;
+				ctx.beginPath();
+				ctx.moveTo(pad, y);
+				ctx.lineTo(w - pad, y);
+				ctx.stroke();
+				const val = Math.round(maxVal * frac);
+				ctx.fillStyle = '#6b7280';
+				ctx.fillText(val.toString(), 4, y + 4);
+			}
+
+			const labelStep = Math.max(1, Math.ceil(xCount / 8));
+			ctx.fillStyle = '#6b7280';
+			for (let i = 0; i < xCount; i += labelStep) {
+				const x = pad + i * xStep;
+				const lbl = labelsArr[i];
+				ctx.fillText(lbl, x - 12, h - 8);
+			}
+
+			datasets.forEach(ds => {
+				ctx.strokeStyle = ds.color || '#2563eb';
+				ctx.lineWidth = 2;
+				ctx.beginPath();
+				ds.data.forEach((v, idx) => {
+					const x = pad + idx * xStep;
+					const y = h - pad - (Number(v || 0) / maxVal) * usableH;
+					if (idx === 0) ctx.moveTo(x, y);
+					else ctx.lineTo(x, y);
+				});
+				ctx.stroke();
+				ctx.fillStyle = ds.color || '#2563eb';
+				ds.data.forEach((v, idx) => {
+					const x = pad + idx * xStep;
+					const y = h - pad - (Number(v || 0) / maxVal) * usableH;
+					ctx.beginPath();
+					ctx.arc(x, y, 3, 0, Math.PI * 2);
+					ctx.fill();
+				});
+			});
+
+			if (legendId) {
+				const legend = document.getElementById(legendId);
+				if (legend) {
+					legend.innerHTML = datasets.map(ds => `<span style="display:inline-flex;align-items:center;margin-right:12px;">
+						<span style="width:12px;height:12px;border-radius:999px;background:${ds.color};display:inline-block;margin-right:6px;"></span>
+						${ds.label}
+					</span>`).join('');
+				}
+			}
+		}
+
+		(function renderDailyCharts() {
+			if (DAILY_COUNTS && DAILY_COUNTS.length) {
+				const labels = DAILY_COUNTS.map(d => (d.date || '').slice(5));
+				renderLineChart('dailyCountsChart', labels, [
+					{ label: 'Satış', color: '#2563eb', data: DAILY_COUNTS.map(d => d.sales || 0) },
+					{ label: 'İptal', color: '#f97316', data: DAILY_COUNTS.map(d => d.cancelled || 0) },
+					{ label: 'İade', color: '#dc2626', data: DAILY_COUNTS.map(d => d.refunded || 0) },
+				], 'dailyCountsLegend');
+			}
+			if (DAILY_FINANCIALS && DAILY_FINANCIALS.length) {
+				const labels = DAILY_FINANCIALS.map(d => (d.date || '').slice(5));
+				renderLineChart('dailyFinancialsChart', labels, [
+					{ label: 'Ciro', color: '#0ea5e9', data: DAILY_FINANCIALS.map(d => d.revenue || 0) },
+					{ label: 'Kâr', color: '#10b981', data: DAILY_FINANCIALS.map(d => d.profit || 0) },
+					{ label: 'Maliyet', color: '#f59e0b', data: DAILY_FINANCIALS.map(d => d.cost || 0) },
+				], 'dailyFinancialsLegend');
+			}
+		})();
 
 		// Simple pie chart without external deps
 		(function(){
