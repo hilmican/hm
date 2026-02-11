@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, List, Optional
 import re
 import json
 import ast
+from collections import defaultdict
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request, Query
 from sqlmodel import select
@@ -32,6 +33,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BIZIM_DIR = PROJECT_ROOT / "bizimexcellerimiz"
 KARGO_DIR = PROJECT_ROOT / "kargocununexcelleri"
 IADE_DIR = PROJECT_ROOT / "iadeler"
+
+# Helper to parse mapped_json safely (stored as Python dict string)
+def _parse_mapped_json(raw: str | None) -> dict:
+	if not raw:
+		return {}
+	try:
+		return ast.literal_eval(raw)
+	except Exception:
+		return {}
 
 
 def _enrich_duplicate_row(rec: dict, run: ImportRun, existing_ir: ImportRow | None, session, source: str) -> None:
@@ -1506,6 +1516,253 @@ def import_result(run_ids: str, request: Request):
                 "rows_by_run": rows_by_run,
             },
         )
+
+
+@router.get("/import/dedupe/kargo", response_class=HTMLResponse)
+def import_kargo_dedupe_report(
+	request: Request,
+	start: str | None = None,
+	end: str | None = None,
+	limit: int = 200,
+):
+	"""Detect kargo rows skipped as duplicate where same order has both 0 payment and a paid row (date range by run.started_at)."""
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	limit = max(10, min(int(limit or 200), 500))
+	today = datetime.utcnow().date()
+	def _parse_date(val: str | None, default):
+		if not val:
+			return default
+		try:
+			return datetime.fromisoformat(val).date()
+		except Exception:
+			try:
+				return datetime.strptime(val, "%Y-%m-%d").date()
+			except Exception:
+				return default
+	start_date = _parse_date(start, today - timedelta(days=120))
+	end_date = _parse_date(end, today)
+	if end_date < start_date:
+		start_date, end_date = end_date, start_date
+	start_dt = datetime.combine(start_date, datetime.min.time())
+	end_dt = datetime.combine(end_date, datetime.max.time())
+
+	with get_session() as session:
+		rows = session.exec(
+			select(ImportRow, ImportRun)
+			.join(ImportRun, ImportRun.id == ImportRow.import_run_id)
+			.where(
+				ImportRun.source == "kargo",
+				ImportRun.started_at >= start_dt,
+				ImportRun.started_at <= end_dt,
+				ImportRow.status == "skipped",
+				ImportRow.message.contains("duplicate"),
+				ImportRow.matched_order_id.is_not(None),
+			)
+			.order_by(ImportRow.import_run_id, ImportRow.matched_order_id, ImportRow.row_index)
+		).all()
+
+		# Group by (run_id, order_id)
+		group: dict[tuple[int, int], dict] = defaultdict(lambda: {"rows": [], "order_id": None, "run": None})
+		for ir, run in rows:
+			key = (int(run.id or 0), int(ir.matched_order_id or 0))
+			rec = _parse_mapped_json(ir.mapped_json)
+			group[key]["rows"].append(
+				{
+					"row_index": ir.row_index,
+					"status": ir.status,
+					"message": ir.message,
+					"payment_amount": rec.get("payment_amount"),
+					"fee_kargo": rec.get("fee_kargo"),
+					"shipment_date": rec.get("shipment_date"),
+					"delivery_date": rec.get("delivery_date"),
+					"tracking_no": rec.get("tracking_no"),
+					"alici_kodu": rec.get("alici_kodu"),
+					"mapped_json": rec,
+				}
+			)
+			group[key]["order_id"] = int(ir.matched_order_id or 0)
+			group[key]["run"] = run
+
+		candidates = []
+		order_ids = set()
+		run_ids = set()
+		for (run_id, order_id), data in group.items():
+			rows_data = data["rows"]
+			amts = []
+			tracking = None
+			for r in rows_data:
+				try:
+					amts.append(float(r.get("payment_amount") or 0.0))
+				except Exception:
+					amts.append(0.0)
+				if not tracking:
+					tracking = r.get("tracking_no")
+			has_zero = any((a == 0) for a in amts)
+			has_pos = any((a > 0) for a in amts)
+			if not (has_zero and has_pos):
+				continue
+			order_ids.add(order_id)
+			run_ids.add(run_id)
+			candidates.append(
+				{
+					"run_id": run_id,
+					"order_id": order_id,
+					"tracking_no": tracking,
+					"amounts": amts,
+					"rows": rows_data,
+					"run": data["run"],
+				}
+			)
+			if len(candidates) >= limit:
+				break
+
+		orders_map = {}
+		clients_map = {}
+		if order_ids:
+			orders = session.exec(select(Order).where(Order.id.in_(order_ids))).all()
+			for o in orders:
+				if o and o.id:
+					orders_map[int(o.id)] = o
+					if o.client_id:
+						clients_map[int(o.client_id)] = None
+			if clients_map:
+				clients = session.exec(select(Client).where(Client.id.in_(clients_map.keys()))).all()
+				for c in clients:
+					if c and c.id:
+						clients_map[int(c.id)] = c
+
+		# Attach order/client info and placeholder payment counts
+		enhanced = []
+		for cand in candidates:
+			o = orders_map.get(int(cand["order_id"]))
+			client = clients_map.get(int(o.client_id)) if o and o.client_id else None
+			placeholder_payments = []
+			if o and o.client_id:
+				ph_orders = session.exec(
+					select(Order).where(
+						Order.channel == "rollback",
+						Order.client_id == o.client_id,
+						Order.notes.contains(f"[rollback placeholder run {cand['run_id']}]"),
+					)
+				).all()
+				if ph_orders:
+					ph_ids = [p.id for p in ph_orders if p.id]
+					if ph_ids:
+						ph_payments = session.exec(select(Payment).where(Payment.order_id.in_(ph_ids))).all()
+						for p in ph_payments:
+							placeholder_payments.append(p)
+			enhanced.append(
+				{
+					"run": cand["run"],
+					"run_id": cand["run_id"],
+					"order": o,
+					"client": client,
+					"tracking_no": cand["tracking_no"],
+					"amounts": cand["amounts"],
+					"rows": cand["rows"],
+					"placeholder_payments": placeholder_payments,
+				}
+			)
+
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"import_dedupe.html",
+			{
+				"request": request,
+				"candidates": enhanced,
+				"limit": limit,
+				"start": start_date,
+				"end": end_date,
+				"found": len(enhanced),
+			},
+		)
+
+
+@router.post("/import/dedupe/kargo/fix")
+def import_kargo_dedupe_fix(request: Request, run_id: int, order_id: int):
+	"""Move payments from rollback placeholders to the real order and mark it paid."""
+	if not request.session.get("uid"):
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	with get_session() as session:
+		run = session.get(ImportRun, int(run_id))
+		if not run or (run.source or "").lower() != "kargo":
+			raise HTTPException(status_code=404, detail="Run not found or not kargo")
+		order = session.get(Order, int(order_id))
+		if not order:
+			raise HTTPException(status_code=404, detail="Order not found")
+
+		rows = session.exec(
+			select(ImportRow)
+			.where(
+				ImportRow.import_run_id == int(run_id),
+				ImportRow.matched_order_id == int(order_id),
+				ImportRow.status == "skipped",
+				ImportRow.message.contains("duplicate"),
+			)
+			.order_by(ImportRow.row_index)
+		).all()
+		if not rows:
+			raise HTTPException(status_code=404, detail="No matching skipped rows")
+
+		amts = []
+		tracking = None
+		for ir in rows:
+			rec = _parse_mapped_json(ir.mapped_json)
+			try:
+				amts.append(float(rec.get("payment_amount") or 0.0))
+			except Exception:
+				amts.append(0.0)
+			if not tracking:
+				tracking = rec.get("tracking_no")
+		if not (any(a == 0 for a in amts) and any(a > 0 for a in amts)):
+			raise HTTPException(status_code=400, detail="Row set is not a zero+paid mix; aborting.")
+		max_pay = max(amts)
+
+		# Move payments from placeholders (same client, rollback tag)
+		payments_moved = 0
+		amount_moved = 0.0
+		if order.client_id:
+			ph_orders = session.exec(
+				select(Order).where(
+					Order.channel == "rollback",
+					Order.client_id == order.client_id,
+					Order.notes.contains(f"[rollback placeholder run {run_id}]"),
+				)
+			).all()
+			ph_ids = [p.id for p in ph_orders if p.id]
+			if ph_ids:
+				payments = session.exec(select(Payment).where(Payment.order_id.in_(ph_ids))).all()
+				for p in payments:
+					p.order_id = order.id  # type: ignore
+					if p.reference:
+						if f"[fix{run_id}->{order.id}]" not in p.reference:
+							p.reference = p.reference + f" [fix{run_id}->{order.id}]"
+					else:
+						p.reference = f"[fix{run_id}->{order.id}]"
+					payments_moved += 1
+					try:
+						amount_moved += float(p.amount or 0.0)
+					except Exception:
+						pass
+
+		# Adjust order fields minimally
+		if float(order.total_amount or 0.0) <= 0 and max_pay > 0:
+			order.total_amount = max_pay
+		if not order.status or order.status.strip().lower() in ("merged", "placeholder", "unpaid", "none", "null", ""):
+			order.status = "paid"
+		session.add(order)
+		session.commit()
+
+		return {
+			"status": "ok",
+			"run_id": run_id,
+			"order_id": order_id,
+			"payments_moved": payments_moved,
+			"amount_moved": amount_moved,
+			"max_payment_amount": max_pay,
+			"tracking_no": tracking,
+		}
 
 
 @router.post("/returns/apply")
