@@ -41,7 +41,11 @@ def _parse_mapped_json(raw: str | None) -> dict:
 	try:
 		return ast.literal_eval(raw)
 	except Exception:
-		return {}
+		try:
+			# allow datetime.date(...) etc. with a restricted globals dict
+			return eval(raw, {"__builtins__": {}}, {"datetime": datetime})
+		except Exception:
+			return {}
 
 
 def _enrich_duplicate_row(rec: dict, run: ImportRun, existing_ir: ImportRow | None, session, source: str) -> None:
