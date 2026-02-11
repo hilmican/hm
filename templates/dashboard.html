@@ -306,6 +306,18 @@
 			canvas.parentElement.style.position = 'relative';
 			canvas.parentElement.appendChild(tip);
 
+			// Hover dot
+			const hoverDot = document.createElement('div');
+			hoverDot.style.position = 'absolute';
+			hoverDot.style.width = '12px';
+			hoverDot.style.height = '12px';
+			hoverDot.style.borderRadius = '999px';
+			hoverDot.style.border = '2px solid #fff';
+			hoverDot.style.boxShadow = '0 2px 6px rgba(0,0,0,0.18)';
+			hoverDot.style.pointerEvents = 'none';
+			hoverDot.style.display = 'none';
+			canvas.parentElement.appendChild(hoverDot);
+
 			function formatVal(v) {
 				return Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2);
 			}
@@ -313,8 +325,10 @@
 			canvas.addEventListener('mousemove', (e) => {
 				const rect = canvas.getBoundingClientRect();
 				const parentRect = canvas.parentElement.getBoundingClientRect();
-				const mx = e.clientX - rect.left;
-				const my = e.clientY - rect.top;
+				const scaleX = canvas.width / rect.width;
+				const scaleY = canvas.height / rect.height;
+				const mx = (e.clientX - rect.left) * scaleX;
+				const my = (e.clientY - rect.top) * scaleY;
 				let best = null;
 				let bestD = 12; // radius threshold
 				for (const p of points) {
@@ -323,6 +337,7 @@
 				}
 				if (!best) {
 					tip.style.display = 'none';
+					hoverDot.style.display = 'none';
 					return;
 				}
 				const idx = best.idx;
@@ -335,10 +350,16 @@
 				tip.style.left = (e.clientX - parentRect.left + 10) + 'px';
 				tip.style.top = Math.max(0, e.clientY - parentRect.top - 10) + 'px';
 				tip.style.display = 'block';
+
+				hoverDot.style.left = (e.clientX - parentRect.left - 6) + 'px';
+				hoverDot.style.top = (e.clientY - parentRect.top - 6) + 'px';
+				hoverDot.style.background = best.color;
+				hoverDot.style.display = 'block';
 			});
 
 			canvas.addEventListener('mouseleave', () => {
 				tip.style.display = 'none';
+				hoverDot.style.display = 'none';
 			});
 		}
 
