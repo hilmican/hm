@@ -1518,7 +1518,7 @@ def import_result(run_ids: str, request: Request):
         )
 
 
-@router.get("/import/dedupe/kargo", response_class=HTMLResponse)
+@router.get("/dedupe/kargo", response_class=HTMLResponse)
 def import_kargo_dedupe_report(
 	request: Request,
 	start: str | None = None,
@@ -1679,7 +1679,7 @@ def import_kargo_dedupe_report(
 		)
 
 
-@router.post("/import/dedupe/kargo/fix")
+@router.post("/dedupe/kargo/fix")
 def import_kargo_dedupe_fix(request: Request, run_id: int, order_id: int):
 	"""Move payments from rollback placeholders to the real order and mark it paid."""
 	if not request.session.get("uid"):
