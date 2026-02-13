@@ -1855,9 +1855,32 @@ def returns_apply(body: dict, request: Request):
 									# derive unit cost if available
 									unit_cost = None
 									try:
-										item = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
-										if item and item.cost is not None and float(item.cost) > 0:
-											unit_cost = float(item.cost)
+										# fallback: last inbound movement cost
+										if unit_cost is None or unit_cost <= 0:
+											last_in = session.exec(
+												_select(StockMovement)
+												.where(StockMovement.item_id == oi.item_id, StockMovement.direction == "in")
+												.order_by(StockMovement.id.desc())
+											).first()
+											if last_in and last_in.unit_cost is not None:
+												try:
+													uc = float(last_in.unit_cost)
+													if uc > 0:
+														unit_cost = uc
+												except Exception:
+													pass
+										# fallback: product default_cost
+										if (unit_cost is None or unit_cost <= 0):
+											item = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
+											if item and item.product_id:
+												prod = session.exec(_select(Product).where(Product.id == item.product_id)).first()
+												if prod and getattr(prod, "default_cost", None) is not None:
+													try:
+														dc = float(prod.default_cost)
+														if dc > 0:
+															unit_cost = dc
+													except Exception:
+														pass
 									except Exception:
 										unit_cost = None
 									if unit_cost is None or unit_cost <= 0:
