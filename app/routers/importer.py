@@ -1889,7 +1889,7 @@ def returns_apply(body: dict, request: Request):
 						if already_processed and (message is None):
 							message = "already_processed"
 				except Exception as _e:
-					message = "apply_failed"
+					message = f"apply_failed:{str(_e)[:80]}"
 					errors.append({"row_index": idx, "error": "apply_failed", "detail": str(_e), "order_id": chosen_id})
 			else:
 				unmatched += 1
