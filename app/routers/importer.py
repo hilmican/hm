@@ -1784,6 +1784,15 @@ def returns_apply(body: dict, request: Request):
 	if not file_path.exists():
 		raise HTTPException(status_code=404, detail="File not found")
 	records = read_returns_file(str(file_path))
+	# If no data_date provided, try to infer from filename prefix YYYY-MM-DD
+	if not data_date_raw:
+		try:
+			import re as _re
+			m = _re.match(r"(\\d{4}-\\d{2}-\\d{2})", filename)
+			if m:
+				data_date_raw = m.group(1)
+		except Exception:
+			pass
 	# build quick map row_index -> chosen order id
 	chosen_map: dict[int, int] = {}
 	for sel in selections:
@@ -1829,6 +1838,7 @@ def returns_apply(body: dict, request: Request):
 				try:
 					o = session.exec(_select(Order).where(Order.id == int(chosen_id))).first()
 					if not o:
+						message = "order_not_found"
 						errors.append({"row_index": idx, "error": "order_not_found", "order_id": chosen_id})
 					else:
 						# Check if already processed for this order (restock done or date set previously)
@@ -1879,6 +1889,7 @@ def returns_apply(body: dict, request: Request):
 						if already_processed and (message is None):
 							message = "already_processed"
 				except Exception as _e:
+					message = "apply_failed"
 					errors.append({"row_index": idx, "error": "apply_failed", "detail": str(_e), "order_id": chosen_id})
 			else:
 				unmatched += 1
@@ -1895,6 +1906,10 @@ def returns_apply(body: dict, request: Request):
 			session.add(ir)
 		# Invalidate caches
 		bump_namespace()
+		try:
+			print(f"[returns_apply] run_id={run.id} filename={filename} updated={updated} unmatched={unmatched} errors={len(errors)}")
+		except Exception:
+			pass
 		# Always return 200 to allow partial success; include errors for client display
 		return {
 			"status": "ok",
