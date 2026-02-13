@@ -1852,7 +1852,20 @@ def returns_apply(body: dict, request: Request):
 									continue
 								qty = int(oi.quantity or 0)
 								if qty > 0:
-									adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id)
+									# derive unit cost if available
+									unit_cost = None
+									try:
+										item = session.exec(_select(Item).where(Item.id == oi.item_id)).first()
+										if item and item.cost is not None and float(item.cost) > 0:
+											unit_cost = float(item.cost)
+									except Exception:
+										unit_cost = None
+									if unit_cost is None or unit_cost <= 0:
+										# no cost info; skip stock-in but still continue processing
+										if message is None:
+											message = "restock_skipped_no_cost"
+									else:
+										adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=o.id, unit_cost=unit_cost)
 						# Always update order fields from the spreadsheet (status/date/amount)
 						action = (rec.get("action") or "").strip()
 						if not action:
