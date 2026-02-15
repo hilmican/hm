@@ -6,6 +6,7 @@ from pathlib import Path
 import ast
 import json
 import re
+import datetime as dt
 
 from ..db import get_session
 from ..models import Order, ImportRow, ImportRun, Client
@@ -45,10 +46,36 @@ def _parse_mapped_json(raw: str | None) -> dict:
     except Exception:
         pass
 
-    # 3) Legacy fallback: normalize common non-literals (nan/NaN/NaT)
+    # 3) Legacy fallback: normalize common non-literals/representations
     normalized = re.sub(r"\b(?:nan|NaN|NaT)\b", "None", text)
+    normalized = re.sub(
+        r"datetime\.date\((\d{4}),\s*(\d{1,2}),\s*(\d{1,2})\)",
+        lambda m: f"'{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}'",
+        normalized,
+    )
+    normalized = re.sub(
+        r"Timestamp\('([^']+)'\)",
+        lambda m: f"'{m.group(1)}'",
+        normalized,
+    )
+    normalized = re.sub(
+        r"datetime\.datetime\((\d{4}),\s*(\d{1,2}),\s*(\d{1,2}),\s*(\d{1,2}),\s*(\d{1,2})(?:,\s*(\d{1,2}))?(?:,\s*\d+)?\)",
+        lambda m: (
+            f"'{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d} "
+            f"{int(m.group(4)):02d}:{int(m.group(5)):02d}:{int(m.group(6) or 0):02d}'"
+        ),
+        normalized,
+    )
     try:
         parsed = ast.literal_eval(normalized)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    # 4) Last resort: restricted eval to support datetime.date(...) payloads
+    try:
+        parsed = eval(normalized, {"__builtins__": {}}, {"datetime": dt, "date": dt.date})  # noqa: S307
         if isinstance(parsed, dict):
             return parsed
     except Exception:
