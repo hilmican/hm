@@ -54,6 +54,10 @@ def _enrich_duplicate_row(rec: dict, run: ImportRun, existing_ir: ImportRow | No
 	Safe/idempotent: only fills empty fields or adds a payment when not already present.
 	"""
 	try:
+		try:
+			print(f"[DUP_ENRICH_START] source={source} run_id={getattr(run, 'id', None)} tracking={rec.get('tracking_no')} payment_amount={rec.get('payment_amount')}")
+		except Exception:
+			pass
 		order = None
 		if existing_ir and existing_ir.matched_order_id:
 			order = session.get(Order, existing_ir.matched_order_id)
@@ -62,16 +66,90 @@ def _enrich_duplicate_row(rec: dict, run: ImportRun, existing_ir: ImportRow | No
 		if order is None:
 			return
 
+		# Duplicate kargo rows can still arrive after a real Bizim order exists for the same tracking.
+		# Prefer that Bizim order as canonical target and retire the kargo placeholder.
+		target_order = order
+		if source == "kargo" and rec.get("tracking_no"):
+			track = rec.get("tracking_no")
+			cands = session.exec(
+				select(Order)
+				.where(Order.tracking_no == track)
+				.order_by(Order.id.asc())
+			).all()
+			bizim = [o for o in cands if (o.source or "") == "bizim" and (o.merged_into_order_id is None)]
+			if bizim:
+				target_order = bizim[0]
+				if order.id and target_order.id and order.id != target_order.id:
+					try:
+						print(f"[DUP_ENRICH_CANONICALIZE] old_order={order.id} target_order={target_order.id} tracking={track}")
+					except Exception:
+						pass
+					old_order_id = order.id
+					target_order_id = target_order.id
+					# Move any dangling payments on placeholder to canonical order.
+					legacy_pays = session.exec(select(Payment).where(Payment.order_id == order.id)).all()
+					for p in legacy_pays:
+						p.order_id = target_order.id
+						p.client_id = target_order.client_id
+					# Mark old kargo row as merged/retired.
+					order.merged_into_order_id = target_order.id
+					order.status = "merged"
+					order.total_amount = 0.0
+					# Re-anchor duplicate linkage so new ImportRow points to canonical order.
+					if existing_ir is not None:
+						existing_ir.matched_order_id = target_order.id
+					# Re-anchor historical import rows too, then delete redundant placeholder if safe.
+					try:
+						old_rows = session.exec(
+							select(ImportRow).where(ImportRow.matched_order_id == old_order_id)
+						).all()
+						for ir_old in old_rows:
+							ir_old.matched_order_id = target_order_id
+					except Exception:
+						pass
+					try:
+						has_pay = session.exec(select(Payment).where(Payment.order_id == old_order_id)).first() is not None
+						has_items = session.exec(select(OrderItem).where(OrderItem.order_id == old_order_id)).first() is not None
+						has_moves = session.exec(select(StockMovement).where(StockMovement.related_order_id == old_order_id)).first() is not None
+						if (not has_pay) and (not has_items) and (not has_moves) and ((order.source or "") == "kargo"):
+							session.delete(order)
+							try:
+								print(f"[DUP_ENRICH_DELETE_PLACEHOLDER] old_order={old_order_id} target_order={target_order_id}")
+							except Exception:
+								pass
+					except Exception:
+						pass
+
 		pdate = rec.get("delivery_date") or rec.get("shipment_date") or run.data_date
 		amt = rec.get("payment_amount") or 0.0
 		if amt and amt > 0 and pdate:
+			# Global duplicate guard by (reference, amount): do not clone payment across orders.
+			existing_ref = None
+			if rec.get("tracking_no"):
+				existing_ref = session.exec(
+					select(Payment).where(
+						Payment.reference == rec.get("tracking_no"),
+						Payment.amount == float(amt),
+					)
+				).first()
+				# If payment exists on another order, bind it to canonical order.
+				if existing_ref and target_order.id and existing_ref.order_id != target_order.id:
+					existing_ref.order_id = target_order.id
+					existing_ref.client_id = target_order.client_id
+					try:
+						print(f"[DUP_ENRICH_REUSE_PAYMENT] payment_id={existing_ref.id} target_order={target_order.id} tracking={rec.get('tracking_no')}")
+					except Exception:
+						pass
+
 			existing_pay = session.exec(
 				select(Payment).where(
-					Payment.order_id == order.id,
+					Payment.order_id == target_order.id,
 					Payment.amount == float(amt),
 					Payment.date == pdate,
 				)
 			).first()
+			if existing_ref and not existing_pay and existing_ref.order_id == target_order.id:
+				existing_pay = existing_ref
 			if existing_pay is None:
 				fee_kom = rec.get("fee_komisyon") or 0.0
 				fee_hiz = rec.get("fee_hizmet") or 0.0
@@ -80,8 +158,8 @@ def _enrich_duplicate_row(rec: dict, run: ImportRun, existing_ir: ImportRow | No
 				fee_kar = compute_shipping_fee(float(amt))
 				net = round(float(amt) - sum([fee_kom, fee_hiz, fee_kar, fee_iad, fee_eok]), 2)
 				pmt = Payment(
-					client_id=order.client_id,
-					order_id=order.id,
+					client_id=target_order.client_id,
+					order_id=target_order.id,
 					amount=float(amt),
 					date=pdate,
 					payment_date=pdate,
@@ -95,23 +173,27 @@ def _enrich_duplicate_row(rec: dict, run: ImportRun, existing_ir: ImportRow | No
 					net_amount=net,
 				)
 				session.add(pmt)
+				try:
+					print(f"[DUP_ENRICH_CREATE_PAYMENT] target_order={target_order.id} amount={amt} date={pdate} tracking={rec.get('tracking_no')}")
+				except Exception:
+					pass
 
-		if (order.total_amount is None) or (float(order.total_amount or 0.0) == 0.0):
+		if (target_order.total_amount is None) or (float(target_order.total_amount or 0.0) == 0.0):
 			if rec.get("total_amount") is not None:
-				order.total_amount = rec.get("total_amount")
+				target_order.total_amount = rec.get("total_amount")
 			elif amt and amt > 0:
-				order.total_amount = float(amt)
+				target_order.total_amount = float(amt)
 
-		if (order.quantity or 0) and (not order.unit_price) and order.total_amount is not None:
+		if (target_order.quantity or 0) and (not target_order.unit_price) and target_order.total_amount is not None:
 			try:
-				order.unit_price = round(float(order.total_amount) / float(order.quantity), 2)
+				target_order.unit_price = round(float(target_order.total_amount) / float(target_order.quantity), 2)
 			except Exception:
 				pass
 
-		if rec.get("shipment_date") and not order.shipment_date:
-			order.shipment_date = rec.get("shipment_date")
-		if rec.get("delivery_date") and not getattr(order, "delivery_date", None):
-			order.delivery_date = rec.get("delivery_date")
+		if rec.get("shipment_date") and not target_order.shipment_date:
+			target_order.shipment_date = rec.get("shipment_date")
+		if rec.get("delivery_date") and not getattr(target_order, "delivery_date", None):
+			target_order.delivery_date = rec.get("delivery_date")
 	except Exception:
 		return
 
