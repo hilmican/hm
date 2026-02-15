@@ -108,6 +108,7 @@ def income_table(
 		account_ids = {inc.account_id for inc in rows}
 		accounts = session.exec(select(Account).where(Account.id.in_(account_ids))).all() if account_ids else []
 		account_map = {acc.id: acc.name for acc in accounts if acc.id is not None}
+		total_amount = sum(float(inc.amount or 0.0) for inc in rows)
 		
 		templates = request.app.state.templates
 		return templates.TemplateResponse(
@@ -120,6 +121,7 @@ def income_table(
 				"accounts": all_accounts,
 				"account_map": account_map,
 				"today": today,
+				"total_amount": total_amount,
 			},
 		)
 

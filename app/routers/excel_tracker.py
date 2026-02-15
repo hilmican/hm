@@ -4,6 +4,8 @@ from sqlmodel import select
 from sqlalchemy import func
 from pathlib import Path
 import ast
+import json
+import re
 
 from ..db import get_session
 from ..models import Order, ImportRow, ImportRun, Client
@@ -15,6 +17,44 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BIZIM_DIR = PROJECT_ROOT / "bizimexcellerimiz"
 KARGO_DIR = PROJECT_ROOT / "kargocununexcelleri"
 IADE_DIR = PROJECT_ROOT / "iadeler"
+
+
+def _parse_mapped_json(raw: str | None) -> dict:
+    """Best-effort parser for ImportRow.mapped_json values.
+
+    Legacy rows are stored as Python-dict strings (str(rec)); newer rows may be
+    valid JSON. Some records also contain non-literal tokens like nan/NaT.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return {}
+
+    # 1) Standard JSON payload
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    # 2) Python literal dict payload
+    try:
+        parsed = ast.literal_eval(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    # 3) Legacy fallback: normalize common non-literals (nan/NaN/NaT)
+    normalized = re.sub(r"\b(?:nan|NaN|NaT)\b", "None", text)
+    try:
+        parsed = ast.literal_eval(normalized)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    return {}
 
 
 @router.get("/excel-tracker", response_class=HTMLResponse)
@@ -99,12 +139,7 @@ def excel_tracker_page(request: Request, order_id: str | None = None, q: str | N
                 
                 file_exists = file_path.exists() if file_path else False
                 
-                # Parse mapped_json
-                mapped_data = {}
-                try:
-                    mapped_data = ast.literal_eval(ir.mapped_json) if ir.mapped_json else {}
-                except Exception:
-                    pass
+                mapped_data = _parse_mapped_json(ir.mapped_json)
                 
                 rows_data.append({
                     "import_row_id": ir.id,

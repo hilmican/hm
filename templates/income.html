@@ -163,6 +163,9 @@
     <div class="card" style="margin-top:18px;">
       <h2>Gelir Geçmişi</h2>
       <div class="body" style="padding:0">
+        <div style="padding:12px 16px; border-bottom:1px solid #e5e7eb; background:#f8fafc; font-weight:600;">
+          Toplam: {{ '%.2f'|format(total_amount or 0) }} ₺ ({{ income_entries|length }} kayıt)
+        </div>
         <table>
           <thead>
             <tr>
