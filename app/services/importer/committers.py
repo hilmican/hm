@@ -21,6 +21,15 @@ from ..shipping import compute_shipping_fee
 from ..finance import ensure_iban_income
 
 
+def _kargo_log(event: str, **kwargs) -> None:
+    """Lightweight structured-ish logs for kargo import decisions."""
+    try:
+        payload = " ".join(f"{k}={kwargs[k]}" for k in sorted(kwargs.keys()))
+        print(f"[KARGO:{event}] {payload}".strip())
+    except Exception:
+        pass
+
+
 def _normalize_shipping_company(val: Optional[str]) -> str:
 	try:
 		s = (val or "").strip().lower()
@@ -234,6 +243,8 @@ def _maybe_rehome_payment_cross_client_by_name(
 			try:
 				# if target has no tracking, adopt from source
 				target = session.get(_Order, target_order_id)
+				if target:
+					pay.client_id = target.client_id
 				if target and (not target.tracking_no) and src_order.tracking_no:
 					target.tracking_no = src_order.tracking_no
 				if src_order:
@@ -241,6 +252,8 @@ def _maybe_rehome_payment_cross_client_by_name(
 					if src_order.status == "placeholder":
 						src_order.status = "merged"
 					src_order.total_amount = 0.0
+				if target:
+					_maybe_mark_order_paid(session, target)
 				try:
 					print(f"[REHOME-XC-MOVED] pay={pay.id} from_order={src_order.id if src_order else None} to_order={target_order_id} client={c.id if 'c' in locals() else None}")
 				except Exception:
@@ -283,6 +296,17 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
     matched_client_id = None
     matched_order_id = None
     candidates: list = []
+    _kargo_log(
+        "ROW_START",
+        run_id=getattr(run, "id", None),
+        source=getattr(run, "source", None),
+        file=getattr(run, "filename", None),
+        tracking=rec.get("tracking_no"),
+        name=rec.get("name"),
+        payment_amount=rec.get("payment_amount"),
+        shipment_date=rec.get("shipment_date"),
+        delivery_date=rec.get("delivery_date"),
+    )
 
     # never treat kargo item_name as an item; push into notes if exists
     if rec.get("item_name"):
@@ -294,6 +318,15 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
     # Try direct match by tracking
     order = find_order_by_tracking(session, rec.get("tracking_no"))
     if order:
+        _kargo_log(
+            "TRACKING_MATCH",
+            order_id=order.id,
+            order_client_id=order.client_id,
+            order_source=order.source,
+            order_status=order.status,
+            order_total=order.total_amount,
+            tracking=rec.get("tracking_no"),
+        )
         matched_order_id = order.id
         matched_client_id = order.client_id
         try:
@@ -359,6 +392,15 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
                         print(f"[KARGO-TRACK-REHOME] tracking={rec.get('tracking_no')} kargo_order={order.id} bizim_order={o_biz.id} client_kargo={order.client_id} client_bizim={o_biz.client_id} name_norm={name_norm} amount={payment_amount}")
                     except Exception:
                         pass
+                else:
+                    _kargo_log(
+                        "TRACKING_REHOME_NOT_FOUND",
+                        tracking=rec.get("tracking_no"),
+                        kargo_order_id=order.id,
+                        name_norm=name_norm,
+                        payment_amount=payment_amount,
+                        ship=ship,
+                    )
         except Exception:
             pass
         # enrich order if missing data (do not overwrite existing non-null values)
@@ -388,6 +430,14 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
     else:
         # Skip zero-amount ErkenOdemeKesintisi rows to avoid placeholder creation
         if _is_zero_early_payment_deduction(rec):
+            _kargo_log(
+                "ZERO_EARLY_DEDUCTION_SKIPPED",
+                tracking=rec.get("tracking_no"),
+                name=rec.get("name"),
+                notes=rec.get("notes"),
+                payment_amount=rec.get("payment_amount"),
+                total_amount=rec.get("total_amount"),
+            )
             return "skipped", "ignored zero-amount early payment deduction row", None, None, []
 
         # resolve client by unique key (name + optional surname + phone)
@@ -539,6 +589,14 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
                             print(f"[KARGO-NAME-MERGE] target_order={o.id} target_client={o.client_id} kargo_client={client.id} name_norm={name_norm} amount={payment_amount}")
                         except Exception:
                             pass
+                    else:
+                        _kargo_log(
+                            "NAME_MERGE_NOT_FOUND",
+                            name_norm=name_norm,
+                            payment_amount=payment_amount,
+                            ship=ship,
+                            kargo_client_id=getattr(client, "id", None),
+                        )
             except Exception:
                 pass
         if order:
@@ -668,17 +726,44 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
                     Payment.amount == amt,
                 )
             ).first()
+            if existing_ref:
+                _kargo_log(
+                    "EXISTING_REF_FOUND",
+                    tracking=rec.get("tracking_no"),
+                    payment_id=existing_ref.id,
+                    payment_order_id=existing_ref.order_id,
+                    payment_client_id=existing_ref.client_id,
+                    amount=existing_ref.amount,
+                )
 
         existing = session.exec(select(Payment).where(Payment.order_id == order.id, Payment.date == pdate_legacy)).first()
         if existing_ref and not existing:
             existing = existing_ref
             # If the ref belongs to another order, prefer reusing that instead of creating a duplicate
             if existing_ref.order_id and existing_ref.order_id != order.id:
+                old_order = order
                 matched_order_id = existing_ref.order_id
                 matched_client_id = existing_ref.client_id
                 order = session.get(Order, existing_ref.order_id) or order
                 status = "updated"
                 message = message or "payment reference already exists; reused"
+                try:
+                    # Keep merge pointer coherent when we re-anchor this row to another order.
+                    if old_order and old_order.id and order and order.id and old_order.id != order.id:
+                        old_order.merged_into_order_id = order.id
+                        if (old_order.status or "").lower() in ("", "placeholder", "merged"):
+                            old_order.status = "merged"
+                        old_order.total_amount = 0.0
+                except Exception:
+                    pass
+                _kargo_log(
+                    "PAYMENT_REUSED_FROM_OTHER_ORDER",
+                    from_order_id=getattr(old_order, "id", None),
+                    to_order_id=getattr(order, "id", None),
+                    payment_id=existing_ref.id,
+                    tracking=rec.get("tracking_no"),
+                    amount=amt,
+                )
 
         fee_kom = rec.get("fee_komisyon") or 0.0
         fee_hiz = rec.get("fee_hizmet") or 0.0
@@ -713,6 +798,16 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
                 "reference": pmt.reference,
             })
             run.created_payments += 1
+            _kargo_log(
+                "PAYMENT_CREATED",
+                payment_id=pmt.id,
+                order_id=order.id if order else None,
+                client_id=order.client_id if order else None,
+                amount=amt,
+                payment_date=payment_date_from_filename,
+                legacy_date=pdate_legacy,
+                reference=rec.get("tracking_no"),
+            )
         else:
             old_snap = {
                 "amount": existing.amount,
@@ -736,6 +831,25 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
                     "payment_date": (existing.payment_date or existing.date).isoformat() if (existing.payment_date or existing.date) else None,
                     "reference": existing.reference,
                 })
+                _kargo_log(
+                    "PAYMENT_UPDATED_HIGHER_AMOUNT",
+                    payment_id=existing.id,
+                    old_amount=old_snap.get("amount"),
+                    new_amount=existing.amount,
+                    order_id=existing.order_id,
+                    client_id=existing.client_id,
+                    reference=existing.reference,
+                )
+            else:
+                _kargo_log(
+                    "PAYMENT_UPDATE_SKIPPED_NON_INCREASING",
+                    payment_id=existing.id,
+                    existing_amount=existing.amount,
+                    incoming_amount=amt,
+                    order_id=existing.order_id,
+                    client_id=existing.client_id,
+                    reference=existing.reference,
+                )
         # After creating/updating payment, auto-mark paid if fully covered
         try:
             _maybe_mark_order_paid(session, order)
@@ -757,6 +871,16 @@ def process_kargo_row(session, run, rec, *, force_client_id: Optional[int] = Non
                 ensure_iban_income(session, order, float(order.total_amount or amt or 0.0))
         except Exception:
             pass
+    else:
+        _kargo_log(
+            "PAYMENT_SKIPPED",
+            reason="non_positive_or_missing_date_or_order",
+            tracking=rec.get("tracking_no"),
+            payment_amount=amt_raw,
+            pdate_legacy=pdate_legacy,
+            order_id=getattr(order, "id", None),
+            order_total=getattr(order, "total_amount", None),
+        )
     return status, message, matched_client_id, matched_order_id, candidates
 
 
