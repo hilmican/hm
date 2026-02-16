@@ -9,7 +9,12 @@
     .muted { color: #6b7280; font-size: 13px; }
     .toolbar { margin: 12px 0 18px 0; display:flex; gap:8px; align-items:center; }
     .toolbar input { padding: 6px 8px; border:1px solid #d1d5db; border-radius: 6px; width: 120px; }
-    .btn { background:#2563eb; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; }
+    .btn { background:#2563eb; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; text-decoration:none; display:inline-block; }
+    .btn:hover { background:#1d4ed8; }
+    .btn-danger { background:#b91c1c; }
+    .btn-danger:hover { background:#991b1b; }
+    .btn-secondary { background:#374151; }
+    .btn-secondary:hover { background:#1f2937; }
     .grid { display:grid; grid-template-columns: 1fr; gap:16px; }
     .card { border:1px solid #e5e7eb; border-radius:8px; overflow:hidden; background:#fff; }
     .card h2 { margin:0; padding:10px 14px; background:#f9fafb; border-bottom:1px solid #e5e7eb; font-size:16px; }
@@ -20,12 +25,17 @@
     .ok { color:#059669; }
     .warn { color:#b45309; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+    .small { font-size:12px; }
+    .meta { margin-top:4px; color:#4b5563; }
+    .link { color:#2563eb; text-decoration:none; }
+    .link:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
   {% include "_nav.html" %}
   <h1>Veri Butunlugu Kontrolu</h1>
-  <div class="muted">Satis ve odeme kayitlarinda potansiyel ciftleri/tutarsizliklari listeler.</div>
+  <div class="muted">Satis ve odeme kayitlarinda potansiyel ciftleri/tutarsizliklari listeler. Her satirda detay linkleri ve hizli aksiyonlar vardir.</div>
 
   <form class="toolbar" method="get" action="/admin/data-integrity">
     <label>Limit</label>
@@ -48,17 +58,34 @@
         {% if dup_tracking %}
         <table>
           <thead>
-            <tr><th>Tracking</th><th>Adet</th><th>Siparisler</th></tr>
+            <tr><th>Tracking</th><th>Adet</th><th>Siparisler ve Karar</th></tr>
           </thead>
           <tbody>
             {% for g in dup_tracking %}
             <tr>
-              <td class="mono">{{ g.tracking_no }}</td>
+              <td class="mono">
+                {{ g.tracking_no }}
+                <div class="meta"><a class="link" href="/excel-tracker?order_id={{ g.canonical_order_id or '' }}" target="_blank">Excel Tracker</a></div>
+              </td>
               <td>{{ g.count }}</td>
               <td>
                 {% for o in g.orders %}
-                  <div class="mono">#{{ o.id }} | client={{ o.client_id }} | src={{ o.source }} | st={{ o.status or '-' }} | total={{ o.total_amount or 0 }}</div>
+                  <div class="mono">
+                    <a class="link" href="/orders/{{ o.id }}/edit" target="_blank">#{{ o.id }}</a>
+                    | client=<a class="link" href="/clients/{{ o.client_id }}" target="_blank">{{ o.client_id }}</a>
+                    | src={{ o.source }}
+                    | st={{ o.status or '-' }}
+                    | total={{ o.total_amount or 0 }}
+                    {% if g.canonical_order_id == o.id %}<strong> | KANONIK</strong>{% endif %}
+                  </div>
                 {% endfor %}
+                <div class="actions">
+                  {% if g.canonical_order_id %}
+                  <button class="btn btn-secondary small" onclick="mergeTrackingOrders('{{ g.tracking_no }}', {{ g.canonical_order_id }})">
+                    Bu tracking'i #{{ g.canonical_order_id }} altinda birlestir
+                  </button>
+                  {% endif %}
+                </div>
               </td>
             </tr>
             {% endfor %}
@@ -76,7 +103,7 @@
         {% if dup_payments %}
         <table>
           <thead>
-            <tr><th>Reference</th><th>Tutar</th><th>Adet</th><th>Odeme Kayitlari</th></tr>
+            <tr><th>Reference</th><th>Tutar</th><th>Adet</th><th>Odeme Kayitlari ve Karar</th></tr>
           </thead>
           <tbody>
             {% for g in dup_payments %}
@@ -86,8 +113,24 @@
               <td>{{ g.count }}</td>
               <td>
                 {% for p in g.payments %}
-                  <div class="mono">#{{ p.id }} | order={{ p.order_id }} | client={{ p.client_id }} | date={{ p.date }} | pdate={{ p.payment_date or '-' }}</div>
+                  <div class="mono">
+                    pay#{{ p.id }}
+                    {% if p.order_id %}| order=<a class="link" href="/orders/{{ p.order_id }}/edit" target="_blank">#{{ p.order_id }}</a>{% endif %}
+                    | client=<a class="link" href="/clients/{{ p.client_id }}" target="_blank">{{ p.client_id }}</a>
+                    | src={{ p.order_source or '-' }}
+                    | st={{ p.order_status or '-' }}
+                    | date={{ p.date }}
+                    | pdate={{ p.payment_date or '-' }}
+                    {% if g.canonical_payment_id == p.id %}<strong> | KANONIK</strong>{% endif %}
+                  </div>
                 {% endfor %}
+                <div class="actions">
+                  {% if g.canonical_payment_id %}
+                  <button class="btn btn-secondary small" onclick="dedupePaymentGroup('{{ g.reference }}', {{ g.amount or 0 }}, {{ g.canonical_payment_id }})">
+                    Cift odemeleri temizle (keep pay#{{ g.canonical_payment_id }})
+                  </button>
+                  {% endif %}
+                </div>
               </td>
             </tr>
             {% endfor %}
@@ -105,17 +148,20 @@
         {% if client_mismatches %}
         <table>
           <thead>
-            <tr><th>Payment</th><th>Order</th><th>Payment Client</th><th>Order Client</th><th>Tutar</th><th>Reference</th></tr>
+            <tr><th>Payment</th><th>Order</th><th>Payment Client</th><th>Order Client</th><th>Tutar</th><th>Reference</th><th>Aksiyon</th></tr>
           </thead>
           <tbody>
             {% for r in client_mismatches %}
             <tr>
-              <td>#{{ r.id }}</td>
-              <td>#{{ r.order_id }}</td>
-              <td class="warn">{{ r.payment_client_id }}</td>
-              <td>{{ r.order_client_id }}</td>
+              <td>pay#{{ r.id }}</td>
+              <td><a class="link" href="/orders/{{ r.order_id }}/edit" target="_blank">#{{ r.order_id }}</a></td>
+              <td class="warn"><a class="link" href="/clients/{{ r.payment_client_id }}" target="_blank">{{ r.payment_client_id }}</a></td>
+              <td><a class="link" href="/clients/{{ r.order_client_id }}" target="_blank">{{ r.order_client_id }}</a></td>
               <td>{{ '%.2f'|format(r.amount or 0) }}</td>
               <td class="mono">{{ r.reference or '-' }}</td>
+              <td>
+                <button class="btn btn-secondary small" onclick="syncPaymentClient({{ r.id }})">payment.client'i order.client ile senkronla</button>
+              </td>
             </tr>
             {% endfor %}
           </tbody>
@@ -132,14 +178,27 @@
         {% if placeholder_overlaps %}
         <table>
           <thead>
-            <tr><th>Tracking</th><th>Kargo Siparis</th><th>Bizim Siparis</th></tr>
+            <tr><th>Tracking</th><th>Kargo Siparis</th><th>Bizim Siparis</th><th>Aksiyon</th></tr>
           </thead>
           <tbody>
             {% for r in placeholder_overlaps %}
             <tr>
               <td class="mono">{{ r.tracking_no }}</td>
-              <td class="mono">#{{ r.kargo_order_id }} | client={{ r.kargo_client_id }} | st={{ r.kargo_status or '-' }} | total={{ r.kargo_total or 0 }}</td>
-              <td class="mono">#{{ r.bizim_order_id }} | client={{ r.bizim_client_id }} | st={{ r.bizim_status or '-' }} | total={{ r.bizim_total or 0 }}</td>
+              <td class="mono">
+                <a class="link" href="/orders/{{ r.kargo_order_id }}/edit" target="_blank">#{{ r.kargo_order_id }}</a>
+                | client=<a class="link" href="/clients/{{ r.kargo_client_id }}" target="_blank">{{ r.kargo_client_id }}</a>
+                | st={{ r.kargo_status or '-' }} | total={{ r.kargo_total or 0 }}
+              </td>
+              <td class="mono">
+                <a class="link" href="/orders/{{ r.bizim_order_id }}/edit" target="_blank">#{{ r.bizim_order_id }}</a>
+                | client=<a class="link" href="/clients/{{ r.bizim_client_id }}" target="_blank">{{ r.bizim_client_id }}</a>
+                | st={{ r.bizim_status or '-' }} | total={{ r.bizim_total or 0 }}
+              </td>
+              <td>
+                <button class="btn btn-secondary small" onclick="mergeTrackingOrders('{{ r.tracking_no }}', {{ r.bizim_order_id }})">
+                  Kargo'yu Bizim'e birlestir
+                </button>
+              </td>
             </tr>
             {% endfor %}
           </tbody>
@@ -150,5 +209,101 @@
       </div>
     </div>
   </div>
+  <script>
+    async function postJson(url, payload) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {})
+      });
+      const data = await res.json();
+      return { ok: res.ok, data: data, status: res.status };
+    }
+
+    async function runActionWithPreview(url, payload, previewFormatter, successMsg) {
+      try {
+        const preview = await postJson(url, { ...(payload || {}), preview: true });
+        if (!preview.ok) {
+          alert('Onizleme hatasi: ' + (preview.data.detail || preview.data.error || preview.status));
+          return;
+        }
+        const summary = previewFormatter(preview.data || {});
+        const msg = `Onizleme:\\n${summary}\\n\\nUygulansin mi?`;
+        if (!confirm(msg)) return;
+
+        const apply = await postJson(url, { ...(payload || {}), preview: false });
+        if (!apply.ok) {
+          alert('Uygulama hatasi: ' + (apply.data.detail || apply.data.error || apply.status));
+          return;
+        }
+        alert(successMsg || 'Tamamlandi');
+        location.reload();
+      } catch (e) {
+        alert('Istek hatasi: ' + (e && e.message ? e.message : e));
+      }
+    }
+
+    function syncPaymentClient(paymentId) {
+      runActionWithPreview(
+        '/admin/data-integrity/actions/sync-payment-client',
+        { payment_id: paymentId },
+        (p) => {
+          if (!p.will_change) {
+            return `Payment #${p.payment_id}: degisiklik yok (client zaten ${p.current_client_id})`;
+          }
+          return `Payment #${p.payment_id}: client ${p.current_client_id} -> ${p.new_client_id}`;
+        },
+        'Payment client senkronlandi'
+      );
+    }
+
+    function dedupePaymentGroup(reference, amount, keepPaymentId) {
+      runActionWithPreview(
+        '/admin/data-integrity/actions/dedupe-payment-group',
+        {
+          reference: reference,
+          amount: amount,
+          keep_payment_id: keepPaymentId
+        },
+        (p) => {
+          const drop = (p.drop_payment_ids || []).join(', ') || '-';
+          return [
+            `Reference: ${p.reference}`,
+            `Amount: ${p.amount}`,
+            `Keep payment: #${p.keep_payment_id}`,
+            `Silinecek payment id'ler: ${drop}`,
+            `Toplam silinecek: ${p.will_delete || 0}`
+          ].join('\\n');
+        },
+        'Cift odeme kayitlari temizlendi'
+      );
+    }
+
+    function mergeTrackingOrders(trackingNo, keepOrderId) {
+      runActionWithPreview(
+        '/admin/data-integrity/actions/merge-tracking-orders',
+        {
+          tracking_no: trackingNo,
+          keep_order_id: keepOrderId,
+          delete_merged: true
+        },
+        (p) => {
+          const lines = [
+            `Tracking: ${p.tracking_no}`,
+            `Kanonik siparis: #${p.keep_order_id}`,
+            `Birlesecek siparis adedi: ${p.merge_count || 0}`,
+          ];
+          (p.merge_plan || []).forEach((m) => {
+            const c = m.reference_counts || {};
+            lines.push(
+              `- #${m.from_order_id} -> #${m.to_order_id} (payment:${c.payment||0}, importrow:${c.importrow||0}, orderitem:${c.orderitem||0}, stock:${c.stockmovement||0})`
+            );
+          });
+          return lines.join('\\n');
+        },
+        'Siparisler birlestirildi'
+      );
+    }
+  </script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 import os
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, Request, HTTPException, Body
 from sqlalchemy import text
@@ -99,6 +99,48 @@ def _row_val(row: Any, key: str, idx: int):
 		return row[idx]
 	except Exception:
 		return None
+
+
+def _order_rank_for_canonical(o: Dict[str, Any]) -> tuple:
+	"""Lower tuple is better canonical candidate."""
+	source = (o.get("source") or "").lower()
+	status = (o.get("status") or "").lower()
+	total = float(o.get("total_amount") or 0.0)
+	# prefer bizim, non-terminal status, positive totals, oldest id
+	bad_status = status in {"cancelled", "refunded", "iade", "iade_bekliyor", "merged", "switched", "stitched"}
+	return (
+		0 if source == "bizim" else 1,
+		1 if bad_status else 0,
+		0 if total > 0 else 1,
+		int(o.get("id") or 0),
+	)
+
+
+def _pick_canonical_order(orders: List[Dict[str, Any]]) -> Optional[int]:
+	if not orders:
+		return None
+	best = sorted(orders, key=_order_rank_for_canonical)[0]
+	return int(best.get("id")) if best.get("id") is not None else None
+
+
+def _payment_rank_for_canonical(p: Dict[str, Any]) -> tuple:
+	order_source = (p.get("order_source") or "").lower()
+	order_status = (p.get("order_status") or "").lower()
+	payment_date = p.get("payment_date")
+	bad_status = order_status in {"cancelled", "refunded", "iade", "iade_bekliyor", "merged", "switched", "stitched"}
+	return (
+		0 if order_source == "bizim" else 1,
+		1 if bad_status else 0,
+		0 if payment_date else 1,
+		int(p.get("id") or 0),
+	)
+
+
+def _pick_canonical_payment(payments: List[Dict[str, Any]]) -> Optional[int]:
+	if not payments:
+		return None
+	best = sorted(payments, key=_payment_rank_for_canonical)[0]
+	return int(best.get("id")) if best.get("id") is not None else None
 
 
 @router.get("/version")
@@ -205,6 +247,17 @@ def data_integrity_page(
 						}
 						for d in details
 					],
+					"canonical_order_id": _pick_canonical_order(
+						[
+							{
+								"id": _row_val(d, "id", 0),
+								"source": _row_val(d, "source", 2),
+								"status": _row_val(d, "status", 3),
+								"total_amount": _row_val(d, "total_amount", 4),
+							}
+							for d in details
+						]
+					),
 				}
 			)
 
@@ -231,31 +284,38 @@ def data_integrity_page(
 			details = session.exec(
 				text(
 					"""
-					SELECT id, order_id, client_id, amount, date, payment_date, method, reference
-					FROM payment
-					WHERE reference = :reference AND amount = :amount
+					SELECT p.id, p.order_id, p.client_id, p.amount, p.date, p.payment_date, p.method, p.reference,
+					       o.source AS order_source, o.status AS order_status, o.client_id AS order_client_id
+					FROM payment p
+					LEFT JOIN `order` o ON o.id = p.order_id
+					WHERE p.reference = :reference AND p.amount = :amount
 					ORDER BY id ASC
 					"""
 				).params(reference=reference, amount=amount)
 			).all()
+			payment_dicts = [
+				{
+					"id": _row_val(d, "id", 0),
+					"order_id": _row_val(d, "order_id", 1),
+					"client_id": _row_val(d, "client_id", 2),
+					"amount": _row_val(d, "amount", 3),
+					"date": _row_val(d, "date", 4),
+					"payment_date": _row_val(d, "payment_date", 5),
+					"method": _row_val(d, "method", 6),
+					"reference": _row_val(d, "reference", 7),
+					"order_source": _row_val(d, "order_source", 8),
+					"order_status": _row_val(d, "order_status", 9),
+					"order_client_id": _row_val(d, "order_client_id", 10),
+				}
+				for d in details
+			]
 			dup_payments.append(
 				{
 					"reference": reference,
 					"amount": amount,
 					"count": cnt,
-					"payments": [
-						{
-							"id": _row_val(d, "id", 0),
-							"order_id": _row_val(d, "order_id", 1),
-							"client_id": _row_val(d, "client_id", 2),
-							"amount": _row_val(d, "amount", 3),
-							"date": _row_val(d, "date", 4),
-							"payment_date": _row_val(d, "payment_date", 5),
-							"method": _row_val(d, "method", 6),
-							"reference": _row_val(d, "reference", 7),
-						}
-						for d in details
-					],
+					"payments": payment_dicts,
+					"canonical_payment_id": _pick_canonical_payment(payment_dicts),
 				}
 			)
 
@@ -340,6 +400,251 @@ def data_integrity_page(
 				"placeholder_overlaps": placeholder_overlaps,
 			},
 		)
+
+
+def _merge_order_into(session, from_order_id: int, to_order_id: int, delete_merged: bool = True) -> Dict[str, Any]:
+	"""Move all known links from one order to another, then optionally delete merged order."""
+	if from_order_id == to_order_id:
+		return {"moved": False, "reason": "same_order"}
+
+	from_order = session.get(Order, from_order_id)
+	to_order = session.get(Order, to_order_id)
+	if not from_order or not to_order:
+		raise HTTPException(status_code=404, detail="Order not found")
+
+	# Move direct references
+	session.exec(text("UPDATE importrow SET matched_order_id=:to_id WHERE matched_order_id=:from_id").bindparams(to_id=to_order_id, from_id=from_order_id))
+	session.exec(text("UPDATE ordereditlog SET order_id=:to_id WHERE order_id=:from_id").bindparams(to_id=to_order_id, from_id=from_order_id))
+	session.exec(text("UPDATE orderitem SET order_id=:to_id WHERE order_id=:from_id").bindparams(to_id=to_order_id, from_id=from_order_id))
+	session.exec(text("UPDATE orderpayment SET order_id=:to_id WHERE order_id=:from_id").bindparams(to_id=to_order_id, from_id=from_order_id))
+	session.exec(text("UPDATE stockmovement SET related_order_id=:to_id WHERE related_order_id=:from_id").bindparams(to_id=to_order_id, from_id=from_order_id))
+	session.exec(text("UPDATE payment SET order_id=:to_id, client_id=:to_client WHERE order_id=:from_id").bindparams(to_id=to_order_id, from_id=from_order_id, to_client=to_order.client_id))
+	# Preserve chain correctness
+	session.exec(text("UPDATE `order` SET merged_into_order_id=:to_id WHERE merged_into_order_id=:from_id").bindparams(to_id=to_order_id, from_id=from_order_id))
+
+	# Retire merged order
+	from_order.merged_into_order_id = to_order_id
+	from_order.status = "merged"
+	from_order.total_amount = 0.0
+
+	# Promote target to paid when covered
+	paid_row = session.exec(text("SELECT COALESCE(SUM(amount), 0) AS paid FROM payment WHERE order_id=:oid").bindparams(oid=to_order_id)).first()
+	paid_val = float(_row_val(paid_row, "paid", 0) or 0.0)
+	total_val = float(to_order.total_amount or 0.0)
+	if total_val > 0 and paid_val >= total_val:
+		to_order.status = "paid"
+
+	deleted = False
+	if delete_merged:
+		try:
+			session.flush()
+			session.delete(from_order)
+			deleted = True
+		except Exception:
+			deleted = False
+	return {"moved": True, "deleted": deleted, "from_order_id": from_order_id, "to_order_id": to_order_id}
+
+
+def _collect_order_reference_counts(session, order_id: int) -> Dict[str, int]:
+	"""Count related rows that would be moved/deleted during merge."""
+	def _cnt(sql: str, **params) -> int:
+		row = session.exec(text(sql).bindparams(**params)).first()
+		return int(_row_val(row, "c", 0) or 0)
+	return {
+		"importrow": _cnt("SELECT COUNT(*) AS c FROM importrow WHERE matched_order_id=:oid", oid=order_id),
+		"ordereditlog": _cnt("SELECT COUNT(*) AS c FROM ordereditlog WHERE order_id=:oid", oid=order_id),
+		"orderitem": _cnt("SELECT COUNT(*) AS c FROM orderitem WHERE order_id=:oid", oid=order_id),
+		"orderpayment": _cnt("SELECT COUNT(*) AS c FROM orderpayment WHERE order_id=:oid", oid=order_id),
+		"stockmovement": _cnt("SELECT COUNT(*) AS c FROM stockmovement WHERE related_order_id=:oid", oid=order_id),
+		"payment": _cnt("SELECT COUNT(*) AS c FROM payment WHERE order_id=:oid", oid=order_id),
+	}
+
+
+@router.post("/data-integrity/actions/sync-payment-client")
+def integrity_sync_payment_client(request: Request, body: Dict[str, Any] = Body(...)):
+	uid = request.session.get("uid")
+	if not uid:
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	payment_id = int(body.get("payment_id") or 0)
+	preview = bool(body.get("preview", False))
+	if payment_id <= 0:
+		raise HTTPException(status_code=400, detail="payment_id is required")
+	with get_session() as session:
+		row = session.exec(
+			text(
+				"""
+				SELECT p.id, p.client_id AS payment_client_id, p.order_id, o.client_id AS order_client_id
+				FROM payment p
+				JOIN `order` o ON o.id = p.order_id
+				WHERE p.id = :pid
+				"""
+			).bindparams(pid=payment_id)
+		).first()
+		if not row:
+			raise HTTPException(status_code=404, detail="Payment not found")
+		current_client_id = _row_val(row, "payment_client_id", 1)
+		order_client_id = _row_val(row, "order_client_id", 3)
+		if preview:
+			return {
+				"status": "ok",
+				"preview": True,
+				"payment_id": payment_id,
+				"current_client_id": current_client_id,
+				"new_client_id": order_client_id,
+				"will_change": current_client_id != order_client_id,
+			}
+		session.exec(text("UPDATE payment SET client_id=:cid WHERE id=:pid").bindparams(cid=order_client_id, pid=payment_id))
+		return {
+			"status": "ok",
+			"preview": False,
+			"payment_id": payment_id,
+			"old_client_id": current_client_id,
+			"new_client_id": order_client_id,
+		}
+
+
+@router.post("/data-integrity/actions/dedupe-payment-group")
+def integrity_dedupe_payment_group(request: Request, body: Dict[str, Any] = Body(...)):
+	uid = request.session.get("uid")
+	if not uid:
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	reference = str(body.get("reference") or "").strip()
+	amount = body.get("amount")
+	keep_payment_id = body.get("keep_payment_id")
+	preview = bool(body.get("preview", False))
+	if (not reference) or (amount is None):
+		raise HTTPException(status_code=400, detail="reference and amount are required")
+	amount_val = float(amount)
+	with get_session() as session:
+		rows = session.exec(
+			text("SELECT id FROM payment WHERE reference=:ref AND amount=:amt ORDER BY id ASC").bindparams(ref=reference, amt=amount_val)
+		).all()
+		ids = [int(_row_val(r, "id", 0) or 0) for r in rows if int(_row_val(r, "id", 0) or 0) > 0]
+		if not ids:
+			return {"status": "ok", "deleted": 0, "keep_payment_id": None}
+		if keep_payment_id:
+			keep_id = int(keep_payment_id)
+			if keep_id not in ids:
+				raise HTTPException(status_code=400, detail="keep_payment_id not in duplicate group")
+		else:
+			keep_id = ids[0]
+		drop_ids = [pid for pid in ids if pid != keep_id]
+		if preview:
+			return {
+				"status": "ok",
+				"preview": True,
+				"reference": reference,
+				"amount": amount_val,
+				"all_payment_ids": ids,
+				"keep_payment_id": keep_id,
+				"drop_payment_ids": drop_ids,
+				"will_delete": len(drop_ids),
+			}
+		deleted = 0
+		for pid in drop_ids:
+			session.exec(text("DELETE FROM payment WHERE id=:pid").bindparams(pid=pid))
+			deleted += 1
+		return {
+			"status": "ok",
+			"preview": False,
+			"reference": reference,
+			"amount": amount_val,
+			"keep_payment_id": keep_id,
+			"deleted": deleted,
+		}
+
+
+@router.post("/data-integrity/actions/merge-tracking-orders")
+def integrity_merge_tracking_orders(request: Request, body: Dict[str, Any] = Body(...)):
+	uid = request.session.get("uid")
+	if not uid:
+		raise HTTPException(status_code=401, detail="Unauthorized")
+	tracking_no = str(body.get("tracking_no") or "").strip()
+	keep_order_id = body.get("keep_order_id")
+	delete_merged = bool(body.get("delete_merged", True))
+	preview = bool(body.get("preview", False))
+	if not tracking_no:
+		raise HTTPException(status_code=400, detail="tracking_no is required")
+	with get_session() as session:
+		rows = session.exec(
+			text(
+				"""
+				SELECT id, client_id, source, status, total_amount
+				FROM `order`
+				WHERE tracking_no=:tracking
+				  AND merged_into_order_id IS NULL
+				ORDER BY id ASC
+				"""
+			).bindparams(tracking=tracking_no)
+		).all()
+		orders = [
+			{
+				"id": int(_row_val(r, "id", 0) or 0),
+				"client_id": _row_val(r, "client_id", 1),
+				"source": _row_val(r, "source", 2),
+				"status": _row_val(r, "status", 3),
+				"total_amount": _row_val(r, "total_amount", 4),
+			}
+			for r in rows
+		]
+		order_ids = [o["id"] for o in orders if o["id"]]
+		if len(order_ids) <= 1:
+			return {"status": "ok", "tracking_no": tracking_no, "merged_count": 0, "keep_order_id": order_ids[0] if order_ids else None}
+		if keep_order_id:
+			keep_id = int(keep_order_id)
+			if keep_id not in order_ids:
+				raise HTTPException(status_code=400, detail="keep_order_id not found in tracking group")
+		else:
+			picked = _pick_canonical_order(orders)
+			if not picked:
+				raise HTTPException(status_code=400, detail="Could not determine canonical order")
+			keep_id = int(picked)
+		if preview:
+			merge_plan = []
+			for oid in order_ids:
+				if oid == keep_id:
+					continue
+				merge_plan.append(
+					{
+						"from_order_id": oid,
+						"to_order_id": keep_id,
+						"reference_counts": _collect_order_reference_counts(session, oid),
+					}
+				)
+			return {
+				"status": "ok",
+				"preview": True,
+				"tracking_no": tracking_no,
+				"keep_order_id": keep_id,
+				"merge_plan": merge_plan,
+				"merge_count": len(merge_plan),
+				"delete_merged": delete_merged,
+			}
+		merged = []
+		for oid in order_ids:
+			if oid == keep_id:
+				continue
+			result = _merge_order_into(session, from_order_id=oid, to_order_id=keep_id, delete_merged=delete_merged)
+			merged.append(result)
+		# Client merge hints: mark source clients as merged into canonical client
+		target = session.get(Order, keep_id)
+		if target:
+			for oid in order_ids:
+				if oid == keep_id:
+					continue
+				src = session.get(Order, oid)
+				if src and src.client_id and src.client_id != target.client_id:
+					cl = session.get(Client, src.client_id)
+					if cl:
+						cl.merged_into_client_id = target.client_id
+		return {
+			"status": "ok",
+			"preview": False,
+			"tracking_no": tracking_no,
+			"keep_order_id": keep_id,
+			"merged_count": len(merged),
+			"merged": merged,
+		}
 
 
 @router.post("/clients/merge")
