@@ -1,0 +1,146 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Veri Butunlugu Kontrolu</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    h1 { margin: 0 0 12px 0; }
+    .muted { color: #6b7280; font-size: 13px; }
+    .toolbar { margin: 12px 0 18px 0; display:flex; gap:8px; align-items:center; }
+    .toolbar input { padding: 6px 8px; border:1px solid #d1d5db; border-radius: 6px; width: 120px; }
+    .btn { background:#2563eb; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; }
+    .grid { display:grid; grid-template-columns: 1fr; gap:16px; }
+    .card { border:1px solid #e5e7eb; border-radius:8px; overflow:hidden; background:#fff; }
+    .card h2 { margin:0; padding:10px 14px; background:#f9fafb; border-bottom:1px solid #e5e7eb; font-size:16px; }
+    .body { padding: 10px 14px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid #f3f4f6; padding:6px 8px; text-align:left; font-size:13px; vertical-align: top; }
+    th { background:#fafafa; }
+    .ok { color:#059669; }
+    .warn { color:#b45309; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  {% include "_nav.html" %}
+  <h1>Veri Butunlugu Kontrolu</h1>
+  <div class="muted">Satis ve odeme kayitlarinda potansiyel ciftleri/tutarsizliklari listeler.</div>
+
+  <form class="toolbar" method="get" action="/admin/data-integrity">
+    <label>Limit</label>
+    <input type="number" name="limit" value="{{ limit }}" min="10" max="500" />
+    <button class="btn" type="submit">Yenile</button>
+  </form>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Cift Siparis Adaylari (tracking_no bazli) - {{ dup_tracking|length }}</h2>
+      <div class="body">
+        {% if dup_tracking %}
+        <table>
+          <thead>
+            <tr><th>Tracking</th><th>Adet</th><th>Siparisler</th></tr>
+          </thead>
+          <tbody>
+            {% for g in dup_tracking %}
+            <tr>
+              <td class="mono">{{ g.tracking_no }}</td>
+              <td>{{ g.count }}</td>
+              <td>
+                {% for o in g.orders %}
+                  <div class="mono">#{{ o.id }} | client={{ o.client_id }} | src={{ o.source }} | st={{ o.status or '-' }} | total={{ o.total_amount or 0 }}</div>
+                {% endfor %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="ok">Kayit bulunmadi.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Cift Odeme Adaylari (reference + amount) - {{ dup_payments|length }}</h2>
+      <div class="body">
+        {% if dup_payments %}
+        <table>
+          <thead>
+            <tr><th>Reference</th><th>Tutar</th><th>Adet</th><th>Odeme Kayitlari</th></tr>
+          </thead>
+          <tbody>
+            {% for g in dup_payments %}
+            <tr>
+              <td class="mono">{{ g.reference }}</td>
+              <td>{{ '%.2f'|format(g.amount or 0) }}</td>
+              <td>{{ g.count }}</td>
+              <td>
+                {% for p in g.payments %}
+                  <div class="mono">#{{ p.id }} | order={{ p.order_id }} | client={{ p.client_id }} | date={{ p.date }} | pdate={{ p.payment_date or '-' }}</div>
+                {% endfor %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="ok">Kayit bulunmadi.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Payment Client Uyumsuzlugu (payment.client_id != order.client_id) - {{ client_mismatches|length }}</h2>
+      <div class="body">
+        {% if client_mismatches %}
+        <table>
+          <thead>
+            <tr><th>Payment</th><th>Order</th><th>Payment Client</th><th>Order Client</th><th>Tutar</th><th>Reference</th></tr>
+          </thead>
+          <tbody>
+            {% for r in client_mismatches %}
+            <tr>
+              <td>#{{ r.id }}</td>
+              <td>#{{ r.order_id }}</td>
+              <td class="warn">{{ r.payment_client_id }}</td>
+              <td>{{ r.order_client_id }}</td>
+              <td>{{ '%.2f'|format(r.amount or 0) }}</td>
+              <td class="mono">{{ r.reference or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="ok">Kayit bulunmadi.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Kargo Placeholder + Bizim Siparis Cakisimi - {{ placeholder_overlaps|length }}</h2>
+      <div class="body">
+        {% if placeholder_overlaps %}
+        <table>
+          <thead>
+            <tr><th>Tracking</th><th>Kargo Siparis</th><th>Bizim Siparis</th></tr>
+          </thead>
+          <tbody>
+            {% for r in placeholder_overlaps %}
+            <tr>
+              <td class="mono">{{ r.tracking_no }}</td>
+              <td class="mono">#{{ r.kargo_order_id }} | client={{ r.kargo_client_id }} | st={{ r.kargo_status or '-' }} | total={{ r.kargo_total or 0 }}</td>
+              <td class="mono">#{{ r.bizim_order_id }} | client={{ r.bizim_client_id }} | st={{ r.bizim_status or '-' }} | total={{ r.bizim_total or 0 }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="ok">Kayit bulunmadi.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</body>
+</html>

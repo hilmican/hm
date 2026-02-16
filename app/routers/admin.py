@@ -88,6 +88,19 @@ def _check_redis() -> Dict[str, Any]:
 		return {"ok": False, "error": str(e)}
 
 
+def _row_val(row: Any, key: str, idx: int):
+	"""Best-effort row getter for SQLAlchemy Row / tuple."""
+	try:
+		if hasattr(row, key):
+			return getattr(row, key)
+	except Exception:
+		pass
+	try:
+		return row[idx]
+	except Exception:
+		return None
+
+
 @router.get("/version")
 def version() -> Dict[str, Any]:
 	return {"version": _read_git_version() or "unknown"}
@@ -116,6 +129,198 @@ def status_page(request: Request):
 		"redis": _check_redis(),
 	}
 	return templates.TemplateResponse("admin_status.html", {"request": request, **ctx})
+
+
+@router.get("/data-integrity")
+def data_integrity_page(request: Request, limit: int = 100):
+	"""Operational page to detect non-unique sales/payments and data mismatches."""
+	uid = request.session.get("uid")
+	if not uid:
+		templates = request.app.state.templates
+		return templates.TemplateResponse("login.html", {"request": request, "error": None})
+
+	safe_limit = max(10, min(int(limit or 100), 500))
+	with get_session() as session:
+		# 1) Potential duplicate sales by tracking number
+		dup_tracking_rows_raw = session.exec(
+			text(
+				"""
+				SELECT o.tracking_no AS tracking_no, COUNT(*) AS cnt
+				FROM `order` o
+				WHERE o.tracking_no IS NOT NULL
+				  AND o.tracking_no <> ''
+				  AND o.merged_into_order_id IS NULL
+				GROUP BY o.tracking_no
+				HAVING COUNT(*) > 1
+				ORDER BY cnt DESC, o.tracking_no ASC
+				LIMIT :n
+				"""
+			).params(n=safe_limit)
+		).all()
+		dup_tracking = []
+		for row in dup_tracking_rows_raw:
+			tracking_no = _row_val(row, "tracking_no", 0)
+			cnt = int(_row_val(row, "cnt", 1) or 0)
+			details = session.exec(
+				text(
+					"""
+					SELECT id, client_id, source, status, total_amount, shipment_date, data_date, merged_into_order_id
+					FROM `order`
+					WHERE tracking_no = :tracking_no
+					ORDER BY id ASC
+					"""
+				).params(tracking_no=tracking_no)
+			).all()
+			dup_tracking.append(
+				{
+					"tracking_no": tracking_no,
+					"count": cnt,
+					"orders": [
+						{
+							"id": _row_val(d, "id", 0),
+							"client_id": _row_val(d, "client_id", 1),
+							"source": _row_val(d, "source", 2),
+							"status": _row_val(d, "status", 3),
+							"total_amount": _row_val(d, "total_amount", 4),
+							"shipment_date": _row_val(d, "shipment_date", 5),
+							"data_date": _row_val(d, "data_date", 6),
+							"merged_into_order_id": _row_val(d, "merged_into_order_id", 7),
+						}
+						for d in details
+					],
+				}
+			)
+
+		# 2) Potential duplicate payments by (reference, amount)
+		dup_payment_rows = session.exec(
+			text(
+				"""
+				SELECT p.reference AS reference, p.amount AS amount, COUNT(*) AS cnt
+				FROM payment p
+				WHERE p.reference IS NOT NULL
+				  AND p.reference <> ''
+				GROUP BY p.reference, p.amount
+				HAVING COUNT(*) > 1
+				ORDER BY cnt DESC, p.reference ASC
+				LIMIT :n
+				"""
+			).params(n=safe_limit)
+		).all()
+		dup_payments = []
+		for row in dup_payment_rows:
+			reference = _row_val(row, "reference", 0)
+			amount = _row_val(row, "amount", 1)
+			cnt = int(_row_val(row, "cnt", 2) or 0)
+			details = session.exec(
+				text(
+					"""
+					SELECT id, order_id, client_id, amount, date, payment_date, method, reference
+					FROM payment
+					WHERE reference = :reference AND amount = :amount
+					ORDER BY id ASC
+					"""
+				).params(reference=reference, amount=amount)
+			).all()
+			dup_payments.append(
+				{
+					"reference": reference,
+					"amount": amount,
+					"count": cnt,
+					"payments": [
+						{
+							"id": _row_val(d, "id", 0),
+							"order_id": _row_val(d, "order_id", 1),
+							"client_id": _row_val(d, "client_id", 2),
+							"amount": _row_val(d, "amount", 3),
+							"date": _row_val(d, "date", 4),
+							"payment_date": _row_val(d, "payment_date", 5),
+							"method": _row_val(d, "method", 6),
+							"reference": _row_val(d, "reference", 7),
+						}
+						for d in details
+					],
+				}
+			)
+
+		# 3) Payment client mismatch vs order client
+		client_mismatch_rows = session.exec(
+			text(
+				"""
+				SELECT p.id, p.order_id, p.client_id AS payment_client_id, o.client_id AS order_client_id,
+				       p.amount, p.reference, p.date, p.payment_date
+				FROM payment p
+				JOIN `order` o ON o.id = p.order_id
+				WHERE p.client_id IS NOT NULL AND o.client_id IS NOT NULL
+				  AND p.client_id <> o.client_id
+				ORDER BY p.id DESC
+				LIMIT :n
+				"""
+			).params(n=safe_limit)
+		).all()
+		client_mismatches = [
+			{
+				"id": _row_val(r, "id", 0),
+				"order_id": _row_val(r, "order_id", 1),
+				"payment_client_id": _row_val(r, "payment_client_id", 2),
+				"order_client_id": _row_val(r, "order_client_id", 3),
+				"amount": _row_val(r, "amount", 4),
+				"reference": _row_val(r, "reference", 5),
+				"date": _row_val(r, "date", 6),
+				"payment_date": _row_val(r, "payment_date", 7),
+			}
+			for r in client_mismatch_rows
+		]
+
+		# 4) kargo placeholder orders that overlap with a bizim order by tracking
+		placeholder_overlap_rows = session.exec(
+			text(
+				"""
+				SELECT ko.id AS kargo_order_id, ko.client_id AS kargo_client_id, ko.tracking_no,
+				       ko.status AS kargo_status, ko.total_amount AS kargo_total,
+				       bo.id AS bizim_order_id, bo.client_id AS bizim_client_id,
+				       bo.status AS bizim_status, bo.total_amount AS bizim_total
+				FROM `order` ko
+				JOIN `order` bo
+				  ON bo.tracking_no = ko.tracking_no
+				 AND bo.source = 'bizim'
+				 AND bo.merged_into_order_id IS NULL
+				WHERE ko.source = 'kargo'
+				  AND ko.merged_into_order_id IS NULL
+				  AND ko.tracking_no IS NOT NULL
+				  AND ko.tracking_no <> ''
+				  AND ko.id <> bo.id
+				ORDER BY ko.id DESC
+				LIMIT :n
+				"""
+			).params(n=safe_limit)
+		).all()
+		placeholder_overlaps = [
+			{
+				"kargo_order_id": _row_val(r, "kargo_order_id", 0),
+				"kargo_client_id": _row_val(r, "kargo_client_id", 1),
+				"tracking_no": _row_val(r, "tracking_no", 2),
+				"kargo_status": _row_val(r, "kargo_status", 3),
+				"kargo_total": _row_val(r, "kargo_total", 4),
+				"bizim_order_id": _row_val(r, "bizim_order_id", 5),
+				"bizim_client_id": _row_val(r, "bizim_client_id", 6),
+				"bizim_status": _row_val(r, "bizim_status", 7),
+				"bizim_total": _row_val(r, "bizim_total", 8),
+			}
+			for r in placeholder_overlap_rows
+		]
+
+		templates = request.app.state.templates
+		return templates.TemplateResponse(
+			"admin_data_integrity.html",
+			{
+				"request": request,
+				"limit": safe_limit,
+				"dup_tracking": dup_tracking,
+				"dup_payments": dup_payments,
+				"client_mismatches": client_mismatches,
+				"placeholder_overlaps": placeholder_overlaps,
+			},
+		)
 
 
 @router.post("/clients/merge")
