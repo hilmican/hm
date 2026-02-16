@@ -30,6 +30,14 @@
   <form class="toolbar" method="get" action="/admin/data-integrity">
     <label>Limit</label>
     <input type="number" name="limit" value="{{ limit }}" min="10" max="500" />
+    <label style="display:flex; gap:6px; align-items:center;">
+      <input type="checkbox" name="include_cancelled" value="1" {% if include_cancelled %}checked{% endif %} />
+      cancelled dahil et
+    </label>
+    <label style="display:flex; gap:6px; align-items:center;">
+      <input type="checkbox" name="include_returned" value="1" {% if include_returned %}checked{% endif %} />
+      iade/refunded dahil et
+    </label>
     <button class="btn" type="submit">Yenile</button>
   </form>
 

@@ -132,7 +132,12 @@ def status_page(request: Request):
 
 
 @router.get("/data-integrity")
-def data_integrity_page(request: Request, limit: int = 100):
+def data_integrity_page(
+	request: Request,
+	limit: int = 100,
+	include_cancelled: int = 0,
+	include_returned: int = 0,
+):
 	"""Operational page to detect non-unique sales/payments and data mismatches."""
 	uid = request.session.get("uid")
 	if not uid:
@@ -140,6 +145,8 @@ def data_integrity_page(request: Request, limit: int = 100):
 		return templates.TemplateResponse("login.html", {"request": request, "error": None})
 
 	safe_limit = max(10, min(int(limit or 100), 500))
+	inc_cancelled = 1 if int(include_cancelled or 0) else 0
+	inc_returned = 1 if int(include_returned or 0) else 0
 	with get_session() as session:
 		# 1) Potential duplicate sales by tracking number
 		dup_tracking_rows_raw = session.exec(
@@ -150,12 +157,17 @@ def data_integrity_page(request: Request, limit: int = 100):
 				WHERE o.tracking_no IS NOT NULL
 				  AND o.tracking_no <> ''
 				  AND o.merged_into_order_id IS NULL
+				  AND (:inc_cancelled = 1 OR COALESCE(LOWER(o.status), '') <> 'cancelled')
+				  AND (
+				    :inc_returned = 1
+				    OR COALESCE(LOWER(o.status), '') NOT IN ('refunded', 'iade', 'iade_bekliyor', 'switched', 'stitched')
+				  )
 				GROUP BY o.tracking_no
 				HAVING COUNT(*) > 1
 				ORDER BY cnt DESC, o.tracking_no ASC
 				LIMIT :n
 				"""
-			).params(n=safe_limit)
+			).params(n=safe_limit, inc_cancelled=inc_cancelled, inc_returned=inc_returned)
 		).all()
 		dup_tracking = []
 		for row in dup_tracking_rows_raw:
@@ -167,9 +179,14 @@ def data_integrity_page(request: Request, limit: int = 100):
 					SELECT id, client_id, source, status, total_amount, shipment_date, data_date, merged_into_order_id
 					FROM `order`
 					WHERE tracking_no = :tracking_no
+					  AND (:inc_cancelled = 1 OR COALESCE(LOWER(status), '') <> 'cancelled')
+					  AND (
+					    :inc_returned = 1
+					    OR COALESCE(LOWER(status), '') NOT IN ('refunded', 'iade', 'iade_bekliyor', 'switched', 'stitched')
+					  )
 					ORDER BY id ASC
 					"""
-				).params(tracking_no=tracking_no)
+				).params(tracking_no=tracking_no, inc_cancelled=inc_cancelled, inc_returned=inc_returned)
 			).all()
 			dup_tracking.append(
 				{
@@ -315,6 +332,8 @@ def data_integrity_page(request: Request, limit: int = 100):
 			{
 				"request": request,
 				"limit": safe_limit,
+				"include_cancelled": inc_cancelled,
+				"include_returned": inc_returned,
 				"dup_tracking": dup_tracking,
 				"dup_payments": dup_payments,
 				"client_mismatches": client_mismatches,
