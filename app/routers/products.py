@@ -25,6 +25,7 @@ def list_products(limit: int = Query(default=500, ge=1, le=5000)):
 					"id": p.id or 0,
 					"name": p.name,
 					"slug": p.slug,
+					"category": p.category,
 					"default_unit": p.default_unit,
 					"default_color": p.default_color,
 					"default_price": p.default_price,
@@ -40,6 +41,7 @@ def list_products(limit: int = Query(default=500, ge=1, le=5000)):
 @router.post("")
 def create_product(
     name: str = Form(...),
+    category: str | None = Form(None),
     default_unit: str = Form("adet"),
     default_price: float | None = Form(None),
     default_cost: float | None = Form(None),
@@ -57,6 +59,7 @@ def create_product(
 		p = Product(
 			name=name,
 			slug=slug,
+			category=(category.strip() if isinstance(category, str) and category.strip() else None),
 			default_unit=default_unit,
 			default_price=default_price,
 			default_cost=default_cost,
@@ -76,6 +79,7 @@ def create_product(
 			"id": p.id,
 			"name": p.name,
 			"slug": p.slug,
+			"category": p.category,
 			"default_unit": p.default_unit,
 			"default_price": p.default_price,
 			"default_cost": p.default_cost,
@@ -354,7 +358,7 @@ def delete_product_upsell(upsell_id: int):
 
 @router.put("/{product_id}")
 def update_product(product_id: int, body: dict):
-    allowed = {"name", "default_unit", "default_price", "default_cost", "default_color", "ai_variant_exclusions", "size_chart_id"}
+    allowed = {"name", "category", "default_unit", "default_price", "default_cost", "default_color", "ai_variant_exclusions", "size_chart_id"}
     with get_session() as session:
         p = session.exec(select(Product).where(Product.id == product_id)).first()
         if not p:
@@ -370,6 +374,9 @@ def update_product(product_id: int, body: dict):
             p.slug = new_slug
         if "default_unit" in body:
             p.default_unit = body.get("default_unit") or p.default_unit
+        if "category" in body:
+            raw_cat = body.get("category")
+            p.category = raw_cat.strip() if isinstance(raw_cat, str) and raw_cat.strip() else None
         if "default_price" in body:
             try:
                 val = body.get("default_price")

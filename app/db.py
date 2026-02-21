@@ -842,6 +842,12 @@ def init_db() -> None:
                             conn.exec_driver_sql("CREATE INDEX idx_product_default_cost ON product(default_cost)")
                         except Exception:
                             pass
+                    if 'category' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN category VARCHAR(191) NULL")
+                        try:
+                            conn.exec_driver_sql("CREATE INDEX idx_product_category ON product(category)")
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 # Ensure ai_pretext table exists

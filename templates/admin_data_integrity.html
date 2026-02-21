@@ -216,7 +216,13 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload || {})
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch (_e) {
+        data = { raw_text: raw };
+      }
       return { ok: res.ok, data: data, status: res.status };
     }
 
@@ -224,7 +230,8 @@
       try {
         const preview = await postJson(url, { ...(payload || {}), preview: true });
         if (!preview.ok) {
-          alert('Onizleme hatasi: ' + (preview.data.detail || preview.data.error || preview.status));
+          const msg = (preview.data && (preview.data.detail || preview.data.error || preview.data.raw_text)) || preview.status;
+          alert('Onizleme hatasi: ' + msg);
           return;
         }
         const summary = previewFormatter(preview.data || {});
@@ -233,7 +240,8 @@
 
         const apply = await postJson(url, { ...(payload || {}), preview: false });
         if (!apply.ok) {
-          alert('Uygulama hatasi: ' + (apply.data.detail || apply.data.error || apply.status));
+          const msg = (apply.data && (apply.data.detail || apply.data.error || apply.data.raw_text)) || apply.status;
+          alert('Uygulama hatasi: ' + msg);
           return;
         }
         alert(successMsg || 'Tamamlandi');

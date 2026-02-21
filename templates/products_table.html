@@ -35,6 +35,7 @@
         <h3 style="margin:0 0 8px 0; font-size:15px;">Urun Olustur</h3>
         <form id="createForm" onsubmit="return false;" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
             <input name="name" placeholder="Ad" required />
+            <input name="category" placeholder="Kategori (örn: Alt Giyim)" />
             <input name="default_unit" placeholder="Birim" value="adet" />
             <input name="default_price" type="number" step="0.01" placeholder="Varsayilan fiyat" />
             <input name="default_cost" type="number" step="0.01" placeholder="Varsayilan maliyet" />
@@ -46,7 +47,7 @@
     <h2>Urunler</h2>
     <table id="prodTbl">
         <thead>
-            <tr><th>ID</th><th>Ad</th><th>Slug</th><th>Birim</th><th>Varsayilan Fiyat</th><th>Varsayilan Maliyet</th><th>AI Hariç Beden/Renk</th><th>AI</th><th>Islemler</th></tr>
+            <tr><th>ID</th><th>Ad</th><th>Slug</th><th>Kategori</th><th>Birim</th><th>Varsayilan Fiyat</th><th>Varsayilan Maliyet</th><th>AI Hariç Beden/Renk</th><th>AI</th><th>Islemler</th></tr>
         </thead>
         <tbody>
             {% for p in rows %}
@@ -54,6 +55,7 @@
                 <td>{{ p.id }}</td>
                 <td><input data-field="name" value="{{ p.name }}" /></td>
                 <td>{{ p.slug }}</td>
+                <td><input data-field="category" value="{{ p.category or '' }}" /></td>
                 <td><input data-field="default_unit" value="{{ p.default_unit }}" /></td>
                 <td><input data-field="default_price" type="number" step="0.01" value="{{ p.default_price }}" /></td>
                 <td><input data-field="default_cost" type="number" step="0.01" value="{{ p.default_cost }}" /></td>

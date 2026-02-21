@@ -135,6 +135,7 @@ class Product(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     slug: str = Field(index=True, unique=True)
+    category: Optional[str] = Field(default=None, index=True, description="Merchandising category label for storefront sync")
     default_unit: Optional[str] = Field(default="adet")
     default_color: Optional[str] = None
     default_price: Optional[float] = None
