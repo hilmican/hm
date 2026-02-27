@@ -258,6 +258,20 @@ def _collect_shadow_metrics(limit: int = 100, status_filter: str | None = None) 
         "avg_reply_count": (total_replies / len(entries)) if entries else 0,
         "oldest_pending_seconds": oldest_pending,
     }
+    # Worker scope: who consumes this queue and can skip/exhaust items
+    shadow_scope = "all"
+    try:
+        from ..models import SystemSetting
+        from sqlmodel import select as _select
+        with get_session() as session:
+            row = session.exec(_select(SystemSetting).where(SystemSetting.key == "ai_shadow_scope")).first()
+            if row and getattr(row, "value", None):
+                v = str(row.value).strip().lower()
+                if v in ("all", "linked_only", "off"):
+                    shadow_scope = v
+    except Exception:
+        pass
+
     # Convert generated_at to Turkey time for display
     return {
         "generated_at": _utc_to_turkey_time(now) or now,
@@ -265,6 +279,7 @@ def _collect_shadow_metrics(limit: int = 100, status_filter: str | None = None) 
         "entries": entries,
         "summary": summary,
         "limit": n,
+        "shadow_scope": shadow_scope,
     }
 
 
@@ -1342,6 +1357,7 @@ def shadow_monitor_data(limit: int = 50, status: str | None = None):
         "limit": data["limit"],
         "entries": [_serialize_shadow_entry(e) for e in data["entries"]],
         "status_filter": safe_status or "",
+        "shadow_scope": data.get("shadow_scope", "all"),
     }
     return payload
 

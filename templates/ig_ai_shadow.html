@@ -79,6 +79,19 @@
     </div>
   </div>
 
+  <div class="card" style="border-left:4px solid #2563eb;">
+    <h3 style="margin-top:0;">Kuyruk tüketimi</h3>
+    <p class="muted" style="margin:0 0 8px 0;">Bu kuyruğu <strong>hm-worker-reply</strong> (scripts/worker_reply.py) tüketir. Her ~0,5 sn due olan en fazla <strong>20</strong> konuşmayı alır; AI taslağı üretir ve (onaylıysa) mesaj gönderir.</p>
+    <p style="margin:0 0 8px 0;"><strong>Mevcut kapsam:</strong> <code id="shadowScopeValue">{{ shadow_scope or 'all' }}</code>
+      {% if (shadow_scope or 'all') == 'off' %}
+        <span style="color:#b91c1c;">— Kapalı. Worker tüm bekleyenleri "exhausted" yapar, sayı düşmez.</span>
+      {% elif (shadow_scope or 'all') == 'linked_only' %}
+        <span class="muted">— Sadece reklam/gönderi bağlı konuşmalar işlenir; diğerleri exhausted.</span>
+      {% endif %}
+    </p>
+    <p class="muted" style="margin:0; font-size:12px;">Sayı düşmüyorsa: (1) Pod çalışıyor mu: <code>kubectl get pods -n hm -l app=hm-worker-reply</code> (2) <code>shadow_scope=off</code> ise işlem yok (3) Hata için: <code>kubectl logs -n hm -l app=hm-worker-reply --tail=100</code>. Kapsamı AI → AI Cevap Ayarlarından değiştirebilirsiniz.</p>
+  </div>
+
   <div class="card">
     <div class="card-header">
       <h3>Durum Dağılımı</h3>
@@ -322,6 +335,10 @@
             document.getElementById('metricAvgReplies').textContent = (data.summary.avg_reply_count ?? 0).toFixed(1);
           }
           document.getElementById('generatedAt').textContent = fmtDate(data.generated_at);
+          if (data.shadow_scope !== undefined) {
+            const scopeEl = document.getElementById('shadowScopeValue');
+            if (scopeEl) scopeEl.textContent = data.shadow_scope;
+          }
           renderStatusChips(data.status_counts || {});
           renderTable(applyFilter(data.entries || []));
         } catch (err){
