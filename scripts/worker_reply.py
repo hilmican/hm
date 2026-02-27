@@ -427,6 +427,79 @@ def _is_ai_reply_sending_enabled(conversation_id: int) -> tuple[bool, bool, bool
 	return global_enabled, product_enabled, intro_only_mode
 
 
+def _handle_intro_only_followup_escalation(
+	conversation_id: int,
+	*,
+	state_snapshot: Optional[dict[str, Any]] = None,
+) -> None:
+	"""
+	When intro-only mode is active and first AI intro has already been sent,
+	block further AI generation and escalate to admins.
+	"""
+	trigger_info = _fetch_last_inbound_message(conversation_id)
+	already_notified = False
+	state_copy = dict(state_snapshot or {})
+	state_copy["needs_admin"] = True
+	state_copy["intro_only_mode_blocked"] = True
+	state_copy["intro_only_mode_block_reason"] = "first_reply_after_intro"
+	state_json_dump = json.dumps(state_copy, ensure_ascii=False)
+	try:
+		with get_session() as session:
+			row = session.exec(
+				_text(
+					"SELECT first_reply_notified_at FROM ai_shadow_state WHERE conversation_id=:cid LIMIT 1"
+				).params(cid=int(conversation_id))
+			).first()
+			if row:
+				notified_at = (
+					row.first_reply_notified_at
+					if hasattr(row, "first_reply_notified_at")
+					else (row[0] if len(row) > 0 else None)
+				)
+				already_notified = bool(notified_at)
+			# Keep conversation halted on admin queue.
+			session.exec(
+				_text(
+					"""
+					UPDATE ai_shadow_state
+					SET status='needs_admin',
+					    state_json=:state,
+					    first_reply_notified_at=CASE
+					        WHEN first_reply_notified_at IS NULL THEN CURRENT_TIMESTAMP
+					        ELSE first_reply_notified_at
+					    END,
+					    updated_at=CURRENT_TIMESTAMP
+					WHERE conversation_id=:cid
+					"""
+				).params(state=state_json_dump, cid=int(conversation_id))
+			)
+	except Exception:
+		pass
+	if already_notified:
+		return
+	try:
+		create_admin_notification(
+			int(conversation_id),
+			"İlk tanıtım mesajı gönderildikten sonra müşteriden cevap geldi. Intro-only mod aktif olduğu için AI cevap üretimi durduruldu ve konuşma yöneticilere eskale edildi.",
+			message_type="warning",
+			metadata={
+				"conversation_id": int(conversation_id),
+				"kind": "first_reply_after_intro",
+				"source": "worker_intro_only_mode",
+				"auto_blocked": True,
+				"needs_admin": True,
+				"trigger_message_id": trigger_info.get("id") if trigger_info else None,
+				"trigger_message_text": trigger_info.get("text") if trigger_info else None,
+				"trigger_message_ts": trigger_info.get("timestamp_ms") if trigger_info else None,
+			},
+		)
+	except Exception as notify_err:
+		try:
+			log.warning("intro_only admin notification creation error cid=%s err=%s", conversation_id, notify_err)
+		except Exception:
+			pass
+
+
 def _utcnow() -> dt.datetime:
 	return dt.datetime.utcnow()
 
@@ -667,6 +740,31 @@ def main() -> None:
 			last_ms = int(st.get("last_inbound_ms") or 0)
 			postpones = int(st.get("postpone_count") or 0)
 			current_state = _coerce_state(st.get("state_json"))
+			# Check delivery settings and whether this conversation already received an outbound/AI draft reply.
+			global_enabled, product_enabled, intro_only_mode = _is_ai_reply_sending_enabled(cid)
+			is_first_outbound = False
+			try:
+				with get_session() as session:
+					row_first = session.exec(
+						_text(
+							"SELECT 1 FROM message WHERE conversation_id=:cid AND direction='out' LIMIT 1"
+						).params(cid=int(cid))
+					).first()
+					row_shadow_first = session.exec(
+						_text(
+							"SELECT 1 FROM ai_shadow_reply WHERE conversation_id=:cid AND status IN ('sent','suggested') LIMIT 1"
+						).params(cid=int(cid))
+					).first()
+					is_first_outbound = (row_first is None) and (row_shadow_first is None)
+			except Exception:
+				is_first_outbound = False
+			# Intro-only mode: after first outbound intro, do not generate shadow/normal reply; escalate and stop.
+			if intro_only_mode and not is_first_outbound:
+				_handle_intro_only_followup_escalation(
+					int(cid),
+					state_snapshot=current_state,
+				)
+				continue
 			# If user likely still typing, postpone
 			if last_ms > 0 and (_now_ms() - last_ms) < (DEBOUNCE_SECONDS * 1000):
 				if postpones >= POSTPONE_MAX:
@@ -1027,26 +1125,12 @@ def main() -> None:
 				should_auto_send = confidence >= AUTO_SEND_CONFIDENCE_THRESHOLD
 				
 				# Check global and product settings
-				global_enabled, product_enabled, intro_only_mode = _is_ai_reply_sending_enabled(cid)
 				if not global_enabled or not product_enabled:
 					should_auto_send = False
 					if not global_enabled:
 						log.info("ai_shadow: auto-send disabled globally for conversation_id=%s", cid)
 					if not product_enabled:
 						log.info("ai_shadow: auto-send disabled for product in conversation_id=%s", cid)
-				
-				# Determine whether this thread has ever had an outbound message
-				is_first_outbound = False
-				try:
-					with get_session() as session:
-						row_first = session.exec(
-							_text(
-								"SELECT 1 FROM message WHERE conversation_id=:cid AND direction='out' LIMIT 1"
-							).params(cid=int(cid))
-						).first()
-						is_first_outbound = row_first is None
-				except Exception:
-					is_first_outbound = False
 				
 				# If intro_only_mode is enabled and this is not the first message, don't auto-send
 				if intro_only_mode and not is_first_outbound:
