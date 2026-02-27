@@ -242,9 +242,9 @@ def _load_product_stock(product_id: int) -> List[Dict[str, Any]]:
 					sku = item.sku
 					if not isinstance(sku, str):
 						continue
-					price = item.price
-					if price is None and product_default_price is not None:
-						price = product_default_price
+					# Use product-level price for all variants when available.
+					# Variant prices are often inconsistent for upsell config generation.
+					price = product_default_price if product_default_price is not None else item.price
 					stock.append(
 						{
 							"sku": sku,
@@ -477,15 +477,20 @@ def _calculate_upsell_recommendations(product_id: int, limit_orders: int = 100, 
 				other_pid = item.product_id
 				cooccurrence_count[other_pid] += 1
 				
-				# Get product name if not already cached
+				# Get product name/default price if not already cached
 				if other_pid not in product_names:
 					prod = session.exec(select(Product).where(Product.id == other_pid)).first()
 					if prod:
 						product_names[other_pid] = prod.name or f"Product {other_pid}"
+						try:
+							if getattr(prod, "default_price", None) is not None:
+								product_prices[other_pid] = float(prod.default_price)
+						except (ValueError, TypeError):
+							pass
 					else:
 						product_names[other_pid] = f"Product {other_pid}"
 				
-				# Get price if not already cached
+				# Fallback to item price only when product default price is unavailable.
 				if other_pid not in product_prices and item.price:
 					try:
 						product_prices[other_pid] = float(item.price)
