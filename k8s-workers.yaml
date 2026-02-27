@@ -50,6 +50,8 @@ spec:
               valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
             - name: IG_GRAPH_API_VERSION
               value: v21.0
+            - name: DATABASE_URL
+              value: "mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
           volumeMounts: [ { name: app-root, mountPath: /app } ]
 ---
 apiVersion: apps/v1

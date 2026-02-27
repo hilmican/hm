@@ -488,3 +488,62 @@ def backfill_latest_messages(limit: int = 50000):
 	except Exception:
 		created = 0
 	return {"status": "ok", "upserted": created}
+
+
+@router.post("/admin/backfill/raw_events")
+def backfill_raw_events(since: str = "2025-01-22", limit: int = 50000):
+	"""Re-enqueue ingest jobs for raw_events received after a given date.
+
+	Use when the ingest worker was down and webhooks were saved to raw_events but
+	never processed. Worker will process each raw_event idempotently (duplicate
+	messages are skipped). Inbox list is built from conversations updated by ingest.
+	"""
+	from sqlalchemy import text as _text
+	enqueued = 0
+	try:
+		with get_session() as session:
+			# raw_events.received_at is set by DB default on insert
+			rows = session.exec(
+				_text(
+					"""
+					SELECT id FROM raw_events
+					WHERE received_at >= :since
+					ORDER BY id ASC
+					LIMIT :n
+					"""
+				).params(since=since, n=int(max(1, min(limit, 100000))))
+			).all()
+			for r in rows:
+				rid = r.id if hasattr(r, "id") else r[0]
+				try:
+					enqueue("ingest", key=str(rid), payload={"raw_event_id": int(rid)})
+					enqueued += 1
+				except Exception:
+					pass
+	except Exception as e:
+		return {"status": "error", "error": str(e), "enqueued": enqueued}
+	return {"status": "ok", "enqueued": enqueued, "since": since}
+
+
+@router.post("/admin/ingest/clear_backlog")
+def clear_ingest_backlog():
+	"""Tüm bekleyen ingest işlerini siler. Geçmiş mesajlar işlenmemiş sayılır; sadece bundan sonra gelen webhook'lar işlenecek.
+
+	- Redis jobs:ingest listesini temizler.
+	- jobs tablosunda kind='ingest' kayıtlarını siler.
+	"""
+	from sqlalchemy import text as _text
+	redis_removed = 0
+	jobs_deleted = 0
+	try:
+		r = _get_redis()
+		redis_removed = r.delete("jobs:ingest")
+	except Exception:
+		pass
+	try:
+		with get_session() as session:
+			res = session.exec(_text("DELETE FROM jobs WHERE kind = 'ingest'"))
+			jobs_deleted = getattr(res, "rowcount", None) or 0
+	except Exception as e:
+		return {"status": "error", "error": str(e), "redis_removed": redis_removed, "jobs_deleted": jobs_deleted}
+	return {"status": "ok", "redis_removed": redis_removed, "jobs_deleted": jobs_deleted}

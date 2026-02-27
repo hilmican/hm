@@ -2799,8 +2799,15 @@ def handle(raw_event_id: int) -> int:
 				user_to_enrich = str(recipient_id)
 
 			if user_to_enrich:
-				# Enrich IG user info without keeping the current transaction open
-				_ensure_ig_user_with_data(user_to_enrich, str(igba_id))
+				# Enrich IG user info without keeping the current transaction open.
+				# Never let enrichment failure (e.g. expired token, 403) block message insert.
+				try:
+					_ensure_ig_user_with_data(user_to_enrich, str(igba_id))
+				except Exception as e:
+					try:
+						_log.warning("ingest: enrich user %s failed (message will still be saved): %s", user_to_enrich, str(e)[:200])
+					except Exception:
+						pass
 
 			mid = message_obj.get("mid") or message_obj.get("id")
 

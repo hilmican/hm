@@ -203,6 +203,125 @@ SHOW PROCESSLIST;
 KILL <id>;
 ```
 
+### Instagram Inbox: New Messages Not Appearing
+
+Akış: Webhook (hm-app) → `raw_events` tablosu → Redis `jobs:ingest` kuyruğu → **hm-worker-ingest** pod'u işler → `message` + `conversations` güncellenir. Inbox listesi `conversations` tablosundan okunur.
+
+**1. Ingest worker çalışıyor mu?**
+
+```bash
+kubectl get pods -n hm -l app=hm-worker-ingest
+kubectl logs -n hm -l app=hm-worker-ingest --tail=100
+```
+
+Pod `Running` ve crash-loop yok olmalı. Log’da `ingest ok jid=... raw=... inserted=...` satırları yeni mesajların işlendiğini gösterir.
+
+**2. Worker’da DATABASE_URL var mı?**
+
+Ingest worker DB’ye bağlanmak zorunda. Eksikse pod başlarken hata alır veya işler çalışmaz:
+
+```bash
+kubectl get deployment -n hm hm-worker-ingest -o jsonpath='{.spec.template.spec.containers[0].env}' | jq '.[] | select(.name=="DATABASE_URL")'
+```
+
+Boşsa `k8s-workers.yaml` içinde `hm-worker-ingest` env’e `DATABASE_URL` ekleyip rollout yapın.
+
+**3. Kuyruk doluluk / uygulama tarafı**
+
+Uygulama (hm-app) aynı Redis’e yazıyor mu kontrol için queue status:
+
+```bash
+curl -s "https://hma.cdn.com.tr/queue/status"
+# veya pod içinden
+kubectl exec -n hm deploy/hm-app -- python -c "
+from app.services.queue import _get_redis
+r = _get_redis()
+print('jobs:ingest length', r.llen('jobs:ingest'))
+"
+```
+
+`jobs:ingest` sürekli çok yüksekse worker yetişemiyor veya hiç tüketmiyor olabilir.
+
+**4. Son webhook’lar raw_events’e yazılmış mı?**
+
+```bash
+# MySQL’e bağlanıp
+SELECT id, object, created_at FROM raw_events ORDER BY id DESC LIMIT 10;
+```
+
+Son dakikalarda satır gelmiyorsa webhook ya gelmiyor ya da signature/DB hatası var (hm-app log’larına bakın).
+
+**5. Ingest işlenmiş mi?**
+
+Worker log’unda ilgili `raw_event_id` için `ingest ok ... inserted=1` (veya >0) görülmeli. Hata varsa `ingest fail jid=... err=...` çıkar.
+
+**6. Hızlı test: Ingest worker’ı yeniden başlat**
+
+```bash
+kubectl rollout restart deployment -n hm hm-worker-ingest
+kubectl rollout status deployment -n hm hm-worker-ingest
+kubectl logs -n hm -l app=hm-worker-ingest -f --tail=50
+```
+
+Sonra yeni bir DM atıp birkaç saniye içinde inbox’ta görünüp görünmediğine bakın.
+
+### Instagram token süresi dolmuş / Access Denied
+
+Worker log’unda **access denied**, **403**, **Invalid OAuth** veya **token expired** benzeri hatalar görüyorsanız Instagram/Facebook **erişim token’ı** süresi dolmuş veya iptal edilmiş olabilir.
+
+**Token’lar:**
+- **Page Access Token** (IG_PAGE_ACCESS_TOKEN): Genelde 60 gün; süresi dolunca yenilemeniz gerekir.
+- **User Access Token** (IG_ACCESS_TOKEN): Kısa veya uzun ömürlü olabilir; uzun ömürlü için Meta üzerinden exchange yapılır.
+
+**1. Hangi token’ın kullanıldığını kontrol edin (secret açıklanmaz):**
+
+```bash
+curl -s "https://hma.cdn.com.tr/ig/debug/env"
+# active_path: "page" veya "user", token_len, token_suffix gösterir
+```
+
+**2. Token’ı test edin (Graph API):**
+
+[Graph API Explorer](https://developers.facebook.com/tools/explorer/) veya:
+
+```bash
+# Page token ile örnek (IG_PAGE_ID ve token'ı kendi değerlerinizle değiştirin)
+curl -s "https://graph.facebook.com/v21.0/me?access_token=TOKEN"
+# Geçerli token: {"id":"...","name":"..."}
+# Süresi dolmuş: {"error":{"message":"Error validating access token...","code":190}}
+```
+
+**3. Uzun ömürlü Page token almak:**
+
+- [Meta for Developers](https://developers.facebook.com/) → Uygulamanız → Tools → Graph API Explorer.
+- Sayfa token’ı ile **Page** seçin, **Get User Access Token** / **Get Page Access Token** ile gerekli izinleri seçin (`instagram_basic_manage_messages`, `instagram_manage_messages` vb.).
+- **Generate Access Token** → çıkan token’ı kopyalayın.
+- Uzun ömürlü token için: [Access Token Debugger](https://developers.facebook.com/tools/debug/accesstoken/) ile token’ı girip **Extend** (uzat) ile 60 günlük hale getirin.
+
+**4. K8s secret’ı güncellemek:**
+
+Token’ı aldıktan sonra `hm` namespace’indeki `hm-ig` secret’ında ilgili alanı güncelleyin:
+
+```bash
+# Mevcut secret'ı düzenleyin (IG_PAGE_ACCESS_TOKEN veya IG_ACCESS_TOKEN)
+kubectl edit secret -n hm hm-ig
+# base64 ile: echo -n "YENI_TOKEN" | base64
+# veya tek satırda:
+kubectl patch secret -n hm hm-ig -p '{"data":{"IG_PAGE_ACCESS_TOKEN":"'$(echo -n "YENI_TOKEN_BURAYA" | base64)'"}}'
+```
+
+**5. Pod’ları yeniden başlatın** (yeni env’i almaları için):
+
+```bash
+kubectl rollout restart deployment -n hm hm-app
+kubectl rollout restart deployment -n hm hm-worker-ingest
+kubectl rollout restart deployment -n hm hm-worker-enrich
+kubectl rollout restart deployment -n hm hm-worker-reply
+# Gerekirse diğer worker'lar
+```
+
+Bundan sonra yeni gelen mesajlar tekrar işlenmeli. (Kod tarafında, token hatası olsa bile mesajın kaydedilmesi için ingest’te enrichment hatası yakalanıyor; yine de token’ı yenilemek kullanıcı adı vb. alanların dolu gelmesi için gerekli.)
+
 ### Restart a Kubernetes Deployment
 
 ```bash

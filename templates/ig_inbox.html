@@ -45,6 +45,8 @@
       <button id="clearEnrich" style="background:#ef4444">Enrich Kuyruğunu Temizle</button>
       <button id="backfillAds" style="background:#10b981">Reklamları Geri Doldur</button>
       <button id="backfillAiLatest" style="background:#0ea5e9">Son Mesajları Geri Doldur</button>
+      <button id="backfillRawEvents" style="background:#8b5cf6" title="22 Ocak sonrası raw_events kayıtlarını ingest kuyruğuna ekler (worker kapalıyken gelen webhook'lar)">İşlenmemiş Webhook'ları Kuyruğa Al</button>
+      <button id="clearIngestBacklog" style="background:#dc2626;color:#fff" title="Bekleyen tüm ingest işlerini siler; sadece bundan sonra gelen mesajlar işlenir">Eski Ingest Kuyruğunu Temizle</button>
       <button id="mergeGraph" style="background:#6366f1">Graph CID'e Birleştir</button>
       <button id="normalizeDm" style="background:#22c55e">dm:&lt;id&gt; Normalize</button>
       <button id="resetIg" style="background:#ef4444">IG Verilerini Sıfırla</button>
@@ -191,6 +193,32 @@
           location.reload();
         } catch (e) { alert('Geri doldurma hatası'); }
         finally { backfillLatestBtn.disabled = false; backfillLatestBtn.textContent = prev; }
+      });
+      const backfillRawEventsBtn = document.getElementById('backfillRawEvents');
+      backfillRawEventsBtn?.addEventListener('click', async () => {
+        if (!confirm('22 Ocak 2025 sonrası alınmış webhook kayıtlarını (raw_events) ingest kuyruğuna ekleyeceğiz. Inbox worker işledikçe mesajlar görünecek. Devam?')) return;
+        backfillRawEventsBtn.disabled = true; const prev = backfillRawEventsBtn.textContent; backfillRawEventsBtn.textContent = 'Kuyruğa ekleniyor...';
+        try {
+          const r = await fetch('/ig/admin/backfill/raw_events?since=2025-01-22&limit=50000', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (js.status === 'error') throw new Error(js.error || 'Hata');
+          alert('Kuyruğa eklendi: ' + (js.enqueued||0) + ' iş.\nIngest worker işledikçe inbox güncellenecek.');
+          location.reload();
+        } catch (e) { alert('Raw events backfill hatası: ' + e.message); }
+        finally { backfillRawEventsBtn.disabled = false; backfillRawEventsBtn.textContent = prev; }
+      });
+      const clearIngestBacklogBtn = document.getElementById('clearIngestBacklog');
+      clearIngestBacklogBtn?.addEventListener('click', async () => {
+        if (!confirm('Bekleyen tüm ingest işleri silinecek. Geçmiş mesajlar işlenmeyecek; sadece bundan sonra gelen yeni webhook\'lar işlenecek. Emin misiniz?')) return;
+        clearIngestBacklogBtn.disabled = true; const prev = clearIngestBacklogBtn.textContent; clearIngestBacklogBtn.textContent = 'Temizleniyor...';
+        try {
+          const r = await fetch('/ig/admin/ingest/clear_backlog', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (js.status === 'error') throw new Error(js.error || 'Hata');
+          alert('Ingest kuyruğu temizlendi.\nRedis: ' + (js.redis_removed||0) + '\nJobs silinen: ' + (js.jobs_deleted||0));
+          location.reload();
+        } catch (e) { alert('Temizleme hatası: ' + e.message); }
+        finally { clearIngestBacklogBtn.disabled = false; clearIngestBacklogBtn.textContent = prev; }
       });
       const enrichUsersBtn = document.getElementById('enrichUsersErrors');
       enrichUsersBtn?.addEventListener('click', async () => {
