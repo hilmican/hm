@@ -1266,48 +1266,60 @@ async def refresh_thread(conversation_id: str):
 def ai_queue_position(conversation_id: int):
     """Worker kuyruğunda bu konuşmadan önce kaç konuşma var (bu mesaja kadar işlenecek sayı)."""
     from sqlalchemy import text as _text
-    # Worker ile aynı koşul: pending/paused ve next_attempt_at due
-    due_where = """
-        (
-            (status = 'pending' OR status IS NULL)
-            AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
-        )
-        OR (
-            status = 'paused'
-            AND postpone_count > 0 AND postpone_count <= 8
-            AND next_attempt_at IS NOT NULL AND next_attempt_at <= CURRENT_TIMESTAMP
-        )
-    """
-    with get_session() as session:
-        # Toplam kuyruktaki (due) konuşma sayısı
-        total_row = session.exec(
-            _text(f"SELECT COUNT(*) FROM ai_shadow_state WHERE {due_where}")
-        ).first()
-        total_due = int(total_row[0] if total_row else 0)
-        # Bu konuşmadan önce kaç tane var: ORDER BY (next_attempt_at IS NULL) DESC, next_attempt_at ASC, conversation_id ASC
-        # Önce gelen = (A.next NULL ve bizimki dolu) VEYA (ikisi de dolu ve A.next < bizimki) VEYA (eşit ve A.cid < bizimki) VEYA (ikisi de NULL ve A.cid < bizimki)
-        ahead_row = session.exec(
-            _text(
-                """
-                SELECT COUNT(*) FROM ai_shadow_state A
-                INNER JOIN (SELECT next_attempt_at AS na FROM ai_shadow_state WHERE conversation_id=:cid LIMIT 1) B ON 1=1
-                WHERE (
-                    (A.status = 'pending' OR A.status IS NULL) AND (A.next_attempt_at IS NULL OR A.next_attempt_at <= CURRENT_TIMESTAMP)
-                ) OR (
-                    A.status = 'paused' AND A.postpone_count > 0 AND A.postpone_count <= 8
-                    AND A.next_attempt_at IS NOT NULL AND A.next_attempt_at <= CURRENT_TIMESTAMP
-                )
-                AND A.conversation_id <> :cid
-                AND (
-                    (A.next_attempt_at IS NULL AND B.na IS NOT NULL)
-                    OR (A.next_attempt_at IS NOT NULL AND B.na IS NOT NULL AND A.next_attempt_at < B.na)
-                    OR (A.next_attempt_at IS NOT NULL AND B.na IS NOT NULL AND A.next_attempt_at = B.na AND A.conversation_id < :cid)
-                    OR (A.next_attempt_at IS NULL AND B.na IS NULL AND A.conversation_id < :cid)
-                )
-                """
-            ).params(cid=int(conversation_id))
-        ).first()
-        ahead_count = int(ahead_row[0] if ahead_row else 0)
+    total_due = 0
+    ahead_count = 0
+    try:
+        # Worker ile aynı koşul: pending/paused ve next_attempt_at due
+        due_where = """
+            (
+                (status = 'pending' OR status IS NULL)
+                AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
+            )
+            OR (
+                status = 'paused'
+                AND postpone_count > 0 AND postpone_count <= 8
+                AND next_attempt_at IS NOT NULL AND next_attempt_at <= CURRENT_TIMESTAMP
+            )
+        """
+        with get_session() as session:
+            # Toplam kuyruktaki (due) konuşma sayısı
+            total_row = session.exec(
+                _text(f"SELECT COUNT(*) FROM ai_shadow_state WHERE {due_where}")
+            ).first()
+            if total_row is not None:
+                try:
+                    total_due = int(total_row[0] if hasattr(total_row, "__getitem__") else list(total_row)[0])
+                except (TypeError, ValueError, IndexError, KeyError):
+                    total_due = 0
+            # Bu konuşmadan önce kaç tane var
+            ahead_row = session.exec(
+                _text(
+                    """
+                    SELECT COUNT(*) FROM ai_shadow_state A
+                    INNER JOIN (SELECT next_attempt_at AS na FROM ai_shadow_state WHERE conversation_id=:cid LIMIT 1) B ON 1=1
+                    WHERE (
+                        (A.status = 'pending' OR A.status IS NULL) AND (A.next_attempt_at IS NULL OR A.next_attempt_at <= CURRENT_TIMESTAMP)
+                    ) OR (
+                        A.status = 'paused' AND A.postpone_count > 0 AND A.postpone_count <= 8
+                        AND A.next_attempt_at IS NOT NULL AND A.next_attempt_at <= CURRENT_TIMESTAMP
+                    )
+                    AND A.conversation_id <> :cid
+                    AND (
+                        (A.next_attempt_at IS NULL AND B.na IS NOT NULL)
+                        OR (A.next_attempt_at IS NOT NULL AND B.na IS NOT NULL AND A.next_attempt_at < B.na)
+                        OR (A.next_attempt_at IS NOT NULL AND B.na IS NOT NULL AND A.next_attempt_at = B.na AND A.conversation_id < :cid)
+                        OR (A.next_attempt_at IS NULL AND B.na IS NULL AND A.conversation_id < :cid)
+                    )
+                    """
+                ).params(cid=int(conversation_id))
+            ).first()
+            if ahead_row is not None:
+                try:
+                    ahead_count = int(ahead_row[0] if hasattr(ahead_row, "__getitem__") else list(ahead_row)[0])
+                except (TypeError, ValueError, IndexError, KeyError):
+                    ahead_count = 0
+    except Exception:
+        pass
     return {
         "conversation_id": conversation_id,
         "ahead_count": ahead_count,
