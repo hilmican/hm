@@ -122,6 +122,7 @@
           <div class="meta">AI Durumu: {{ ai_state.label }}{% if ai_state.description %} — {{ ai_state.description }}{% endif %}</div>
           <div id="aiQueuePositionBlock" class="meta" style="margin-top:4px; padding:6px 8px; background:#f3f4f6; border-radius:6px; font-size:12px; color:#374151;">
             <span id="aiQueuePosition">Kuyruk bilgisi yükleniyor...</span>
+            <br><a href="/ig/inbox/ai-queue" style="font-size:12px;">Kuyruktaki konuşmaları listele</a>
           </div>
         {% endif %}
         {% if ai_state.needs_link %}

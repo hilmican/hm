@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Cevap Kuyruğu</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .toolbar { display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap; }
+      a { color:#2563eb; text-decoration:none; }
+      .meta { color:#6b7280; font-size:12px; }
+      table { border-collapse: collapse; width:100%; margin-top:12px; }
+      th, td { border:1px solid #e5e7eb; padding:8px 10px; text-align:left; font-size:14px; }
+      th { background:#f9fafb; font-weight:600; color:#374151; }
+      tr:nth-child(even) { background:#f9fafb; }
+      .snippet { max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .note { margin-top:16px; padding:12px; background:#fef3c7; border:1px solid #f59e0b; border-radius:8px; font-size:13px; color:#92400e; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>AI Cevap Kuyruğu</h1>
+    <div class="toolbar">
+      <a href="/ig/inbox">← Gelen Kutusu</a>
+      <a href="/ig/inbox/ai-replied" class="meta">AI Cevaplanan Mesajlar</a>
+      <span class="meta">Toplam bekleyen: <strong>{{ total_pending }}</strong> (worker her döngüde en fazla 20 işler)</span>
+    </div>
+    {% if queue_rows %}
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Konuşma</th>
+          <th>Kullanıcı</th>
+          <th>Son mesaj</th>
+          <th>Durum</th>
+          <th>Sonraki deneme</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in queue_rows %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td><a href="/ig/inbox/{{ row.conversation_id }}">{{ row.conversation_id }}</a></td>
+          <td>{{ row.other_username or row.other_name or row.ig_user_id or '-' }}</td>
+          <td class="snippet" title="{{ row.last_message_text }}">{{ row.last_message_text[:80] or '-' }}{% if row.last_message_text and row.last_message_text|length > 80 %}…{% endif %}</td>
+          <td>{{ row.status or 'pending' }}</td>
+          <td>{{ row.next_attempt_at or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="meta">Kuyrukta bekleyen konuşma yok.</p>
+    {% endif %}
+    <div class="note">
+      <strong>Kuyruk neden azalmıyor olabilir?</strong> Worker (hm-worker-reply) çalışıyor mu kontrol edin: <code>kubectl get pods -n hm -l app=hm-worker-reply</code>. Her döngüde en fazla 20 konuşma işlenir; sürekli yeni mesaj geliyorsa sayı sabit kalabilir. Hata varsa pod loglarına bakın: <code>kubectl logs -n hm -l app=hm-worker-reply --tail=100</code>.
+    </div>
+  </body>
+</html>

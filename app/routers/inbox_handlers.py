@@ -478,6 +478,71 @@ async def refresh_inbox(limit: int = 25):
         return {"status": "error", "error": str(e)}
 
 
+_DUE_WHERE_AI_QUEUE = """
+    (
+        (s.status = 'pending' OR s.status IS NULL)
+        AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= CURRENT_TIMESTAMP)
+    )
+    OR (
+        s.status = 'paused'
+        AND s.postpone_count > 0 AND s.postpone_count <= 8
+        AND s.next_attempt_at IS NOT NULL AND s.next_attempt_at <= CURRENT_TIMESTAMP
+    )
+"""
+
+
+@router.get("/inbox/ai-queue")
+async def ai_reply_queue_list(request: Request, limit: int = 200):
+    """Worker'ın baktığı AI cevap kuyruğundaki konuşmaları listeler (sırayla)."""
+    from sqlalchemy import text as _text
+    rows = []
+    total = 0
+    try:
+        with get_session() as session:
+            count_row = session.exec(
+                _text(f"SELECT COUNT(*) FROM ai_shadow_state s WHERE {_DUE_WHERE_AI_QUEUE}")
+            ).first()
+            if count_row is not None:
+                try:
+                    total = int(count_row[0])
+                except (TypeError, ValueError, IndexError, KeyError):
+                    pass
+            q = _text(
+                f"""
+                SELECT s.conversation_id, s.status, s.next_attempt_at, s.last_inbound_ms,
+                       c.last_message_text, c.ig_user_id,
+                       u.username AS other_username, u.name AS other_name
+                FROM ai_shadow_state s
+                LEFT JOIN conversations c ON c.id = s.conversation_id
+                LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id
+                WHERE {_DUE_WHERE_AI_QUEUE}
+                ORDER BY (s.next_attempt_at IS NULL) DESC, s.next_attempt_at ASC, s.conversation_id ASC
+                LIMIT :n
+                """
+            ).params(n=int(min(limit, 500)))
+            raw = session.exec(q).all()
+            for r in raw:
+                cid = r.conversation_id if hasattr(r, "conversation_id") else r[0]
+                rows.append({
+                    "conversation_id": cid,
+                    "status": r.status if hasattr(r, "status") else (r[1] if len(r) > 1 else None),
+                    "next_attempt_at": r.next_attempt_at if hasattr(r, "next_attempt_at") else (r[2] if len(r) > 2 else None),
+                    "last_inbound_ms": r.last_inbound_ms if hasattr(r, "last_inbound_ms") else (r[3] if len(r) > 3 else None),
+                    "last_message_text": (r.last_message_text if hasattr(r, "last_message_text") else (r[4] if len(r) > 4 else None)) or "",
+                    "ig_user_id": r.ig_user_id if hasattr(r, "ig_user_id") else (r[5] if len(r) > 5 else None),
+                    "other_username": r.other_username if hasattr(r, "other_username") else (r[6] if len(r) > 6 else None),
+                    "other_name": r.other_name if hasattr(r, "other_name") else (r[7] if len(r) > 7 else None),
+                })
+    except Exception:
+        pass
+    templates = request.app.state.templates
+    return templates.TemplateResponse("ig_ai_queue.html", {
+        "request": request,
+        "queue_rows": rows,
+        "total_pending": total,
+    })
+
+
 @router.get("/inbox/ai-replied")
 async def ai_replied_messages(
     request: Request,
