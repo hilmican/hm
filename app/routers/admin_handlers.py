@@ -547,3 +547,32 @@ def clear_ingest_backlog():
 	except Exception as e:
 		return {"status": "error", "error": str(e), "redis_removed": redis_removed, "jobs_deleted": jobs_deleted}
 	return {"status": "ok", "redis_removed": redis_removed, "jobs_deleted": jobs_deleted}
+
+
+@router.post("/admin/ai_reply/exhaust_old_pending")
+def exhaust_old_pending_ai_replies(minutes: int = 30):
+	"""30 dakikadan eski, cevap bekleyen (pending/paused) AI kuyruğundaki konuşmaları 'exhausted' yapar.
+
+	Böylece worker sadece yeni/taze konuşmalara odaklanır; eski backlog işlenmez.
+	"""
+	from sqlalchemy import text as _text
+	updated = 0
+	try:
+		with get_session() as session:
+			# Son gelen mesaj 30+ dakika önceyse artık otomatik cevap denemeyi bırak
+			# last_inbound_ms: ms since epoch; 30 min ago = (UNIX_TIMESTAMP() - minutes*60) * 1000
+			res = session.exec(
+				_text(
+					"""
+					UPDATE ai_shadow_state
+					SET status = 'exhausted', updated_at = CURRENT_TIMESTAMP
+					WHERE (status = 'pending' OR status = 'paused')
+					  AND last_inbound_ms > 0
+					  AND last_inbound_ms < ((UNIX_TIMESTAMP() - :mins * 60) * 1000)
+					"""
+				).params(mins=int(max(1, min(minutes, 1440))))
+			)
+			updated = getattr(res, "rowcount", None) or 0
+	except Exception as e:
+		return {"status": "error", "error": str(e), "exhausted": 0}
+	return {"status": "ok", "exhausted": updated, "minutes": minutes}

@@ -1264,12 +1264,7 @@ async def refresh_thread(conversation_id: str):
 
 @router.post("/inbox/{conversation_id}/ai/retry")
 def retry_ai_for_thread(conversation_id: int):
-    try:
-        focus_slug, _ = _detect_focus_product(str(conversation_id))
-    except Exception:
-        focus_slug = None
-    if not focus_slug:
-        return {"status": "error", "error": "missing_product"}
+    """Force AI reply to be attempted now: set status=pending and next_attempt_at=now."""
     last_ms = None
     from sqlalchemy import text as _text
 
@@ -1279,6 +1274,7 @@ def retry_ai_for_thread(conversation_id: int):
         ).first()
         if row_ts:
             last_ms = getattr(row_ts, "last_message_timestamp_ms", None) if hasattr(row_ts, "last_message_timestamp_ms") else (row_ts[0] if len(row_ts) > 0 else None)
+        # Set next_attempt_at to now so worker_reply picks it up immediately
         session.exec(
             _text(
                 "UPDATE ai_shadow_state SET status='pending', next_attempt_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"

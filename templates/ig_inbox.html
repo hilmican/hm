@@ -47,6 +47,7 @@
       <button id="backfillAiLatest" style="background:#0ea5e9">Son Mesajları Geri Doldur</button>
       <button id="backfillRawEvents" style="background:#8b5cf6" title="22 Ocak sonrası raw_events kayıtlarını ingest kuyruğuna ekler (worker kapalıyken gelen webhook'lar)">İşlenmemiş Webhook'ları Kuyruğa Al</button>
       <button id="clearIngestBacklog" style="background:#dc2626;color:#fff" title="Bekleyen tüm ingest işlerini siler; sadece bundan sonra gelen mesajlar işlenir">Eski Ingest Kuyruğunu Temizle</button>
+      <button id="exhaustOldAiPending" style="background:#b45309;color:#fff" title="30 dakikadan eski AI cevap kuyruğundaki konuşmaları verilmiş sayar; worker yeni mesajlara odaklanır">Eski AI Kuyruğunu Verilmiş Yap (30 dk)</button>
       <button id="mergeGraph" style="background:#6366f1">Graph CID'e Birleştir</button>
       <button id="normalizeDm" style="background:#22c55e">dm:&lt;id&gt; Normalize</button>
       <button id="resetIg" style="background:#ef4444">IG Verilerini Sıfırla</button>
@@ -219,6 +220,19 @@
           location.reload();
         } catch (e) { alert('Temizleme hatası: ' + e.message); }
         finally { clearIngestBacklogBtn.disabled = false; clearIngestBacklogBtn.textContent = prev; }
+      });
+      const exhaustOldAiBtn = document.getElementById('exhaustOldAiPending');
+      exhaustOldAiBtn?.addEventListener('click', async () => {
+        if (!confirm('30 dakikadan eski, cevap bekleyen (Sırada) AI kuyruğundaki konuşmalar "verilmiş" sayılacak; worker sadece yeni mesajlara bakacak. Devam?')) return;
+        exhaustOldAiBtn.disabled = true; const prev = exhaustOldAiBtn.textContent; exhaustOldAiBtn.textContent = 'İşleniyor...';
+        try {
+          const r = await fetch('/ig/admin/ai_reply/exhaust_old_pending?minutes=30', { method: 'POST' });
+          const js = await r.json().catch(()=>({}));
+          if (js.status === 'error') throw new Error(js.error || 'Hata');
+          alert('Eski AI kuyruğu güncellendi.\nVerilmiş sayılan: ' + (js.exhausted||0) + ' konuşma.');
+          location.reload();
+        } catch (e) { alert('Hata: ' + e.message); }
+        finally { exhaustOldAiBtn.disabled = false; exhaustOldAiBtn.textContent = prev; }
       });
       const enrichUsersBtn = document.getElementById('enrichUsersErrors');
       enrichUsersBtn?.addEventListener('click', async () => {

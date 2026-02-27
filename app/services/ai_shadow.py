@@ -97,9 +97,7 @@ def touch_shadow_state(
 	if debounce_seconds is None:
 		debounce_seconds = int(os.getenv("AI_REPLY_DEBOUNCE_SECONDS", "5"))
 	force_release = debounce_seconds == 0
-	
-	now = dt.datetime.utcnow()
-	next_at = now + dt.timedelta(seconds=max(1, int(debounce_seconds)))
+	debounce_sec = max(1, int(debounce_seconds)) if not force_release else 0
 
 	with get_session() as session:
 		keep_needs_link = False
@@ -124,22 +122,28 @@ def touch_shadow_state(
 			keep_needs_link = False
 			keep_needs_admin = False
 		try:
+			# Use MySQL DATE_ADD so next_attempt_at is in server time (avoids timezone mismatch with worker_reply)
+			if force_release:
+				# Immediate: next_attempt_at = now so worker picks it up right away
+				next_sql = "CURRENT_TIMESTAMP"
+			else:
+				next_sql = f"DATE_ADD(CURRENT_TIMESTAMP, INTERVAL {int(debounce_sec)} SECOND)"
 			# Try INSERT IGNORE first (creates row if doesn't exist)
 			session.exec(
 				_text(
-					"""
+					f"""
 					INSERT IGNORE INTO ai_shadow_state(conversation_id, last_inbound_ms, next_attempt_at, postpone_count, status, ai_images_sent, updated_at)
-					VALUES(:cid, :ms, :na, 0, 'pending', 0, CURRENT_TIMESTAMP)
+					VALUES(:cid, :ms, {next_sql}, 0, 'pending', 0, CURRENT_TIMESTAMP)
 					"""
-				).params(cid=cid_int, ms=int(last_inbound_ms or 0), na=next_at.isoformat(" "))
+				).params(cid=cid_int, ms=int(last_inbound_ms or 0))
 			)
 			# Then UPDATE to refresh values (affects both new and existing rows)
 			session.exec(
 				_text(
-					"""
+					f"""
 					UPDATE ai_shadow_state
 					SET last_inbound_ms=:ms,
-					    next_attempt_at=:na,
+					    next_attempt_at={next_sql},
 					    postpone_count=0,
 					    status=CASE
 					        WHEN status='running' THEN status
@@ -152,7 +156,6 @@ def touch_shadow_state(
 					"""
 				).params(
 					ms=int(last_inbound_ms or 0),
-					na=next_at.isoformat(" "),
 					cid=cid_int,
 					keep_link=(1 if keep_needs_link else 0),
 					keep_admin=(1 if keep_needs_admin else 0),

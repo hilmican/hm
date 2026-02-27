@@ -322,6 +322,21 @@ kubectl rollout restart deployment -n hm hm-worker-reply
 
 Bundan sonra yeni gelen mesajlar tekrar işlenmeli. (Kod tarafında, token hatası olsa bile mesajın kaydedilmesi için ingest’te enrichment hatası yakalanıyor; yine de token’ı yenilemek kullanıcı adı vb. alanların dolu gelmesi için gerekli.)
 
+### AI cevap vermiyor (Sırada kalıyor)
+
+Konuşma sayfasında **AI Durumu: Sırada** görünüyor ama yanıt gelmiyorsa:
+
+1. **Hemen deneme:** Konuşma sayfasında **"Son Mesajlara Göre AI Mesajını Yeniden Tetikle"** butonuna tıklayın. Bu, `next_attempt_at` değerini şimdi yapar; worker_reply bir sonraki taramada (birkaç saniye içinde) konuşmayı işler.
+
+2. **Worker çalışıyor mu:** `hm-worker-reply` pod’unun ayakta olduğundan emin olun; log’da `ai_shadow: generating draft for conversation_id=12851` benzeri satırları kontrol edin:
+   ```bash
+   kubectl logs -n hm -l app=hm-worker-reply --tail=200 | grep -E "12851|ai_shadow|worker_reply"
+   ```
+
+3. **Scope / link:** Ayarlarda **ai_shadow_scope** “linked_only” ise, konuşmanın reklam/post bağlantısı veya `conversations.last_link_id` / `last_ad_id` (veya mesajda `ad_id`) olmalı. Ürün sadece manuel atanmışsa ve bu alanlar boşsa worker konuşmayı atlayabilir.
+
+4. **Zamanlama:** `touch_shadow_state` artık `next_attempt_at` için MySQL `CURRENT_TIMESTAMP` kullanıyor (saat dilimi kaynaklı “hep ileride” kalma sorununu önlemek için). Eski kayıtlar için yine de **Yeniden Tetikle** kullanın.
+
 ### Restart a Kubernetes Deployment
 
 ```bash
