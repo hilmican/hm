@@ -127,7 +127,7 @@ def _collect_shadow_metrics(limit: int = 100, status_filter: str | None = None) 
                         (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id) AS last_reply_at
                     FROM ai_shadow_state s
                     LEFT JOIN conversations c ON c.id = s.conversation_id
-                    LEFT JOIN ig_users u ON u.id = c.ig_user_id
+                    LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id
                     ORDER BY 
                         COALESCE(
                             (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id),
@@ -1222,7 +1222,7 @@ def preview_process(body: dict):
     cutoff_ms = int(cutoff_dt.timestamp() * 1000)
 
     with get_session() as session:
-        # Conversations count derived from messages grouped by conversation_id, filtered by ai_conversations.ai_process_time
+        # Conversations count derived from messages grouped by conversation_id (conversations table has no ai_process_time)
         cutoff_ms = int(cutoff_dt.timestamp() * 1000)
         msg_where = ["m.conversation_id IS NOT NULL", "(m.timestamp_ms IS NULL OR m.timestamp_ms <= :cutoff_ms)"]
         msg_params: dict[str, object] = {"cutoff_ms": int(cutoff_ms)}
@@ -1240,24 +1240,17 @@ def preview_process(body: dict):
             ms_to = int(dt.datetime.combine(date_to + dt.timedelta(days=1), dt.time.min).timestamp() * 1000)
             msg_where.append("(m.timestamp_ms IS NULL OR m.timestamp_ms < :ms_to)")
             msg_params["ms_to"] = int(ms_to)
-        try:
-            backend = getattr(session.get_bind().engine.url, "get_backend_name", lambda: "")()
-        except Exception:
-            backend = ""
-        # Use conversations.ai_process_time as the watermark instead of ai_conversations
-        ts_expr = "COALESCE(UNIX_TIMESTAMP(c.ai_process_time),0)*1000" if backend == "mysql" else "COALESCE(strftime('%s', c.ai_process_time),0)*1000"
         sql_conv = (
             "SELECT COUNT(1) AS c FROM ("
             " SELECT m.conversation_id, MAX(COALESCE(m.timestamp_ms,0)) AS last_ts"
             " FROM message m WHERE " + " AND ".join(msg_where) +
             " GROUP BY m.conversation_id"
-            ") t LEFT JOIN conversations c ON c.id = t.conversation_id "
-            + ("WHERE (c.ai_process_time IS NULL OR t.last_ts > " + ts_expr + ")" if not reprocess else "")
+            ") t"
         )
         rowc = session.exec(text(sql_conv).params(**msg_params)).first()
         conv_count = int((getattr(rowc, "c", None) if rowc is not None else 0) or (rowc[0] if rowc else 0) or 0)
 
-        # Messages count aligned with eligibility: only messages newer than ai_process_time when not reprocessing
+        # Messages count in scope (no ai_process_time watermark; conversations table does not have it)
         msg_where = ["m.conversation_id IS NOT NULL", "COALESCE(m.timestamp_ms,0) <= :cutoff_ms"]
         msg_params = {"cutoff_ms": int(cutoff_ms)}
         if date_from and date_to and date_from <= date_to:
@@ -1276,9 +1269,8 @@ def preview_process(body: dict):
             msg_params["ms_to"] = int(ms_to)
         sql_msg = (
             "SELECT COUNT(1) AS mc, SUM(CASE WHEN m.timestamp_ms IS NULL THEN 1 ELSE 0 END) AS mt0 "
-            "FROM message m LEFT JOIN conversations c ON c.id = m.conversation_id WHERE "
+            "FROM message m WHERE "
             + " AND ".join(msg_where)
-            + (f" AND (c.ai_process_time IS NULL OR COALESCE(m.timestamp_ms,0) > {ts_expr})" if not reprocess else "")
         )
         rowm = session.exec(text(sql_msg).params(**msg_params)).first()
         msg_count = int((getattr(rowm, "mc", None) if rowm is not None else 0) or (rowm[0] if rowm else 0) or 0)
