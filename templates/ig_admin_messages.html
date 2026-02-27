@@ -50,6 +50,9 @@
           <span class="badge unread">{{ unread_count }}</span>
         {% endif %}
       </a>
+      {% if unread_only and unread_count > 0 %}
+        <button type="button" id="markAllReadBtn" style="background: #10b981;">Tümünü okundu işaretle ({{ unread_count }})</button>
+      {% endif %}
       <a href="/ig/inbox" style="padding: 6px 12px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; color: #2563eb;">← Inbox'a Dön</a>
     </div>
     <div class="settings-card">
@@ -150,6 +153,28 @@
           btn.textContent = 'Okundu İşaretle';
         }
       }
+
+      document.getElementById('markAllReadBtn')?.addEventListener('click', async function() {
+        const btn = this;
+        btn.disabled = true;
+        btn.textContent = 'İşleniyor...';
+        try {
+          const r = await fetch('/ig/inbox/admin/messages/mark-all-read', { method: 'POST' });
+          if (!r.ok) throw new Error('Toplu okundu işaretleme başarısız');
+          const js = await r.json();
+          if (js.status === 'ok') {
+            location.reload();
+          } else {
+            alert('Hata: ' + (js.error || 'Bilinmeyen hata'));
+            btn.disabled = false;
+            btn.textContent = 'Tümünü okundu işaretle';
+          }
+        } catch (e) {
+          alert('Toplu okundu işaretleme hatası: ' + e.message);
+          btn.disabled = false;
+          btn.textContent = 'Tümünü okundu işaretle';
+        }
+      });
     </script>
   </body>
 </html>

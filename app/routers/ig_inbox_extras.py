@@ -87,6 +87,24 @@ def save_order_draft(conversation_id: int, payload: OrderDraftPayload = Body(...
 		raise HTTPException(status_code=400, detail=f"draft_error: {exc}")
 
 
+@router.post("/admin/messages/mark-all-read")
+def mark_all_admin_messages_read():
+	"""Tüm okunmamış admin mesajlarını topluca okundu işaretle."""
+	try:
+		from sqlalchemy import text as _text
+		with get_session() as session:
+			count_row = session.exec(_text("SELECT COUNT(*) FROM admin_messages WHERE is_read = 0")).first()
+			marked_count = int(count_row[0] or 0) if count_row else 0
+			session.exec(
+				_text(
+					"UPDATE admin_messages SET is_read = 1, read_at = CURRENT_TIMESTAMP WHERE is_read = 0"
+				)
+			)
+			return {"status": "ok", "marked_count": marked_count}
+	except Exception as exc:
+		raise HTTPException(status_code=400, detail=f"mark_all_read_error: {exc}")
+
+
 @router.post("/admin/messages/{message_id}/read")
 def mark_admin_message_read(message_id: int):
 	"""Admin mesajını okundu olarak işaretle"""
