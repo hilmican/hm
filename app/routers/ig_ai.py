@@ -109,37 +109,43 @@ def _collect_shadow_metrics(limit: int = 100, status_filter: str | None = None) 
             ready_count = 0
 
         try:
-            rows = session.exec(
-                text(
-                    f"""
-                    SELECT
-                        s.conversation_id,
-                        COALESCE(s.status, 'pending') AS status,
-                        s.last_inbound_ms,
-                        s.next_attempt_at,
-                        s.updated_at,
-                        c.graph_conversation_id,
-                        c.last_message_at,
-                        u.username,
-                        u.name AS contact_name,
-                        (SELECT MIN(m.timestamp_ms) FROM message m WHERE m.conversation_id = s.conversation_id) AS first_msg_ms,
-                        (SELECT MAX(m.timestamp_ms) FROM message m WHERE m.conversation_id = s.conversation_id) AS last_msg_ms,
-                        (SELECT COUNT(*) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id) AS reply_count,
-                        (SELECT MIN(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id) AS first_reply_at,
-                        (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id) AS last_reply_at
-                    FROM ai_shadow_state s
-                    LEFT JOIN conversations c ON c.id = s.conversation_id
-                    LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id
-                    ORDER BY 
-                        COALESCE(
-                            (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id),
-                            (SELECT MAX(m.timestamp_ms) FROM message m WHERE m.conversation_id = s.conversation_id),
-                            s.updated_at
-                        ) DESC
-                    LIMIT {n}
-                    """
-                )
-            ).all()
+            where_clause = " WHERE COALESCE(s.status, 'pending') = :status_filter" if normalized_filter else ""
+            list_sql = (
+                """
+                SELECT
+                    s.conversation_id,
+                    COALESCE(s.status, 'pending') AS status,
+                    s.last_inbound_ms,
+                    s.next_attempt_at,
+                    s.updated_at,
+                    c.graph_conversation_id,
+                    c.last_message_at,
+                    u.username,
+                    u.name AS contact_name,
+                    (SELECT MIN(m.timestamp_ms) FROM message m WHERE m.conversation_id = s.conversation_id) AS first_msg_ms,
+                    (SELECT MAX(m.timestamp_ms) FROM message m WHERE m.conversation_id = s.conversation_id) AS last_msg_ms,
+                    (SELECT COUNT(*) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id) AS reply_count,
+                    (SELECT MIN(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id) AS first_reply_at,
+                    (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id) AS last_reply_at
+                FROM ai_shadow_state s
+                LEFT JOIN conversations c ON c.id = s.conversation_id
+                LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id
+                """
+                + where_clause
+                + """
+                ORDER BY
+                    COALESCE(
+                        (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = s.conversation_id),
+                        (SELECT MAX(m.timestamp_ms) FROM message m WHERE m.conversation_id = s.conversation_id),
+                        s.updated_at
+                    ) DESC
+                LIMIT :n
+                """
+            )
+            list_params: dict[str, object] = {"n": n}
+            if normalized_filter:
+                list_params["status_filter"] = normalized_filter
+            rows = session.exec(text(list_sql).params(**list_params)).all()
         except Exception:
             session.rollback()
             rows = []

@@ -236,7 +236,7 @@
             currentFilter = (currentFilter === normalized) ? '' : normalized;
             updateUrlFilter();
             renderStatusChips(data);
-            renderTable(applyFilter(lastData.entries || []));
+            refreshData();
           });
           container.appendChild(div);
         }
