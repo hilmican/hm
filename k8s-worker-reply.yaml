@@ -1,0 +1,59 @@
+# hm-worker-reply: AI cevap kuyruğunu (ai_shadow_state) tüketir; draft_reply + send_message.
+# Namespace hm, secret hm-ig ve hm-openai gerekli. Apply: kubectl apply -f k8s-worker-reply.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hm-worker-reply
+  namespace: hm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hm-worker-reply
+  template:
+    metadata:
+      labels:
+        app: hm-worker-reply
+    spec:
+      nodeName: mediatriplem4
+      imagePullSecrets:
+        - name: my-dockerhub-secret
+      volumes:
+        - name: app-root
+          persistentVolumeClaim:
+            claimName: hm-app-root
+      containers:
+        - name: worker
+          image: mediatriple/hm:0.7.6
+          command: ["python","scripts/worker_reply.py"]
+          workingDir: /app
+          env:
+            - name: PYTHONPATH
+              value: /app
+            - name: REDIS_URL
+              value: redis://hm-redis.hm.svc.cluster.local:6379/0
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: hm-openai, key: OPENAI_API_KEY } }
+            - name: IG_PAGE_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_PAGE_ID } }
+            - name: IG_PAGE_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_PAGE_ACCESS_TOKEN } }
+            - name: IG_USER_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_USER_ID } }
+            - name: IG_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
+            - name: IG_GRAPH_API_VERSION
+              value: v21.0
+            - name: AI_SHADOW_ENABLED
+              value: "1"
+            - name: AI_SHADOW_MODEL
+              value: gpt-4o-mini
+            - name: AI_MAX_PRODUCT_IMAGES
+              value: "10"
+            - name: AI_AUTO_SEND_CONFIDENCE
+              value: "0.49"
+            - name: DATABASE_URL
+              value: "mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
+            - name: IMAGE_CDN_BASE_URL
+              value: "https://hma.cdn.com.tr"
+          volumeMounts: [ { name: app-root, mountPath: /app } ]

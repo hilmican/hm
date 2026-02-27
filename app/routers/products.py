@@ -358,7 +358,7 @@ def delete_product_upsell(upsell_id: int):
 
 @router.put("/{product_id}")
 def update_product(product_id: int, body: dict):
-    allowed = {"name", "category", "default_unit", "default_price", "default_cost", "default_color", "ai_variant_exclusions", "size_chart_id"}
+    allowed = {"name", "category", "default_unit", "default_price", "default_cost", "default_color", "ai_variant_exclusions", "size_chart_id", "ai_reply_sending_enabled"}
     with get_session() as session:
         p = session.exec(select(Product).where(Product.id == product_id)).first()
         if not p:
@@ -394,6 +394,9 @@ def update_product(product_id: int, body: dict):
         if "ai_variant_exclusions" in body:
             val = body.get("ai_variant_exclusions")
             p.ai_variant_exclusions = val if isinstance(val, str) and val.strip() else None
+        if "ai_reply_sending_enabled" in body:
+            en = body.get("ai_reply_sending_enabled")
+            p.ai_reply_sending_enabled = en in (True, 1, "1", "true", "yes", "on")
         if "size_chart_id" in body:
             sc_id = body.get("size_chart_id")
             if sc_id in (None, ""):

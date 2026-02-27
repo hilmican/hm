@@ -47,7 +47,7 @@
     <h2>Urunler</h2>
     <table id="prodTbl">
         <thead>
-            <tr><th>ID</th><th>Ad</th><th>Slug</th><th>Kategori</th><th>Birim</th><th>Varsayilan Fiyat</th><th>Varsayilan Maliyet</th><th>AI Hariç Beden/Renk</th><th>AI</th><th>Islemler</th></tr>
+            <tr><th>ID</th><th>Ad</th><th>Slug</th><th>Kategori</th><th>Birim</th><th>Varsayilan Fiyat</th><th>Varsayilan Maliyet</th><th>AI Hariç Beden/Renk</th><th>AI Cevap</th><th>AI</th><th>Islemler</th></tr>
         </thead>
         <tbody>
             {% for p in rows %}
@@ -61,6 +61,12 @@
                 <td><input data-field="default_cost" type="number" step="0.01" value="{{ p.default_cost }}" /></td>
                 <td>
                     <textarea data-field="ai_variant_exclusions" style="width:220px;min-height:60px;" placeholder='JSON veya "s,m,color:red"'>{{ p.ai_variant_exclusions or "" }}</textarea>
+                </td>
+                <td>
+                    <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;" class="ai-reply-label">
+                        <input type="checkbox" data-field="ai_reply_sending_enabled" {{ 'checked' if (p.ai_reply_sending_enabled is not false) else '' }} />
+                        <span class="ai-reply-status">{{ 'Açık' if (p.ai_reply_sending_enabled is not false) else 'Kapalı' }}</span>
+                    </label>
                 </td>
                 <td>
                     {% if p.slug or p.name %}
@@ -121,6 +127,12 @@ if (form) {
   });
 }
 
+document.querySelectorAll('input[data-field="ai_reply_sending_enabled"]').forEach(cb => {
+  cb.addEventListener('change', function() {
+    const span = this.closest('label')?.querySelector('.ai-reply-status');
+    if (span) span.textContent = this.checked ? 'Açık' : 'Kapalı';
+  });
+});
 for (const btn of document.querySelectorAll('.saveBtn')) {
   btn.addEventListener('click', async (e) => {
     const tr = e.target.closest('tr');
@@ -128,8 +140,8 @@ for (const btn of document.querySelectorAll('.saveBtn')) {
     const body = {};
     for (const inp of tr.querySelectorAll('input[data-field], textarea[data-field]')) {
       const k = inp.getAttribute('data-field');
-      let v = inp.value;
-      if ((k === 'default_price' || k === 'default_cost') && v !== '') v = Number(v);
+      let v = inp.type === 'checkbox' ? inp.checked : inp.value;
+      if ((k === 'default_price' || k === 'default_cost') && v !== '' && typeof v !== 'boolean') v = Number(v);
       body[k] = v;
     }
     try {
