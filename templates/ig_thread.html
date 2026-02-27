@@ -119,7 +119,7 @@
           </div>
         {% endif %}
         {% if ai_state.label %}
-          <div class="meta">AI Durumu: {{ ai_state.label }}{% if ai_state.description %} — {{ ai_state.description }}{% endif %}</div>
+          <div class="meta">AI Durumu: {{ ai_state.label }}{% if ai_state.description %} — {{ ai_state.description }}{% endif %} <span id="aiQueuePosition" style="color:#6b7280; font-size:11px;"></span></div>
         {% endif %}
         {% if ai_state.needs_link %}
           {% if lc.product_slug %}
@@ -623,7 +623,22 @@
     <script>
       const conversationId = {{ conversation_id | tojson }};
       const publicConversationId = {{ (public_conversation_id or "") | tojson }};
-      
+
+      // Kuyruk sırası: bu mesaja kadar işlenecek kaç konuşma var
+      (async () => {
+        const el = document.getElementById('aiQueuePosition');
+        if (!el) return;
+        try {
+          const r = await fetch(`/ig/inbox/${conversationId}/ai/queue_position`);
+          const d = await r.json().catch(() => ({}));
+          if (d.ahead_count !== undefined) {
+            if (d.ahead_count === 0 && d.total_pending > 0) el.textContent = ' (sırada en önde)';
+            else if (d.total_pending > 0) el.textContent = ` · ${d.ahead_count} konuşma önünüzde, toplam ${d.total_pending} bekleyen`;
+            else el.textContent = '';
+          }
+        } catch (_) {}
+      })();
+
       // Load available ads for manual assignment
       const adSelector = document.getElementById('adSelector');
       const assignAdBtn = document.getElementById('assignAdBtn');
