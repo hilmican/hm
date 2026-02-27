@@ -89,6 +89,7 @@ def _collect_shadow_metrics(limit: int = 100, status_filter: str | None = None) 
                 cnt = int(_row_get(row, "cnt") or 0)
                 status_counts[status] = cnt
         except Exception:
+            session.rollback()
             status_counts = {}
 
         try:
@@ -104,6 +105,7 @@ def _collect_shadow_metrics(limit: int = 100, status_filter: str | None = None) 
             ).first()
             ready_count = int(_row_get(row_ready, "c") or 0) if row_ready else 0
         except Exception:
+            session.rollback()
             ready_count = 0
 
         try:
@@ -139,6 +141,7 @@ def _collect_shadow_metrics(limit: int = 100, status_filter: str | None = None) 
                 )
             ).all()
         except Exception:
+            session.rollback()
             rows = []
 
     total_replies = 0
