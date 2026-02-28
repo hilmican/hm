@@ -40,8 +40,15 @@ def _persist_payload_to_disk(payload: Dict[str, Any], raw_body: bytes) -> Option
 
 def _validate_signature(raw_body: bytes, signature: Optional[str]) -> None:
     secret = os.getenv("IG_APP_SECRET", "")
-    if not secret or not signature:
-        raise HTTPException(status_code=403, detail="Missing signature")
+    require_signature = str(os.getenv("WA_REQUIRE_SIGNATURE", "0")).strip().lower() in {"1", "true", "yes"}
+    if not secret:
+        if require_signature:
+            raise HTTPException(status_code=403, detail="Missing app secret")
+        return
+    if not signature:
+        if require_signature:
+            raise HTTPException(status_code=403, detail="Missing signature")
+        return
     expected = "sha256=" + hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature):
         raise HTTPException(status_code=403, detail="Invalid signature")
@@ -71,7 +78,15 @@ async def receive_events(request: Request):
     signature = request.headers.get("X-Hub-Signature-256")
     try:
         _validate_signature(body, signature)
-    except Exception:
+    except Exception as exc:
+        try:
+            _log.warning(
+                "WA webhook POST: signature invalid (has_sig=%s): %s",
+                bool(signature),
+                str(exc),
+            )
+        except Exception:
+            pass
         return {"status": "signature_invalid"}
 
     try:
@@ -85,7 +100,12 @@ async def receive_events(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
-    if payload.get("object") != "whatsapp_business_account":
+    payload_object = payload.get("object")
+    if payload_object != "whatsapp_business_account":
+        try:
+            _log.info("WA webhook POST: ignored payload object=%s", payload_object)
+        except Exception:
+            pass
         return {"status": "ignored"}
 
     uniq_hash = hashlib.sha256(body).hexdigest()

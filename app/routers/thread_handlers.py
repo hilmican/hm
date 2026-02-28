@@ -1156,6 +1156,7 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
         )
 
         user_context = {
+            "platform": str(getattr(convo, "platform", None) or "instagram"),
             "username": other_username,
             "ig_user_id": str(convo.ig_user_id) if getattr(convo, "ig_user_id", None) else None,
             "contact_name": contact_name,
@@ -1224,6 +1225,7 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
                 "user_context": user_context,
                 "template_cards": template_cards,
                 "public_conversation_id": public_conversation_id,
+                "conversation_platform": str(getattr(convo, "platform", None) or "instagram"),
                 "brand_profile": brand_profile,
                 "assignable_users": assignable_users,
                 "current_assignment": current_assignment,

@@ -74,7 +74,11 @@
     <div style="display:grid; gap:12px; margin-bottom:16px;">
       <div style="border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
         <h3 style="margin:0 0 8px 0; color:#111827;">Konuşma Özeti</h3>
-        <div class="meta">IG Kullanıcısı:
+        {% set conv_platform = (conversation_platform or (uc.platform if uc and uc.platform else 'instagram')) %}
+        <div class="meta">Platform:
+          {% if conv_platform == 'whatsapp' %}🟢 WhatsApp{% else %}📸 Instagram{% endif %}
+        </div>
+        <div class="meta">Kullanıcı:
           {% if uc.username %}@{{ uc.username }}
           {% elif other_label %}{{ other_label }}
           {% else %}-{% endif %}
@@ -356,8 +360,9 @@
     {% endif %}
   </div>
     <h2>
+      {% if conv_platform == 'whatsapp' %}🟢 WA{% else %}📸 IG{% endif %}
       Conversation {{ other_label or conversation_id }}
-      {% if other_label %}<a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ other_label[1:] }}">profile ↗</a>{% endif %}
+      {% if conv_platform == 'instagram' and other_label %}<a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ other_label[1:] }}">profile ↗</a>{% endif %}
       {% if contact_name or contact_phone or contact_address %}
         <div class="meta">{{ contact_name or '' }}{% if contact_name and contact_phone %} · {% endif %}{{ contact_phone or '' }}{% if (contact_name or contact_phone) and contact_address %} · {% endif %}{{ contact_address or '' }}</div>
       {% endif %}
@@ -379,6 +384,8 @@
               {% elif m.ig_sender_id %}
                 <span class="meta">id: {{ m.ig_sender_id }}</span><br/>
               {% endif %}
+              {% set msg_platform = (m.platform or conv_platform or 'instagram') %}
+              <span class="meta">{% if msg_platform == 'whatsapp' %}🟢 WhatsApp{% else %}📸 Instagram{% endif %}</span><br/>
               {{ m.text or '' }}
               {% if m.is_ai_draft %}
                 <div class="meta" style="margin-top:4px">

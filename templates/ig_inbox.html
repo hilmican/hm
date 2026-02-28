@@ -16,7 +16,7 @@
   </head>
   <body>
     {% include "_nav.html" %}
-    <h1>{{ title or "Instagram Gelen Kutusu" }}</h1>
+    <h1>{{ title or "Gelen Kutusu (Instagram + WhatsApp)" }}</h1>
     {% set escalation_map = escalation_map or {} %}
     <div class="toolbar">
       {% if not title or title == "Instagram Gelen Kutusu" %}
@@ -103,13 +103,15 @@
         <div class="conv">
           <div>
             <a href="/ig/inbox/{{ m.conversation_id }}">
+              {% set platform = (m.platform or 'instagram') %}
+              {% if platform == 'whatsapp' %}🟢 WA{% else %}📸 IG{% endif %} ·
               {% if names and names.get(m.conversation_id) %}
                 {{ names.get(m.conversation_id) }} {% if labels and labels.get(m.conversation_id) %}· {{ labels.get(m.conversation_id) }}{% endif %}
               {% else %}
                 {{ labels.get(m.conversation_id) or m.conversation_id }}
               {% endif %}
             </a>
-            {% if labels and labels.get(m.conversation_id) %}
+            {% if platform == 'instagram' and labels and labels.get(m.conversation_id) %}
               <a class="meta" target="_blank" rel="noopener" href="https://instagram.com/{{ labels.get(m.conversation_id)[1:] }}">profil ↗</a>
             {% endif %}
             <a class="meta-link" href="/ig/inbox/{{ m.conversation_id }}/debug" title="AI Hata Ayıklama">AI Hata Ayıklama</a>
@@ -139,7 +141,7 @@
               </div>
             {% endif %}
           </div>
-          <div class="meta"><span class="ts" data-ts="{{ m.timestamp_ms or '' }}">{{ m.timestamp_ms }}</span> · {{ (m.text or '')[:120] }}</div>
+          <div class="meta"><span class="ts" data-ts="{{ m.timestamp_ms or '' }}">{{ m.timestamp_ms }}</span> · {{ 'WhatsApp' if platform == 'whatsapp' else 'Instagram' }} · {{ (m.text or '')[:120] }}</div>
         </div>
       {% endfor %}
       {% if not conversations %}

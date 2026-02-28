@@ -463,6 +463,7 @@ async def inbox(
         templates = request.app.state.templates
         return templates.TemplateResponse("ig_inbox.html", {
             "request": request,
+            "title": "Gelen Kutusu (Instagram + WhatsApp)",
             "conversations": conversations,
             "labels": labels,
             "names": names,
