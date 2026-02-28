@@ -14,6 +14,7 @@ from .routers import reports
 from .routers import inventory, mappings, products, size_charts, magaza_satis, settings_finance
 from .routers import product_qa
 from .routers import instagram
+from .routers import whatsapp
 from .routers import legal
 from .routers import ig
 from .routers import ig_ai
@@ -123,7 +124,7 @@ def create_app() -> FastAPI:
 			_fmt = _lg.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
 			_h = _lg.StreamHandler()
 			_h.setFormatter(_fmt)
-			for lname in ("instagram.webhook", "instagram.inbox", "graph.api", "ingest.upsert"):
+			for lname in ("instagram.webhook", "whatsapp.webhook", "instagram.inbox", "graph.api", "ingest.upsert"):
 				lg = _lg.getLogger(lname)
 				lg.setLevel(_lg.INFO)
 				# avoid duplicate handlers
@@ -270,6 +271,7 @@ def create_app() -> FastAPI:
 
 	app.include_router(product_qa.router)
 	app.include_router(instagram.router)
+	app.include_router(whatsapp.router)
 	app.include_router(legal.router)
 	app.include_router(ig.router)
 	app.include_router(ig_ai.router)

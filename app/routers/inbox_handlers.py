@@ -38,6 +38,7 @@ async def inbox(
         if has_new_cols:
             base_sql = """
                 SELECT c.id AS convo_id,
+                       COALESCE(c.platform, 'instagram') AS platform,
                        c.last_message_timestamp_ms AS timestamp_ms,
                        c.last_message_text AS text,
                        c.last_sender_username AS sender_username,
@@ -56,6 +57,7 @@ async def inbox(
                 FROM conversations c
                 LEFT JOIN ig_users u
                   ON u.ig_user_id = c.ig_user_id
+                 AND COALESCE(u.platform, 'instagram') = COALESCE(c.platform, 'instagram')
                 LEFT JOIN ads_products ap
                   ON ap.ad_id = COALESCE(c.last_link_id, c.last_ad_id) AND ap.link_type = COALESCE(c.last_link_type, 'ad')
                 LEFT JOIN product p
@@ -65,6 +67,7 @@ async def inbox(
             # Fallback for databases that haven't run migration yet
             base_sql = """
                 SELECT c.id AS convo_id,
+                       COALESCE(c.platform, 'instagram') AS platform,
                        c.last_message_timestamp_ms AS timestamp_ms,
                        c.last_message_text AS text,
                        c.last_sender_username AS sender_username,
@@ -83,6 +86,7 @@ async def inbox(
                 FROM conversations c
                 LEFT JOIN ig_users u
                   ON u.ig_user_id = c.ig_user_id
+                 AND COALESCE(u.platform, 'instagram') = COALESCE(c.platform, 'instagram')
                 LEFT JOIN ads_products ap
                   ON ap.ad_id = c.last_ad_id AND (ap.link_type = 'ad' OR ap.link_type IS NULL)
                 LEFT JOIN product p
@@ -99,6 +103,7 @@ async def inbox(
                     OR EXISTS (
                         SELECT 1 FROM ig_users u
                         WHERE (u.ig_user_id = c.ig_sender_id OR u.ig_user_id = c.ig_recipient_id)
+                          AND COALESCE(u.platform, 'instagram') = COALESCE(c.platform, 'instagram')
                           AND (
                             (u.name IS NOT NULL AND LOWER(u.name) LIKE :qq)
                             OR (u.username IS NOT NULL AND LOWER(u.username) LIKE :qq)
@@ -161,21 +166,22 @@ async def inbox(
                 cid = (r.convo_id if hasattr(r, "convo_id") else r[0])
                 rows.append({
                     "conversation_id": cid,
-                    "timestamp_ms": (getattr(r, "timestamp_ms", None) if hasattr(r, "timestamp_ms") else (r[1] if len(r) > 1 else None)),
-                    "text": (getattr(r, "text", None) if hasattr(r, "text") else (r[2] if len(r) > 2 else None)),
-                    "sender_username": (getattr(r, "sender_username", None) if hasattr(r, "sender_username") else (r[3] if len(r) > 3 else None)),
-                    "direction": (getattr(r, "direction", None) if hasattr(r, "direction") else (r[4] if len(r) > 4 else None)),
-                    "ig_sender_id": (getattr(r, "ig_sender_id", None) if hasattr(r, "ig_sender_id") else (r[5] if len(r) > 5 else None)),
-                    "ig_recipient_id": (getattr(r, "ig_recipient_id", None) if hasattr(r, "ig_recipient_id") else (r[6] if len(r) > 6 else None)),
-                    "ig_user_id": (getattr(r, "ig_user_id", None) if hasattr(r, "ig_user_id") else (r[7] if len(r) > 7 else None)),
-                    "ad_link": (getattr(r, "ad_link", None) if hasattr(r, "ad_link") else (r[8] if len(r) > 8 else None)),
-                    "ad_title": (getattr(r, "ad_title", None) if hasattr(r, "ad_title") else (r[9] if len(r) > 9 else None)),
-                    "message_id": (getattr(r, "message_id", None) if hasattr(r, "message_id") else (r[10] if len(r) > 10 else None)),
-                    "last_ad_id": (getattr(r, "last_ad_id", None) if hasattr(r, "last_ad_id") else (r[11] if len(r) > 11 else None)),
-                    "last_link_type": (getattr(r, "last_link_type", None) if hasattr(r, "last_link_type") else (r[12] if len(r) > 12 else None)),
-                    "last_link_id": (getattr(r, "last_link_id", None) if hasattr(r, "last_link_id") else (r[13] if len(r) > 13 else None)),
-                    "other_username": (getattr(r, "other_username", None) if hasattr(r, "other_username") else (r[14] if len(r) > 14 else None)),
-                    "other_name": (getattr(r, "other_name", None) if hasattr(r, "other_name") else (r[15] if len(r) > 15 else None)),
+                    "platform": (getattr(r, "platform", None) if hasattr(r, "platform") else (r[1] if len(r) > 1 else "instagram")),
+                    "timestamp_ms": (getattr(r, "timestamp_ms", None) if hasattr(r, "timestamp_ms") else (r[2] if len(r) > 2 else None)),
+                    "text": (getattr(r, "text", None) if hasattr(r, "text") else (r[3] if len(r) > 3 else None)),
+                    "sender_username": (getattr(r, "sender_username", None) if hasattr(r, "sender_username") else (r[4] if len(r) > 4 else None)),
+                    "direction": (getattr(r, "direction", None) if hasattr(r, "direction") else (r[5] if len(r) > 5 else None)),
+                    "ig_sender_id": (getattr(r, "ig_sender_id", None) if hasattr(r, "ig_sender_id") else (r[6] if len(r) > 6 else None)),
+                    "ig_recipient_id": (getattr(r, "ig_recipient_id", None) if hasattr(r, "ig_recipient_id") else (r[7] if len(r) > 7 else None)),
+                    "ig_user_id": (getattr(r, "ig_user_id", None) if hasattr(r, "ig_user_id") else (r[8] if len(r) > 8 else None)),
+                    "ad_link": (getattr(r, "ad_link", None) if hasattr(r, "ad_link") else (r[9] if len(r) > 9 else None)),
+                    "ad_title": (getattr(r, "ad_title", None) if hasattr(r, "ad_title") else (r[10] if len(r) > 10 else None)),
+                    "message_id": (getattr(r, "message_id", None) if hasattr(r, "message_id") else (r[11] if len(r) > 11 else None)),
+                    "last_ad_id": (getattr(r, "last_ad_id", None) if hasattr(r, "last_ad_id") else (r[12] if len(r) > 12 else None)),
+                    "last_link_type": (getattr(r, "last_link_type", None) if hasattr(r, "last_link_type") else (r[13] if len(r) > 13 else None)),
+                    "last_link_id": (getattr(r, "last_link_id", None) if hasattr(r, "last_link_id") else (r[14] if len(r) > 14 else None)),
+                    "other_username": (getattr(r, "other_username", None) if hasattr(r, "other_username") else (r[15] if len(r) > 15 else None)),
+                    "other_name": (getattr(r, "other_name", None) if hasattr(r, "other_name") else (r[16] if len(r) > 16 else None)),
                 })
             except Exception:
                 continue
@@ -235,14 +241,16 @@ async def inbox(
                     placeholders = ",".join([":p" + str(i) for i in range(len(other_ids))])
                     from sqlalchemy import text as _text
                     params = {("p" + str(i)): list(other_ids)[i] for i in range(len(other_ids))}
-                    rows_u = session.exec(_text(f"SELECT ig_user_id, username, name FROM ig_users WHERE ig_user_id IN ({placeholders})")).params(**params).all()
+                    rows_u = session.exec(
+                        _text(f"SELECT platform, ig_user_id, username, name FROM ig_users WHERE ig_user_id IN ({placeholders})")
+                    ).params(**params).all()
                     id_to_username: dict[str, str] = {}
                     id_to_name: dict[str, str] = {}
                     ids_without_username: list[str] = []
                     for r in rows_u:
-                        uid = r.ig_user_id if hasattr(r, "ig_user_id") else r[0]
-                        un = r.username if hasattr(r, "username") else r[1]
-                        nm = r.name if hasattr(r, "name") else (r[2] if len(r) > 2 else None)
+                        uid = r.ig_user_id if hasattr(r, "ig_user_id") else r[1]
+                        un = r.username if hasattr(r, "username") else r[2]
+                        nm = r.name if hasattr(r, "name") else (r[3] if len(r) > 3 else None)
                         if uid and un:
                             id_to_username[str(uid)] = str(un)
                             if nm:
@@ -510,11 +518,11 @@ async def ai_reply_queue_list(request: Request, limit: int = 200):
             q = _text(
                 f"""
                 SELECT s.conversation_id, s.status, s.next_attempt_at, s.last_inbound_ms,
-                       c.last_message_text, c.ig_user_id,
+                       c.last_message_text, c.ig_user_id, COALESCE(c.platform, 'instagram') AS platform,
                        u.username AS other_username, u.name AS other_name
                 FROM ai_shadow_state s
                 LEFT JOIN conversations c ON c.id = s.conversation_id
-                LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id
+                LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id AND COALESCE(u.platform, 'instagram') = COALESCE(c.platform, 'instagram')
                 WHERE {_DUE_WHERE_AI_QUEUE}
                 ORDER BY (s.next_attempt_at IS NULL) DESC, s.next_attempt_at ASC, s.conversation_id ASC
                 LIMIT :n
@@ -530,8 +538,9 @@ async def ai_reply_queue_list(request: Request, limit: int = 200):
                     "last_inbound_ms": r.last_inbound_ms if hasattr(r, "last_inbound_ms") else (r[3] if len(r) > 3 else None),
                     "last_message_text": (r.last_message_text if hasattr(r, "last_message_text") else (r[4] if len(r) > 4 else None)) or "",
                     "ig_user_id": r.ig_user_id if hasattr(r, "ig_user_id") else (r[5] if len(r) > 5 else None),
-                    "other_username": r.other_username if hasattr(r, "other_username") else (r[6] if len(r) > 6 else None),
-                    "other_name": r.other_name if hasattr(r, "other_name") else (r[7] if len(r) > 7 else None),
+                    "platform": r.platform if hasattr(r, "platform") else (r[6] if len(r) > 6 else "instagram"),
+                    "other_username": r.other_username if hasattr(r, "other_username") else (r[7] if len(r) > 7 else None),
+                    "other_name": r.other_name if hasattr(r, "other_name") else (r[8] if len(r) > 8 else None),
                 })
     except Exception:
         pass
@@ -556,6 +565,7 @@ async def ai_replied_messages(
                 """
                 SELECT DISTINCT
                     c.id AS convo_id,
+                    COALESCE(c.platform, 'instagram') AS platform,
                     c.last_message_timestamp_ms AS timestamp_ms,
                     c.last_message_text AS text,
                     c.last_sender_username AS sender_username,
@@ -567,7 +577,7 @@ async def ai_replied_messages(
                     (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = c.id AND r.status = 'sent') AS last_ai_reply_at
                 FROM conversations c
                 INNER JOIN ai_shadow_reply r ON r.conversation_id = c.id AND r.status = 'sent'
-                LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id
+                LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id AND COALESCE(u.platform, 'instagram') = COALESCE(c.platform, 'instagram')
                 ORDER BY (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = c.id AND r.status = 'sent') DESC
                 LIMIT :n
                 """
@@ -579,15 +589,16 @@ async def ai_replied_messages(
             try:
                 conversations.append({
                     "conversation_id": (r.convo_id if hasattr(r, "convo_id") else r[0]),
-                    "timestamp_ms": (getattr(r, "timestamp_ms", None) if hasattr(r, "timestamp_ms") else (r[1] if len(r) > 1 else None)),
-                    "text": (getattr(r, "text", None) if hasattr(r, "text") else (r[2] if len(r) > 2 else None)),
-                    "sender_username": (getattr(r, "sender_username", None) if hasattr(r, "sender_username") else (r[3] if len(r) > 3 else None)),
-                    "direction": (getattr(r, "direction", None) if hasattr(r, "direction") else (r[4] if len(r) > 4 else None)),
-                    "ig_user_id": (getattr(r, "ig_user_id", None) if hasattr(r, "ig_user_id") else (r[5] if len(r) > 5 else None)),
-                    "other_username": (getattr(r, "other_username", None) if hasattr(r, "other_username") else (r[6] if len(r) > 6 else None)),
-                    "other_name": (getattr(r, "other_name", None) if hasattr(r, "other_name") else (r[7] if len(r) > 7 else None)),
-                    "ai_reply_count": (getattr(r, "ai_reply_count", None) if hasattr(r, "ai_reply_count") else (r[8] if len(r) > 8 else None)),
-                    "last_ai_reply_at": (getattr(r, "last_ai_reply_at", None) if hasattr(r, "last_ai_reply_at") else (r[9] if len(r) > 9 else None)),
+                    "platform": (getattr(r, "platform", None) if hasattr(r, "platform") else (r[1] if len(r) > 1 else "instagram")),
+                    "timestamp_ms": (getattr(r, "timestamp_ms", None) if hasattr(r, "timestamp_ms") else (r[2] if len(r) > 2 else None)),
+                    "text": (getattr(r, "text", None) if hasattr(r, "text") else (r[3] if len(r) > 3 else None)),
+                    "sender_username": (getattr(r, "sender_username", None) if hasattr(r, "sender_username") else (r[4] if len(r) > 4 else None)),
+                    "direction": (getattr(r, "direction", None) if hasattr(r, "direction") else (r[5] if len(r) > 5 else None)),
+                    "ig_user_id": (getattr(r, "ig_user_id", None) if hasattr(r, "ig_user_id") else (r[6] if len(r) > 6 else None)),
+                    "other_username": (getattr(r, "other_username", None) if hasattr(r, "other_username") else (r[7] if len(r) > 7 else None)),
+                    "other_name": (getattr(r, "other_name", None) if hasattr(r, "other_name") else (r[8] if len(r) > 8 else None)),
+                    "ai_reply_count": (getattr(r, "ai_reply_count", None) if hasattr(r, "ai_reply_count") else (r[9] if len(r) > 9 else None)),
+                    "last_ai_reply_at": (getattr(r, "last_ai_reply_at", None) if hasattr(r, "last_ai_reply_at") else (r[10] if len(r) > 10 else None)),
                 })
             except Exception:
                 continue

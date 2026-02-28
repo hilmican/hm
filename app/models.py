@@ -352,6 +352,7 @@ class User(SQLModel, table=True):
 
 class Message(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    platform: str = Field(default="instagram", index=True, description="Messaging platform: instagram|whatsapp")
     ig_sender_id: Optional[str] = Field(default=None, index=True)
     ig_recipient_id: Optional[str] = Field(default=None, index=True)
     ig_message_id: Optional[str] = Field(default=None, index=True, unique=True)
@@ -419,6 +420,7 @@ class Conversation(SQLModel, table=True):
     __tablename__ = "conversations"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    platform: str = Field(default="instagram", index=True, description="Conversation platform: instagram|whatsapp")
 
     # Page / user mapping
     igba_id: str = Field(index=True, description="Instagram business account (page) id")
@@ -479,9 +481,13 @@ class IGUser(SQLModel, table=True):
     """
 
     __tablename__ = "ig_users"
+    __table_args__ = (
+        UniqueConstraint("platform", "ig_user_id", name="uq_ig_users_platform_ig_user_id"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    ig_user_id: str = Field(index=True, unique=True)
+    platform: str = Field(default="instagram", index=True, description="Contact platform: instagram|whatsapp")
+    ig_user_id: str = Field(index=True)
 
     # Basic profile
     username: Optional[str] = Field(default=None, index=True)

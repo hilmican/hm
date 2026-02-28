@@ -50,6 +50,14 @@ spec:
               valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
             - name: IG_GRAPH_API_VERSION
               value: v21.0
+            - name: WA_PHONE_NUMBER_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_PHONE_NUMBER_ID } }
+            - name: WA_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_ACCESS_TOKEN } }
+            - name: WA_BUSINESS_ACCOUNT_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_BUSINESS_ACCOUNT_ID } }
+            - name: WA_GRAPH_API_VERSION
+              value: v22.0
             - name: DATABASE_URL
               value: "mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
           volumeMounts: [ { name: app-root, mountPath: /app } ]
@@ -106,6 +114,14 @@ spec:
               valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
             - name: IG_GRAPH_API_VERSION
               value: v21.0
+            - name: WA_PHONE_NUMBER_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_PHONE_NUMBER_ID } }
+            - name: WA_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_ACCESS_TOKEN } }
+            - name: WA_BUSINESS_ACCOUNT_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_BUSINESS_ACCOUNT_ID } }
+            - name: WA_GRAPH_API_VERSION
+              value: v22.0
           volumeMounts: [ { name: app-root, mountPath: /app } ]
 ---
 apiVersion: apps/v1
@@ -160,6 +176,14 @@ spec:
               valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
             - name: IG_GRAPH_API_VERSION
               value: v21.0
+            - name: WA_PHONE_NUMBER_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_PHONE_NUMBER_ID } }
+            - name: WA_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_ACCESS_TOKEN } }
+            - name: WA_BUSINESS_ACCOUNT_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_BUSINESS_ACCOUNT_ID } }
+            - name: WA_GRAPH_API_VERSION
+              value: v22.0
           volumeMounts: [ { name: app-root, mountPath: /app } ]
 ---
 apiVersion: apps/v1
@@ -206,6 +230,14 @@ spec:
               valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
             - name: IG_GRAPH_API_VERSION
               value: v21.0
+            - name: WA_PHONE_NUMBER_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_PHONE_NUMBER_ID } }
+            - name: WA_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_ACCESS_TOKEN } }
+            - name: WA_BUSINESS_ACCOUNT_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_BUSINESS_ACCOUNT_ID } }
+            - name: WA_GRAPH_API_VERSION
+              value: v22.0
             - name: AI_SHADOW_ENABLED
               value: "1"
             - name: AI_SHADOW_MODEL
@@ -266,6 +298,14 @@ spec:
               valueFrom: { secretKeyRef: { name: hm-ig, key: IG_ACCESS_TOKEN } }
             - name: IG_GRAPH_API_VERSION
               value: v21.0
+            - name: WA_PHONE_NUMBER_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_PHONE_NUMBER_ID } }
+            - name: WA_ACCESS_TOKEN
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_ACCESS_TOKEN } }
+            - name: WA_BUSINESS_ACCOUNT_ID
+              valueFrom: { secretKeyRef: { name: hm-ig, key: WA_BUSINESS_ACCOUNT_ID } }
+            - name: WA_GRAPH_API_VERSION
+              value: v22.0
             - name: DATABASE_URL
               value: "mysql+pymysql://hm:0Nh4shgeoYmhhe+!d@185.70.97.125:30336/appdb_h?charset=utf8mb4"
           volumeMounts: [ { name: app-root, mountPath: /app } ]

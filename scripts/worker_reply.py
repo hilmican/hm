@@ -12,7 +12,7 @@ from sqlalchemy import text as _text
 from sqlmodel import select
 
 from app.services.ai_reply import draft_reply, _sanitize_reply_text, _select_product_images_for_reply
-from app.services.instagram_api import send_message
+from app.services.channel_sender import send_message as send_channel_message
 from app.services.ai_orders import get_candidate_snapshot, submit_candidate_order, mark_candidate_very_interested
 from app.models import SystemSetting, Product
 from app.services.admin_notifications import create_admin_notification
@@ -1169,6 +1169,7 @@ def main() -> None:
 				conversation_id_for_send: Optional[str] = None
 				graph_conversation_id: Optional[str] = None
 				ig_user_id: Optional[str] = None
+				conversation_platform: str = "instagram"
 				conversation_username: Optional[str] = None
 				conversation_name: Optional[str] = None
 				conversation_last_message: Optional[str] = None
@@ -1179,6 +1180,7 @@ def main() -> None:
 							_text(
 								"""
 								SELECT
+									COALESCE(c.platform, 'instagram') AS platform,
 									c.graph_conversation_id,
 									c.ig_user_id,
 									c.last_sender_username,
@@ -1186,24 +1188,30 @@ def main() -> None:
 									u.username AS ig_username,
 									u.name AS ig_name
 								FROM conversations c
-								LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id
+								LEFT JOIN ig_users u
+								  ON u.ig_user_id = c.ig_user_id
+								 AND COALESCE(u.platform, 'instagram') = COALESCE(c.platform, 'instagram')
 								WHERE c.id=:cid
 								LIMIT 1
 								"""
 							).params(cid=int(cid))
 						).first()
 						if row_conv:
-							graph_conversation_id = (row_conv.graph_conversation_id if hasattr(row_conv, "graph_conversation_id") else (row_conv[0] if len(row_conv) > 0 else None)) or None
-							ig_user_id = (row_conv.ig_user_id if hasattr(row_conv, "ig_user_id") else (row_conv[1] if len(row_conv) > 1 else None)) or None
-							last_sender_username = (row_conv.last_sender_username if hasattr(row_conv, "last_sender_username") else (row_conv[2] if len(row_conv) > 2 else None)) or None
-							last_message_text = (row_conv.last_message_text if hasattr(row_conv, "last_message_text") else (row_conv[3] if len(row_conv) > 3 else None)) or None
+							conversation_platform = (
+								(row_conv.platform if hasattr(row_conv, "platform") else (row_conv[0] if len(row_conv) > 0 else None))
+								or "instagram"
+							)
+							graph_conversation_id = (row_conv.graph_conversation_id if hasattr(row_conv, "graph_conversation_id") else (row_conv[1] if len(row_conv) > 1 else None)) or None
+							ig_user_id = (row_conv.ig_user_id if hasattr(row_conv, "ig_user_id") else (row_conv[2] if len(row_conv) > 2 else None)) or None
+							last_sender_username = (row_conv.last_sender_username if hasattr(row_conv, "last_sender_username") else (row_conv[3] if len(row_conv) > 3 else None)) or None
+							last_message_text = (row_conv.last_message_text if hasattr(row_conv, "last_message_text") else (row_conv[4] if len(row_conv) > 4 else None)) or None
 							ig_username = None
 							ig_name = None
 							try:
 								ig_username = (
 									row_conv.ig_username
 									if hasattr(row_conv, "ig_username")
-									else (row_conv[4] if len(row_conv) > 4 else None)
+									else (row_conv[5] if len(row_conv) > 5 else None)
 								)
 							except Exception:
 								ig_username = None
@@ -1211,7 +1219,7 @@ def main() -> None:
 								ig_name = (
 									row_conv.ig_name
 									if hasattr(row_conv, "ig_name")
-									else (row_conv[5] if len(row_conv) > 5 else None)
+									else (row_conv[6] if len(row_conv) > 6 else None)
 								)
 							except Exception:
 								ig_name = None
@@ -1221,10 +1229,14 @@ def main() -> None:
 								str(last_message_text).strip() if isinstance(last_message_text, str) else None
 							)
 							conversation_ig_user_id = str(ig_user_id) if ig_user_id else None
-						if graph_conversation_id:
-							conversation_id_for_send = str(graph_conversation_id)
-						elif ig_user_id:
-							conversation_id_for_send = f"dm:{ig_user_id}"
+						if str(conversation_platform).lower() == "whatsapp":
+							if ig_user_id:
+								conversation_id_for_send = str(ig_user_id)
+						else:
+							if graph_conversation_id:
+								conversation_id_for_send = str(graph_conversation_id)
+							elif ig_user_id:
+								conversation_id_for_send = f"dm:{ig_user_id}"
 				except Exception:
 					pass
 				
@@ -1249,7 +1261,9 @@ def main() -> None:
 							asyncio.set_event_loop(loop)
 						
 						result = loop.run_until_complete(
-							send_message(
+							send_channel_message(
+								platform=conversation_platform,
+								recipient_id=str(ig_user_id or ""),
 								conversation_id=conversation_id_for_send,
 								text=reply_text,
 								image_urls=image_urls_to_send if image_urls_to_send else None,
@@ -1293,7 +1307,11 @@ def main() -> None:
 									from app.models import Message
 									from sqlmodel import select
 									import os
-									entity_id = os.getenv("IG_PAGE_ID") or os.getenv("IG_USER_ID") or ""
+									entity_id = (
+										(os.getenv("WA_PHONE_NUMBER_ID") or "")
+										if str(conversation_platform).lower() == "whatsapp"
+										else (os.getenv("IG_PAGE_ID") or os.getenv("IG_USER_ID") or "")
+									)
 									now_ms = _now_ms()
 									# Split reply_text by newlines to match the messages that were sent
 									text_lines = [line.strip() for line in reply_text.split('\n') if line.strip()]
@@ -1314,7 +1332,12 @@ def main() -> None:
 										)
 
 										# Check if message already exists
-										existing = session.exec(select(Message).where(Message.ig_message_id == str(msg_id))).first()
+										existing = session.exec(
+											select(Message).where(
+												Message.ig_message_id == str(msg_id),
+												Message.platform == str(conversation_platform or "instagram"),
+											)
+										).first()
 
 										if existing:
 											# Backfill missing text/ai_status/ai_json on webhook echoes that arrive without text
@@ -1348,6 +1371,7 @@ def main() -> None:
 										
 										# Insert new row
 										msg = Message(
+											platform=str(conversation_platform or "instagram"),
 											ig_sender_id=str(entity_id),
 											ig_recipient_id=str(ig_user_id) if ig_user_id else None,
 											ig_message_id=str(msg_id),

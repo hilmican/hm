@@ -693,6 +693,129 @@ def init_db() -> None:
                         pass
                 except Exception:
                     pass
+                # Ensure platform columns and indexes for multi-channel (Instagram + WhatsApp)
+                try:
+                    # message.platform
+                    msg_cols = conn.exec_driver_sql(
+                        """
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message'
+                        """
+                    ).fetchall()
+                    have_msg_cols = {str(r[0]).lower() for r in msg_cols or []}
+                    if 'platform' not in have_msg_cols:
+                        conn.exec_driver_sql(
+                            "ALTER TABLE message ADD COLUMN platform VARCHAR(16) NOT NULL DEFAULT 'instagram'"
+                        )
+                    try:
+                        conn.exec_driver_sql(
+                            "UPDATE message SET platform='instagram' WHERE platform IS NULL OR platform=''"
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        conn.exec_driver_sql("CREATE INDEX idx_message_platform ON message(platform)")
+                    except Exception:
+                        pass
+                    try:
+                        conn.exec_driver_sql(
+                            "CREATE INDEX idx_message_platform_conv_ts ON message(platform, conversation_id, timestamp_ms)"
+                        )
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                try:
+                    # conversations.platform
+                    conv_cols = conn.exec_driver_sql(
+                        """
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conversations'
+                        """
+                    ).fetchall()
+                    have_conv_cols = {str(r[0]).lower() for r in conv_cols or []}
+                    if 'platform' not in have_conv_cols:
+                        conn.exec_driver_sql(
+                            "ALTER TABLE conversations ADD COLUMN platform VARCHAR(16) NOT NULL DEFAULT 'instagram'"
+                        )
+                    try:
+                        conn.exec_driver_sql(
+                            "UPDATE conversations SET platform='instagram' WHERE platform IS NULL OR platform=''"
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        conn.exec_driver_sql("CREATE INDEX idx_conversations_platform ON conversations(platform)")
+                    except Exception:
+                        pass
+                    try:
+                        conn.exec_driver_sql(
+                            "CREATE INDEX idx_conversations_platform_user ON conversations(platform, ig_user_id)"
+                        )
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                try:
+                    # ig_users.platform + platform-scoped uniqueness
+                    user_cols = conn.exec_driver_sql(
+                        """
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ig_users'
+                        """
+                    ).fetchall()
+                    have_user_cols = {str(r[0]).lower() for r in user_cols or []}
+                    if 'platform' not in have_user_cols:
+                        conn.exec_driver_sql(
+                            "ALTER TABLE ig_users ADD COLUMN platform VARCHAR(16) NOT NULL DEFAULT 'instagram'"
+                        )
+                    try:
+                        conn.exec_driver_sql(
+                            "UPDATE ig_users SET platform='instagram' WHERE platform IS NULL OR platform=''"
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        conn.exec_driver_sql("CREATE INDEX idx_ig_users_platform ON ig_users(platform)")
+                    except Exception:
+                        pass
+                    try:
+                        conn.exec_driver_sql(
+                            "CREATE INDEX idx_ig_users_platform_user ON ig_users(platform, ig_user_id)"
+                        )
+                    except Exception:
+                        pass
+                    # Drop legacy unique index on ig_user_id-only to allow same id across platforms
+                    try:
+                        unique_ig_only = conn.exec_driver_sql(
+                            """
+                            SELECT s.INDEX_NAME
+                            FROM INFORMATION_SCHEMA.STATISTICS s
+                            WHERE s.TABLE_SCHEMA = DATABASE()
+                              AND s.TABLE_NAME = 'ig_users'
+                              AND s.NON_UNIQUE = 0
+                              AND s.INDEX_NAME <> 'PRIMARY'
+                            GROUP BY s.INDEX_NAME
+                            HAVING COUNT(*) = 1 AND MAX(s.COLUMN_NAME) = 'ig_user_id'
+                            """
+                        ).fetchall()
+                        for r in unique_ig_only or []:
+                            idx_name = str(r[0])
+                            if idx_name and idx_name != "uq_ig_users_platform_ig_user_id":
+                                try:
+                                    conn.exec_driver_sql(f"ALTER TABLE ig_users DROP INDEX `{idx_name}`")
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                    try:
+                        conn.exec_driver_sql(
+                            "ALTER TABLE ig_users ADD CONSTRAINT uq_ig_users_platform_ig_user_id UNIQUE (platform, ig_user_id)"
+                        )
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
                 # Ensure `order`.ig_conversation_id exists for linking back to IG threads
                 try:
                     rows = conn.exec_driver_sql(

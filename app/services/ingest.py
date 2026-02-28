@@ -913,7 +913,7 @@ def _extract_graph_conversation_id_from_message_id(mid: str, page_id: Optional[s
 
 
 def _get_or_create_conversation_id(
-	session, igba_id: str, ig_user_id: Optional[str]
+	session, igba_id: str, ig_user_id: Optional[str], platform: str = "instagram"
 ) -> Optional[int]:
 	"""
 	Resolve or create the canonical Conversation row for (igba_id, ig_user_id).
@@ -931,11 +931,11 @@ def _get_or_create_conversation_id(
 			"""
 			SELECT id
 			FROM conversations
-			WHERE igba_id=:g AND ig_user_id=:u
+			WHERE COALESCE(platform, 'instagram')=:p AND igba_id=:g AND ig_user_id=:u
 			ORDER BY CASE WHEN graph_conversation_id IS NULL THEN 1 ELSE 0 END, id ASC
 			LIMIT 1
 			"""
-		).params(g=str(igba_id), u=str(ig_user_id))
+		).params(p=str(platform or "instagram"), g=str(igba_id), u=str(ig_user_id))
 	).first()
 	if row:
 		try:
@@ -949,10 +949,10 @@ def _get_or_create_conversation_id(
 		session.exec(
 			_t(
 				"""
-				INSERT INTO conversations(igba_id, ig_user_id, last_message_at, unread_count)
-				VALUES (:g, :u, :ts, 0)
+				INSERT INTO conversations(platform, igba_id, ig_user_id, last_message_at, unread_count)
+				VALUES (:p, :g, :u, :ts, 0)
 				"""
-			).params(g=str(igba_id), u=str(ig_user_id), ts=now_dt)
+			).params(p=str(platform or "instagram"), g=str(igba_id), u=str(ig_user_id), ts=now_dt)
 		)
 	except Exception:
 		# Best-effort; fall through to lookup.
@@ -962,11 +962,11 @@ def _get_or_create_conversation_id(
 			"""
 			SELECT id
 			FROM conversations
-			WHERE igba_id=:g AND ig_user_id=:u
+			WHERE COALESCE(platform, 'instagram')=:p AND igba_id=:g AND ig_user_id=:u
 			ORDER BY CASE WHEN graph_conversation_id IS NULL THEN 1 ELSE 0 END, id ASC
 			LIMIT 1
 			"""
-		).params(g=str(igba_id), u=str(ig_user_id))
+		).params(p=str(platform or "instagram"), g=str(igba_id), u=str(ig_user_id))
 	).first()
 	if not row2:
 		return None
@@ -1134,7 +1134,7 @@ def _update_conversation_summary_from_message(
 		)
 
 
-def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_InsertResult]:
+def _insert_message(session, event: Dict[str, Any], igba_id: str, platform: str = "instagram") -> Optional[_InsertResult]:
 	message_obj = event.get("message") or {}
 	if not message_obj:
 		return None
@@ -1143,16 +1143,20 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		return None
 	# idempotency by ig_message_id - use INSERT IGNORE to avoid race conditions
 	# Check if message already exists - if so, only update raw_json (preserve existing text)
-	exists_row = session.exec(text("SELECT id, text FROM message WHERE ig_message_id = :mid LIMIT 1").params(mid=str(mid))).first()
+	exists_row = session.exec(
+		text("SELECT id, text FROM message WHERE ig_message_id = :mid AND COALESCE(platform, 'instagram') = :platform LIMIT 1")
+		.params(mid=str(mid), platform=str(platform or "instagram"))
+	).first()
 	if exists_row:
 		# Message already exists - update raw_json but preserve existing text
 		# This handles status callbacks (delivered/read) that don't include message text
 		raw_json_data = json.dumps(event, ensure_ascii=False)
 		try:
 			session.exec(
-				text("UPDATE message SET raw_json = :raw_json WHERE ig_message_id = :mid").params(
+				text("UPDATE message SET raw_json = :raw_json WHERE ig_message_id = :mid AND COALESCE(platform, 'instagram') = :platform").params(
 					raw_json=raw_json_data,
-					mid=str(mid)
+					mid=str(mid),
+					platform=str(platform or "instagram"),
 				)
 			)
 		except Exception:
@@ -1168,6 +1172,8 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		# Check against webhook entry id (igba_id)
 		if sender_id and str(sender_id) == str(igba_id):
 			direction = "out"
+		elif platform != "instagram":
+			direction = "in"
 		else:
 			# Also check against configured owner ID (IG_PAGE_ID or IG_USER_ID)
 			token, owner_id, is_page = __import__(
@@ -1196,7 +1202,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 	except Exception:
 		user_id = None
 	# Resolve or create canonical Conversation row (internal integer id)
-	conversation_pk = _get_or_create_conversation_id(session, page_id, user_id)
+	conversation_pk = _get_or_create_conversation_id(session, page_id, user_id, platform=platform)
 	
 	# Get current product focus from ai_shadow_state if available (for inbound messages)
 	product_id_for_message: Optional[int] = None
@@ -1377,15 +1383,16 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		# Try INSERT IGNORE first - this is atomic and avoids lock contention
 		stmt = _t("""
 			INSERT IGNORE INTO message (
-				ig_sender_id, ig_recipient_id, ig_message_id, text, attachments_json,
+				platform, ig_sender_id, ig_recipient_id, ig_message_id, text, attachments_json,
 				timestamp_ms, raw_json, conversation_id, direction, sender_username,
 				story_id, story_url, ad_id, ad_link, ad_title, ad_image_url, ad_name, referral_json, created_at
 			) VALUES (
-				:sender_id, :recipient_id, :mid, :text, :attachments_json,
+				:platform, :sender_id, :recipient_id, :mid, :text, :attachments_json,
 				:timestamp_ms, :raw_json, :conversation_id, :direction, :sender_username,
 				:story_id, :story_url, :ad_id, :ad_link, :ad_title, :ad_image_url, :ad_name, :referral_json, NOW()
 			)
 		""").bindparams(
+			platform=str(platform or "instagram"),
 			sender_id=str(sender_id) if sender_id is not None else None,
 			recipient_id=str(recipient_id) if recipient_id is not None else None,
 			mid=str(mid),
@@ -1410,7 +1417,10 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		
 		# Check if insert actually happened (INSERT IGNORE returns 0 rows if duplicate)
 		# Fetch the message ID
-		msg_row = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid").params(mid=str(mid))).first()
+		msg_row = session.exec(
+			text("SELECT id FROM message WHERE ig_message_id = :mid AND COALESCE(platform, 'instagram') = :platform")
+			.params(mid=str(mid), platform=str(platform or "instagram"))
+		).first()
 		if not msg_row:
 			# Another process inserted it between our check and insert, or insert failed silently
 			return None
@@ -1421,9 +1431,10 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		raw_json_data = json.dumps(event, ensure_ascii=False)
 		try:
 			session.exec(
-				text("UPDATE message SET raw_json = :raw_json WHERE ig_message_id = :mid").params(
+				text("UPDATE message SET raw_json = :raw_json WHERE ig_message_id = :mid AND COALESCE(platform, 'instagram') = :platform").params(
 					raw_json=raw_json_data,
-					mid=str(mid)
+					mid=str(mid),
+					platform=str(platform or "instagram"),
 				)
 			)
 		except Exception:
@@ -1448,6 +1459,7 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 		# Create Message object for return value
 		row = Message(
 			id=message_id,
+			platform=str(platform or "instagram"),
 			ig_sender_id=str(sender_id) if sender_id is not None else None,
 			ig_recipient_id=str(recipient_id) if recipient_id is not None else None,
 			ig_message_id=str(mid),
@@ -1475,7 +1487,10 @@ def _insert_message(session, event: Dict[str, Any], igba_id: str) -> Optional[_I
 			_log_up.warning("insert.webhook: INSERT IGNORE failed mid=%s err=%s, checking if exists", str(mid), str(e)[:200])
 		except Exception:
 			pass
-		msg_row = session.exec(text("SELECT id FROM message WHERE ig_message_id = :mid").params(mid=str(mid))).first()
+		msg_row = session.exec(
+			text("SELECT id FROM message WHERE ig_message_id = :mid AND COALESCE(platform, 'instagram') = :platform")
+			.params(mid=str(mid), platform=str(platform or "instagram"))
+		).first()
 		if not msg_row:
 			# Insert failed and message doesn't exist - return None
 			return None
@@ -2735,6 +2750,132 @@ def upsert_message_from_ig_event(session, event: Dict[str, Any] | str, igba_id: 
 	return int(row.id)
 
 
+def _ensure_platform_user(
+	session,
+	*,
+	platform: str,
+	user_id: str,
+	username: Optional[str] = None,
+	name: Optional[str] = None,
+) -> None:
+	"""Best-effort upsert for contact rows in ig_users."""
+	if not user_id:
+		return
+	try:
+		session.exec(
+			text(
+				"""
+				INSERT IGNORE INTO ig_users(platform, ig_user_id, username, name, last_seen_at, fetched_at, fetch_status)
+				VALUES (:platform, :uid, :username, :name, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'ok')
+				"""
+			).params(
+				platform=str(platform or "instagram"),
+				uid=str(user_id),
+				username=(str(username) if username else None),
+				name=(str(name) if name else None),
+			)
+		)
+		session.exec(
+			text(
+				"""
+				UPDATE ig_users
+				SET
+				  username = COALESCE(:username, username),
+				  name = COALESCE(:name, name),
+				  last_seen_at = CURRENT_TIMESTAMP
+				WHERE platform=:platform AND ig_user_id=:uid
+				"""
+			).params(
+				platform=str(platform or "instagram"),
+				uid=str(user_id),
+				username=(str(username) if username else None),
+				name=(str(name) if name else None),
+			)
+		)
+	except Exception:
+		pass
+
+
+def _derive_whatsapp_text(message_obj: Dict[str, Any]) -> Optional[str]:
+	msg_type = str(message_obj.get("type") or "").strip().lower()
+	if msg_type == "text":
+		return ((message_obj.get("text") or {}).get("body") or "").strip() or None
+	if msg_type == "button":
+		return ((message_obj.get("button") or {}).get("text") or "").strip() or None
+	if msg_type == "interactive":
+		interactive = message_obj.get("interactive") or {}
+		btn_reply = interactive.get("button_reply") or {}
+		list_reply = interactive.get("list_reply") or {}
+		candidate = btn_reply.get("title") or list_reply.get("title") or list_reply.get("description")
+		return (str(candidate).strip() if candidate else None) or None
+	if msg_type in {"image", "video", "audio", "document", "sticker"}:
+		return f"[{msg_type}]"
+	if msg_type == "location":
+		loc = message_obj.get("location") or {}
+		lat = loc.get("latitude")
+		lng = loc.get("longitude")
+		if lat is not None and lng is not None:
+			return f"[location] {lat},{lng}"
+		return "[location]"
+	return None
+
+
+def _collect_whatsapp_events(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+	"""Normalize WhatsApp webhook payload to event objects compatible with _insert_message."""
+	normalized: List[Dict[str, Any]] = []
+	for entry in payload.get("entry") or []:
+		if not isinstance(entry, dict):
+			continue
+		entry_id = str(entry.get("id") or "")
+		for change in entry.get("changes") or []:
+			if not isinstance(change, dict):
+				continue
+			value = change.get("value") or {}
+			if not isinstance(value, dict):
+				continue
+			metadata = value.get("metadata") or {}
+			phone_number_id = str(metadata.get("phone_number_id") or entry_id or "")
+			if not phone_number_id:
+				continue
+			contacts = value.get("contacts") or []
+			contact_map: Dict[str, str] = {}
+			for c in contacts:
+				if not isinstance(c, dict):
+					continue
+				wa_id = str(c.get("wa_id") or "")
+				profile_name = str((c.get("profile") or {}).get("name") or "").strip()
+				if wa_id and profile_name:
+					contact_map[wa_id] = profile_name
+			for msg in value.get("messages") or []:
+				if not isinstance(msg, dict):
+					continue
+				wa_mid = str(msg.get("id") or "").strip()
+				wa_from = str(msg.get("from") or "").strip()
+				if not wa_mid or not wa_from:
+					continue
+				ts_ms: Optional[int] = None
+				try:
+					ts_raw = str(msg.get("timestamp") or "").strip()
+					if ts_raw.isdigit():
+						ts_int = int(ts_raw)
+						ts_ms = ts_int * 1000 if ts_int < 10_000_000_000 else ts_int
+				except Exception:
+					ts_ms = None
+				text_val = _derive_whatsapp_text(msg)
+				event_obj: Dict[str, Any] = {
+					"sender": {"id": wa_from},
+					"recipient": {"id": phone_number_id},
+					"timestamp": ts_ms,
+					"message": {"id": wa_mid},
+					"__platform": "whatsapp",
+					"__profile_name": contact_map.get(wa_from),
+				}
+				if text_val:
+					event_obj["message"]["text"] = text_val
+				normalized.append(event_obj)
+	return normalized
+
+
 def handle(raw_event_id: int) -> int:
 	"""Ingest one raw_event id. Return number of messages inserted.
 
@@ -2762,6 +2903,37 @@ def handle(raw_event_id: int) -> int:
 		payload: Dict[str, Any] = json.loads(payload_text)
 	except Exception:
 		return 0
+
+	payload_object = str(payload.get("object") or "").strip().lower()
+	if payload_object == "whatsapp_business_account":
+		for event in _collect_whatsapp_events(payload):
+			message_obj = event.get("message") or {}
+			if not message_obj:
+				continue
+			recipient_id = str((event.get("recipient") or {}).get("id") or "").strip()
+			sender_id = str((event.get("sender") or {}).get("id") or "").strip()
+			if not recipient_id or not sender_id:
+				continue
+			with get_session() as session_msg:
+				try:
+					_ensure_platform_user(
+						session_msg,
+						platform="whatsapp",
+						user_id=sender_id,
+						username=sender_id,
+						name=event.get("__profile_name"),
+					)
+				except Exception:
+					pass
+				insert_result = _insert_message(
+					session_msg,
+					event,
+					recipient_id,
+					platform="whatsapp",
+				)
+				if insert_result:
+					inserted += 1
+		return inserted
 
 	entries: List[Dict[str, Any]] = payload.get("entry", [])
 
@@ -2821,7 +2993,7 @@ def handle(raw_event_id: int) -> int:
 					# Best-effort; do not fail ingestion because of ig_accounts
 					pass
 
-				insert_result = _insert_message(session_msg, event, igba_id)
+				insert_result = _insert_message(session_msg, event, igba_id, platform="instagram")
 				if insert_result:
 					inserted += 1
 					attachments = insert_result.attachments

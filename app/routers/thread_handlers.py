@@ -21,6 +21,7 @@ from ..services.monitoring import increment_counter
 from ..services.ai_reply import _load_history, _sanitize_reply_text
 from ..services.ingest import _extract_graph_conversation_id_from_message_id
 from ..services.admin_notifications import create_admin_notification
+from ..services.channel_sender import send_message as send_channel_message
 
 router = APIRouter()
 
@@ -2398,6 +2399,7 @@ async def send_message(conversation_id: str, body: dict):
     other_id: str | None = None
     conv_internal_id: int | None = None
     public_conv_id: str | None = None
+    conversation_platform: str = "instagram"
     with get_session() as session:
         from sqlmodel import select
 
@@ -2428,6 +2430,7 @@ async def send_message(conversation_id: str, body: dict):
                 )
         if convo_row:
             conv_internal_id = int(convo_row.id)
+            conversation_platform = str(getattr(convo_row, "platform", None) or "instagram")
             if not other_id and getattr(convo_row, "ig_user_id", None):
                 other_id = str(convo_row.ig_user_id)
             public_conv_id = (
@@ -2461,72 +2464,29 @@ async def send_message(conversation_id: str, body: dict):
     if conv_internal_id is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Send via Messenger API for Instagram (requires Page token)
-    token, entity_id, is_page = _get_base_token_and_id()
-    if not is_page:
-        raise HTTPException(status_code=400, detail="Sending requires a Page access token (IG_PAGE_ACCESS_TOKEN)")
-    base = f"https://graph.facebook.com/{GRAPH_VERSION}"
-    url = base + "/me/messages"
+    # Resolve sender account id for local persistence
+    entity_id = ""
+    if conversation_platform == "instagram":
+        _, entity_id, is_page = _get_base_token_and_id()
+        if not is_page:
+            raise HTTPException(status_code=400, detail="Sending requires a Page access token (IG_PAGE_ACCESS_TOKEN)")
+    else:
+        entity_id = _os.getenv("WA_PHONE_NUMBER_ID", "")
 
-    async with httpx.AsyncClient() as client:
-        # 1) Send image messages first (if any)
-        for img_url in image_urls:
-            img_payload = {
-                "recipient": {"id": other_id},
-                "messaging_type": "RESPONSE",
-                "message": {
-                    "attachment": {
-                        "type": "image",
-                        "payload": {
-                            "url": img_url,
-                        },
-                    }
-                },
-            }
-            try:
-                r_img = await client.post(
-                    url,
-                    params={"access_token": token},
-                    json=img_payload,
-                    timeout=20,
-                )
-                r_img.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                try:
-                    detail = e.response.text
-                except Exception:
-                    detail = str(e)
-                try:
-                    _log.warning("Graph image send failed url=%s err=%s", img_url, detail[:200])
-                except Exception:
-                    pass
-            except Exception as e:
-                try:
-                    _log.warning("Graph image send failed url=%s err=%s", img_url, str(e)[:200])
-                except Exception:
-                    pass
-
-        # 2) Send the text message
-        payload = {
-            "recipient": {"id": other_id},
-            "messaging_type": "RESPONSE",
-            "message": {"text": text_val},
-        }
-        try:
-            r = await client.post(url, params={"access_token": token}, json=payload, timeout=20)
-            r.raise_for_status()
-            resp = r.json()
-        except httpx.HTTPStatusError as e:
-            try:
-                detail = e.response.text
-            except Exception:
-                detail = str(e)
-            raise HTTPException(status_code=502, detail=f"Graph send failed: {detail}")
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Graph send failed: {e}")
+    try:
+        resp = await send_channel_message(
+            platform=conversation_platform,
+            recipient_id=str(other_id),
+            conversation_id=(public_conv_id or conversation_id),
+            text=text_val,
+            image_urls=image_urls if image_urls else None,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Message send failed: {e}")
 
     # Persist locally
-    mid = str((resp or {}).get("message_id") or "")
+    message_ids = (resp or {}).get("message_ids") or []
+    mid = str((resp or {}).get("message_id") or (message_ids[0] if message_ids else "") or "")
     now_ms = int(time.time() * 1000)
     if not public_conv_id:
         public_conv_id = conversation_id if conversation_id.startswith("dm:") else f"dm:{other_id}"
@@ -2535,7 +2495,12 @@ async def send_message(conversation_id: str, body: dict):
         # Idempotency: avoid duplicate insert when the same message_id was already saved
         if mid:
             try:
-                exists = session.exec(select(Message).where(Message.ig_message_id == mid)).first()
+                exists = session.exec(
+                    select(Message).where(
+                        Message.ig_message_id == mid,
+                        Message.platform == str(conversation_platform or "instagram"),
+                    )
+                ).first()
                 if exists:
                     # still bump last_message fields for the conversation to reflect the send time
                     try:
@@ -2556,6 +2521,7 @@ async def send_message(conversation_id: str, body: dict):
                 # proceed with best-effort insert
                 pass
         row = Message(
+            platform=str(conversation_platform or "instagram"),
             ig_sender_id=str(entity_id),
             ig_recipient_id=str(other_id),
             ig_message_id=(mid or None),
