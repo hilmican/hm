@@ -1592,7 +1592,7 @@ Döndürülecek JSON alanları: reply_text (string), confidence (0-1 sayı), rea
 
 	reply_text = _sanitize_reply_text(_decode_escape_sequences((data.get("reply_text") or "").strip()))
 	try:
-		confidence = max(0.0, min(1.0, float(data.get("confidence") if data.get("confidence") is not None else 0.7))
+		confidence = max(0.0, min(1.0, float(data.get("confidence") if data.get("confidence") is not None else 0.7)))
 	except Exception:
 		confidence = 0.7
 	reason = (data.get("reason") or "intro_only").strip() or "intro_only"
