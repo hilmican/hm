@@ -8,10 +8,10 @@ GRAPH_VERSION = os.getenv("WA_GRAPH_API_VERSION", os.getenv("IG_GRAPH_API_VERSIO
 
 
 def _get_token_and_phone_number_id() -> tuple[str, str]:
-    token = os.getenv("WA_ACCESS_TOKEN", "")
+    token = os.getenv("WA_ACCESS_TOKEN", "") or os.getenv("IG_ACCESS_TOKEN", "")
     phone_number_id = os.getenv("WA_PHONE_NUMBER_ID", "")
     if not token or not phone_number_id:
-        raise RuntimeError("Missing WA_ACCESS_TOKEN or WA_PHONE_NUMBER_ID")
+        raise RuntimeError("Missing WA_PHONE_NUMBER_ID (and WA_ACCESS_TOKEN/IG_ACCESS_TOKEN)")
     return token, phone_number_id
 
 

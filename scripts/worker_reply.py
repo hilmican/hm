@@ -11,7 +11,7 @@ from app.db import get_session
 from sqlalchemy import text as _text
 from sqlmodel import select
 
-from app.services.ai_reply import draft_reply, _sanitize_reply_text, _select_product_images_for_reply
+from app.services.ai_reply import draft_reply, draft_reply_intro_only, _sanitize_reply_text, _select_product_images_for_reply
 from app.services.channel_sender import send_message as send_channel_message
 from app.services.ai_orders import get_candidate_snapshot, submit_candidate_order, mark_candidate_very_interested
 from app.models import SystemSetting, Product
@@ -782,13 +782,16 @@ def main() -> None:
 					)
 			except Exception:
 				continue
-			# Generate draft
+			# Generate draft (intro-only mode uses minimal context path when first outbound)
 			try:
 				try:
 					log.info("ai_shadow: generating draft for conversation_id=%s", cid)
 				except Exception:
 					pass
-				data = draft_reply(int(cid), limit=40, include_meta=True, state=current_state)
+				if intro_only_mode and is_first_outbound:
+					data = draft_reply_intro_only(int(cid), include_meta=True, state=current_state)
+				else:
+					data = draft_reply(int(cid), limit=40, include_meta=True, state=current_state)
 				function_callbacks = data.get("function_callbacks") or []
 				if function_callbacks:
 					try:

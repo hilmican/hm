@@ -1368,6 +1368,257 @@ def _create_aftersales_admin_notification(
 	)
 
 
+def draft_reply_intro_only(
+	conversation_id: int,
+	*,
+	include_meta: bool = False,
+	state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+	"""
+	Create a suggested first-intro reply with minimal context (intro-only mode).
+	No tools, single generate_json call. Return shape is compatible with draft_reply
+	so the worker can process it identically.
+	"""
+	if _has_any_human_agent_outbound(int(conversation_id)):
+		out: Dict[str, Any] = {
+			"should_reply": False,
+			"reply_text": "",
+			"confidence": 0.0,
+			"reason": "human_agent_present",
+			"notes": "Human agent outbound detected in this conversation; AI will not rely on this thread for automated replies.",
+			"model": "system",
+			"conversation_id": int(conversation_id),
+			"function_callbacks": [],
+			"state": {"cart": [], "hail_sent": True},
+			"product_images": [],
+		}
+		if include_meta:
+			out["meta"] = {"human_agent_present": True}
+		return out
+
+	client = AIClient(model=get_ai_shadow_model_from_settings())
+	if not client.enabled:
+		raise RuntimeError("AI client is not configured. Set OPENAI_API_KEY.")
+
+	product_info, stock = _load_focus_product_and_stock(int(conversation_id))
+	product_info = product_info or {}
+	if not product_info.get("id"):
+		st = dict(_normalize_state(state, fallback={"cart": []}))
+		if "cart" not in st or not isinstance(st.get("cart"), list):
+			st["cart"] = []
+		return {
+			"should_reply": False,
+			"reply_text": "",
+			"confidence": 0.0,
+			"reason": "missing_product_context",
+			"notes": "Konuşma herhangi bir reklam/post ürünü ile eşleşmediği için AI devre dışı.",
+			"missing_product_context": True,
+			"product_info": product_info,
+			"function_callbacks": [],
+			"state": st,
+			"product_images": [],
+		}
+
+	history, last_customer_message = _load_history(int(conversation_id), limit=10)
+	transcript = _format_transcript(
+		[
+			{"direction": h.get("dir"), "timestamp_ms": h.get("timestamp_ms"), "text": h.get("text")}
+			for h in history
+		]
+	)
+	customer_info = _load_customer_info(int(conversation_id))
+	pid = product_info.get("id") if isinstance(product_info, dict) else None
+	product_images = _select_product_images_for_reply(pid, variant_key=None) if pid else []
+
+	# Pretext + gender instructions (same sources as full draft_reply)
+	pretext_content: Optional[str] = None
+	if product_info and product_info.get("id") is not None:
+		try:
+			with get_session() as session:
+				p = session.exec(
+					select(Product).where(Product.id == int(product_info["id"])).limit(1)
+				).first()
+				if p:
+					pretext_id = getattr(p, "pretext_id", None)
+					if pretext_id:
+						pretext = session.exec(
+							select(AIPretext).where(AIPretext.id == int(pretext_id)).limit(1)
+						).first()
+						if pretext:
+							pretext_content = pretext.content
+					else:
+						pretext = session.exec(
+							select(AIPretext).where(AIPretext.is_default == True).limit(1)
+						).first()
+						if not pretext:
+							pretext = session.exec(
+								select(AIPretext).order_by(AIPretext.id.asc()).limit(1)
+							).first()
+						if pretext:
+							pretext_content = pretext.content
+						else:
+							pretext_content = get_global_system_prompt()
+		except Exception:
+			pretext_content = get_global_system_prompt()
+	else:
+		try:
+			with get_session() as session:
+				pretext = session.exec(
+					select(AIPretext).where(AIPretext.is_default == True).limit(1)
+				).first()
+				if not pretext:
+					pretext = session.exec(
+						select(AIPretext).order_by(AIPretext.id.asc()).limit(1)
+					).first()
+				if pretext:
+					pretext_content = pretext.content
+				else:
+					pretext_content = get_global_system_prompt()
+		except Exception:
+			pretext_content = get_global_system_prompt()
+
+	gender_instructions = f"""
+## Müşteri Hitap Kuralları
+
+Müşteri bilgileri:
+- Kullanıcı adı: {customer_info.get("username") or "bilinmiyor"}
+- İsim: {customer_info.get("name") or customer_info.get("contact_name") or "bilinmiyor"}
+- İletişim adı: {customer_info.get("contact_name") or "bilinmiyor"}
+
+HITAP KURALLARI:
+1. Müşterinin cinsiyetini belirlemek için yukarıdaki bilgileri (kullanıcı adı, isim, iletişim adı) kullan.
+2. Eğer müşteri ERKEK ise: "abim" kullan (örnek: "Merhabalar abim")
+3. Eğer müşteri KADIN ise: "ablam" kullan (örnek: "Merhabalar ablam")
+4. Eğer cinsiyeti belirleyemiyorsan: "efendim" kullan (örnek: "Merhabalar efendim")
+5. Cinsiyet belirleme kriterleri:
+   - İsimdeki son ekler: "-a", "-e" gibi ekler genelde kadın isimlerinde görülür
+   - Türkçe kadın isimleri: Ayşe, Fatma, Zeynep, Elif, Emine, Hatice, Merve, Seda, vb.
+   - Türkçe erkek isimleri: Mehmet, Ali, Ahmet, Mustafa, Hasan, Hüseyin, İbrahim, vb.
+   - Belirsizse veya emin değilsen "efendim" kullan
+
+ÖNEMLİ: Asla yanlış cinsiyete hitap etme. Emin değilsen "efendim" kullan.
+"""
+
+	intro_instruction = """
+## Görev (İlk Tanıtım Mesajı)
+
+Sadece ilk tanıtım mesajını yaz. Kısa selamlama (abim/ablam/efendim) + ürün adı + kısa tanıtım.
+Resimler mesajla birlikte otomatik gönderilecek; sen sadece metni yaz. JSON MODE: Sadece geçerli JSON döndür.
+Döndürülecek JSON alanları: reply_text (string), confidence (0-1 sayı), reason (string), state (obje; içinde hail_sent: true ve cart: [] olmalı).
+"""
+
+	sys_prompt_parts: List[str] = []
+	if pretext_content:
+		sys_prompt_parts.append(f"=== ÜRÜN ÖZEL TALİMATLARI ===\n{pretext_content}")
+	sys_prompt_parts.append(gender_instructions)
+	sys_prompt_parts.append(intro_instruction)
+	sys_prompt = "\n\n".join(sys_prompt_parts)
+
+	# Minimal context for intro-only
+	product_focus_data: Dict[str, Any] = {
+		"id": product_info.get("id"),
+		"name": product_info.get("name"),
+		"slug": product_info.get("slug") or product_info.get("slug_or_sku"),
+	}
+	if stock:
+		prices = [s.get("price") for s in stock if s.get("price") is not None]
+		if prices:
+			try:
+				product_focus_data["price"] = float(prices[0]) if prices else None
+			except Exception:
+				pass
+
+	user_payload = {
+		"store": {"brand": "HiMan"},
+		"product_focus": product_focus_data,
+		"product_images": product_images,
+		"last_customer_message": last_customer_message,
+		"transcript": transcript,
+		"customer": customer_info,
+	}
+	context_json = json.dumps(user_payload, ensure_ascii=False)
+	user_prompt = (
+		"=== AMAÇ ===\n"
+		"İlk tanıtım mesajı metnini üret. Sadece JSON döndür.\n\n"
+		"=== BAĞLAM ===\n"
+		"CONTEXT_JSON_START\n"
+		f"{context_json}\n"
+		"CONTEXT_JSON_END\n\n"
+		"Yanıtında şu alanları içeren tek bir JSON objesi döndür: reply_text (metin), confidence (0-1), reason (kısa açıklama), state (içinde hail_sent: true, cart: [])."
+	)
+
+	temperature = get_shadow_temperature_setting()
+	temp_opt_out = is_shadow_temperature_opt_out()
+	kwargs: Dict[str, Any] = {
+		"system_prompt": sys_prompt,
+		"user_prompt": user_prompt,
+		"temperature": None if temp_opt_out else temperature,
+	}
+	if include_meta:
+		kwargs["include_raw"] = True
+		kwargs["include_request_payload"] = True
+
+	raw_response: Any = None
+	api_request_payload: Any = None
+	result = client.generate_json(**kwargs)
+	if include_meta and isinstance(result, tuple):
+		if len(result) == 3:
+			data, raw_response, api_request_payload = result
+		elif len(result) == 2:
+			data = result[0]
+			if isinstance(result[1], str):
+				raw_response = result[1]
+			else:
+				api_request_payload = result[1]
+		else:
+			data = result[0] if result else {}
+	else:
+		data = result[0] if isinstance(result, tuple) else result
+
+	if data is None or not isinstance(data, dict):
+		data = {
+			"reply_text": "",
+			"confidence": 0.5,
+			"reason": "intro_only_parse_failed",
+			"state": {"hail_sent": True, "cart": []},
+		}
+
+	state_out = _normalize_state(data.get("state"), fallback={"hail_sent": True, "cart": []})
+	if "cart" not in state_out or not isinstance(state_out.get("cart"), list):
+		state_out["cart"] = []
+	state_out["hail_sent"] = True
+	if pid:
+		state_out["current_focus_product_id"] = pid
+
+	reply_text = _sanitize_reply_text(_decode_escape_sequences((data.get("reply_text") or "").strip()))
+	try:
+		confidence = max(0.0, min(1.0, float(data.get("confidence") if data.get("confidence") is not None else 0.7))
+	except Exception:
+		confidence = 0.7
+	reason = (data.get("reason") or "intro_only").strip() or "intro_only"
+
+	reply = {
+		"should_reply": True,
+		"reply_text": reply_text,
+		"confidence": confidence,
+		"reason": reason,
+		"notes": data.get("notes"),
+		"model": client.model,
+		"function_callbacks": [],
+		"state": state_out,
+		"product_images": product_images,
+		"conversation_id": int(conversation_id),
+	}
+	if include_meta:
+		reply["debug_meta"] = {
+			"intro_only": True,
+			"user_payload": user_payload,
+			"raw_response": raw_response,
+			"serializer_request_payload": api_request_payload,
+		}
+	return reply
+
+
 def draft_reply(
 	conversation_id: int,
 	*,

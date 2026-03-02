@@ -20,6 +20,7 @@ async def inbox(
     q: str | None = None,
     has_ad: str | None = None,
     ad_product: str | None = None,
+    platform: str | None = None,
 ):
     with get_session() as session:
         # Use unified conversations table as single source for inbox list
@@ -94,6 +95,10 @@ async def inbox(
             """
         where_parts: list[str] = []
         params: dict[str, object] = {}
+        platform_s = (platform or "").strip().lower()
+        if platform_s in ("instagram", "whatsapp"):
+            where_parts.append("COALESCE(c.platform, 'instagram') = :platform")
+            params["platform"] = platform_s
         if q and isinstance(q, str) and q.strip():
             qq = f"%{q.lower().strip()}%"
             where_parts.append("""
@@ -470,6 +475,7 @@ async def inbox(
             "ad_map": ad_map,
             "escalation_map": escalation_map,
             "q": (q or ""),
+            "platform": platform_s,
             "has_ad": has_ad_s,
             "ad_product": ad_product_s,
             "ad_product_options": ad_product_options,
@@ -631,6 +637,7 @@ async def ai_replied_messages(
                 "ad_map": {},
                 "q": "",
                 "title": "AI Cevaplanan Mesajlar",
+                "platform": "",
                 "has_ad": "",
                 "ad_product": "",
                 "ad_product_options": [],

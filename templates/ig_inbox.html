@@ -27,6 +27,11 @@
       {% endif %}
       <form method="get" action="/ig/inbox" style="display:flex;gap:8px;align-items:center;">
         <input type="text" name="q" placeholder="Mesajlarda ara..." value="{{ q or '' }}" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;min-width:280px" />
+        <select name="platform" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;">
+          <option value="" {% if not platform %}selected{% endif %}>Tüm platformlar</option>
+          <option value="instagram" {% if platform == 'instagram' %}selected{% endif %}>📸 Instagram</option>
+          <option value="whatsapp" {% if platform == 'whatsapp' %}selected{% endif %}>🟢 WhatsApp</option>
+        </select>
         <select name="has_ad" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;">
           <option value="" {% if not has_ad %}selected{% endif %}>Tüm konuşmalar</option>
           <option value="yes" {% if has_ad == 'yes' %}selected{% endif %}>Reklamlı konuşmalar</option>

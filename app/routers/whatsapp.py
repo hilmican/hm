@@ -39,7 +39,7 @@ def _persist_payload_to_disk(payload: Dict[str, Any], raw_body: bytes) -> Option
 
 
 def _validate_signature(raw_body: bytes, signature: Optional[str]) -> None:
-    secret = os.getenv("IG_APP_SECRET", "")
+    secret = os.getenv("WA_APP_SECRET") or os.getenv("IG_APP_SECRET", "")
     require_signature = str(os.getenv("WA_REQUIRE_SIGNATURE", "0")).strip().lower() in {"1", "true", "yes"}
     if not secret:
         if require_signature:
@@ -51,7 +51,9 @@ def _validate_signature(raw_body: bytes, signature: Optional[str]) -> None:
         return
     expected = "sha256=" + hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature):
-        raise HTTPException(status_code=403, detail="Invalid signature")
+        if require_signature:
+            raise HTTPException(status_code=403, detail="Invalid signature")
+        return
 
 
 @router.get("/webhooks/whatsapp")
