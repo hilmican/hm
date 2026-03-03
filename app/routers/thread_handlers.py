@@ -449,18 +449,21 @@ def debug_reset_conversation(
             raise HTTPException(status_code=404, detail="Conversation not found")
 
         cid = int(conversation_id)
+        cid_str = str(cid)
 
         if clear_messages_bool:
-            # Delete attachments first (FK from attachments.message_id -> message.id)
+            # Delete attachments first (FK from attachments.message_id -> message.id).
+            # Use string comparison for message.conversation_id to avoid MySQL "Truncated incorrect DOUBLE value"
+            # when column has mixed types (e.g. int 1683 vs varchar 'dm:...').
             msg_ids_row = session.exec(
-                _text("SELECT id FROM message WHERE conversation_id=:cid").params(cid=cid)
+                _text("SELECT id FROM message WHERE conversation_id = :cid").params(cid=cid_str)
             ).all()
             msg_ids = [getattr(r, "id", r[0]) for r in msg_ids_row if (getattr(r, "id", r[0]) is not None)]
             if msg_ids:
                 placeholders = ",".join([f":p{i}" for i in range(len(msg_ids))])
                 params = {f"p{i}": msg_ids[i] for i in range(len(msg_ids))}
                 session.exec(_text(f"DELETE FROM attachments WHERE message_id IN ({placeholders})").params(**params))
-            session.exec(_text("DELETE FROM message WHERE conversation_id=:cid").params(cid=cid))
+            session.exec(_text("DELETE FROM message WHERE conversation_id = :cid").params(cid=cid_str))
 
         if reset_ai_state_bool:
             session.exec(_text("DELETE FROM ai_shadow_reply WHERE conversation_id=:cid").params(cid=cid))
