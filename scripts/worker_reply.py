@@ -510,6 +510,33 @@ def _now_ms() -> int:
 	return int(_utcnow().timestamp() * 1000)
 
 
+def _has_any_inbound_message(conversation_id: int) -> bool:
+	"""Return True if the conversation has at least one inbound message (so we have something to reply to)."""
+	try:
+		with get_session() as session:
+			# Use string cid for message table to avoid type mismatch (conversation_id can be int or varchar)
+			cid_str = str(int(conversation_id))
+			row = session.exec(
+				_text(
+					"SELECT 1 FROM message WHERE conversation_id = :cid AND direction = 'in' LIMIT 1"
+				).params(cid=cid_str)
+			).first()
+			return row is not None
+	except Exception:
+		return False
+
+
+def _postpone_quiet(conversation_id: int, seconds: int = 60) -> None:
+	"""Set next_attempt_at to now + seconds without incrementing postpone_count. Use when we must not send yet (e.g. no inbound messages)."""
+	with get_session() as session:
+		next_at = _utcnow() + dt.timedelta(seconds=seconds)
+		session.exec(
+			_text(
+				"UPDATE ai_shadow_state SET status='pending', next_attempt_at=:na, updated_at=CURRENT_TIMESTAMP WHERE conversation_id=:cid"
+			).params(na=next_at.isoformat(" "), cid=int(conversation_id))
+		)
+
+
 def _postpone(conversation_id: int, *, increment: bool = True) -> None:
 	with get_session() as session:
 		next_at = _utcnow() + dt.timedelta(seconds=POSTPONE_WINDOW_SECONDS)
@@ -767,6 +794,14 @@ def main() -> None:
 					int(cid),
 					state_snapshot=current_state,
 				)
+				continue
+			# Do not reply when there is no inbound message (e.g. after debug reset with messages cleared)
+			if not _has_any_inbound_message(int(cid)):
+				log.info(
+					"ai_shadow: skipping conversation_id=%s (no inbound messages); postponing 60s until next trigger",
+					cid,
+				)
+				_postpone_quiet(int(cid), 60)
 				continue
 			# If user likely still typing, postpone
 			if last_ms > 0 and (_now_ms() - last_ms) < (DEBOUNCE_SECONDS * 1000):

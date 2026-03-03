@@ -265,6 +265,21 @@ kubectl logs -n hm -l app=hm-worker-ingest -f --tail=50
 
 Sonra yeni bir DM atıp birkaç saniye içinde inbox’ta görünüp görünmediğine bakın.
 
+### Reply worker loglarını inceleme (tek görsel / beklenmedik gönderim)
+
+Konuşma sıfırlandıktan sonra mesaj atmadan tek görsel geliyorsa: worker, mesaj listesi boş olan konuşmayı yine de "due" görüp intro + görsel gönderebiliyordu. Artık **en az bir inbound mesaj yoksa** worker cevap üretmiyor (60 sn postpone). Eski davranışın logları:
+
+```bash
+# Belirli konuşma (örn. 1683) için reply worker logları
+./scripts/check_reply_logs.sh 1683
+
+# veya doğrudan kubectl
+kubectl logs -n hm -l app=hm-worker-reply --tail=300 | grep -E "1683|image_urls received|after_absolute_filter|image summary|image API error|no images delivered|ai_shadow:"
+```
+
+- `image_urls received=N after_absolute_filter=1` → Sadece 1 URL mutlak kaldı, 1 görsel gitti.
+- `image summary sent=1 requested=8` → 8 gönderilmek istendi, API sadece 1’i kabul etti (önceki satırlarda API error body’si olur).
+
 ### AI görsel gönderimi: Görseller gelmiyor (mesaj geliyor)
 
 Metin mesajları gidiyor ama ürün görselleri müşteriye ulaşmıyorsa: Meta API mutlak URL ister; relative path kullanıyorsanız **IMAGE_CDN_BASE_URL** veya **APP_URL** (örn. `https://hma.cdn.com.tr`) tanımlı olmalı. Log'da `image_urls received=N after_absolute_filter=0` → URL'ler elendi (env eksik). `image summary sent=0 requested=N` ve `Instagram image API error ... body=...` → API hata döndü (body ile sebep). `ai_shadow: no images delivered despite N attempted` → Worker N denedi, 0 gitti; yukarıdaki log'larla ayrıştırın. Hızlı kontrol: `kubectl logs -n hm -l app=hm-worker-reply --tail=200 | grep -E "image_urls received|after_absolute_filter|image summary|image API error|no images delivered"`
