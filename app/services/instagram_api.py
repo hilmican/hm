@@ -660,6 +660,14 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
 
     async with httpx.AsyncClient() as client:
         # 1) Send image messages first (if any); aralarda gecikme, başarısızdan sonra ek bekleme
+        n_images = len(absolute_image_urls)
+        if n_images:
+            _log.info(
+                "Instagram send_message: recipient_id=%s image_count=%d (from %d requested)",
+                recipient_id[:20] if recipient_id else "",
+                n_images,
+                len(image_urls or []),
+            )
         sent_count = 0
         for i, img_url in enumerate(absolute_image_urls):
             if i > 0 and image_delay_sec > 0:
@@ -667,14 +675,32 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
             ok = await _send_one_image(img_url)
             if ok:
                 sent_count += 1
-            elif image_delay_after_fail_sec > 0:
-                await asyncio.sleep(image_delay_after_fail_sec)
-        if absolute_image_urls and sent_count < len(absolute_image_urls):
+                mid = results["message_ids"][-1] if results["message_ids"] else None
+                _log.info(
+                    "Instagram image sent idx=%d/%d message_id=%s url=%s",
+                    i + 1,
+                    n_images,
+                    mid,
+                    (img_url[:60] + "..." if len(img_url) > 60 else img_url),
+                )
+            else:
+                _log.warning(
+                    "Instagram image failed idx=%d/%d url=%s",
+                    i + 1,
+                    n_images,
+                    (img_url[:60] + "..." if len(img_url) > 60 else img_url),
+                )
+                if image_delay_after_fail_sec > 0:
+                    await asyncio.sleep(image_delay_after_fail_sec)
+        if n_images and sent_count < n_images:
             _log.warning(
-                "Instagram images partial send: %d/%d succeeded",
+                "Instagram images partial send: %d/%d succeeded recipient_id=%s",
                 sent_count,
-                len(absolute_image_urls),
+                n_images,
+                recipient_id[:20] if recipient_id else "",
             )
+        if n_images:
+            results["image_message_count"] = sent_count
 
         # 2) Send the text message(s) - split by newlines to send each line separately
         if text and text.strip():

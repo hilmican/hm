@@ -1562,9 +1562,14 @@ HITAP KURALLARI:
 	intro_instruction = """
 ## Görev (İlk Tanıtım Mesajı)
 
-Sadece ilk tanıtım mesajını yaz. Kısa selamlama (abim/ablam/efendim) + ürün adı + kısa tanıtım.
-Resimler mesajla birlikte otomatik gönderilecek; sen sadece metni yaz. JSON MODE: Sadece geçerli JSON döndür.
-Döndürülecek JSON alanları: reply_text (string), confidence (0-1 sayı), reason (string), state (obje; içinde hail_sent: true ve cart: [] olmalı).
+İlk tanıtım mesajını yaz. reply_text içinde her mantıksal bölümü **YENİ SATIR** (\\n) ile ayır; böylece her satır müşteriye ayrı mesaj olarak gidecek.
+- 1. satır: Kısa selamlama (abim/ablam/efendim) + isteğe bir emoji.
+- 2. satır: Ürün adı + net fiyat (örn. "BAGGY KOT PANTOLON modelimiz Adet 849₺'dir.").
+- 3. satır: Kısa ürün tanıtımı (tek cümle).
+- 4. satır: Beden sorusu — ürün talimatlarındaki ifadeyi kullan: "Beden konusunda yardımcı olabilmek adına boy ve kilonuzu öğrenebilir miyim?" (veya talimatta verilen aynı cümle). "İstersen bedenin için yardımcı olayım" gibi kısaltma kullanma.
+
+Resimler otomatik gönderilecek; sen sadece metni yaz. JSON MODE: Sadece geçerli JSON döndür.
+Döndürülecek alanlar: reply_text (string, satırlar \\n ile ayrılmış), confidence (0-1), reason (string), state (obje; hail_sent: true, cart: []).
 """
 
 	sys_prompt_parts: List[str] = []
@@ -1672,9 +1677,12 @@ Döndürülecek JSON alanları: reply_text (string), confidence (0-1 sayı), rea
 	if include_meta:
 		reply["debug_meta"] = {
 			"intro_only": True,
+			"system_prompt": sys_prompt,
+			"user_prompt": user_prompt,
 			"user_payload": user_payload,
 			"raw_response": raw_response,
 			"serializer_request_payload": api_request_payload,
+			"api_request_payload": api_request_payload,
 		}
 	return reply
 

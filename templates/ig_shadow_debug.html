@@ -185,6 +185,15 @@
     </div>
 
     <div class="section">
+      <h3>User Prompt (OpenAI’e giden metin)</h3>
+      {% if debug_meta and debug_meta.user_prompt %}
+        <pre style="white-space: pre-wrap;">{{ debug_meta.user_prompt }}</pre>
+      {% else %}
+        <div class="meta">user_prompt kaydı yok.</div>
+      {% endif %}
+    </div>
+
+    <div class="section">
       <h3>User Payload (Prompt JSON)</h3>
       {% if debug_meta and debug_meta.user_payload %}
         <pre>{{ debug_meta.user_payload_pretty }}</pre>

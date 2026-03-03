@@ -1298,6 +1298,13 @@ def main() -> None:
 								except Exception:
 									pass
 						if text_to_send:
+							image_count_attempted = len(image_urls_to_send) if image_urls_to_send else 0
+							log.info(
+								"ai_shadow: sending reply conversation_id=%s images=%d text_len=%d",
+								cid,
+								image_count_attempted,
+								len(text_to_send or ""),
+							)
 							result = loop.run_until_complete(
 								send_channel_message(
 									platform=conversation_platform,
@@ -1312,7 +1319,15 @@ def main() -> None:
 							if result.get("message_id") and result.get("message_id") not in all_message_ids:
 								all_message_ids.insert(0, result.get("message_id"))
 							sent_message_id = all_message_ids[0] if all_message_ids else None
-							log.info("ai_shadow: auto-sent reply message_ids=%s conversation_id=%s images_sent=%d", all_message_ids, cid, len(image_urls_to_send) if image_urls_to_send else 0)
+							image_message_count = result.get("image_message_count")
+							log.info(
+								"ai_shadow: auto-sent reply conversation_id=%s total_message_ids=%d image_succeeded=%s image_attempted=%d message_ids=%s",
+								cid,
+								len(all_message_ids),
+								image_message_count if image_message_count is not None else "n/a",
+								image_count_attempted,
+								all_message_ids[:5] if len(all_message_ids) > 5 else all_message_ids,
+							)
 							
 							# Mark images as sent if we actually sent any
 							if image_urls_to_send:
