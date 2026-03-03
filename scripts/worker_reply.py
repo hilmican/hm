@@ -43,7 +43,8 @@ def _categorize_outbound_message(
 	"""
 	if not state:
 		state = {}
-	
+	reply_text = (reply_text or "").strip()
+
 	state_last_step = str(state.get("last_step") or "").strip().lower()
 	hail_sent = bool(state.get("hail_sent"))
 	asked_payment = bool(state.get("asked_payment"))
@@ -740,7 +741,8 @@ def main() -> None:
 			last_ms = int(st.get("last_inbound_ms") or 0)
 			postpones = int(st.get("postpone_count") or 0)
 			current_state = _coerce_state(st.get("state_json"))
-			# Check delivery settings and whether this conversation already received an outbound/AI draft reply.
+			# Check delivery settings and whether we have already SENT an outbound (first message = nothing sent yet).
+			# Only status='sent' counts; 'suggested' means we never actually sent, so next run can still send.
 			global_enabled, product_enabled, intro_only_mode = _is_ai_reply_sending_enabled(cid)
 			is_first_outbound = False
 			try:
@@ -750,12 +752,12 @@ def main() -> None:
 							"SELECT 1 FROM message WHERE conversation_id=:cid AND direction='out' LIMIT 1"
 						).params(cid=int(cid))
 					).first()
-					row_shadow_first = session.exec(
+					row_shadow_sent = session.exec(
 						_text(
-							"SELECT 1 FROM ai_shadow_reply WHERE conversation_id=:cid AND status IN ('sent','suggested') LIMIT 1"
+							"SELECT 1 FROM ai_shadow_reply WHERE conversation_id=:cid AND status = 'sent' LIMIT 1"
 						).params(cid=int(cid))
 					).first()
-					is_first_outbound = (row_first is None) and (row_shadow_first is None)
+					is_first_outbound = (row_first is None) and (row_shadow_sent is None)
 			except Exception:
 				is_first_outbound = False
 			# Intro-only mode: after first outbound intro, do not generate shadow/normal reply; escalate and stop.
@@ -1355,6 +1357,10 @@ def main() -> None:
 											text_lines = [text_to_send.strip()]
 										# Image messages (if any) come first; map text lines only to the last N ids
 										text_start_idx = max(0, len(all_message_ids) - len(text_lines))
+										# One category for the whole batch (all lines + images = one logical message)
+										batch_message_category = _categorize_outbound_message(
+											new_state, function_callbacks, text_to_send or reply_text or ""
+										)
 										
 										# Persist each message with its corresponding text line
 										for idx, msg_id in enumerate(all_message_ids):
@@ -1402,9 +1408,9 @@ def main() -> None:
 													session.add(existing)
 												continue
 
-											# Categorize message based on state and content
-											message_category = _categorize_outbound_message(new_state, function_callbacks, msg_text)
-											
+											# Same category for entire batch (all lines + images = one logical message)
+											message_category = batch_message_category
+
 											# Insert new row
 											msg = Message(
 												platform=str(conversation_platform or "instagram"),
