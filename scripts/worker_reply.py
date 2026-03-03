@@ -1271,6 +1271,30 @@ def main() -> None:
 								cid,
 							)
 							text_to_send = None
+							# Yönetici eskalesi: Müşteriye gidecek metin kalmadı, manuel müdahale gerek
+							status_to_set = "needs_admin"
+							if isinstance(new_state, dict):
+								new_state["needs_admin"] = True
+								new_state["skip_send_reason"] = "technical_content_stripped"
+							state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
+							try:
+								create_admin_notification(
+									int(cid),
+									"AI cevabı müşteriye gönderilemedi: metin JSON/kod içerdiği için temizleme sonrası boş kaldı. Konuşma yöneticilere eskale edildi, lütfen manuel yanıt verin.",
+									message_type="warning",
+									metadata={
+										"conversation_id": int(cid),
+										"kind": "technical_content_stripped",
+										"source": "worker_reply",
+										"needs_admin": True,
+										"reason": "reply_text_empty_after_strip",
+									},
+								)
+							except Exception as notify_err:
+								try:
+									log.warning("admin_notification technical_content_stripped error cid=%s err=%s", cid, notify_err)
+								except Exception:
+									pass
 						if text_to_send:
 							result = loop.run_until_complete(
 								send_channel_message(
