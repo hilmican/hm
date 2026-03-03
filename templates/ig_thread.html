@@ -70,6 +70,26 @@
       <a href="/ig/inbox">← Back to Inbox</a>
       <a class="action" href="/ig/inbox/{{ conversation_id }}/debug" title="AI Debug">AI Debug</a>
       <button id="refresh">Refresh</button>
+      <details class="debug-reset-details" style="margin-left:auto;">
+        <summary style="cursor:pointer; color:#6b7280; font-size:13px;">Debug: Konuşmayı sıfırla</summary>
+        <form id="debugResetForm" method="post" action="/ig/inbox/{{ conversation_id }}/debug/reset" style="margin-top:10px; padding:12px; border:1px solid #e5e7eb; border-radius:8px; background:#f9fafb; max-width:420px;">
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+              <input type="checkbox" name="clear_messages" value="true"> Mesajları sil (bu konuşmadaki tüm mesajlar)
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+              <input type="checkbox" name="reset_ai_state" value="true"> AI durumunu sıfırla (shadow + state)
+            </label>
+            <div style="font-size:13px;">
+              <label for="debugResetAdId">İsteğe bağlı: Reklama bağla</label>
+              <select id="debugResetAdId" name="ad_id" style="display:block; width:100%; margin-top:4px; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
+                <option value="">— Reklam seçin —</option>
+              </select>
+            </div>
+            <button type="submit" style="align-self:flex-start; padding:8px 14px; font-size:13px; background:#7c3aed; color:#fff; border:none; border-radius:6px; cursor:pointer;">Sıfırla ve uygula</button>
+          </div>
+        </form>
+      </details>
     </div>
     <div style="display:grid; gap:12px; margin-bottom:16px;">
       <div style="border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
@@ -659,47 +679,50 @@
         }
       })();
 
-      // Load available ads for manual assignment
+      // Load available ads for manual assignment and for debug reset dropdown
       const adSelector = document.getElementById('adSelector');
       const assignAdBtn = document.getElementById('assignAdBtn');
       const assignAdStatus = document.getElementById('assignAdStatus');
-      if (adSelector && assignAdBtn) {
+      const debugResetAdId = document.getElementById('debugResetAdId');
+      if (adSelector || debugResetAdId) {
         (async () => {
           try {
             const res = await fetch(`/ig/inbox/${conversationId}/ads`);
             const data = await res.json().catch(() => ({}));
             if (res.ok && data.ads && Array.isArray(data.ads)) {
-              data.ads.forEach(ad => {
-                const opt = document.createElement('option');
-                opt.value = ad.ad_id;
-                const label = ad.product_name 
-                  ? `${ad.name || ad.ad_id} → ${ad.product_name}`
-                  : (ad.name || ad.ad_id);
-                opt.textContent = label;
-                opt.dataset.productId = ad.product_id || '';
-                opt.dataset.productSlug = ad.product_slug || '';
-                adSelector.appendChild(opt);
-              });
-              if (data.ads.length === 0) {
-                const opt = document.createElement('option');
-                opt.value = '';
-                opt.textContent = 'Reklam bulunamadı';
-                opt.disabled = true;
-                adSelector.appendChild(opt);
-              }
+              const fillAdSelect = (sel) => {
+                if (!sel) return;
+                data.ads.forEach(ad => {
+                  const opt = document.createElement('option');
+                  opt.value = ad.ad_id;
+                  const label = ad.product_name
+                    ? `${ad.name || ad.ad_id} → ${ad.product_name}`
+                    : (ad.name || ad.ad_id);
+                  opt.textContent = label;
+                  opt.dataset.productId = ad.product_id || '';
+                  opt.dataset.productSlug = ad.product_slug || '';
+                  sel.appendChild(opt);
+                });
+                if (data.ads.length === 0) {
+                  const opt = document.createElement('option');
+                  opt.value = '';
+                  opt.textContent = 'Reklam bulunamadı';
+                  opt.disabled = true;
+                  sel.appendChild(opt);
+                }
+              };
+              fillAdSelect(adSelector);
+              fillAdSelect(debugResetAdId);
             }
           } catch (e) {
             if (assignAdStatus) assignAdStatus.textContent = 'Reklamlar yüklenemedi';
           }
         })();
-        
-        adSelector.addEventListener('change', () => {
-          if (assignAdBtn) {
-            assignAdBtn.disabled = !adSelector.value;
-          }
+
+        if (adSelector) adSelector.addEventListener('change', () => {
+          if (assignAdBtn) assignAdBtn.disabled = !adSelector.value;
         });
-        
-        assignAdBtn.addEventListener('click', async () => {
+        if (assignAdBtn) assignAdBtn.addEventListener('click', async () => {
           const selectedAdId = adSelector.value;
           if (!selectedAdId) return;
           

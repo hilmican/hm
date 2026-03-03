@@ -421,6 +421,89 @@ def trigger_debug_conversation(conversation_id: int):
     return RedirectResponse(url=f"/ig/inbox/{conversation_id}/debug", status_code=HTTP_303_SEE_OTHER)
 
 
+@router.post("/inbox/{conversation_id}/debug/reset")
+def debug_reset_conversation(
+    conversation_id: int,
+    clear_messages: str = Form(""),
+    reset_ai_state: str = Form(""),
+    ad_id: str = Form(""),
+):
+    """
+    Debug: Reset conversation for testing (e.g. own account).
+    - clear_messages: delete all messages (and their attachments) in this conversation.
+    - reset_ai_state: delete ai_shadow_reply rows and reset ai_shadow_state to pending.
+    - ad_id: optionally assign this ad to the conversation (same as assign-ad).
+    At least one of clear_messages or reset_ai_state must be True.
+    """
+    clear_messages_bool = str(clear_messages or "").strip().lower() in ("true", "1", "on", "yes")
+    reset_ai_state_bool = str(reset_ai_state or "").strip().lower() in ("true", "1", "on", "yes")
+    if not clear_messages_bool and not reset_ai_state_bool:
+        raise HTTPException(
+            status_code=400,
+            detail="En az biri seçilmeli: Mesajları sil veya AI durumunu sıfırla.",
+        )
+    with get_session() as session:
+        convo = session.get(Conversation, int(conversation_id))
+        if not convo:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        cid = int(conversation_id)
+
+        if clear_messages_bool:
+            # Delete attachments first (FK from attachments.message_id -> message.id)
+            msg_ids_row = session.exec(
+                _text("SELECT id FROM message WHERE conversation_id=:cid").params(cid=cid)
+            ).all()
+            msg_ids = [getattr(r, "id", r[0]) for r in msg_ids_row if (getattr(r, "id", r[0]) is not None)]
+            if msg_ids:
+                placeholders = ",".join([f":p{i}" for i in range(len(msg_ids))])
+                params = {f"p{i}": msg_ids[i] for i in range(len(msg_ids))}
+                session.exec(_text(f"DELETE FROM attachments WHERE message_id IN ({placeholders})").params(**params))
+            session.exec(_text("DELETE FROM message WHERE conversation_id=:cid").params(cid=cid))
+
+        if reset_ai_state_bool:
+            session.exec(_text("DELETE FROM ai_shadow_reply WHERE conversation_id=:cid").params(cid=cid))
+            session.exec(
+                _text(
+                    """
+                    UPDATE ai_shadow_state
+                    SET status = 'pending', state_json = NULL, first_reply_notified_at = NULL,
+                        ai_images_sent = 0, next_attempt_at = NULL, postpone_count = 0, updated_at = CURRENT_TIMESTAMP
+                    WHERE conversation_id = :cid
+                    """
+                ).params(cid=cid)
+            )
+
+        session.commit()
+
+        # Optional: assign ad (same as assign-ad endpoint)
+        ad_id_clean = str(ad_id or "").strip()
+        if ad_id_clean:
+            row_ad = session.exec(
+                _text("SELECT ad_id, name, link, link_type FROM ads WHERE ad_id = :aid LIMIT 1").params(aid=ad_id_clean)
+            ).first()
+            if row_ad:
+                ad_name = getattr(row_ad, "name", None) if hasattr(row_ad, "name") else (row_ad[1] if len(row_ad) > 1 else None)
+                ad_link = getattr(row_ad, "link", None) if hasattr(row_ad, "link") else (row_ad[2] if len(row_ad) > 2 else None)
+                link_type = getattr(row_ad, "link_type", None) if hasattr(row_ad, "link_type") else (row_ad[3] if len(row_ad) > 3 else None)
+                session.exec(
+                    _text(
+                        """
+                        UPDATE conversations
+                        SET last_ad_id = :aid, last_link_id = :aid, last_link_type = :lt, last_ad_link = :link, last_ad_title = :title
+                        WHERE id = :cid
+                        """
+                    ).params(cid=cid, aid=ad_id_clean, lt=(link_type or "ad"), link=ad_link, title=ad_name)
+                )
+                session.commit()
+                try:
+                    touch_shadow_state(cid, None, debounce_seconds=0)
+                except Exception:
+                    pass
+
+    return RedirectResponse(url=f"/ig/inbox/{conversation_id}", status_code=HTTP_303_SEE_OTHER)
+
+
 @router.get("/inbox/{conversation_id}")
 def thread(request: Request, conversation_id: int, limit: int = 500):
     with get_session() as session:
@@ -900,7 +983,7 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
         except Exception:
             pass
         templates = request.app.state.templates
-        # Fetch latest AI shadow draft (suggested) for this conversation.
+        # Fetch latest AI shadow drafts for this conversation (limit 50 for faster load; enough for inline display).
         # Intro-only path stores minimal state (hail_sent, cart); full path stores full state; both are handled.
         shadow = None
         rows_shadow: list[Any] = []
@@ -908,7 +991,7 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
             from sqlalchemy import text as _text
             rows_shadow = session.exec(
                 _text(
-                    "SELECT id, reply_text, model, confidence, reason, created_at, status, actions_json, state_json, json_meta FROM ai_shadow_reply WHERE conversation_id=:cid ORDER BY created_at ASC LIMIT 200"
+                    "SELECT id, reply_text, model, confidence, reason, created_at, status, actions_json, state_json, json_meta FROM ai_shadow_reply WHERE conversation_id=:cid ORDER BY created_at ASC LIMIT 50"
                 ).params(cid=int(conversation_id))
             ).all()
             # Represent the last one (if any) in 'shadow' for legacy panel rendering
@@ -1173,12 +1256,12 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
             "linked_order_id": linked_order_id,
         }
 
-        # Brand snapshot + assignment helpers (lazy imports to avoid heavy modules at top-level)
+        # Brand snapshot: use cache only (max 24h) to avoid blocking thread load on Graph API.
         brand_profile = None
         try:
             from ..services.ig_profile import ensure_profile_snapshot as _ensure_profile_snapshot
 
-            snap = _ensure_profile_snapshot()
+            snap = _ensure_profile_snapshot(max_age_seconds=86400)
             brand_profile = {
                 "username": snap.username,
                 "name": snap.name,
