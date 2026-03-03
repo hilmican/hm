@@ -70,26 +70,6 @@
       <a href="/ig/inbox">← Back to Inbox</a>
       <a class="action" href="/ig/inbox/{{ conversation_id }}/debug" title="AI Debug">AI Debug</a>
       <button id="refresh">Refresh</button>
-      <details class="debug-reset-details" style="margin-left:auto;">
-        <summary style="cursor:pointer; color:#6b7280; font-size:13px;">Eski mesajları sil & Konuşmayı sıfırla (Debug)</summary>
-        <form id="debugResetForm" method="post" action="/ig/inbox/{{ conversation_id }}/debug/reset" style="margin-top:10px; padding:12px; border:1px solid #e5e7eb; border-radius:8px; background:#f9fafb; max-width:420px;">
-          <div style="display:flex; flex-direction:column; gap:10px;">
-            <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
-              <input type="checkbox" name="clear_messages" value="true" id="debugClearMessages"> Eski mesajları sil (bu konuşmadaki tüm mesajlar)
-            </label>
-            <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
-              <input type="checkbox" name="reset_ai_state" value="true"> AI durumunu sıfırla (shadow + state)
-            </label>
-            <div style="font-size:13px;">
-              <label for="debugResetAdId">İsteğe bağlı: Reklama bağla</label>
-              <select id="debugResetAdId" name="ad_id" style="display:block; width:100%; margin-top:4px; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
-                <option value="">— Reklam seçin —</option>
-              </select>
-            </div>
-            <button type="submit" style="align-self:flex-start; padding:8px 14px; font-size:13px; background:#7c3aed; color:#fff; border:none; border-radius:6px; cursor:pointer;">Sıfırla ve uygula</button>
-          </div>
-        </form>
-      </details>
     </div>
     <div style="display:grid; gap:12px; margin-bottom:16px;">
       <div style="border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
@@ -184,6 +164,27 @@
         {% if last_message_direction == 'in' and lc.product_slug %}
           <button id="triggerAiFromLastMessages" class="action" style="margin-top:8px; font-size:13px; background:#10b981; border-color:#10b981;">Son Mesajlara Göre AI Mesajını Yeniden Tetikle</button>
         {% endif %}
+
+        <div style="margin-top:16px; padding-top:14px; border-top:1px solid #e5e7eb;">
+          <div style="font-size:13px; font-weight:600; color:#374151; margin-bottom:10px;">Bu konuşmaya özel</div>
+          <form id="debugResetForm" method="post" action="/ig/inbox/{{ conversation_id }}/debug/reset" style="padding:12px; border:1px solid #e5e7eb; border-radius:8px; background:#f9fafb;">
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+                <input type="checkbox" name="clear_messages" value="true" id="debugClearMessages"> Eski mesajları sil (bu konuşmadaki tüm mesajlar)
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+                <input type="checkbox" name="reset_ai_state" value="true"> AI durumunu sıfırla (shadow + state)
+              </label>
+              <div style="font-size:13px;">
+                <label for="debugResetAdId">İsteğe bağlı: Reklama bağla</label>
+                <select id="debugResetAdId" name="ad_id" style="display:block; width:100%; margin-top:4px; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
+                  <option value="">— Reklam seçin —</option>
+                </select>
+              </div>
+              <button type="submit" style="align-self:flex-start; padding:8px 14px; font-size:13px; background:#7c3aed; color:#fff; border:none; border-radius:6px; cursor:pointer;">Sıfırla ve uygula</button>
+            </div>
+          </form>
+        </div>
       </div>
       {% if admin_alerts %}
       <div style="border:1px solid #f97316; border-radius:10px; padding:12px; background:#fff7ed;">
