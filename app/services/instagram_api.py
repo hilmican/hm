@@ -602,48 +602,61 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
     # Convert relative URLs to absolute URLs for Facebook
     absolute_image_urls = [_make_absolute_url(img_url) for img_url in image_urls]
     results: Dict[str, Any] = {"message_ids": [], "status": "ok"}
-    
-    async with httpx.AsyncClient() as client:
-        # 1) Send image messages first (if any)
-        for img_url in absolute_image_urls:
-            img_payload = {
-                "recipient": {"id": recipient_id},
-                "messaging_type": "RESPONSE",
-                "message": {
-                    "attachment": {
-                        "type": "image",
-                        "payload": {
-                            "url": img_url,
-                        },
-                    }
-                },
-            }
+    # Görseller arası gecikme (rate limit / "1 gönderiyor 1 göndermiyor" azaltmak için)
+    image_delay_sec = float(os.getenv("IG_IMAGE_SEND_DELAY_SEC", "0.8"))
+
+    async def _send_one_image(img_url: str) -> bool:
+        img_payload = {
+            "recipient": {"id": recipient_id},
+            "messaging_type": "RESPONSE",
+            "message": {
+                "attachment": {
+                    "type": "image",
+                    "payload": {"url": img_url},
+                }
+            },
+        }
+        for attempt in range(2):  # İlk deneme + 1 retry
             try:
                 r_img = await client.post(
                     url,
                     params={"access_token": token},
                     json=img_payload,
-                    timeout=20,
+                    timeout=25,
                 )
                 r_img.raise_for_status()
                 resp_img = r_img.json()
                 if resp_img.get("message_id"):
                     results["message_ids"].append(resp_img["message_id"])
+                    return True
             except httpx.HTTPStatusError as e:
-                try:
-                    detail = e.response.text
-                except Exception:
-                    detail = str(e)
-                try:
-                    _log.warning("Graph image send failed url=%s err=%s", img_url, detail[:200])
-                except Exception:
-                    pass
+                detail = getattr(e.response, "text", None) or str(e)
+                _log.warning(
+                    "Graph image send failed attempt=%s url=%s err=%s",
+                    attempt + 1,
+                    img_url[:80],
+                    detail[:200],
+                )
+                if attempt == 0:
+                    await asyncio.sleep(1.0)
             except Exception as e:
-                try:
-                    _log.warning("Graph image send failed url=%s err=%s", img_url, str(e)[:200])
-                except Exception:
-                    pass
-        
+                _log.warning(
+                    "Graph image send failed attempt=%s url=%s err=%s",
+                    attempt + 1,
+                    img_url[:80],
+                    str(e)[:200],
+                )
+                if attempt == 0:
+                    await asyncio.sleep(1.0)
+        return False
+
+    async with httpx.AsyncClient() as client:
+        # 1) Send image messages first (if any); aralarda kısa gecikme
+        for i, img_url in enumerate(absolute_image_urls):
+            if i > 0 and image_delay_sec > 0:
+                await asyncio.sleep(image_delay_sec)
+            await _send_one_image(img_url)
+
         # 2) Send the text message(s) - split by newlines to send each line separately
         if text and text.strip():
             # Split text by newlines and filter out empty lines
