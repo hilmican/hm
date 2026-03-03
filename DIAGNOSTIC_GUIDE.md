@@ -265,6 +265,10 @@ kubectl logs -n hm -l app=hm-worker-ingest -f --tail=50
 
 Sonra yeni bir DM atıp birkaç saniye içinde inbox’ta görünüp görünmediğine bakın.
 
+### AI görsel gönderimi: Görseller gelmiyor (mesaj geliyor)
+
+Metin mesajları gidiyor ama ürün görselleri müşteriye ulaşmıyorsa: Meta API mutlak URL ister; relative path kullanıyorsanız **IMAGE_CDN_BASE_URL** veya **APP_URL** (örn. `https://hma.cdn.com.tr`) tanımlı olmalı. Log'da `image_urls received=N after_absolute_filter=0` → URL'ler elendi (env eksik). `image summary sent=0 requested=N` ve `Instagram image API error ... body=...` → API hata döndü (body ile sebep). `ai_shadow: no images delivered despite N attempted` → Worker N denedi, 0 gitti; yukarıdaki log'larla ayrıştırın. Hızlı kontrol: `kubectl logs -n hm -l app=hm-worker-reply --tail=200 | grep -E "image_urls received|after_absolute_filter|image summary|image API error|no images delivered"`
+
 ### Instagram token süresi dolmuş / Access Denied
 
 Worker log’unda **access denied**, **403**, **Invalid OAuth** veya **token expired** benzeri hatalar görüyorsanız Instagram/Facebook **erişim token’ı** süresi dolmuş veya iptal edilmiş olabilir.

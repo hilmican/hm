@@ -13,6 +13,7 @@ from sqlmodel import select
 
 from app.services.ai_reply import draft_reply, draft_reply_intro_only, _sanitize_reply_text, _strip_technical_content_for_customer, _select_product_images_for_reply
 from app.services.channel_sender import send_message as send_channel_message
+from app.services.image_urls import normalize_image_urls_for_send
 from app.services.ai_orders import get_candidate_snapshot, submit_candidate_order, mark_candidate_very_interested
 from app.models import SystemSetting, Product
 from app.services.admin_notifications import create_admin_notification
@@ -1084,10 +1085,19 @@ def main() -> None:
 				if image_urls and current_focus_pid and current_focus_pid not in images_sent_products:
 					auto_image_urls = image_urls
 					auto_image_product_ids.add(current_focus_pid)
-				image_urls_combined: list[str] = []
+				# Normalize to absolute URLs only (Meta requires public absolute URLs; relative are dropped)
+				raw_combined = []
 				for u in auto_image_urls + requested_image_urls:
-					if u and u not in image_urls_combined:
-						image_urls_combined.append(u)
+					if u and u not in raw_combined:
+						raw_combined.append(u)
+				image_urls_combined: list[str] = normalize_image_urls_for_send(raw_combined)
+				if raw_combined and len(image_urls_combined) < len(raw_combined):
+					log.warning(
+						"ai_shadow: some image URLs dropped (not absolute) conversation_id=%s raw=%d after_normalize=%d. Set IMAGE_CDN_BASE_URL or APP_URL.",
+						cid,
+						len(raw_combined),
+						len(image_urls_combined),
+					)
 				if auto_image_urls:
 					action_entry = {
 						"type": "send_product_images",
@@ -1300,10 +1310,11 @@ def main() -> None:
 						if text_to_send:
 							image_count_attempted = len(image_urls_to_send) if image_urls_to_send else 0
 							log.info(
-								"ai_shadow: sending reply conversation_id=%s images=%d text_len=%d",
+								"ai_shadow: sending reply conversation_id=%s images=%d text_len=%d first_image_url=%s",
 								cid,
 								image_count_attempted,
 								len(text_to_send or ""),
+								(image_urls_to_send[0][:80] + "..." if image_urls_to_send and len(image_urls_to_send[0]) > 80 else (image_urls_to_send[0] if image_urls_to_send else "")),
 							)
 							result = loop.run_until_complete(
 								send_channel_message(
@@ -1328,9 +1339,14 @@ def main() -> None:
 								image_count_attempted,
 								all_message_ids[:5] if len(all_message_ids) > 5 else all_message_ids,
 							)
-							
-							# Mark images as sent if we actually sent any
-							if image_urls_to_send:
+							if image_count_attempted and (image_message_count is None or image_message_count == 0):
+								log.warning(
+									"ai_shadow: no images delivered despite %d attempted conversation_id=%s; check IMAGE_CDN_BASE_URL/APP_URL or API errors in logs above",
+									image_count_attempted,
+									cid,
+								)
+							# Mark images as sent only if at least one image was actually delivered
+							if image_urls_to_send and image_message_count is not None and image_message_count > 0:
 								images_were_sent = True
 								images_sent_products.update(auto_image_product_ids)
 								images_sent_products.update(requested_image_pids)

@@ -521,41 +521,9 @@ async def sync_latest_conversations(limit: int = 25) -> int:
 
 
 def _make_absolute_url(url: str) -> str:
-    """
-    Convert a relative URL to an absolute URL for Facebook Graph API.
-    
-    Facebook requires absolute URLs that are publicly accessible.
-    Uses IMAGE_CDN_BASE_URL if set, otherwise constructs from APP_URL or BASE_URL.
-    """
-    if not url:
-        return url
-    
-    # If already absolute (starts with http:// or https://), return as-is
-    if url.startswith(("http://", "https://")):
-        return url
-    
-    # Try IMAGE_CDN_BASE_URL first (preferred for CDN-hosted images)
-    cdn_base = (os.getenv("IMAGE_CDN_BASE_URL", "") or "").strip().rstrip("/")
-    if cdn_base:
-        # Remove leading slash from relative URL if present
-        relative_path = url.lstrip("/")
-        return f"{cdn_base}/{relative_path}"
-    
-    # Fallback to APP_URL or BASE_URL
-    app_url = (os.getenv("APP_URL", "") or os.getenv("BASE_URL", "") or "").strip().rstrip("/")
-    if app_url:
-        # Remove leading slash from relative URL if present
-        relative_path = url.lstrip("/")
-        return f"{app_url}/{relative_path}"
-    
-    # Last resort: if no base URL is configured, log a warning and return as-is
-    # This will likely fail, but at least we tried
-    try:
-        _log.warning("No IMAGE_CDN_BASE_URL or APP_URL configured, cannot convert relative URL to absolute: %s", url[:100])
-    except Exception:
-        pass
-    
-    return url
+    """Convert relative URL to absolute; uses shared helper."""
+    from .image_urls import make_absolute_image_url
+    return make_absolute_image_url(url or "")
 
 
 async def send_message(conversation_id: str, text: str, image_urls: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -599,14 +567,22 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
     url = base + "/me/messages"
     
     image_urls = image_urls or []
-    # Convert to absolute URLs and skip empty/invalid (Meta requires absolute, public URLs)
-    absolute_image_urls = []
-    for u in image_urls:
-        if not u or not str(u).strip():
-            continue
-        abs_u = _make_absolute_url(str(u).strip())
-        if abs_u and abs_u.startswith(("http://", "https://")):
-            absolute_image_urls.append(abs_u)
+    from .image_urls import normalize_image_urls_for_send
+    absolute_image_urls = normalize_image_urls_for_send(image_urls)
+    received_n = len(image_urls)
+    after_filter_n = len(absolute_image_urls)
+    _log.info(
+        "Instagram send_message: image_urls received=%d after_absolute_filter=%d recipient_id=%s",
+        received_n,
+        after_filter_n,
+        (recipient_id[:20] if recipient_id else ""),
+    )
+    if received_n and after_filter_n == 0:
+        _log.warning(
+            "Instagram send_message: all %d image URL(s) dropped (none absolute). First: %s. Set IMAGE_CDN_BASE_URL or APP_URL.",
+            received_n,
+            (image_urls[0][:120] if image_urls else ""),
+        )
     results: Dict[str, Any] = {"message_ids": [], "status": "ok"}
     # Görseller arası gecikme (rate limit / "1 gönderiyor 1 göndermiyor" azaltmak için). Varsayılan 1.2s.
     image_delay_sec = float(os.getenv("IG_IMAGE_SEND_DELAY_SEC", "1.2"))
@@ -638,21 +614,27 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
                     results["message_ids"].append(resp_img["message_id"])
                     return True
             except httpx.HTTPStatusError as e:
-                detail = getattr(e.response, "text", None) or str(e)
+                try:
+                    body = (e.response.text or "")[:500]
+                    code = getattr(e.response, "status_code", None)
+                except Exception:
+                    body = str(e)[:500]
+                    code = None
                 _log.warning(
-                    "Graph image send failed attempt=%s url=%s err=%s",
+                    "Instagram image API error attempt=%s status=%s url=%s body=%s",
                     attempt + 1,
+                    code,
                     img_url[:80],
-                    detail[:200],
+                    body,
                 )
                 if attempt == 0:
                     await asyncio.sleep(1.0)
             except Exception as e:
                 _log.warning(
-                    "Graph image send failed attempt=%s url=%s err=%s",
+                    "Instagram image send exception attempt=%s url=%s err=%s",
                     attempt + 1,
                     img_url[:80],
-                    str(e)[:200],
+                    str(e)[:300],
                 )
                 if attempt == 0:
                     await asyncio.sleep(1.0)
@@ -692,15 +674,20 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
                 )
                 if image_delay_after_fail_sec > 0:
                     await asyncio.sleep(image_delay_after_fail_sec)
-        if n_images and sent_count < n_images:
-            _log.warning(
-                "Instagram images partial send: %d/%d succeeded recipient_id=%s",
+        if n_images:
+            results["image_message_count"] = sent_count
+            _log.info(
+                "Instagram send_message: image summary sent=%d requested=%d recipient_id=%s",
                 sent_count,
                 n_images,
                 recipient_id[:20] if recipient_id else "",
             )
-        if n_images:
-            results["image_message_count"] = sent_count
+            if sent_count < n_images:
+                _log.warning(
+                    "Instagram images partial send: %d/%d succeeded (check logs above for API errors)",
+                    sent_count,
+                    n_images,
+                )
 
         # 2) Send the text message(s) - split by newlines to send each line separately
         if text and text.strip():
