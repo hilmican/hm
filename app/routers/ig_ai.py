@@ -1687,28 +1687,25 @@ def update_pretext(
 
 @router.post("/pretexts/{pretext_id}/delete")
 def delete_pretext(pretext_id: int):
-    """Delete a pretext."""
-    from ..models import AIPretext
-    
+    """Delete a pretext. If products use it, set their pretext_id to NULL (they fall back to default) then delete."""
+    from ..models import AIPretext, Product
+
     with get_session() as session:
         pretext = session.exec(select(AIPretext).where(AIPretext.id == pretext_id)).first()
         if not pretext:
             raise HTTPException(status_code=404, detail="Pretext not found")
-        
-        # Check if any products are using this pretext
+
+        # Kullanan ürünleri varsayılana çek (pretext_id = NULL → default pretext kullanılır)
         products_using = session.exec(
-            text("SELECT COUNT(*) FROM product WHERE pretext_id = :id").params(id=pretext_id)
-        ).first()
-        count = int(products_using[0] if isinstance(products_using, (list, tuple)) else (getattr(products_using, "count", 0) if hasattr(products_using, "count") else 0))
-        
-        if count > 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot delete pretext: {count} product(s) are using it. Please update products first."
-            )
-        
+            select(Product).where(Product.pretext_id == pretext_id)
+        ).all()
+        for prod in products_using:
+            prod.pretext_id = None
+            session.add(prod)
+
         session.delete(pretext)
-    
+        session.commit()
+
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/ig/ai/pretexts", status_code=303)
 
