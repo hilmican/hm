@@ -599,11 +599,19 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
     url = base + "/me/messages"
     
     image_urls = image_urls or []
-    # Convert relative URLs to absolute URLs for Facebook
-    absolute_image_urls = [_make_absolute_url(img_url) for img_url in image_urls]
+    # Convert to absolute URLs and skip empty/invalid (Meta requires absolute, public URLs)
+    absolute_image_urls = []
+    for u in image_urls:
+        if not u or not str(u).strip():
+            continue
+        abs_u = _make_absolute_url(str(u).strip())
+        if abs_u and abs_u.startswith(("http://", "https://")):
+            absolute_image_urls.append(abs_u)
     results: Dict[str, Any] = {"message_ids": [], "status": "ok"}
-    # Görseller arası gecikme (rate limit / "1 gönderiyor 1 göndermiyor" azaltmak için)
-    image_delay_sec = float(os.getenv("IG_IMAGE_SEND_DELAY_SEC", "0.8"))
+    # Görseller arası gecikme (rate limit / "1 gönderiyor 1 göndermiyor" azaltmak için). Varsayılan 1.2s.
+    image_delay_sec = float(os.getenv("IG_IMAGE_SEND_DELAY_SEC", "1.2"))
+    # Başarısız gönderimden sonra ek bekleme (rate limit toparlanması)
+    image_delay_after_fail_sec = float(os.getenv("IG_IMAGE_DELAY_AFTER_FAIL_SEC", "2.5"))
 
     async def _send_one_image(img_url: str) -> bool:
         img_payload = {
@@ -651,11 +659,22 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
         return False
 
     async with httpx.AsyncClient() as client:
-        # 1) Send image messages first (if any); aralarda kısa gecikme
+        # 1) Send image messages first (if any); aralarda gecikme, başarısızdan sonra ek bekleme
+        sent_count = 0
         for i, img_url in enumerate(absolute_image_urls):
             if i > 0 and image_delay_sec > 0:
                 await asyncio.sleep(image_delay_sec)
-            await _send_one_image(img_url)
+            ok = await _send_one_image(img_url)
+            if ok:
+                sent_count += 1
+            elif image_delay_after_fail_sec > 0:
+                await asyncio.sleep(image_delay_after_fail_sec)
+        if absolute_image_urls and sent_count < len(absolute_image_urls):
+            _log.warning(
+                "Instagram images partial send: %d/%d succeeded",
+                sent_count,
+                len(absolute_image_urls),
+            )
 
         # 2) Send the text message(s) - split by newlines to send each line separately
         if text and text.strip():

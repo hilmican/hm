@@ -34,10 +34,12 @@ async def send_message(
         raise RuntimeError("recipient_id is required")
 
     message_ids: List[str] = []
-    image_delay_sec = float(os.getenv("WA_IMAGE_SEND_DELAY_SEC", os.getenv("IG_IMAGE_SEND_DELAY_SEC", "0.8")))
+    image_delay_sec = float(os.getenv("WA_IMAGE_SEND_DELAY_SEC", os.getenv("IG_IMAGE_SEND_DELAY_SEC", "1.2")))
+    image_delay_after_fail_sec = float(os.getenv("WA_IMAGE_DELAY_AFTER_FAIL_SEC", os.getenv("IG_IMAGE_DELAY_AFTER_FAIL_SEC", "2.5")))
+    urls_to_send = [u for u in (image_urls or []) if u and str(u).strip() and str(u).strip().startswith(("http://", "https://"))]
 
     async with httpx.AsyncClient() as client:
-        for i, image_url in enumerate(image_urls or []):
+        for i, image_url in enumerate(urls_to_send):
             if i > 0 and image_delay_sec > 0:
                 await asyncio.sleep(image_delay_sec)
             sent = False
@@ -47,7 +49,7 @@ async def send_message(
                         "messaging_product": "whatsapp",
                         "to": str(recipient_id),
                         "type": "image",
-                        "image": {"link": str(image_url)},
+                        "image": {"link": str(image_url).strip()},
                     }
                     r_img = await client.post(url, headers=headers, json=payload, timeout=25)
                     r_img.raise_for_status()
@@ -68,6 +70,8 @@ async def send_message(
                         await asyncio.sleep(1.0)
             if not sent:
                 _log.warning("WhatsApp image skipped after retries url=%s", (str(image_url))[:80])
+                if image_delay_after_fail_sec > 0:
+                    await asyncio.sleep(image_delay_after_fail_sec)
 
         text_lines = [line.strip() for line in (text or "").split("\n") if line.strip()]
         if not text_lines:
