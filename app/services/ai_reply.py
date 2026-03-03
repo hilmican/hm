@@ -42,7 +42,8 @@ from .ai_utils import parse_height_weight, calculate_size_suggestion, detect_col
 from .prompts import get_global_system_prompt, get_serializer_prompt
 
 
-MAX_AI_IMAGES_PER_REPLY = int(os.getenv("AI_MAX_PRODUCT_IMAGES", "3"))
+# Cevapla birlikte gönderilecek max ürün görseli. AI_MAX_PRODUCT_IMAGES ile override (örn. 8 veya 10).
+MAX_AI_IMAGES_PER_REPLY = int(os.getenv("AI_MAX_PRODUCT_IMAGES", "8"))
 log = logging.getLogger("ai.reply")
 
 
