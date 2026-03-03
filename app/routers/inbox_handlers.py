@@ -101,22 +101,44 @@ async def inbox(
             params["platform"] = platform_s
         if q and isinstance(q, str) and q.strip():
             qq = f"%{q.lower().strip()}%"
-            where_parts.append("""
-                (
-                    (c.last_message_text IS NOT NULL AND LOWER(c.last_message_text) LIKE :qq)
-                    OR (c.last_sender_username IS NOT NULL AND LOWER(c.last_sender_username) LIKE :qq)
-                    OR EXISTS (
-                        SELECT 1 FROM ig_users u
-                        WHERE (u.ig_user_id = c.ig_sender_id OR u.ig_user_id = c.ig_recipient_id)
-                          AND COALESCE(u.platform, 'instagram') = COALESCE(c.platform, 'instagram')
-                          AND (
-                            (u.name IS NOT NULL AND LOWER(u.name) LIKE :qq)
-                            OR (u.username IS NOT NULL AND LOWER(u.username) LIKE :qq)
-                          )
-                    )
-                )
-            """)
             params["qq"] = qq
+            # Resolve matching ig_user_ids once (avoids slow correlated EXISTS per row)
+            q_matching_ids: list[str] = []
+            try:
+                q_id_rows = session.exec(
+                    _text("""
+                        SELECT ig_user_id FROM ig_users
+                        WHERE (username IS NOT NULL AND LOWER(username) LIKE :qq)
+                           OR (name IS NOT NULL AND LOWER(name) LIKE :qq)
+                        LIMIT 500
+                    """).params(qq=qq)
+                ).all()
+                for row in q_id_rows:
+                    uid = row.ig_user_id if hasattr(row, "ig_user_id") else (row[0] if len(row) > 0 else None)
+                    if uid:
+                        q_matching_ids.append(str(uid))
+            except Exception:
+                q_matching_ids = []
+            if q_matching_ids:
+                placeholders = ",".join([":qid" + str(i) for i in range(len(q_matching_ids))])
+                for i, uid in enumerate(q_matching_ids):
+                    params["qid" + str(i)] = uid
+                where_parts.append(f"""
+                    (
+                        (c.last_message_text IS NOT NULL AND LOWER(c.last_message_text) LIKE :qq)
+                        OR (c.last_sender_username IS NOT NULL AND LOWER(c.last_sender_username) LIKE :qq)
+                        OR c.ig_user_id IN ({placeholders})
+                        OR c.ig_sender_id IN ({placeholders})
+                        OR c.ig_recipient_id IN ({placeholders})
+                    )
+                """)
+            else:
+                where_parts.append("""
+                    (
+                        (c.last_message_text IS NOT NULL AND LOWER(c.last_message_text) LIKE :qq)
+                        OR (c.last_sender_username IS NOT NULL AND LOWER(c.last_sender_username) LIKE :qq)
+                    )
+                """)
         # Optional filter: restrict to conversations with ads/posts / unlinked ads/posts
         has_ad_s = (has_ad or "").strip().lower()
         if has_ad_s in ("yes", "true", "1", "any"):
@@ -163,7 +185,12 @@ async def inbox(
         order_sql = " ORDER BY c.last_message_timestamp_ms DESC LIMIT :n"
         params["n"] = int(sample_n)
         final_sql = base_sql + (" WHERE " + " AND ".join(where_parts) if where_parts else "") + order_sql
-        rows_raw = session.exec(_text(final_sql).params(**params)).all()
+        try:
+            rows_raw = session.exec(_text(final_sql).params(**params)).all()
+        except Exception as e:
+            import logging
+            logging.getLogger("instagram.inbox").exception("inbox main query failed: %s", e)
+            raise HTTPException(status_code=503, detail="Gelen kutusu sorgusu geçici olarak başarısız. Lütfen kısa süre sonra tekrar deneyin.")
         # Normalize rows into dicts for template use; fall back convo id when preview missing
         rows = []
         for r in rows_raw:
