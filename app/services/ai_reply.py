@@ -4,6 +4,7 @@ import datetime as dt
 import logging
 import json
 import os
+import re
 import unicodedata
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -153,17 +154,76 @@ def _decode_escape_sequences(text: str) -> str:
 			return text
 
 
+def _strip_technical_content_for_customer(text: str) -> str:
+	"""
+	Kesin kontrol: Müşteriye gidecek metinde JSON, kod blokları veya teknik çıktı kalmamalı.
+	Model bazen reply_text içine JSON/codepaste yazıyor; bu fonksiyon hepsini temizler.
+	"""
+	if not text or not isinstance(text, str):
+		return ""
+	txt = text.strip()
+	# 1) Tüm metin tek bir JSON objesi gibi başlıyorsa, sadece insan mesajı alanını çıkar
+	if txt.startswith("{") or txt.startswith("["):
+		try:
+			parsed = json.loads(txt)
+			if isinstance(parsed, dict):
+				for key in ("reply_text", "text", "message", "content"):
+					val = parsed.get(key)
+					if isinstance(val, str) and val.strip():
+						return _strip_technical_content_for_customer(val.strip())
+			# Liste ise ilk insan-benzeri string elemanı al
+			if isinstance(parsed, list):
+				for item in parsed:
+					if isinstance(item, str) and item.strip() and not item.strip().startswith("{"):
+						return _strip_technical_content_for_customer(item.strip())
+		except Exception:
+			# JSON parse edilemezse, ilk { ... } veya "reply_text":"..." bloğunu kaldır
+			m = re.search(r'"reply_text"\s*:\s*"((?:[^"\\]|\\.)*)"', txt)
+			if m:
+				extracted = m.group(1).replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"')
+				return _strip_technical_content_for_customer(extracted)
+		# JSON gibi görünüyor ama parse edilemedi; bu metni müşteriye gönderme
+		return ""
+	# 2) Markdown kod bloklarını kaldır (içeriği müşteriye gösterme)
+	txt = re.sub(r"```[\s\S]*?```", "", txt)
+	txt = re.sub(r"`[^`]*`", "", txt)
+	# 3) Satır bazında: Tamamen JSON satırı gibi görünen satırları kaldır (örn. "key": "value")
+	lines_out: List[str] = []
+	for line in txt.split("\n"):
+		line_stripped = line.strip()
+		if not line_stripped:
+			continue
+		# Çok sayıda tırnak ve iki nokta varsa JSON satırı olabilir
+		if re.search(r'^\s*"[^"]+"\s*:\s*', line_stripped) or re.search(r'^\s*[\{\}\[\],]', line_stripped):
+			continue
+		# "state": { veya "confidence": gibi teknik kalıntı satırları atla
+		if re.search(r'^\s*"(reply_text|state|confidence|reason|notes|should_reply)"\s*:', line_stripped, re.I):
+			continue
+		lines_out.append(line)
+	txt = "\n".join(lines_out)
+	# 4) Başta/sonda kalan tek tırnaklı veya çift tırnaklı sarmalayıcıları kaldır
+	txt = txt.strip()
+	if (txt.startswith('"') and txt.endswith('"')) or (txt.startswith("'") and txt.endswith("'")):
+		txt = txt[1:-1].strip()
+	# 5) İçeride kalan tekil { } [ ] karakterlerini boşlukla değiştir (kelime ortasında kalmasın)
+	txt = re.sub(r"[\{\}\[\]]", " ", txt)
+	# 6) Fazla boşlukları birleştir
+	txt = re.sub(r"[ \t]+", " ", txt).strip()
+	txt = re.sub(r"\n\s*\n", "\n\n", txt).strip()
+	return txt
+
+
 def _sanitize_reply_text(text: str) -> str:
 	"""
 	Remove control characters and normalize Unicode so that replies stay readable
 	even if the model emitted invalid escape sequences.
-
-	Strategy:
-	- Drop ASCII control chars (except tabs/newlines) that break rendering
-	- Normalize to NFKC to collapse oddities
-	- Keep original Turkish characters (IG DM supports UTF-8); do not force ASCII
+	Also strips any JSON/code so that we never send technical output to customers.
 	"""
 	if not isinstance(text, str):
+		return ""
+	# Önce teknik içeriği (JSON, kod) kesin temizle
+	text = _strip_technical_content_for_customer(text)
+	if not text:
 		return ""
 	# Remove problematic control chars but preserve newlines/tabs
 	filtered_chars: list[str] = []

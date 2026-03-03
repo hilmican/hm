@@ -900,9 +900,10 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
         except Exception:
             pass
         templates = request.app.state.templates
-        # Fetch latest AI shadow draft (suggested) for this conversation
+        # Fetch latest AI shadow draft (suggested) for this conversation.
+        # Intro-only path stores minimal state (hail_sent, cart); full path stores full state; both are handled.
         shadow = None
-        # Fetch ALL AI suggestions for this thread (not just the latest)
+        rows_shadow: list[Any] = []
         try:
             from sqlalchemy import text as _text
             rows_shadow = session.exec(
@@ -926,7 +927,7 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
                 return []
             
             def _parse_function_callbacks(raw_val: Any) -> list[dict[str, Any]]:
-                """Parse function_callbacks from json_meta."""
+                """Parse function_callbacks from json_meta. Intro-only replies have no tools, so json_meta may lack this key."""
                 if not raw_val:
                     return []
                 try:
@@ -935,12 +936,12 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
                     else:
                         parsed = raw_val
                     if isinstance(parsed, dict):
-                        # json_meta is a dict, look for function_callbacks inside it
+                        # Intro-only path stores debug_meta (intro_only, user_payload, ...) without function_callbacks
                         callbacks = parsed.get("function_callbacks", [])
                         if isinstance(callbacks, list):
                             return callbacks  # type: ignore[return-value]
+                        return []
                     elif isinstance(parsed, list):
-                        # json_meta might be a list directly (unlikely but handle it)
                         return parsed  # type: ignore[return-value]
                 except Exception:
                     pass
@@ -1004,7 +1005,14 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
                     pass
             else:
                 shadow = None
-        except Exception:
+        except Exception as _e:
+            try:
+                import logging
+                logging.getLogger("instagram.inbox").warning(
+                    "thread shadow load failed conversation_id=%s: %s", conversation_id, _e
+                )
+            except Exception:
+                pass
             rows_shadow = []
             shadow = None
         # If inline drafts enabled, merge all suggestions as virtual messages and resort by timestamp

@@ -11,7 +11,7 @@ from app.db import get_session
 from sqlalchemy import text as _text
 from sqlmodel import select
 
-from app.services.ai_reply import draft_reply, draft_reply_intro_only, _sanitize_reply_text, _select_product_images_for_reply
+from app.services.ai_reply import draft_reply, draft_reply_intro_only, _sanitize_reply_text, _strip_technical_content_for_customer, _select_product_images_for_reply
 from app.services.channel_sender import send_message as send_channel_message
 from app.services.ai_orders import get_candidate_snapshot, submit_candidate_order, mark_candidate_very_interested
 from app.models import SystemSetting, Product
@@ -1263,96 +1263,139 @@ def main() -> None:
 							loop = asyncio.new_event_loop()
 							asyncio.set_event_loop(loop)
 						
-						result = loop.run_until_complete(
-							send_channel_message(
-								platform=conversation_platform,
-								recipient_id=str(ig_user_id or ""),
-								conversation_id=conversation_id_for_send,
-								text=reply_text,
-								image_urls=image_urls_to_send if image_urls_to_send else None,
+						# Kesin kontrol: Müşteriye asla JSON/kod gitmesin
+						text_to_send = _strip_technical_content_for_customer(reply_text)
+						if not (text_to_send and text_to_send.strip()):
+							log.warning(
+								"ai_shadow: reply_text was empty or only technical content after strip; skipping send conversation_id=%s",
+								cid,
 							)
-						)
-						# Get all message IDs (send_message splits by newlines and sends multiple messages)
-						all_message_ids = result.get("message_ids") or []
-						if result.get("message_id") and result.get("message_id") not in all_message_ids:
-							all_message_ids.insert(0, result.get("message_id"))
-						sent_message_id = all_message_ids[0] if all_message_ids else None
-						log.info("ai_shadow: auto-sent reply message_ids=%s conversation_id=%s images_sent=%d", all_message_ids, cid, len(image_urls_to_send) if image_urls_to_send else 0)
-						
-						# Mark images as sent if we actually sent any
-						if image_urls_to_send:
-							images_were_sent = True
-							images_sent_products.update(auto_image_product_ids)
-							images_sent_products.update(requested_image_pids)
-							if isinstance(new_state, dict):
+							text_to_send = None
+						if text_to_send:
+							result = loop.run_until_complete(
+								send_channel_message(
+									platform=conversation_platform,
+									recipient_id=str(ig_user_id or ""),
+									conversation_id=conversation_id_for_send,
+									text=text_to_send,
+									image_urls=image_urls_to_send if image_urls_to_send else None,
+								)
+							)
+							# Get all message IDs (send_message splits by newlines and sends multiple messages)
+							all_message_ids = result.get("message_ids") or []
+							if result.get("message_id") and result.get("message_id") not in all_message_ids:
+								all_message_ids.insert(0, result.get("message_id"))
+							sent_message_id = all_message_ids[0] if all_message_ids else None
+							log.info("ai_shadow: auto-sent reply message_ids=%s conversation_id=%s images_sent=%d", all_message_ids, cid, len(image_urls_to_send) if image_urls_to_send else 0)
+							
+							# Mark images as sent if we actually sent any
+							if image_urls_to_send:
+								images_were_sent = True
+								images_sent_products.update(auto_image_product_ids)
+								images_sent_products.update(requested_image_pids)
+								if isinstance(new_state, dict):
+									try:
+										new_state["images_sent_product_ids"] = sorted(images_sent_products)
+									except Exception:
+										new_state["images_sent_product_ids"] = list(images_sent_products)
+									# Ensure cart is always a list before saving
+									if "cart" not in new_state or not isinstance(new_state.get("cart"), list):
+										new_state["cart"] = []
+								state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
 								try:
-									new_state["images_sent_product_ids"] = sorted(images_sent_products)
-								except Exception:
-									new_state["images_sent_product_ids"] = list(images_sent_products)
-								# Ensure cart is always a list before saving
-								if "cart" not in new_state or not isinstance(new_state.get("cart"), list):
-									new_state["cart"] = []
-							state_json_dump = json.dumps(new_state, ensure_ascii=False) if new_state else None
-							try:
-								with get_session() as session:
-									session.exec(
-										_text(
-											"UPDATE ai_shadow_state SET ai_images_sent=1 WHERE conversation_id=:cid"
-										).params(cid=int(cid))
-									)
-							except Exception:
-								pass
-						
-						# Persist ALL sent messages to Message table to prevent re-processing via webhooks
-						if all_message_ids:
-							try:
-								with get_session() as session:
-									from app.models import Message
-									from sqlmodel import select
-									import os
-									entity_id = (
-										(os.getenv("WA_PHONE_NUMBER_ID") or "")
-										if str(conversation_platform).lower() == "whatsapp"
-										else (os.getenv("IG_PAGE_ID") or os.getenv("IG_USER_ID") or "")
-									)
-									now_ms = _now_ms()
-									# Split reply_text by newlines to match the messages that were sent
-									text_lines = [line.strip() for line in reply_text.split('\n') if line.strip()]
-									if not text_lines:
-										text_lines = [reply_text.strip()]
-									# Image messages (if any) come first; map text lines only to the last N ids
-									text_start_idx = max(0, len(all_message_ids) - len(text_lines))
-									
-									# Persist each message with its corresponding text line
-									for idx, msg_id in enumerate(all_message_ids):
-										if not msg_id:
-											continue
-										is_text_msg = idx >= text_start_idx
-										msg_text = (
-											text_lines[idx - text_start_idx]
-											if is_text_msg and (idx - text_start_idx) < len(text_lines)
-											else None
+									with get_session() as session:
+										session.exec(
+											_text(
+												"UPDATE ai_shadow_state SET ai_images_sent=1 WHERE conversation_id=:cid"
+											).params(cid=int(cid))
 										)
-
-										# Check if message already exists
-										existing = session.exec(
-											select(Message).where(
-												Message.ig_message_id == str(msg_id),
-												Message.platform == str(conversation_platform or "instagram"),
+								except Exception:
+									pass
+							
+							# Persist ALL sent messages to Message table to prevent re-processing via webhooks
+							if all_message_ids:
+								try:
+									with get_session() as session:
+										from app.models import Message
+										from sqlmodel import select
+										import os
+										entity_id = (
+											(os.getenv("WA_PHONE_NUMBER_ID") or "")
+											if str(conversation_platform).lower() == "whatsapp"
+											else (os.getenv("IG_PAGE_ID") or os.getenv("IG_USER_ID") or "")
+										)
+										now_ms = _now_ms()
+										# Split reply_text by newlines to match the messages that were sent
+										text_lines = [line.strip() for line in text_to_send.split('\n') if line.strip()]
+										if not text_lines:
+											text_lines = [text_to_send.strip()]
+										# Image messages (if any) come first; map text lines only to the last N ids
+										text_start_idx = max(0, len(all_message_ids) - len(text_lines))
+										
+										# Persist each message with its corresponding text line
+										for idx, msg_id in enumerate(all_message_ids):
+											if not msg_id:
+												continue
+											is_text_msg = idx >= text_start_idx
+											msg_text = (
+												text_lines[idx - text_start_idx]
+												if is_text_msg and (idx - text_start_idx) < len(text_lines)
+												else None
 											)
-										).first()
 
-										if existing:
-											# Backfill missing text/ai_status/ai_json on webhook echoes that arrive without text
-											needs_update = False
-											if msg_text and not (getattr(existing, "text", None) or "").strip():
-												existing.text = msg_text
-												needs_update = True
-											if getattr(existing, "ai_status", None) != "sent":
-												existing.ai_status = "sent"
-												needs_update = True
-											if not getattr(existing, "ai_json", None):
-												existing.ai_json = json.dumps(
+											# Check if message already exists
+											existing = session.exec(
+												select(Message).where(
+													Message.ig_message_id == str(msg_id),
+													Message.platform == str(conversation_platform or "instagram"),
+												)
+											).first()
+
+											if existing:
+												# Backfill missing text/ai_status/ai_json on webhook echoes that arrive without text
+												needs_update = False
+												if msg_text and not (getattr(existing, "text", None) or "").strip():
+													existing.text = msg_text
+													needs_update = True
+												if getattr(existing, "ai_status", None) != "sent":
+													existing.ai_status = "sent"
+													needs_update = True
+												if not getattr(existing, "ai_json", None):
+													existing.ai_json = json.dumps(
+														{
+															"auto_sent": True,
+															"confidence": confidence,
+															"reason": data.get("reason"),
+															"state": new_state,
+															"message_index": idx,
+															"total_messages": len(all_message_ids),
+															"is_text": is_text_msg,
+														},
+														ensure_ascii=False,
+													)
+													needs_update = True
+												if needs_update:
+													session.add(existing)
+												continue
+
+											# Categorize message based on state and content
+											message_category = _categorize_outbound_message(new_state, function_callbacks, msg_text)
+											
+											# Insert new row
+											msg = Message(
+												platform=str(conversation_platform or "instagram"),
+												ig_sender_id=str(entity_id),
+												ig_recipient_id=str(ig_user_id) if ig_user_id else None,
+												ig_message_id=str(msg_id),
+												text=msg_text,
+												timestamp_ms=now_ms + idx,  # Slight offset to maintain order
+												conversation_id=int(cid),
+												direction="out",
+												ai_status="sent",
+												sender_type="ai",  # Explicitly mark as AI-generated
+												product_id=current_focus_pid,  # Store product focus for this message
+												message_category=message_category,  # Categorize message for bulk processing
+												ai_json=json.dumps(
 													{
 														"auto_sent": True,
 														"confidence": confidence,
@@ -1363,49 +1406,15 @@ def main() -> None:
 														"is_text": is_text_msg,
 													},
 													ensure_ascii=False,
-												)
-												needs_update = True
-											if needs_update:
-												session.add(existing)
-											continue
-
-										# Categorize message based on state and content
-										message_category = _categorize_outbound_message(new_state, function_callbacks, msg_text)
-										
-										# Insert new row
-										msg = Message(
-											platform=str(conversation_platform or "instagram"),
-											ig_sender_id=str(entity_id),
-											ig_recipient_id=str(ig_user_id) if ig_user_id else None,
-											ig_message_id=str(msg_id),
-											text=msg_text,
-											timestamp_ms=now_ms + idx,  # Slight offset to maintain order
-											conversation_id=int(cid),
-											direction="out",
-											ai_status="sent",
-											sender_type="ai",  # Explicitly mark as AI-generated
-											product_id=current_focus_pid,  # Store product focus for this message
-											message_category=message_category,  # Categorize message for bulk processing
-											ai_json=json.dumps(
-												{
-													"auto_sent": True,
-													"confidence": confidence,
-													"reason": data.get("reason"),
-													"state": new_state,
-													"message_index": idx,
-													"total_messages": len(all_message_ids),
-													"is_text": is_text_msg,
-												},
-												ensure_ascii=False,
-											),
-										)
-										session.add(msg)
-									session.commit()
-							except Exception as persist_err:
-								try:
-									log.warning("persist sent messages error cid=%s err=%s", cid, persist_err)
-								except Exception:
-									pass
+												),
+											)
+											session.add(msg)
+										session.commit()
+								except Exception as persist_err:
+									try:
+										log.warning("persist sent messages error cid=%s err=%s", cid, persist_err)
+									except Exception:
+										pass
 					except Exception as send_err:
 						try:
 							log.warning("auto-send error cid=%s err=%s", cid, send_err)
