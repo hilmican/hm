@@ -759,11 +759,21 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
                 pass
         if link_context.get("link_id"):
             try:
-                link_context["ad_edit_url"] = f"/ads/{link_context['link_id']}/edit"
+                link_type = (link_context.get("link_type") or "").strip().lower()
+                raw_id = str(link_context["link_id"]).strip()
+                if link_type == "story" or raw_id.startswith("story:"):
+                    story_id = raw_id.replace("story:", "", 1) if raw_id.startswith("story:") else raw_id
+                    link_context["ad_edit_url"] = f"/stories/{story_id}/edit"
+                    link_context["link_edit_label"] = "Story düzenle"
+                else:
+                    link_context["ad_edit_url"] = f"/ads/{raw_id}/edit"
+                    link_context["link_edit_label"] = "Gönderi düzenle" if link_type == "post" else "İlintili reklam düzenle"
             except Exception:
                 link_context["ad_edit_url"] = None
+                link_context["link_edit_label"] = "Düzenle"
         else:
             link_context["ad_edit_url"] = None
+            link_context["link_edit_label"] = None
 
         # Resolve per-message sender usernames via ig_users only.
         # Enqueue missing ones for background enrichment instead of fetching inline.

@@ -71,11 +71,11 @@
       <a class="action" href="/ig/inbox/{{ conversation_id }}/debug" title="AI Debug">AI Debug</a>
       <button id="refresh">Refresh</button>
       <details class="debug-reset-details" style="margin-left:auto;">
-        <summary style="cursor:pointer; color:#6b7280; font-size:13px;">Debug: Konuşmayı sıfırla</summary>
+        <summary style="cursor:pointer; color:#6b7280; font-size:13px;">Eski mesajları sil & Konuşmayı sıfırla (Debug)</summary>
         <form id="debugResetForm" method="post" action="/ig/inbox/{{ conversation_id }}/debug/reset" style="margin-top:10px; padding:12px; border:1px solid #e5e7eb; border-radius:8px; background:#f9fafb; max-width:420px;">
           <div style="display:flex; flex-direction:column; gap:10px;">
             <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
-              <input type="checkbox" name="clear_messages" value="true"> Mesajları sil (bu konuşmadaki tüm mesajlar)
+              <input type="checkbox" name="clear_messages" value="true" id="debugClearMessages"> Eski mesajları sil (bu konuşmadaki tüm mesajlar)
             </label>
             <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
               <input type="checkbox" name="reset_ai_state" value="true"> AI durumunu sıfırla (shadow + state)
@@ -122,6 +122,11 @@
               <a class="meta" href="/ig/ai/products?focus={{ lc.product_slug }}" target="_blank" rel="noopener">(AI talimatlarını düzenle)</a>
             {% endif %}
           </div>
+          {% if lc.product_slug %}
+          <div style="margin-top:6px;">
+            <a class="action" href="/ig/ai/products?focus={{ lc.product_slug }}" target="_blank" rel="noopener" style="font-size:13px; padding:6px 12px;">Ürün AI talimatını düzenle</a>
+          </div>
+          {% endif %}
         {% elif lc.has_link %}
           <div class="meta">
             Bağlı {{ lc.link_type or 'ad' }}: {{ lc.link_id or lc.ad_id }}
@@ -129,6 +134,11 @@
               <a class="meta" href="{{ lc.ad_edit_url }}" target="_blank" rel="noopener">düzenle ↗</a>
             {% endif %}
           </div>
+          {% if lc.ad_edit_url %}
+          <div style="margin-top:6px;">
+            <a class="action" href="{{ lc.ad_edit_url }}" target="_blank" rel="noopener" style="font-size:13px; padding:6px 12px;">{{ lc.link_edit_label or 'İlintili reklam düzenle' }}</a>
+          </div>
+          {% endif %}
         {% else %}
           <div class="meta" style="color:#b91c1c;">Henüz reklama/ürüne bağlanmadı.</div>
           <div style="margin-top:8px; padding:8px; background:#fef3c7; border:1px solid #fbbf24; border-radius:8px;">
