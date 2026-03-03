@@ -265,6 +265,15 @@ kubectl logs -n hm -l app=hm-worker-ingest -f --tail=50
 
 Sonra yeni bir DM atıp birkaç saniye içinde inbox’ta görünüp görünmediğine bakın.
 
+### Geçmiş loglarda görülen hata: "asyncio referenced before assignment"
+
+Konuşma 1683 için loglar:
+
+- **Hata:** `auto-send error cid=1683 err=local variable 'asyncio' referenced before assignment`
+- **Sebep:** Instagram tarafında mesaj/görsel gönderilirken, `send_message` içinde koşullu `import asyncio` (ör. sadece metin satırları arası gecikmede) kullanıldığı için Python `asyncio`'yu yerel değişken sayıyor; koşul gerçekleşmeyen dallarda (ör. tek satır metin veya önce görsel gönderilirken) bu yerel hiç atanmadan kullanılıyordu → "referenced before assignment".
+- **Sonuç:** İlk görsel gitti, sonra bu exception yüzünden metin ve kalan görseller gönderilmedi (sadece 1 görsel + karşılama metni yok).
+- **Çözüm:** `instagram_api.py` içinde sadece modül seviyesinde `import asyncio` kullanılmalı; fonksiyon içinde `import asyncio` **eklenmemeli**. Mevcut kod bu şekilde düzeltilmiş durumda.
+
 ### Reply worker loglarını inceleme (tek görsel / beklenmedik gönderim)
 
 Konuşma sıfırlandıktan sonra mesaj atmadan tek görsel geliyorsa: worker, mesaj listesi boş olan konuşmayı yine de "due" görüp intro + görsel gönderebiliyordu. Artık **en az bir inbound mesaj yoksa** worker cevap üretmiyor (60 sn postpone). Eski davranışın logları:

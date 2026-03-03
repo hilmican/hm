@@ -55,58 +55,86 @@ async def send_message(
 
     sent_image_count = 0
     async with httpx.AsyncClient() as client:
-        for i, image_url in enumerate(urls_to_send):
-            if i > 0 and image_delay_sec > 0:
-                await asyncio.sleep(image_delay_sec)
-            sent = False
-            for attempt in range(2):
-                try:
-                    payload = {
-                        "messaging_product": "whatsapp",
-                        "to": str(recipient_id),
-                        "type": "image",
-                        "image": {"link": str(image_url).strip()},
-                    }
-                    r_img = await client.post(url, headers=headers, json=payload, timeout=25)
-                    r_img.raise_for_status()
-                    data_img = r_img.json() if r_img.content else {}
-                    msg_id = ((data_img.get("messages") or [{}])[0]).get("id")
-                    if msg_id:
-                        message_ids.append(str(msg_id))
-                        sent = True
-                        sent_image_count += 1
-                    break
-                except httpx.HTTPStatusError as e:
-                    try:
-                        body = (e.response.text or "")[:500]
-                        code = getattr(e.response, "status_code", None)
-                    except Exception:
-                        body = str(e)[:500]
-                        code = None
-                    _log.warning(
-                        "WhatsApp image API error attempt=%s status=%s url=%s body=%s",
-                        attempt + 1,
-                        code,
-                        (str(image_url))[:80],
-                        body,
-                    )
-                    if attempt == 0:
-                        await asyncio.sleep(1.0)
-                except Exception as e:
-                    _log.warning(
-                        "WhatsApp image send exception attempt=%s url=%s err=%s",
-                        attempt + 1,
-                        (str(image_url))[:80],
-                        str(e)[:300],
-                    )
-                    if attempt == 0:
-                        await asyncio.sleep(1.0)
-            if not sent:
-                _log.warning("WhatsApp image skipped after retries url=%s", (str(image_url))[:80])
-                if image_delay_after_fail_sec > 0:
-                    await asyncio.sleep(image_delay_after_fail_sec)
+        # 1) Send text first so user always gets welcome message even if images hit rate limit
+        text_lines = [line.strip() for line in (text or "").split("\n") if line.strip()]
+        if not text_lines:
+            text_lines = [str(text or "").strip()] if (text or "").strip() else []
+        if text_lines:
+            _log.info(
+                "WhatsApp send_message: sending %d text line(s) first to=%s",
+                len(text_lines),
+                (recipient_id[:20] if recipient_id else ""),
+            )
+            for line in text_lines:
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "to": str(recipient_id),
+                    "type": "text",
+                    "text": {"body": line},
+                }
+                r = await client.post(url, headers=headers, json=payload, timeout=20)
+                r.raise_for_status()
+                data = r.json() if r.content else {}
+                msg_id = ((data.get("messages") or [{}])[0]).get("id")
+                if msg_id:
+                    message_ids.append(str(msg_id))
+        elif urls_to_send:
+            _log.warning("WhatsApp send_message: text empty, sending only images to=%s", (recipient_id[:20] if recipient_id else ""))
 
+        # 2) Then send images
         if urls_to_send:
+            await asyncio.sleep(0.5)
+            for i, image_url in enumerate(urls_to_send):
+                if i > 0 and image_delay_sec > 0:
+                    await asyncio.sleep(image_delay_sec)
+                sent = False
+                for attempt in range(2):
+                    try:
+                        payload = {
+                            "messaging_product": "whatsapp",
+                            "to": str(recipient_id),
+                            "type": "image",
+                            "image": {"link": str(image_url).strip()},
+                        }
+                        r_img = await client.post(url, headers=headers, json=payload, timeout=25)
+                        r_img.raise_for_status()
+                        data_img = r_img.json() if r_img.content else {}
+                        msg_id = ((data_img.get("messages") or [{}])[0]).get("id")
+                        if msg_id:
+                            message_ids.append(str(msg_id))
+                            sent = True
+                            sent_image_count += 1
+                        break
+                    except httpx.HTTPStatusError as e:
+                        try:
+                            body = (e.response.text or "")[:500]
+                            code = getattr(e.response, "status_code", None)
+                        except Exception:
+                            body = str(e)[:500]
+                            code = None
+                        _log.warning(
+                            "WhatsApp image API error attempt=%s status=%s url=%s body=%s",
+                            attempt + 1,
+                            code,
+                            (str(image_url))[:80],
+                            body,
+                        )
+                        if attempt == 0:
+                            await asyncio.sleep(1.0)
+                    except Exception as e:
+                        _log.warning(
+                            "WhatsApp image send exception attempt=%s url=%s err=%s",
+                            attempt + 1,
+                            (str(image_url))[:80],
+                            str(e)[:300],
+                        )
+                        if attempt == 0:
+                            await asyncio.sleep(1.0)
+                if not sent:
+                    _log.warning("WhatsApp image skipped after retries url=%s", (str(image_url))[:80])
+                    if image_delay_after_fail_sec > 0:
+                        await asyncio.sleep(image_delay_after_fail_sec)
+
             _log.info(
                 "WhatsApp send_message: image summary sent=%d requested=%d to=%s",
                 sent_image_count,
@@ -119,23 +147,6 @@ async def send_message(
                     sent_image_count,
                     len(urls_to_send),
                 )
-
-        text_lines = [line.strip() for line in (text or "").split("\n") if line.strip()]
-        if not text_lines:
-            text_lines = [str(text or "").strip()]
-        for line in text_lines:
-            payload = {
-                "messaging_product": "whatsapp",
-                "to": str(recipient_id),
-                "type": "text",
-                "text": {"body": line},
-            }
-            r = await client.post(url, headers=headers, json=payload, timeout=20)
-            r.raise_for_status()
-            data = r.json() if r.content else {}
-            msg_id = ((data.get("messages") or [{}])[0]).get("id")
-            if msg_id:
-                message_ids.append(str(msg_id))
 
     result: Dict[str, Any] = {
         "message_id": (message_ids[0] if message_ids else None),

@@ -641,40 +641,80 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
         return False
 
     async with httpx.AsyncClient() as client:
-        # 1) Send image messages first (if any); aralarda gecikme, başarısızdan sonra ek bekleme
+        # 1) Send TEXT first so the user always gets the welcome message even if images hit rate limit
+        if text and text.strip():
+            text_lines = [line.strip() for line in text.split('\n') if line.strip()]
+            if not text_lines:
+                text_lines = [text.strip()]
+            _log.info(
+                "Instagram send_message: sending %d text line(s) first recipient_id=%s",
+                len(text_lines),
+                recipient_id[:20] if recipient_id else "",
+            )
+            for idx, line_text in enumerate(text_lines):
+                payload = {
+                    "recipient": {"id": recipient_id},
+                    "messaging_type": "RESPONSE",
+                    "message": {"text": line_text},
+                }
+                try:
+                    r = await client.post(url, params={"access_token": token}, json=payload, timeout=20)
+                    r.raise_for_status()
+                    resp = r.json()
+                    if resp.get("message_id"):
+                        if idx == 0:
+                            results["message_id"] = resp["message_id"]
+                        results["message_ids"].append(resp["message_id"])
+                    if idx < len(text_lines) - 1:
+                        await asyncio.sleep(0.3)
+                except httpx.HTTPStatusError as e:
+                    try:
+                        detail = e.response.text
+                    except Exception:
+                        detail = str(e)
+                    raise RuntimeError(f"Graph send failed (message {idx + 1}/{len(text_lines)}): {detail}")
+                except Exception as e:
+                    raise RuntimeError(f"Graph send failed (message {idx + 1}/{len(text_lines)}): {e}")
+        elif (image_urls or []) and not (text or "").strip():
+            _log.warning(
+                "Instagram send_message: text empty, sending only images recipient_id=%s",
+                recipient_id[:20] if recipient_id else "",
+            )
+
+        # 2) Then send images; short delay after text to reduce rate limit
         n_images = len(absolute_image_urls)
         if n_images:
+            await asyncio.sleep(0.5)
             _log.info(
                 "Instagram send_message: recipient_id=%s image_count=%d (from %d requested)",
                 recipient_id[:20] if recipient_id else "",
                 n_images,
                 len(image_urls or []),
             )
-        sent_count = 0
-        for i, img_url in enumerate(absolute_image_urls):
-            if i > 0 and image_delay_sec > 0:
-                await asyncio.sleep(image_delay_sec)
-            ok = await _send_one_image(img_url)
-            if ok:
-                sent_count += 1
-                mid = results["message_ids"][-1] if results["message_ids"] else None
-                _log.info(
-                    "Instagram image sent idx=%d/%d message_id=%s url=%s",
-                    i + 1,
-                    n_images,
-                    mid,
-                    (img_url[:60] + "..." if len(img_url) > 60 else img_url),
-                )
-            else:
-                _log.warning(
-                    "Instagram image failed idx=%d/%d url=%s",
-                    i + 1,
-                    n_images,
-                    (img_url[:60] + "..." if len(img_url) > 60 else img_url),
-                )
-                if image_delay_after_fail_sec > 0:
-                    await asyncio.sleep(image_delay_after_fail_sec)
-        if n_images:
+            sent_count = 0
+            for i, img_url in enumerate(absolute_image_urls):
+                if i > 0 and image_delay_sec > 0:
+                    await asyncio.sleep(image_delay_sec)
+                ok = await _send_one_image(img_url)
+                if ok:
+                    sent_count += 1
+                    mid = results["message_ids"][-1] if results["message_ids"] else None
+                    _log.info(
+                        "Instagram image sent idx=%d/%d message_id=%s url=%s",
+                        i + 1,
+                        n_images,
+                        mid,
+                        (img_url[:60] + "..." if len(img_url) > 60 else img_url),
+                    )
+                else:
+                    _log.warning(
+                        "Instagram image failed idx=%d/%d url=%s",
+                        i + 1,
+                        n_images,
+                        (img_url[:60] + "..." if len(img_url) > 60 else img_url),
+                    )
+                    if image_delay_after_fail_sec > 0:
+                        await asyncio.sleep(image_delay_after_fail_sec)
             results["image_message_count"] = sent_count
             _log.info(
                 "Instagram send_message: image summary sent=%d requested=%d recipient_id=%s",
@@ -688,45 +728,6 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
                     sent_count,
                     n_images,
                 )
-
-        # 2) Send the text message(s) - split by newlines to send each line separately
-        if text and text.strip():
-            # Split text by newlines and filter out empty lines
-            text_lines = [line.strip() for line in text.split('\n') if line.strip()]
-            
-            if not text_lines:
-                # If all lines were empty after stripping, send the original text as-is
-                text_lines = [text.strip()]
-            
-            # Send each line as a separate message
-            for idx, line_text in enumerate(text_lines):
-                payload = {
-                    "recipient": {"id": recipient_id},
-                    "messaging_type": "RESPONSE",
-                    "message": {"text": line_text},
-                }
-                try:
-                    r = await client.post(url, params={"access_token": token}, json=payload, timeout=20)
-                    r.raise_for_status()
-                    resp = r.json()
-                    if resp.get("message_id"):
-                        # Store the first message_id as the primary one
-                        if idx == 0:
-                            results["message_id"] = resp["message_id"]
-                        results["message_ids"].append(resp["message_id"])
-                    
-                    # Add a small delay between messages to avoid rate limiting (except for the last one)
-                    if idx < len(text_lines) - 1:
-                        import asyncio
-                        await asyncio.sleep(0.3)  # 300ms delay between messages
-                except httpx.HTTPStatusError as e:
-                    try:
-                        detail = e.response.text
-                    except Exception:
-                        detail = str(e)
-                    raise RuntimeError(f"Graph send failed (message {idx + 1}/{len(text_lines)}): {detail}")
-                except Exception as e:
-                    raise RuntimeError(f"Graph send failed (message {idx + 1}/{len(text_lines)}): {e}")
     
     return results
 
