@@ -41,6 +41,26 @@
         Eşleşen ve güncellenen: {{ request.query_params.get('synced', 0) }} ürün. Sitede olup HMA'da bulunmayan: {{ request.query_params.get('missing_in_hma', 0) }}.
         {% endif %}
     </div>
+    {% if sync_missing_list %}
+    <div class="sync-missing" style="margin:10px 0;padding:12px 14px;border-radius:8px;background:#fffbeb;border:1px solid #fcd34d;">
+        <h4 style="margin:0 0 8px 0;font-size:14px;color:#92400e;">HMA'da eşleşmeyen ürünler (himan.com.tr'de var)</h4>
+        <p style="margin:0 0 8px 0;font-size:12px;color:#78350f;">Bu slug'lara sahip ürünler sitede var ama HMA ürün listesinde yok. HMA'da ürün oluşturup slug'ı eşleştirin veya siteden kaldırın.</p>
+        <table style="width:100%;font-size:13px;border-collapse:collapse;">
+            <thead>
+                <tr style="text-align:left;border-bottom:1px solid #fcd34d;"><th style="padding:6px 8px;">Slug</th><th style="padding:6px 8px;">Ad (himan.com.tr)</th><th style="padding:6px 8px;">İşlem</th></tr>
+            </thead>
+            <tbody>
+                {% for m in sync_missing_list %}
+                <tr style="border-bottom:1px solid #fef3c7;">
+                    <td style="padding:6px 8px;"><code>{{ m.slug }}</code></td>
+                    <td style="padding:6px 8px;">{{ m.name or '-' }}</td>
+                    <td style="padding:6px 8px;"><a href="https://www.himan.com.tr/product/{{ m.slug }}/" target="_blank" rel="noopener">Sitede aç →</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
     {% endif %}
     <div class="card" style="padding:12px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:14px;">
         <h3 style="margin:0 0 8px 0; font-size:15px;">Urun Olustur</h3>

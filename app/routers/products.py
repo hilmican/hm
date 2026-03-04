@@ -91,6 +91,17 @@ def create_product(
 
 @router.get("/table")
 def products_table(request: Request, limit: int = Query(default=10000, ge=1, le=100000)):
+    sync_missing_list = []
+    if "synced" in request.query_params or "missing_in_hma" in request.query_params:
+        try:
+            from ..services.queue import _get_redis
+            import json
+            r = _get_redis()
+            raw = r.get("hm:sync_all_missing")
+            if raw:
+                sync_missing_list = json.loads(raw)
+        except Exception:
+            pass
     with get_session() as session:
         rows = session.exec(select(Product).order_by(Product.id.desc()).limit(limit)).all()
         suppliers = session.exec(select(Supplier).order_by(Supplier.name.asc())).all()
@@ -102,7 +113,7 @@ def products_table(request: Request, limit: int = Query(default=10000, ge=1, le=
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "products_table.html",
-            {"request": request, "rows": rows, "suppliers": suppliers_json, "limit": limit},
+            {"request": request, "rows": rows, "suppliers": suppliers_json, "limit": limit, "sync_missing_list": sync_missing_list},
         )
 
 

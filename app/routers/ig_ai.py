@@ -874,6 +874,7 @@ def sync_all_products_from_himan(
     base = base_url.rstrip("/")
     updated = 0
     missing_in_hma = 0
+    missing_list: list[dict] = []  # himan.com.tr'de olup HMA'da eşleşmeyenler: [{slug, name}]
     page = 1
     per_page = 100
     with get_session() as session:
@@ -899,6 +900,8 @@ def sync_all_products_from_himan(
                     select(Product).where(Product.slug == slug)).first()
                 if not prod:
                     missing_in_hma += 1
+                    name = (woo_prod.get("name") or "").strip()
+                    missing_list.append({"slug": slug, "name": name or slug})
                     continue
                 desc = (woo_prod.get("description") or "").strip()
                 prod.description = desc or None
@@ -922,6 +925,14 @@ def sync_all_products_from_himan(
             if len(products) < per_page:
                 break
             page += 1
+    # Sonuç: eşleşmeyen ürün listesini Redis'e yaz (ürünler tablosunda gösterilecek)
+    try:
+        from ..services.queue import _get_redis
+        import json
+        r = _get_redis()
+        r.setex("hm:sync_all_missing", 3600, json.dumps(missing_list, ensure_ascii=False))
+    except Exception:
+        pass
     from urllib.parse import urlencode
     q = urlencode({"synced": updated, "missing_in_hma": missing_in_hma})
     return RedirectResponse(url=f"{redirect}?{q}", status_code=303)
