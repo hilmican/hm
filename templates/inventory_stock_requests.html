@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stok Istekleri</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin: 10px 0 14px; }
+        .toolbar input, .toolbar select, .toolbar button { padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; }
+        .toolbar button { background:#111827; color:#fff; cursor:pointer; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 10px; border-bottom: 1px solid #eceff3; text-align: left; font-size: 13px; vertical-align: top; }
+        th { background: #f8fafc; }
+        tr:nth-child(even) { background:#fcfcfd; }
+        .status-new { color:#1d4ed8; font-weight:600; }
+        .status-reviewed { color:#92400e; font-weight:600; }
+        .status-fulfilled { color:#166534; font-weight:600; }
+        .status-rejected { color:#b91c1c; font-weight:600; }
+        .small { color:#64748b; font-size:12px; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <h2>Stok Istekleri</h2>
+    <form class="toolbar" method="get" action="/inventory/stock-requests/table">
+        <input type="search" name="q" value="{{ q }}" placeholder="urun, sku, beden, renk" />
+        <select name="status">
+            <option value="">Durum (tum)</option>
+            <option value="new" {% if status == 'new' %}selected{% endif %}>new</option>
+            <option value="reviewed" {% if status == 'reviewed' %}selected{% endif %}>reviewed</option>
+            <option value="fulfilled" {% if status == 'fulfilled' %}selected{% endif %}>fulfilled</option>
+            <option value="rejected" {% if status == 'rejected' %}selected{% endif %}>rejected</option>
+        </select>
+        <input type="date" name="start" value="{{ start.isoformat() if start else '' }}" />
+        <input type="date" name="end" value="{{ end.isoformat() if end else '' }}" />
+        <input type="number" name="limit" min="1" max="5000" value="{{ limit }}" style="width:100px;" />
+        <button type="submit">Filtrele</button>
+    </form>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Tarih</th>
+                <th>Urun</th>
+                <th>SKU / Varyant</th>
+                <th>Istenen</th>
+                <th>Kaynak</th>
+                <th>Durum</th>
+                <th>Aksiyon</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td>#{{ r.id }}</td>
+                <td>
+                    {{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '-' }}
+                    {% if r.processed_at %}
+                    <div class="small">islem: {{ r.processed_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                    {% endif %}
+                </td>
+                <td>
+                    {{ r.product_name or '-' }}
+                    <div class="small">item_id={{ r.item_id or '-' }} / product_id={{ r.product_id or '-' }}</div>
+                </td>
+                <td>
+                    {{ r.sku or '-' }}
+                    <div class="small">{{ r.size or '-' }} / {{ r.color or '-' }}</div>
+                </td>
+                <td>{{ r.requested_qty }}</td>
+                <td>
+                    {{ r.source_site or '-' }}
+                    {% if r.source_url %}
+                    <div><a href="{{ r.source_url }}" target="_blank" rel="noopener noreferrer">Kaynak Link</a></div>
+                    {% endif %}
+                    {% if r.reason %}
+                    <div class="small">neden: {{ r.reason }}</div>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="status-{{ r.status }}">{{ r.status }}</span>
+                </td>
+                <td>
+                    <select id="status-{{ r.id }}">
+                        <option value="new" {% if r.status == 'new' %}selected{% endif %}>new</option>
+                        <option value="reviewed" {% if r.status == 'reviewed' %}selected{% endif %}>reviewed</option>
+                        <option value="fulfilled" {% if r.status == 'fulfilled' %}selected{% endif %}>fulfilled</option>
+                        <option value="rejected" {% if r.status == 'rejected' %}selected{% endif %}>rejected</option>
+                    </select>
+                    <button type="button" onclick="saveStatus({{ r.id }})">Kaydet</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <script>
+    async function saveStatus(id){
+        const sel = document.getElementById('status-' + id);
+        if(!sel) return;
+        const status = sel.value;
+        const res = await fetch('/inventory/stock-requests/' + id, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({status})
+        });
+        if (!res.ok){
+            alert('Kaydetme hatasi');
+            return;
+        }
+        location.reload();
+    }
+    </script>
+</body>
+</html>

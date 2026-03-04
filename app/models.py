@@ -131,6 +131,30 @@ class StockMovement(SQLModel, table=True):
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 
+class StockRequest(SQLModel, table=True):
+    __tablename__ = "stock_request"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    product_id: Optional[int] = Field(default=None, foreign_key="product.id", index=True)
+    item_id: Optional[int] = Field(default=None, foreign_key="item.id", index=True)
+    sku: Optional[str] = Field(default=None, index=True)
+    product_name: Optional[str] = Field(default=None, index=True)
+    size: Optional[str] = Field(default=None, index=True)
+    color: Optional[str] = Field(default=None, index=True)
+    requested_qty: int = Field(default=1)
+    reason: Optional[str] = Field(default="out_of_stock", index=True)
+    source_site: Optional[str] = Field(default="himan.com.tr", index=True)
+    source_url: Optional[str] = None
+    customer_note: Optional[str] = Field(default=None, sa_column=Column(Text))
+    requester_ip: Optional[str] = Field(default=None, index=True)
+    user_agent: Optional[str] = Field(default=None, sa_column=Column(Text))
+    status: str = Field(default="new", index=True, description="new|reviewed|fulfilled|rejected")
+    metadata_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+    processed_at: Optional[dt.datetime] = Field(default=None, index=True)
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+    updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
 class Product(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True)

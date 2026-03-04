@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import datetime as dt
+import json
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Item, Product, StockMovement, Order, ProductSizeChart, Supplier
+from ..models import Item, Product, StockMovement, StockRequest, Order, ProductSizeChart, Supplier
 from ..services.inventory import get_stock_map, recalc_orders_from_mappings, adjust_stock
 
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
+
+
+def _ensure_authenticated(request: Request) -> None:
+    if not request.session.get("uid"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @router.get("/attributes")
@@ -209,6 +217,172 @@ def list_movements(item_id: Optional[int] = Query(default=None), limit: int = Qu
                 for m in rows
             ]
         }
+
+
+@router.post("/stock-requests/public")
+def create_stock_request_public(body: Dict[str, Any], request: Request):
+    token_expected = (os.getenv("HMA_STOCK_REQUEST_TOKEN") or "").strip()
+    if token_expected:
+        header_token = (request.headers.get("x-stock-request-token") or "").strip()
+        auth_header = (request.headers.get("authorization") or "").strip()
+        bearer_token = ""
+        if auth_header.lower().startswith("bearer "):
+            bearer_token = auth_header[7:].strip()
+        if header_token != token_expected and bearer_token != token_expected:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    sku = str(body.get("sku") or "").strip()
+    product_name = str(body.get("product_name") or body.get("name") or "").strip()
+    size = str(body.get("size") or "").strip()
+    color = str(body.get("color") or "").strip()
+    reason = str(body.get("reason") or "out_of_stock").strip() or "out_of_stock"
+    source_site = str(body.get("source_site") or "himan.com.tr").strip() or "himan.com.tr"
+    source_url = str(body.get("source_url") or "").strip() or None
+    customer_note = str(body.get("customer_note") or "").strip() or None
+    requested_qty = int(body.get("requested_qty") or body.get("quantity") or 1)
+    if requested_qty <= 0:
+        requested_qty = 1
+
+    product_id = body.get("product_id")
+    item_id = body.get("item_id")
+    try:
+        product_id = int(product_id) if product_id is not None else None
+    except Exception:
+        product_id = None
+    try:
+        item_id = int(item_id) if item_id is not None else None
+    except Exception:
+        item_id = None
+
+    requester_ip = request.headers.get("x-forwarded-for") or request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+
+    with get_session() as session:
+        item = None
+        if item_id:
+            item = session.exec(select(Item).where(Item.id == item_id)).first()
+        if item is None and sku:
+            item = session.exec(select(Item).where(Item.sku == sku)).first()
+        if item is not None:
+            if item.id is not None:
+                item_id = int(item.id)
+            if not product_id and item.product_id:
+                product_id = int(item.product_id)
+            if not product_name:
+                product_name = item.name
+            if not size and item.size:
+                size = item.size
+            if not color and item.color:
+                color = item.color
+            if not sku:
+                sku = item.sku
+
+        row = StockRequest(
+            product_id=product_id,
+            item_id=item_id,
+            sku=sku or None,
+            product_name=product_name or None,
+            size=size or None,
+            color=color or None,
+            requested_qty=requested_qty,
+            reason=reason,
+            source_site=source_site,
+            source_url=source_url,
+            customer_note=customer_note,
+            requester_ip=requester_ip,
+            user_agent=user_agent,
+            status="new",
+            metadata_json=json.dumps(body, ensure_ascii=False),
+            created_at=dt.datetime.utcnow(),
+            updated_at=dt.datetime.utcnow(),
+        )
+        session.add(row)
+        session.flush()
+        new_id = int(row.id or 0)
+        return {"status": "ok", "stock_request_id": new_id}
+
+
+@router.get("/stock-requests/table")
+def stock_requests_table(
+    request: Request,
+    status: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None),
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=5000),
+):
+    _ensure_authenticated(request)
+
+    def _parse_date(value: Optional[str]) -> Optional[dt.date]:
+        if not value:
+            return None
+        try:
+            return dt.date.fromisoformat(str(value))
+        except Exception:
+            return None
+
+    start_date = _parse_date(start)
+    end_date = _parse_date(end)
+    query_text = (q or "").strip()
+
+    with get_session() as session:
+        qry = select(StockRequest)
+        if status:
+            qry = qry.where(StockRequest.status == status)
+        if start_date:
+            qry = qry.where(StockRequest.created_at >= dt.datetime.combine(start_date, dt.time.min))
+        if end_date:
+            qry = qry.where(StockRequest.created_at <= dt.datetime.combine(end_date, dt.time.max))
+        if query_text:
+            like = f"%{query_text}%"
+            from sqlalchemy import or_
+            qry = qry.where(
+                or_(
+                    StockRequest.product_name.like(like),
+                    StockRequest.sku.like(like),
+                    StockRequest.size.like(like),
+                    StockRequest.color.like(like),
+                    StockRequest.source_site.like(like),
+                )
+            )
+        rows = session.exec(qry.order_by(StockRequest.id.desc()).limit(limit)).all()
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "inventory_stock_requests.html",
+            {
+                "request": request,
+                "rows": rows,
+                "status": status or "",
+                "q": query_text,
+                "start": start_date,
+                "end": end_date,
+                "limit": limit,
+            },
+        )
+
+
+@router.patch("/stock-requests/{stock_request_id}")
+def update_stock_request(stock_request_id: int, body: Dict[str, Any], request: Request):
+    _ensure_authenticated(request)
+    allowed_status = {"new", "reviewed", "fulfilled", "rejected"}
+    new_status = str(body.get("status") or "").strip().lower()
+    if new_status and new_status not in allowed_status:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    with get_session() as session:
+        row = session.exec(select(StockRequest).where(StockRequest.id == stock_request_id)).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Stock request not found")
+        if new_status:
+            row.status = new_status
+            if new_status in {"fulfilled", "rejected"}:
+                row.processed_at = dt.datetime.utcnow()
+        note = body.get("customer_note")
+        if isinstance(note, str):
+            row.customer_note = note.strip() or None
+        row.updated_at = dt.datetime.utcnow()
+        session.add(row)
+        return {"status": "ok"}
 
 
 @router.get("/movements/table")
