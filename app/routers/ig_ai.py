@@ -632,37 +632,122 @@ def add_category(
     return RedirectResponse(url="/ig/ai/categories", status_code=303)
 
 
+def _fetch_categories_from_woo(
+    base_url: str, consumer_key: str, consumer_secret: str
+) -> tuple[list[dict], list[dict]]:
+    """
+    Fetch categories and product->category assignments from WooCommerce REST API (himan.com.tr).
+    Returns (categories list, product_categories list) for sync payload.
+    """
+    import httpx
+
+    base = base_url.rstrip("/")
+    auth = (consumer_key, consumer_secret)
+    categories: list[dict] = []
+    product_categories: list[dict] = []
+
+    with httpx.Client(timeout=30.0) as client:
+        # WooCommerce product_cat: /wp-json/wc/v3/products/categories
+        page = 1
+        per_page = 100
+        while True:
+            r = client.get(
+                f"{base}/wp-json/wc/v3/products/categories",
+                auth=auth,
+                params={"per_page": per_page, "page": page},
+            )
+            r.raise_for_status()
+            chunk = r.json()
+            if not chunk:
+                break
+            for c in chunk:
+                name_s = (c.get("name") or "").strip()
+                slug_s = (c.get("slug") or "").strip()
+                if name_s and slug_s and (slug_s != "uncategorized"):
+                    categories.append({"name": name_s, "slug": slug_s})
+            if len(chunk) < per_page:
+                break
+            page += 1
+
+        # Products with their categories (product slug -> category slugs)
+        page = 1
+        while True:
+            r = client.get(
+                f"{base}/wp-json/wc/v3/products",
+                auth=auth,
+                params={"per_page": per_page, "page": page},
+            )
+            r.raise_for_status()
+            products = r.json()
+            if not products:
+                break
+            for p in products:
+                prod_slug = (p.get("slug") or "").strip()
+                if not prod_slug:
+                    continue
+                for cat in p.get("categories") or []:
+                    cat_slug = (cat.get("slug") or "").strip()
+                    if cat_slug and cat_slug != "uncategorized":
+                        product_categories.append(
+                            {"product_slug": prod_slug, "category_slug": cat_slug}
+                        )
+            if len(products) < per_page:
+                break
+            page += 1
+
+    return categories, product_categories
+
+
 @router.get("/categories/sync-from-himan")
 def sync_categories_from_himan():
     """
-    Placeholder: sync categories and product–category assignments from himan.com.tr.
-    Set HIMAN_CATEGORIES_API_URL (and optionally HIMAN_PRODUCTS_API_URL) to enable.
-    Sync direction can be himan -> HMA (pull) or HMA -> himan (push); this endpoint is for pull.
+    Sync categories and product–category assignments from himan.com.tr (WooCommerce).
+    Configure either:
+    - WooCommerce REST API: HIMAN_WOO_BASE_URL, HIMAN_WOO_CONSUMER_KEY, HIMAN_WOO_CONSUMER_SECRET
+    - Or custom JSON endpoint: HIMAN_CATEGORIES_API_URL returning {categories, product_categories}
     """
     import os
     import httpx
 
+    from ..models import ProductCategory, ProductCategoryLink, Product
+
+    data: dict = {}
+    woo_base = os.getenv("HIMAN_WOO_BASE_URL", "").strip()
+    woo_key = os.getenv("HIMAN_WOO_CONSUMER_KEY", "").strip()
+    woo_secret = os.getenv("HIMAN_WOO_CONSUMER_SECRET", "").strip()
     api_url = os.getenv("HIMAN_CATEGORIES_API_URL", "").strip()
-    if not api_url:
+
+    if woo_base and woo_key and woo_secret:
+        try:
+            categories_list, product_categories_list = _fetch_categories_from_woo(
+                woo_base, woo_key, woo_secret
+            )
+            data = {
+                "categories": categories_list,
+                "product_categories": product_categories_list,
+            }
+        except Exception as e:
+            return {"ok": False, "message": f"WooCommerce API hatası: {e}"}
+    elif api_url:
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                r = client.get(api_url)
+                r.raise_for_status()
+                data = r.json()
+        except Exception as e:
+            return {"ok": False, "message": f"himan.com.tr isteği başarısız: {e}"}
+    else:
         return {
             "ok": False,
-            "message": "HIMAN_CATEGORIES_API_URL ortam değişkeni tanımlı değil. himan.com.tr API adresini set edin.",
-            "hint": "Kategorileri manuel eklemek için /ig/ai/categories sayfasını kullanın.",
+            "message": "himan.com.tr senkronu için tanım yok. WooCommerce kullanıyorsanız HIMAN_WOO_BASE_URL, HIMAN_WOO_CONSUMER_KEY, HIMAN_WOO_CONSUMER_SECRET tanımlayın.",
+            "hint": "himansite projesi /Users/hilmibaycan/Projeler-Aktif/himansite; WooCommerce REST API (himan.com.tr) için Consumer Key/Secret: WooCommerce → Ayarlar → Gelişmiş → REST API.",
+            "alt_hint": "Kategorileri manuel eklemek için /ig/ai/categories sayfasını kullanın.",
         }
-    try:
-        with httpx.Client(timeout=15.0) as client:
-            r = client.get(api_url)
-            r.raise_for_status()
-            data = r.json()
-    except Exception as e:
-        return {"ok": False, "message": f"himan.com.tr isteği başarısız: {e}"}
-    # Expected: data = {"categories": [{"name": "...", "slug": "..."}], "product_categories": [{"product_slug": "...", "category_slug": "..."}]}
-    from ..models import ProductCategory, ProductCategoryLink, Product
 
     categories = data.get("categories") or []
     product_categories = data.get("product_categories") or []
+    created = 0
     with get_session() as session:
-        created = 0
         for c in categories:
             name_s = (c.get("name") or "").strip()
             slug_s = (c.get("slug") or "").strip()
@@ -673,7 +758,6 @@ def sync_categories_from_himan():
                 session.add(ProductCategory(name=name_s, slug=slug_s))
                 created += 1
         session.flush()
-        # Assign products to categories
         for pc in product_categories:
             prod_slug = (pc.get("product_slug") or "").strip()
             cat_slug = (pc.get("category_slug") or "").strip()
@@ -690,7 +774,12 @@ def sync_categories_from_himan():
                 ).first()
                 if not existing_link:
                     session.add(ProductCategoryLink(product_id=prod.id, category_id=cat.id))
-    return {"ok": True, "categories_synced": len(categories), "created": created, "product_links": len(product_categories)}
+    return {
+        "ok": True,
+        "categories_synced": len(categories),
+        "created": created,
+        "product_links": len(product_categories),
+    }
 
 
 @router.post("/products/images/upload")
