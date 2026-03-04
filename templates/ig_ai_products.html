@@ -24,6 +24,56 @@
         <a href="/ig/ai/products/{{ focus }}/review" style="color: #2563eb; text-decoration: none;">📊 İnceleme Sayfasına Git →</a>
       </span>
     </div>
+
+    <h2 style="margin-top:24px;">Ürün detayları</h2>
+    <p class="meta">Ürün adı, fiyat, renk, birim ve maliyet. Slug, isimden otomatik türetilir.</p>
+    <form method="post" action="/ig/ai/products/details/save" style="margin-top:12px;">
+      <input type="hidden" name="focus" value="{{ focus }}" />
+      <div class="row" style="grid-template-columns: 1fr 1fr 1fr; gap:12px;">
+        <div class="field">
+          <label>Ürün adı</label>
+          <input type="text" name="name" value="{{ name }}" required />
+        </div>
+        <div class="field">
+          <label>Varsayılan fiyat (TL)</label>
+          <input type="text" name="default_price" placeholder="örn. 299.00" value="{{ default_price or '' }}" />
+        </div>
+        <div class="field">
+          <label>Varsayılan renk</label>
+          <input type="text" name="default_color" placeholder="örn. Lacivert" value="{{ default_color or '' }}" />
+        </div>
+        <div class="field">
+          <label>Birim</label>
+          <input type="text" name="default_unit" value="{{ default_unit or 'adet' }}" />
+        </div>
+        <div class="field">
+          <label>Maliyet (TL)</label>
+          <input type="text" name="default_cost" placeholder="opsiyonel" value="{{ default_cost or '' }}" />
+        </div>
+      </div>
+      <button type="submit" style="margin-top:10px;">Detayları kaydet</button>
+    </form>
+
+    <h2 style="margin-top:24px;">Kategoriler</h2>
+    <p class="meta">Ürünü birden fazla kategoride gösterebilirsiniz. Kategoriler himan.com.tr senkronu ile de doldurulabilir.</p>
+    {% if categories %}
+    <form method="post" action="/ig/ai/products/categories/save" style="margin-top:12px;">
+      <input type="hidden" name="focus" value="{{ focus }}" />
+      <div style="display:flex; flex-wrap:wrap; gap:10px 20px; align-items:center;">
+        {% for cat in categories %}
+        <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-weight:normal;">
+          <input type="checkbox" name="category_ids[]" value="{{ cat.id }}" {% if cat.id in product_category_ids %}checked{% endif %} style="width:18px; height:18px;" />
+          {{ cat.name }}
+        </label>
+        {% endfor %}
+      </div>
+      <button type="submit" style="margin-top:12px;">Kategorileri kaydet</button>
+    </form>
+    {% else %}
+    <p class="meta">Henüz kategori tanımlanmamış. Kategorileri eklemek için <a href="/ig/ai/categories">Kategori yönetimi</a> veya himan.com.tr senkron scriptini kullanın.</p>
+    {% endif %}
+
+    <h2 style="margin-top:24px;">AI Mesajları</h2>
     <form method="post" action="/ig/ai/products/save" style="margin-top:16px">
       <input type="hidden" name="focus" value="{{ focus }}" />
       <div class="field">

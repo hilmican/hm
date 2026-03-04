@@ -368,11 +368,11 @@ def start_process(body: dict):
 @router.get("/products")
 def product_ai_page(request: Request, focus: str):
     """
-    Edit AI instructions for a single product identified by slug or name.
-    Renders ig_ai_products.html with current ai_system_msg / ai_prompt_msg / pretext_id
+    Edit AI instructions and product details for a single product identified by slug or name.
+    Renders ig_ai_products.html with product details, categories, ai_system_msg / ai_prompt_msg
     and product image configuration.
     """
-    from ..models import Product, AIPretext, ProductImage, Item
+    from ..models import Product, AIPretext, ProductImage, Item, ProductCategory, ProductCategoryLink
 
     focus_s = (focus or "").strip()
     if not focus_s:
@@ -418,6 +418,18 @@ def product_ai_page(request: Request, focus: str):
             select(Item).where(Item.product_id == row.id).order_by(Item.id.asc())
         ).all()
         sku_list = [it.sku for it in items if getattr(it, "sku", None)]
+
+        # All categories (for multi-select); himan.com.tr sync can populate these
+        all_categories = session.exec(
+            select(ProductCategory).order_by(ProductCategory.position.asc(), ProductCategory.name.asc())
+        ).all()
+        category_list = [{"id": c.id, "name": c.name, "slug": c.slug} for c in all_categories]
+
+        # This product's category ids
+        links = session.exec(
+            select(ProductCategoryLink).where(ProductCategoryLink.product_id == row.id)
+        ).all()
+        product_category_ids = [link.category_id for link in links]
         
         name = row.name or focus_s
     templates = request.app.state.templates
@@ -427,6 +439,11 @@ def product_ai_page(request: Request, focus: str):
             "request": request,
             "focus": row.slug or focus_s,
             "name": name,
+            "product_id": row.id,
+            "default_price": row.default_price,
+            "default_color": row.default_color or "",
+            "default_unit": row.default_unit or "adet",
+            "default_cost": row.default_cost,
             "ai_system_msg": row.ai_system_msg or "",
             "ai_prompt_msg": row.ai_prompt_msg or "",
             "pretext_id": row.pretext_id,
@@ -434,6 +451,8 @@ def product_ai_page(request: Request, focus: str):
             "images": image_list,
             "skus": sku_list,
             "ai_reply_sending_enabled": getattr(row, "ai_reply_sending_enabled", True),
+            "categories": category_list,
+            "product_category_ids": product_category_ids,
         },
     )
 
@@ -487,6 +506,191 @@ def save_product_ai(
     # Redirect back to the edit page for this product
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url=f"/ig/ai/products?focus={prod.slug or focus_s}", status_code=303)
+
+
+@router.post("/products/details/save")
+def save_product_details(
+    focus: str = Form(...),
+    name: str = Form(default=""),
+    default_price: str = Form(default=""),
+    default_color: str = Form(default=""),
+    default_unit: str = Form(default="adet"),
+    default_cost: str = Form(default=""),
+):
+    """Persist product details (name, slug, price, color, unit, cost) for the focused product."""
+    from ..models import Product
+    from ..utils.slugify import slugify
+    from fastapi.responses import RedirectResponse
+
+    focus_s = (focus or "").strip()
+    name_s = (name or "").strip()
+    if not focus_s:
+        raise HTTPException(status_code=400, detail="focus is required")
+    if not name_s:
+        raise HTTPException(status_code=400, detail="name is required")
+    with get_session() as session:
+        prod = session.exec(
+            select(Product).where((Product.slug == focus_s) | (Product.name == focus_s)).limit(1)
+        ).first()
+        if not prod:
+            raise HTTPException(status_code=404, detail="Product not found for focus")
+        new_slug = slugify(name_s)
+        if new_slug != (prod.slug or ""):
+            existing = session.exec(
+                select(Product).where(Product.slug == new_slug, Product.id != prod.id)
+            ).first()
+            if existing:
+                raise HTTPException(status_code=409, detail="Başka bir ürün aynı isim/slug ile mevcut")
+        prod.name = name_s
+        prod.slug = new_slug
+        try:
+            prod.default_price = float(default_price) if default_price and default_price.strip() else None
+        except ValueError:
+            prod.default_price = None
+        prod.default_color = default_color.strip() or None
+        prod.default_unit = default_unit.strip() or "adet"
+        try:
+            prod.default_cost = float(default_cost) if default_cost and default_cost.strip() else None
+        except ValueError:
+            prod.default_cost = None
+        session.add(prod)
+    return RedirectResponse(url=f"/ig/ai/products?focus={new_slug}", status_code=303)
+
+
+@router.post("/products/categories/save")
+async def save_product_categories(request: Request, focus: str = Form(...)):
+    """Persist product category links (multi-select). Receives category_ids[] from form."""
+    from ..models import Product, ProductCategoryLink, ProductCategory
+    from fastapi.responses import RedirectResponse
+
+    focus_s = (focus or "").strip()
+    if not focus_s:
+        raise HTTPException(status_code=400, detail="focus is required")
+    form = await request.form()
+    category_ids = form.getlist("category_ids[]") if hasattr(form, "getlist") else []
+    if not category_ids:
+        cat = form.get("category_ids[]") or form.get("category_ids")
+        category_ids = [cat] if isinstance(cat, str) else (list(cat) if cat else [])
+
+    with get_session() as session:
+        prod = session.exec(
+            select(Product).where((Product.slug == focus_s) | (Product.name == focus_s)).limit(1)
+        ).first()
+        if not prod:
+            raise HTTPException(status_code=404, detail="Product not found for focus")
+        for link in session.exec(select(ProductCategoryLink).where(ProductCategoryLink.product_id == prod.id)).all():
+            session.delete(link)
+        valid_ids = set()
+        for cid in category_ids:
+            try:
+                valid_ids.add(int(cid))
+            except (TypeError, ValueError):
+                pass
+        for cid in valid_ids:
+            cat = session.exec(select(ProductCategory).where(ProductCategory.id == cid)).first()
+            if cat:
+                session.add(ProductCategoryLink(product_id=prod.id, category_id=cat.id))
+    return RedirectResponse(url=f"/ig/ai/products?focus={prod.slug or focus_s}", status_code=303)
+
+
+@router.get("/categories")
+def categories_page(request: Request):
+    """List product categories and form to add new. Used for multi-select on product page."""
+    from ..models import ProductCategory
+
+    with get_session() as session:
+        cats = session.exec(
+            select(ProductCategory).order_by(ProductCategory.position.asc(), ProductCategory.name.asc())
+        ).all()
+        category_list = [{"id": c.id, "name": c.name, "slug": c.slug, "position": c.position} for c in cats]
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        "ig_ai_categories.html",
+        {"request": request, "categories": category_list},
+    )
+
+
+@router.post("/categories/add")
+def add_category(
+    name: str = Form(...),
+    slug: str = Form(default=""),
+):
+    """Add a product category. Slug defaults to slugify(name)."""
+    from ..models import ProductCategory
+    from ..utils.slugify import slugify
+    from fastapi.responses import RedirectResponse
+
+    name_s = (name or "").strip()
+    if not name_s:
+        raise HTTPException(status_code=400, detail="name is required")
+    slug_s = (slug or "").strip() or slugify(name_s)
+    with get_session() as session:
+        existing = session.exec(select(ProductCategory).where(ProductCategory.slug == slug_s)).first()
+        if existing:
+            raise HTTPException(status_code=409, detail="Bu slug ile kategori zaten var")
+        session.add(ProductCategory(name=name_s, slug=slug_s))
+    return RedirectResponse(url="/ig/ai/categories", status_code=303)
+
+
+@router.get("/categories/sync-from-himan")
+def sync_categories_from_himan():
+    """
+    Placeholder: sync categories and product–category assignments from himan.com.tr.
+    Set HIMAN_CATEGORIES_API_URL (and optionally HIMAN_PRODUCTS_API_URL) to enable.
+    Sync direction can be himan -> HMA (pull) or HMA -> himan (push); this endpoint is for pull.
+    """
+    import os
+    import httpx
+
+    api_url = os.getenv("HIMAN_CATEGORIES_API_URL", "").strip()
+    if not api_url:
+        return {
+            "ok": False,
+            "message": "HIMAN_CATEGORIES_API_URL ortam değişkeni tanımlı değil. himan.com.tr API adresini set edin.",
+            "hint": "Kategorileri manuel eklemek için /ig/ai/categories sayfasını kullanın.",
+        }
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            r = client.get(api_url)
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        return {"ok": False, "message": f"himan.com.tr isteği başarısız: {e}"}
+    # Expected: data = {"categories": [{"name": "...", "slug": "..."}], "product_categories": [{"product_slug": "...", "category_slug": "..."}]}
+    from ..models import ProductCategory, ProductCategoryLink, Product
+
+    categories = data.get("categories") or []
+    product_categories = data.get("product_categories") or []
+    with get_session() as session:
+        created = 0
+        for c in categories:
+            name_s = (c.get("name") or "").strip()
+            slug_s = (c.get("slug") or "").strip()
+            if not name_s or not slug_s:
+                continue
+            existing = session.exec(select(ProductCategory).where(ProductCategory.slug == slug_s)).first()
+            if not existing:
+                session.add(ProductCategory(name=name_s, slug=slug_s))
+                created += 1
+        session.flush()
+        # Assign products to categories
+        for pc in product_categories:
+            prod_slug = (pc.get("product_slug") or "").strip()
+            cat_slug = (pc.get("category_slug") or "").strip()
+            if not prod_slug or not cat_slug:
+                continue
+            prod = session.exec(select(Product).where(Product.slug == prod_slug)).first()
+            cat = session.exec(select(ProductCategory).where(ProductCategory.slug == cat_slug)).first()
+            if prod and cat:
+                existing_link = session.exec(
+                    select(ProductCategoryLink).where(
+                        ProductCategoryLink.product_id == prod.id,
+                        ProductCategoryLink.category_id == cat.id,
+                    )
+                ).first()
+                if not existing_link:
+                    session.add(ProductCategoryLink(product_id=prod.id, category_id=cat.id))
+    return {"ok": True, "categories_synced": len(categories), "created": created, "product_links": len(product_categories)}
 
 
 @router.post("/products/images/upload")

@@ -973,6 +973,43 @@ def init_db() -> None:
                             pass
                 except Exception:
                     pass
+                # Product categories (multi-select); sync from himan.com.tr possible
+                try:
+                    conn.exec_driver_sql(
+                        """
+                        CREATE TABLE IF NOT EXISTS product_categories (
+                            id INT PRIMARY KEY AUTO_INCREMENT,
+                            name VARCHAR(255) NOT NULL,
+                            slug VARCHAR(255) NOT NULL,
+                            position INT NOT NULL DEFAULT 0,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            UNIQUE KEY uq_product_categories_slug (slug),
+                            INDEX idx_product_categories_slug (slug),
+                            INDEX idx_product_categories_position (position)
+                        )
+                        """
+                    )
+                except Exception:
+                    pass
+                try:
+                    conn.exec_driver_sql(
+                        """
+                        CREATE TABLE IF NOT EXISTS product_category_link (
+                            id INT PRIMARY KEY AUTO_INCREMENT,
+                            product_id INT NOT NULL,
+                            category_id INT NOT NULL,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            UNIQUE KEY uq_product_category_link (product_id, category_id),
+                            INDEX idx_pcl_product (product_id),
+                            INDEX idx_pcl_category (category_id),
+                            FOREIGN KEY (product_id) REFERENCES product(id) ON DELETE CASCADE,
+                            FOREIGN KEY (category_id) REFERENCES product_categories(id) ON DELETE CASCADE
+                        )
+                        """
+                    )
+                except Exception:
+                    pass
                 # Ensure ai_pretext table exists
                 try:
                     conn.exec_driver_sql(

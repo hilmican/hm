@@ -195,6 +195,27 @@ class ProductUpsell(SQLModel, table=True):
 	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 
+class ProductCategory(SQLModel, table=True):
+	"""Category for merchandising/storefront; can be synced from himan.com.tr."""
+	__tablename__ = "product_categories"
+	id: Optional[int] = Field(default=None, primary_key=True)
+	name: str = Field(index=True, description="Display name (e.g. Gömlek)")
+	slug: str = Field(index=True, unique=True, description="URL/sync key (e.g. gomlek)")
+	position: int = Field(default=0, index=True, description="Display order")
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+	updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
+class ProductCategoryLink(SQLModel, table=True):
+	"""Many-to-many: which categories a product belongs to."""
+	__tablename__ = "product_category_link"
+	__table_args__ = (UniqueConstraint("product_id", "category_id", name="uq_product_category_link"),)
+	id: Optional[int] = Field(default=None, primary_key=True)
+	product_id: int = Field(foreign_key="product.id", index=True)
+	category_id: int = Field(foreign_key="product_categories.id", index=True)
+	created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
 class SizeChart(SQLModel, table=True):
 	"""Reusable size chart that can be attached to products."""
 

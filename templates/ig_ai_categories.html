@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Ürün Kategorileri</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+      .field { margin-bottom: 12px; }
+      label { display:block; font-weight:600; margin-bottom:6px; color:#111827; }
+      input[type="text"] { width:100%; max-width:320px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:8px; }
+      button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:10px 14px; cursor:pointer; }
+      .meta { color:#6b7280; font-size:12px; margin-bottom:8px; }
+      table { border-collapse: collapse; margin-top:12px; }
+      th, td { padding:8px 12px; text-align:left; border-bottom:1px solid #e5e7eb; }
+    </style>
+  </head>
+  <body>
+    {% include "_nav.html" %}
+    <h1>Ürün Kategorileri</h1>
+    <p class="meta">Bu kategoriler ürün sayfasında çoktan seçmeli olarak kullanılır. himan.com.tr senkronu ile de doldurulabilir.</p>
+    <p style="margin-top:8px;">
+      <a href="/ig/ai/categories/sync-from-himan" style="color:#2563eb;">himan.com.tr'den kategorileri çek</a>
+      (HIMAN_CATEGORIES_API_URL tanımlıysa çalışır)
+    </p>
+
+    <h2 style="margin-top:20px;">Yeni kategori ekle</h2>
+    <form method="post" action="/ig/ai/categories/add" style="margin-top:8px;">
+      <div class="field">
+        <label>Ad</label>
+        <input type="text" name="name" placeholder="örn. Gömlek" required />
+      </div>
+      <div class="field">
+        <label>Slug (opsiyonel; boş bırakılırsa isimden üretilir)</label>
+        <input type="text" name="slug" placeholder="örn. gomlek" />
+      </div>
+      <button type="submit">Ekle</button>
+    </form>
+
+    <h2 style="margin-top:24px;">Mevcut kategoriler</h2>
+    {% if categories %}
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Ad</th><th>Slug</th><th>Sıra</th></tr>
+      </thead>
+      <tbody>
+        {% for c in categories %}
+        <tr>
+          <td>{{ c.id }}</td>
+          <td>{{ c.name }}</td>
+          <td>{{ c.slug }}</td>
+          <td>{{ c.position }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="meta">Henüz kategori yok. Yukarıdan ekleyin.</p>
+    {% endif %}
+  </body>
+</html>
