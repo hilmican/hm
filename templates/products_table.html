@@ -30,7 +30,18 @@
     {% include "_nav.html" %}
     <div class="toolbar">
         <span class="pill">{{ rows|length }} urun</span>
+        <a href="/ig/ai/products/sync-all-from-himan?redirect=/products/table" class="himan-sync-btn" style="display:inline-flex;align-items:center;gap:6px;background:#059669;color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none;font-weight:600;">himan.com.tr'den topluca veri al</a>
+        <span class="meta" style="font-size:12px;color:#6b7280;">Fiyat, indirim ve satış durumunu siteden çeker; HMA ürünleriyle slug eşleştirir.</span>
     </div>
+    {% if 'synced' in request.query_params or 'sync_error' in request.query_params %}
+    <div class="sync-result" style="margin:10px 0;padding:10px 14px;border-radius:8px;background:{% if request.query_params.get('sync_error') %}#fef2f2;color:#b91c1c{% else %}#ecfdf5;color:#047857{% endif %};">
+        {% if request.query_params.get('sync_error') %}
+        Hata: {% if request.query_params.get('sync_error') == 'woo_not_configured' %}WooCommerce API tanımlı değil (HIMAN_WOO_*).{% elif request.query_params.get('sync_error') == 'fetch_failed' %}himan.com.tr isteği başarısız.{% else %}Bilinmeyen.{% endif %}
+        {% else %}
+        Eşleşen ve güncellenen: {{ request.query_params.get('synced', 0) }} ürün. Sitede olup HMA'da bulunmayan: {{ request.query_params.get('missing_in_hma', 0) }}.
+        {% endif %}
+    </div>
+    {% endif %}
     <div class="card" style="padding:12px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:14px;">
         <h3 style="margin:0 0 8px 0; font-size:15px;">Urun Olustur</h3>
         <form id="createForm" onsubmit="return false;" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -47,7 +58,7 @@
     <h2>Urunler</h2>
     <table id="prodTbl">
         <thead>
-            <tr><th>ID</th><th>Ad</th><th>Slug</th><th>Kategori</th><th>Birim</th><th>Varsayilan Fiyat</th><th>Varsayilan Maliyet</th><th>AI Hariç Beden/Renk</th><th>AI Cevap</th><th>AI</th><th>Islemler</th></tr>
+            <tr><th>ID</th><th>Ad</th><th>Slug</th><th>Kategori</th><th>Birim</th><th>Varsayilan Fiyat</th><th>Varsayilan Maliyet</th><th>himan.com.tr Fiyat</th><th>himan İndirim</th><th>himan Satış</th><th>AI Hariç Beden/Renk</th><th>AI Cevap</th><th>AI</th><th>Islemler</th></tr>
         </thead>
         <tbody>
             {% for p in rows %}
@@ -59,6 +70,9 @@
                 <td><input data-field="default_unit" value="{{ p.default_unit }}" /></td>
                 <td><input data-field="default_price" type="number" step="0.01" value="{{ p.default_price }}" /></td>
                 <td><input data-field="default_cost" type="number" step="0.01" value="{{ p.default_cost }}" /></td>
+                <td>{{ p.himan_price or '-' }}</td>
+                <td>{% if p.himan_sale_price and p.himan_price and p.himan_sale_price < p.himan_price %}{{ p.himan_sale_price }} TL{% else %}-{% endif %}</td>
+                <td>{% if p.himan_status == 'publish' %}<span style="color:#059669;">Satışta</span>{% elif p.himan_status == 'draft' %}<span style="color:#d97706;">Taslak</span>{% elif p.himan_status == 'private' %}<span style="color:#6b7280;">Gizli</span>{% else %}{{ p.himan_status or '-' }}{% endif %}</td>
                 <td>
                     <textarea data-field="ai_variant_exclusions" style="width:220px;min-height:60px;" placeholder='JSON veya "s,m,color:red"'>{{ p.ai_variant_exclusions or "" }}</textarea>
                 </td>

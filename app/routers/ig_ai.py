@@ -818,6 +818,8 @@ def pull_product_from_himan(focus: str):
         regular_price, sale_price = _woo_get_product_prices(base_url, auth, woo_prod)
         prod.himan_price = regular_price
         prod.himan_sale_price = sale_price
+        # Satış durumu (publish=Satışta, draft=Taslak, private=Gizli)
+        prod.himan_status = (woo_prod.get("status") or "").strip() or None
         # Sync categories: Woo category slugs -> HMA ProductCategoryLink
         woo_cats = woo_prod.get("categories") or []
         woo_slugs = [str(c.get("slug") or "").strip() for c in woo_cats if (c.get("slug") or "").strip()]
@@ -831,6 +833,82 @@ def pull_product_from_himan(focus: str):
                 session.add(ProductCategoryLink(product_id=prod.id, category_id=cat.id))
         session.add(prod)
     return RedirectResponse(url=f"/ig/ai/products?focus={focus_s}", status_code=303)
+
+
+@router.get("/products/sync-all-from-himan")
+def sync_all_products_from_himan(
+    redirect: str = Query(default="/products/table"),
+):
+    """
+    himan.com.tr (WooCommerce) tüm ürünleri çekip HMA ürünleriyle eşleştirir.
+    Fiyat, indirim, satış durumu (publish/draft/private), açıklama ve kategoriler güncellenir.
+    Ürünler tablosundan 'himan.com.tr\'den topluca veri al' ile tetiklenir.
+    """
+    from ..models import Product, ProductCategory, ProductCategoryLink
+    from fastapi.responses import RedirectResponse
+    import httpx
+
+    woo = _woo_client()
+    if not woo:
+        return RedirectResponse(
+            url=f"{redirect}?sync_error=woo_not_configured",
+            status_code=303,
+        )
+    base_url, key, secret = woo
+    auth = (key, secret)
+    base = base_url.rstrip("/")
+    updated = 0
+    missing_in_hma = 0
+    page = 1
+    per_page = 100
+    with get_session() as session:
+        while True:
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    r = client.get(
+                        f"{base}/wp-json/wc/v3/products",
+                        auth=auth,
+                        params={"per_page": per_page, "page": page},
+                    )
+                    r.raise_for_status()
+                    products = r.json()
+            except Exception:
+                return RedirectResponse(url=f"{redirect}?sync_error=fetch_failed", status_code=303)
+            if not products:
+                break
+            for woo_prod in products:
+                slug = (woo_prod.get("slug") or "").strip()
+                if not slug:
+                    continue
+                prod = session.exec(
+                    select(Product).where(Product.slug == slug)).first()
+                if not prod:
+                    missing_in_hma += 1
+                    continue
+                desc = (woo_prod.get("description") or "").strip()
+                prod.description = desc or None
+                regular_price, sale_price = _woo_get_product_prices(base_url, auth, woo_prod)
+                prod.himan_price = regular_price
+                prod.himan_sale_price = sale_price
+                prod.himan_status = (woo_prod.get("status") or "").strip() or None
+                woo_cats = woo_prod.get("categories") or []
+                woo_slugs = [str(c.get("slug") or "").strip() for c in woo_cats if (c.get("slug") or "").strip()]
+                for link in session.exec(select(ProductCategoryLink).where(ProductCategoryLink.product_id == prod.id)).all():
+                    session.delete(link)
+                for cat_slug in woo_slugs:
+                    if cat_slug == "uncategorized":
+                        continue
+                    cat = session.exec(select(ProductCategory).where(ProductCategory.slug == cat_slug)).first()
+                    if cat:
+                        session.add(ProductCategoryLink(product_id=prod.id, category_id=cat.id))
+                session.add(prod)
+                updated += 1
+            if len(products) < per_page:
+                break
+            page += 1
+    from urllib.parse import urlencode
+    q = urlencode({"synced": updated, "missing_in_hma": missing_in_hma})
+    return RedirectResponse(url=f"{redirect}?{q}", status_code=303)
 
 
 @router.get("/categories")

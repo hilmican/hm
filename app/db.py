@@ -977,6 +977,8 @@ def init_db() -> None:
                         conn.exec_driver_sql("ALTER TABLE product ADD COLUMN himan_price DOUBLE NULL")
                     if 'himan_sale_price' not in have_cols:
                         conn.exec_driver_sql("ALTER TABLE product ADD COLUMN himan_sale_price DOUBLE NULL")
+                    if 'himan_status' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN himan_status VARCHAR(32) NULL")
                 except Exception:
                     pass
                 # Product categories (multi-select); sync from himan.com.tr possible
