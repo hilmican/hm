@@ -620,15 +620,14 @@ def _woo_format_price(value: Optional[float]) -> str:
     return str(round(value, 2))
 
 
-def _woo_update_product(base_url: str, auth: tuple, woo_id: int, payload: dict) -> bool:
-    """PATCH product on WooCommerce. Returns True on success."""
+def _woo_update_product(base_url: str, auth: tuple, woo_id: int, payload: dict) -> tuple[bool, int, str]:
+    """PATCH product on WooCommerce. Returns (success, status_code, response_text)."""
     import httpx
     base = base_url.rstrip("/")
     with httpx.Client(timeout=15.0) as client:
         r = client.patch(f"{base}/wp-json/wc/v3/products/{woo_id}", auth=auth, json=payload)
-        if r.status_code not in (200, 201):
-            return False
-        return True
+        body = (r.text or "")[:500]
+        return (r.status_code in (200, 201), r.status_code, body)
 
 
 def _woo_update_variations_prices(
@@ -749,10 +748,15 @@ def save_product_details(
                     if prod.himan_price is not None:
                         patch_payload["sale_price"] = sale_str
                     if patch_payload:
-                        _woo_update_product(base_url, auth, woo_id, patch_payload)
+                        ok, status, body = _woo_update_product(base_url, auth, woo_id, patch_payload)
+                        if ok:
+                            log.info("himan push ok slug=%s woo_id=%s payload=%s", new_slug, woo_id, patch_payload)
+                        else:
+                            log.warning("himan push failed slug=%s woo_id=%s status=%s body=%s", new_slug, woo_id, status, body)
                     # Variable ürünlerde sitede görünen fiyat varyasyonlardan gelir; hepsini güncelle
                     if woo_prod.get("type") == "variable" and (reg_str or sale_str is not None):
                         _woo_update_variations_prices(base_url, auth, woo_id, prod.himan_price, sale_str)
+                        log.info("himan variations updated slug=%s woo_id=%s", new_slug, woo_id)
             except Exception as e:
                 log.warning("himan.com.tr fiyat push failed: %s", e)
     return RedirectResponse(url=f"/ig/ai/products?focus={new_slug}", status_code=303)
