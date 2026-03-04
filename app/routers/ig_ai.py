@@ -548,6 +548,21 @@ def _woo_parse_price(s: str) -> Optional[float]:
         return None
 
 
+def _woo_get_product_prices_light(woo_prod: dict) -> tuple[Optional[float], Optional[float]]:
+    """
+    Extract regular_price and sale_price from WooCommerce product dict only (no extra HTTP).
+    For variable products uses top-level 'price' as fallback. Use in bulk sync to avoid timeouts.
+    """
+    reg = (woo_prod.get("regular_price") or "").strip()
+    sale = (woo_prod.get("sale_price") or "").strip()
+    price_display = (woo_prod.get("price") or "").strip()
+    regular_float = _woo_parse_price(reg) if reg else None
+    sale_float = _woo_parse_price(sale) if sale else None
+    if price_display and regular_float is None:
+        regular_float = _woo_parse_price(price_display)
+    return regular_float, sale_float
+
+
 def _woo_get_product_prices(base_url: str, auth: tuple, woo_prod: dict) -> tuple[Optional[float], Optional[float]]:
     """
     Resolve regular_price and sale_price from WooCommerce product.
@@ -573,11 +588,11 @@ def _woo_get_product_prices(base_url: str, auth: tuple, woo_prod: dict) -> tuple
             if sale_float is None and sale:
                 sale_float = _woo_parse_price(sale)
             return regular_float, sale_float
-    # Fetch first variation for variable products
+    # Fetch first variation for variable products (single-product pull only; timeout generous)
     woo_id = woo_prod.get("id")
     if woo_id and (woo_prod.get("type") == "variable" or (regular_float is None and not price_display)):
         base = base_url.rstrip("/")
-        with httpx.Client(timeout=15.0) as client:
+        with httpx.Client(timeout=45.0) as client:
             r = client.get(
                 f"{base}/wp-json/wc/v3/products/{woo_id}/variations",
                 auth=auth,
@@ -864,7 +879,7 @@ def sync_all_products_from_himan(
     with get_session() as session:
         while True:
             try:
-                with httpx.Client(timeout=30.0) as client:
+                with httpx.Client(timeout=60.0) as client:
                     r = client.get(
                         f"{base}/wp-json/wc/v3/products",
                         auth=auth,
@@ -887,7 +902,8 @@ def sync_all_products_from_himan(
                     continue
                 desc = (woo_prod.get("description") or "").strip()
                 prod.description = desc or None
-                regular_price, sale_price = _woo_get_product_prices(base_url, auth, woo_prod)
+                # Toplu senkron: ek HTTP (varyasyon) isteği atma; sadece ürün cevabındaki price kullan (timeout önlenir)
+                regular_price, sale_price = _woo_get_product_prices_light(woo_prod)
                 prod.himan_price = regular_price
                 prod.himan_sale_price = sale_price
                 prod.himan_status = (woo_prod.get("status") or "").strip() or None
