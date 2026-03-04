@@ -155,6 +155,24 @@ class StockRequest(SQLModel, table=True):
     updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 
 
+class StockRequestHit(SQLModel, table=True):
+    """Günlük stok isteği sayacı: himan.com.tr backend her 'stok yok' dönüşünde record-hit çağırır, burada sku+gün bazında hit_count artar."""
+    __tablename__ = "stock_request_hit"
+    __table_args__ = (UniqueConstraint("sku", "request_date", name="uq_stock_request_hit_sku_date"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    sku: str = Field(index=True)
+    product_name: Optional[str] = Field(default=None, index=True)
+    size: Optional[str] = Field(default=None, index=True)
+    color: Optional[str] = Field(default=None, index=True)
+    source_site: str = Field(default="himan.com.tr", index=True)
+    source_url: Optional[str] = Field(default=None)
+    request_date: dt.date = Field(index=True, description="İstek tarihi (gün)")
+    hit_count: int = Field(default=1, description="O gün bu SKU için kaç kez stok yok gösterildi")
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+    updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
 class Product(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True)

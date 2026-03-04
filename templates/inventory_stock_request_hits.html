@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stok istek sayilari</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+        .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin: 10px 0 14px; }
+        .toolbar input, .toolbar select, .toolbar button { padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; }
+        .toolbar button { background:#111827; color:#fff; cursor:pointer; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 10px; border-bottom: 1px solid #eceff3; text-align: left; font-size: 13px; vertical-align: top; }
+        th { background: #f8fafc; }
+        tr:nth-child(even) { background:#fcfcfd; }
+        .hit-count { font-weight:600; color:#1d4ed8; }
+        .meta { color:#64748b; font-size:12px; }
+    </style>
+</head>
+<body>
+    {% include "_nav.html" %}
+    <h2>Stok istek sayilari (gunluk)</h2>
+    <p class="meta">himan.com.tr backend her &quot;stok yok&quot; donusunden sonra HMA'ya record-hit cagirir; bu tablo SKU + gun bazinda kac kez istek alindigini gosterir.</p>
+    <form class="toolbar" method="get" action="/inventory/stock-requests/hits">
+        <input type="search" name="q" value="{{ q }}" placeholder="sku, urun, beden, renk" />
+        <input type="date" name="start" value="{{ start.isoformat() if start else '' }}" />
+        <input type="date" name="end" value="{{ end.isoformat() if end else '' }}" />
+        <input type="number" name="limit" min="1" max="5000" value="{{ limit }}" style="width:100px;" />
+        <button type="submit">Filtrele</button>
+        <a href="/inventory/stock-requests/table" style="margin-left:12px;color:#1d4ed8;text-decoration:none;">Stok istekleri listesine don</a>
+    </form>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Tarih</th>
+                <th>Urun / SKU</th>
+                <th>Beden / Renk</th>
+                <th>Istek sayisi</th>
+                <th>Kaynak</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td>{{ r.request_date.isoformat() if r.request_date else '-' }}</td>
+                <td>
+                    {{ r.product_name or r.sku or '-' }}
+                    <div class="meta">SKU: {{ r.sku or '-' }}</div>
+                </td>
+                <td>{{ r.size or '-' }} / {{ r.color or '-' }}</td>
+                <td class="hit-count">{{ r.hit_count }}</td>
+                <td>
+                    {{ r.source_site or '-' }}
+                    {% if r.source_url %}
+                    <div><a href="{{ r.source_url }}" target="_blank" rel="noopener noreferrer">Urun sayfasi</a></div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if not rows %}
+    <p class="meta">Kayit yok. himan.com.tr tarafinda &quot;stok yok&quot; donuldukten sonra HMA POST /inventory/stock-requests/record-hit cagrilmali.</p>
+    {% endif %}
+</body>
+</html>

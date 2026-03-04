@@ -7,9 +7,10 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from sqlmodel import select
+from sqlalchemy import func
 
 from ..db import get_session
-from ..models import Item, Product, StockMovement, StockRequest, Order, ProductSizeChart, Supplier
+from ..models import Item, Product, StockMovement, StockRequest, StockRequestHit, Order, ProductSizeChart, Supplier
 from ..services.inventory import get_stock_map, recalc_orders_from_mappings, adjust_stock
 
 
@@ -346,6 +347,48 @@ def stock_requests_table(
                 )
             )
         rows = session.exec(qry.order_by(StockRequest.id.desc()).limit(limit)).all()
+
+        summary_q = select(
+            func.date(StockRequest.created_at).label("req_date"),
+            func.coalesce(StockRequest.product_name, StockRequest.sku, "Bilinmeyen").label("product_label"),
+            func.count(StockRequest.id).label("request_count"),
+        )
+        if status:
+            summary_q = summary_q.where(StockRequest.status == status)
+        if start_date:
+            summary_q = summary_q.where(StockRequest.created_at >= dt.datetime.combine(start_date, dt.time.min))
+        if end_date:
+            summary_q = summary_q.where(StockRequest.created_at <= dt.datetime.combine(end_date, dt.time.max))
+        if query_text:
+            like = f"%{query_text}%"
+            from sqlalchemy import or_
+            summary_q = summary_q.where(
+                or_(
+                    StockRequest.product_name.like(like),
+                    StockRequest.sku.like(like),
+                    StockRequest.size.like(like),
+                    StockRequest.color.like(like),
+                    StockRequest.source_site.like(like),
+                )
+            )
+        summary_q = summary_q.group_by(func.date(StockRequest.created_at), func.coalesce(StockRequest.product_name, StockRequest.sku, "Bilinmeyen"))
+        summary_q = summary_q.order_by(func.date(StockRequest.created_at).desc(), func.count(StockRequest.id).desc())
+        summary_rows = session.exec(summary_q.limit(300)).all()
+        summary = []
+        for rec in summary_rows:
+            rec_date = rec[0] if isinstance(rec, (list, tuple)) else getattr(rec, "req_date", None)
+            rec_label = rec[1] if isinstance(rec, (list, tuple)) else getattr(rec, "product_label", "")
+            rec_count = rec[2] if isinstance(rec, (list, tuple)) else getattr(rec, "request_count", 0)
+            summary.append(
+                {
+                    "date": str(rec_date) if rec_date is not None else "",
+                    "product_label": str(rec_label or "Bilinmeyen"),
+                    "request_count": int(rec_count or 0),
+                }
+            )
+        sync_success = request.query_params.get("synced")
+        sync_error = request.query_params.get("sync_error")
+        sync_message = request.query_params.get("message", "")
         templates = request.app.state.templates
         return templates.TemplateResponse(
             "inventory_stock_requests.html",
@@ -357,6 +400,10 @@ def stock_requests_table(
                 "start": start_date,
                 "end": end_date,
                 "limit": limit,
+                "summary": summary,
+                "sync_success": sync_success,
+                "sync_error": sync_error,
+                "sync_message": sync_message,
             },
         )
 
@@ -383,6 +430,134 @@ def update_stock_request(stock_request_id: int, body: Dict[str, Any], request: R
         row.updated_at = dt.datetime.utcnow()
         session.add(row)
         return {"status": "ok"}
+
+
+@router.delete("/stock-requests/{stock_request_id}")
+def delete_stock_request(stock_request_id: int, request: Request):
+    _ensure_authenticated(request)
+    with get_session() as session:
+        row = session.exec(select(StockRequest).where(StockRequest.id == stock_request_id)).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Stock request not found")
+        session.delete(row)
+        return {"status": "ok"}
+
+
+@router.post("/stock-requests/record-hit")
+def stock_requests_record_hit(body: Dict[str, Any], request: Request):
+    """
+    himan.com.tr backend, 'stok yok' döndükten hemen sonra bu endpoint'i çağırır.
+    Her çağrı ilgili (sku, gün) için sayacı 1 artırır. Böylece "şu ürün şu gün kaç istek aldı" raporlanır.
+    Auth: X-Stock-Request-Token veya Authorization: Bearer <HMA_STOCK_REQUEST_TOKEN>
+    Body: sku (zorunlu), product_name?, size?, color?, source_url?
+    """
+    token_expected = (os.getenv("HMA_STOCK_REQUEST_TOKEN") or "").strip()
+    if token_expected:
+        header_token = (request.headers.get("x-stock-request-token") or "").strip()
+        auth_header = (request.headers.get("authorization") or "").strip()
+        bearer = (auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else "") or ""
+        if header_token != token_expected and bearer != token_expected:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+    sku = str(body.get("sku") or "").strip()
+    if not sku:
+        raise HTTPException(status_code=400, detail="sku is required")
+    product_name = str(body.get("product_name") or body.get("name") or "").strip() or None
+    size = str(body.get("size") or "").strip() or None
+    color = str(body.get("color") or "").strip() or None
+    source_url = str(body.get("source_url") or "").strip() or None
+    source_site = str(body.get("source_site") or "himan.com.tr").strip() or "himan.com.tr"
+    request_date = dt.datetime.utcnow().date()
+    with get_session() as session:
+        existing = session.exec(
+            select(StockRequestHit).where(
+                StockRequestHit.sku == sku,
+                StockRequestHit.request_date == request_date,
+            ).limit(1)
+        ).first()
+        if existing:
+            existing.hit_count += 1
+            existing.updated_at = dt.datetime.utcnow()
+            if product_name is not None:
+                existing.product_name = product_name
+            if size is not None:
+                existing.size = size
+            if color is not None:
+                existing.color = color
+            if source_url is not None:
+                existing.source_url = source_url
+            session.add(existing)
+            session.flush()
+            return {"status": "ok", "action": "incremented", "hit_count": existing.hit_count, "request_date": str(request_date)}
+        row = StockRequestHit(
+            sku=sku,
+            product_name=product_name,
+            size=size,
+            color=color,
+            source_site=source_site,
+            source_url=source_url,
+            request_date=request_date,
+            hit_count=1,
+            created_at=dt.datetime.utcnow(),
+            updated_at=dt.datetime.utcnow(),
+        )
+        session.add(row)
+        session.flush()
+        return {"status": "ok", "action": "created", "hit_count": 1, "request_date": str(request_date)}
+
+
+@router.get("/stock-requests/hits")
+def stock_requests_hits_table(
+    request: Request,
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=5000),
+):
+    """Günlük stok istek sayıları: himan.com.tr'den record-hit ile gelen sayaçlar."""
+    _ensure_authenticated(request)
+
+    def _parse_date(value: Optional[str]) -> Optional[dt.date]:
+        if not value:
+            return None
+        try:
+            return dt.date.fromisoformat(str(value))
+        except Exception:
+            return None
+
+    start_date = _parse_date(start)
+    end_date = _parse_date(end)
+    query_text = (q or "").strip()
+
+    with get_session() as session:
+        qry = select(StockRequestHit).order_by(StockRequestHit.request_date.desc(), StockRequestHit.hit_count.desc())
+        if start_date:
+            qry = qry.where(StockRequestHit.request_date >= start_date)
+        if end_date:
+            qry = qry.where(StockRequestHit.request_date <= end_date)
+        if query_text:
+            like = f"%{query_text}%"
+            from sqlalchemy import or_, func
+            qry = qry.where(
+                or_(
+                    StockRequestHit.sku.like(like),
+                    func.coalesce(StockRequestHit.product_name, "").like(like),
+                    func.coalesce(StockRequestHit.size, "").like(like),
+                    func.coalesce(StockRequestHit.color, "").like(like),
+                )
+            )
+        rows = session.exec(qry.limit(limit)).all()
+        templates = request.app.state.templates
+        return templates.TemplateResponse(
+            "inventory_stock_request_hits.html",
+            {
+                "request": request,
+                "rows": rows,
+                "start": start_date,
+                "end": end_date,
+                "q": query_text,
+                "limit": limit,
+            },
+        )
 
 
 @router.get("/movements/table")

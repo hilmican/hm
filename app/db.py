@@ -1018,6 +1018,31 @@ def init_db() -> None:
                     )
                 except Exception:
                     pass
+                # Günlük stok isteği sayacı (himan.com.tr backend record-hit çağrısı)
+                try:
+                    conn.exec_driver_sql(
+                        """
+                        CREATE TABLE IF NOT EXISTS stock_request_hit (
+                            id INT PRIMARY KEY AUTO_INCREMENT,
+                            sku VARCHAR(255) NOT NULL,
+                            product_name VARCHAR(255) NULL,
+                            size VARCHAR(64) NULL,
+                            color VARCHAR(64) NULL,
+                            source_site VARCHAR(128) NOT NULL DEFAULT 'himan.com.tr',
+                            source_url VARCHAR(512) NULL,
+                            request_date DATE NOT NULL,
+                            hit_count INT NOT NULL DEFAULT 1,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            UNIQUE KEY uq_stock_request_hit_sku_date (sku, request_date),
+                            INDEX idx_srh_sku (sku),
+                            INDEX idx_srh_request_date (request_date),
+                            INDEX idx_srh_product_name (product_name)
+                        )
+                        """
+                    )
+                except Exception:
+                    pass
                 # Ensure ai_pretext table exists
                 try:
                     conn.exec_driver_sql(

@@ -23,6 +23,14 @@
 <body>
     {% include "_nav.html" %}
     <h2>Stok Istekleri</h2>
+    {% if sync_success is defined and sync_success %}
+    <p style="background:#dcfce7;color:#166534;padding:8px 12px;border-radius:8px;">himan.com.tr'den {{ sync_success }} adet stokta olmayan varyasyon eklendi.</p>
+    {% endif %}
+    {% if sync_error is defined and sync_error %}
+    <p style="background:#fee2e2;color:#b91c1c;padding:8px 12px;border-radius:8px;">
+      Hata: {% if sync_error == 'woo_not_configured' %}WooCommerce API tanimli degil (HIMAN_WOO_*).{% elif sync_error == 'fetch_failed' %}himan.com.tr istegi basarisiz.{% if sync_message %} {{ sync_message }}{% endif %}{% else %}{{ sync_error }}{% endif %}
+    </p>
+    {% endif %}
     <form class="toolbar" method="get" action="/inventory/stock-requests/table">
         <input type="search" name="q" value="{{ q }}" placeholder="urun, sku, beden, renk" />
         <select name="status">
@@ -36,6 +44,8 @@
         <input type="date" name="end" value="{{ end.isoformat() if end else '' }}" />
         <input type="number" name="limit" min="1" max="5000" value="{{ limit }}" style="width:100px;" />
         <button type="submit">Filtrele</button>
+        <a href="/inventory/stock-requests/sync-from-himan" style="margin-left:12px;display:inline-flex;align-items:center;gap:6px;background:#059669;color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none;font-weight:600;">himan.com.tr'den stokta olmayanlari cek</a>
+        <a href="/inventory/stock-requests/hits" style="margin-left:8px;display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none;font-weight:600;">Istek sayilari (gunluk)</a>
     </form>
 
     <table>
@@ -90,7 +100,28 @@
                         <option value="rejected" {% if r.status == 'rejected' %}selected{% endif %}>rejected</option>
                     </select>
                     <button type="button" onclick="saveStatus({{ r.id }})">Kaydet</button>
+                    <button type="button" onclick="deleteRequest({{ r.id }})" style="margin-left:6px;background:#b91c1c;color:#fff;">Sil</button>
                 </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3 style="margin-top:20px;">Gunluk Urun Bazli Ozet</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Tarih</th>
+                <th>Urun</th>
+                <th>Istek Adedi</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in summary %}
+            <tr>
+                <td>{{ s.date }}</td>
+                <td>{{ s.product_label }}</td>
+                <td>{{ s.request_count }}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -108,6 +139,15 @@
         });
         if (!res.ok){
             alert('Kaydetme hatasi');
+            return;
+        }
+        location.reload();
+    }
+    async function deleteRequest(id){
+        if (!confirm('Bu stok istegini silmek istediginize emin misiniz?')) return;
+        const res = await fetch('/inventory/stock-requests/' + id, { method: 'DELETE' });
+        if (!res.ok){
+            alert('Silme hatasi');
             return;
         }
         location.reload();
