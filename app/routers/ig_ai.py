@@ -444,6 +444,9 @@ def product_ai_page(request: Request, focus: str):
             "default_color": row.default_color or "",
             "default_unit": row.default_unit or "adet",
             "default_cost": row.default_cost,
+            "description": getattr(row, "description", None) or "",
+            "himan_price": getattr(row, "himan_price", None),
+            "himan_sale_price": getattr(row, "himan_sale_price", None),
             "ai_system_msg": row.ai_system_msg or "",
             "ai_prompt_msg": row.ai_prompt_msg or "",
             "pretext_id": row.pretext_id,
@@ -508,6 +511,43 @@ def save_product_ai(
     return RedirectResponse(url=f"/ig/ai/products?focus={prod.slug or focus_s}", status_code=303)
 
 
+def _woo_client():
+    """Return (base_url, consumer_key, consumer_secret) if WooCommerce API is configured."""
+    import os
+    base = os.getenv("HIMAN_WOO_BASE_URL", "").strip()
+    key = os.getenv("HIMAN_WOO_CONSUMER_KEY", "").strip()
+    secret = os.getenv("HIMAN_WOO_CONSUMER_SECRET", "").strip()
+    if base and key and secret:
+        return base, key, secret
+    return None
+
+
+def _woo_get_product_by_slug(base_url: str, auth: tuple, slug: str) -> Optional[dict]:
+    """Get single product by slug from WooCommerce REST API. Returns product dict or None."""
+    import httpx
+    base = base_url.rstrip("/")
+    with httpx.Client(timeout=15.0) as client:
+        r = client.get(
+            f"{base}/wp-json/wc/v3/products",
+            auth=auth,
+            params={"slug": slug, "per_page": 1},
+        )
+        r.raise_for_status()
+        items = r.json()
+        return items[0] if items else None
+
+
+def _woo_update_product(base_url: str, auth: tuple, woo_id: int, payload: dict) -> bool:
+    """PATCH product on WooCommerce. Returns True on success."""
+    import httpx
+    base = base_url.rstrip("/")
+    with httpx.Client(timeout=15.0) as client:
+        r = client.patch(f"{base}/wp-json/wc/v3/products/{woo_id}", auth=auth, json=payload)
+        if r.status_code not in (200, 201):
+            return False
+        return True
+
+
 @router.post("/products/details/save")
 def save_product_details(
     focus: str = Form(...),
@@ -516,11 +556,15 @@ def save_product_details(
     default_color: str = Form(default=""),
     default_unit: str = Form(default="adet"),
     default_cost: str = Form(default=""),
+    description: str = Form(default=""),
+    himan_price: str = Form(default=""),
+    himan_sale_price: str = Form(default=""),
 ):
-    """Persist product details (name, slug, price, color, unit, cost) for the focused product."""
+    """Persist product details including description and himan.com.tr fiyat; optionally push to WooCommerce."""
     from ..models import Product
     from ..utils.slugify import slugify
     from fastapi.responses import RedirectResponse
+    import httpx
 
     focus_s = (focus or "").strip()
     name_s = (name or "").strip()
@@ -553,13 +597,78 @@ def save_product_details(
             prod.default_cost = float(default_cost) if default_cost and default_cost.strip() else None
         except ValueError:
             prod.default_cost = None
+        prod.description = description.strip() or None
+        try:
+            prod.himan_price = float(himan_price) if himan_price and himan_price.strip() else None
+        except ValueError:
+            prod.himan_price = None
+        try:
+            prod.himan_sale_price = float(himan_sale_price) if himan_sale_price and himan_sale_price.strip() else None
+        except ValueError:
+            prod.himan_sale_price = None
         session.add(prod)
+        session.flush()
+        # Push fiyat (ve açıklama) to himan.com.tr if WooCommerce API configured
+        woo = _woo_client()
+        if woo:
+            base_url, key, secret = woo
+            auth = (key, secret)
+            try:
+                woo_prod = _woo_get_product_by_slug(base_url, auth, new_slug)
+                if woo_prod:
+                    woo_id = woo_prod.get("id")
+                    patch_payload = {}
+                    if prod.description is not None:
+                        patch_payload["description"] = prod.description or ""
+                    if prod.himan_price is not None:
+                        patch_payload["regular_price"] = str(prod.himan_price)
+                    if prod.himan_sale_price is not None:
+                        patch_payload["sale_price"] = str(prod.himan_sale_price)
+                    elif prod.himan_price is not None:
+                        patch_payload["sale_price"] = ""
+                    if patch_payload and woo_id:
+                        _woo_update_product(base_url, auth, woo_id, patch_payload)
+            except Exception:
+                pass
     return RedirectResponse(url=f"/ig/ai/products?focus={new_slug}", status_code=303)
+
+
+def _woo_get_category_ids_by_slugs(base_url: str, auth: tuple, slugs: list[str]) -> list[int]:
+    """Resolve WooCommerce category slugs to term ids."""
+    import httpx
+    if not slugs:
+        return []
+    base = base_url.rstrip("/")
+    ids = []
+    with httpx.Client(timeout=15.0) as client:
+        page = 1
+        per_page = 100
+        slug_set = set(s.strip().lower() for s in slugs if (s or "").strip())
+        while True:
+            r = client.get(
+                f"{base}/wp-json/wc/v3/products/categories",
+                auth=auth,
+                params={"per_page": per_page, "page": page},
+            )
+            r.raise_for_status()
+            chunk = r.json()
+            if not chunk:
+                break
+            for c in chunk:
+                s = (c.get("slug") or "").strip().lower()
+                if s in slug_set:
+                    tid = c.get("id")
+                    if tid and tid not in ids:
+                        ids.append(tid)
+            if len(chunk) < per_page:
+                break
+            page += 1
+    return ids
 
 
 @router.post("/products/categories/save")
 async def save_product_categories(request: Request, focus: str = Form(...)):
-    """Persist product category links (multi-select). Receives category_ids[] from form."""
+    """Persist product category links (multi-select) and push to himan.com.tr."""
     from ..models import Product, ProductCategoryLink, ProductCategory
     from fastapi.responses import RedirectResponse
 
@@ -572,12 +681,14 @@ async def save_product_categories(request: Request, focus: str = Form(...)):
         cat = form.get("category_ids[]") or form.get("category_ids")
         category_ids = [cat] if isinstance(cat, str) else (list(cat) if cat else [])
 
+    prod_slug_after = focus_s
     with get_session() as session:
         prod = session.exec(
             select(Product).where((Product.slug == focus_s) | (Product.name == focus_s)).limit(1)
         ).first()
         if not prod:
             raise HTTPException(status_code=404, detail="Product not found for focus")
+        prod_slug_after = prod.slug or focus_s
         for link in session.exec(select(ProductCategoryLink).where(ProductCategoryLink.product_id == prod.id)).all():
             session.delete(link)
         valid_ids = set()
@@ -586,11 +697,85 @@ async def save_product_categories(request: Request, focus: str = Form(...)):
                 valid_ids.add(int(cid))
             except (TypeError, ValueError):
                 pass
+        category_slugs = []
         for cid in valid_ids:
             cat = session.exec(select(ProductCategory).where(ProductCategory.id == cid)).first()
             if cat:
                 session.add(ProductCategoryLink(product_id=prod.id, category_id=cat.id))
-    return RedirectResponse(url=f"/ig/ai/products?focus={prod.slug or focus_s}", status_code=303)
+                category_slugs.append(cat.slug or "")
+    # Push categories to himan.com.tr (WooCommerce)
+    woo = _woo_client()
+    if woo and category_slugs:
+        base_url, key, secret = woo
+        auth = (key, secret)
+        try:
+            woo_prod = _woo_get_product_by_slug(base_url, auth, prod_slug_after)
+            if woo_prod:
+                woo_id = woo_prod.get("id")
+                woo_cat_ids = _woo_get_category_ids_by_slugs(base_url, auth, category_slugs)
+                if woo_id and woo_cat_ids:
+                    _woo_update_product(
+                        base_url, auth, woo_id,
+                        {"categories": [{"id": i} for i in woo_cat_ids]},
+                    )
+        except Exception:
+            pass
+    return RedirectResponse(url=f"/ig/ai/products?focus={prod_slug_after}", status_code=303)
+
+
+@router.get("/products/pull-from-himan")
+def pull_product_from_himan(focus: str):
+    """himan.com.tr (WooCommerce) ürün verisini çekip HMA ürününü günceller: açıklama, fiyat, indirim, kategoriler."""
+    from ..models import Product, ProductCategory, ProductCategoryLink
+    from fastapi.responses import RedirectResponse
+
+    focus_s = (focus or "").strip()
+    if not focus_s:
+        raise HTTPException(status_code=400, detail="focus is required")
+    woo = _woo_client()
+    if not woo:
+        raise HTTPException(
+            status_code=503,
+            detail="HIMAN_WOO_* ortam değişkenleri tanımlı değil; himan.com.tr'den veri alınamaz.",
+        )
+    base_url, key, secret = woo
+    auth = (key, secret)
+    try:
+        woo_prod = _woo_get_product_by_slug(base_url, auth, focus_s)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"himan.com.tr isteği başarısız: {e}")
+    if not woo_prod:
+        raise HTTPException(status_code=404, detail="himan.com.tr'de bu slug ile ürün bulunamadı")
+    with get_session() as session:
+        prod = session.exec(
+            select(Product).where((Product.slug == focus_s) | (Product.name == focus_s)).limit(1)
+        ).first()
+        if not prod:
+            raise HTTPException(status_code=404, detail="HMA'da ürün bulunamadı")
+        # Woo description (can be HTML)
+        desc = (woo_prod.get("description") or "").strip()
+        prod.description = desc or None
+        try:
+            prod.himan_price = float(woo_prod["regular_price"]) if woo_prod.get("regular_price") else None
+        except (TypeError, ValueError):
+            prod.himan_price = None
+        try:
+            prod.himan_sale_price = float(woo_prod["sale_price"]) if woo_prod.get("sale_price") else None
+        except (TypeError, ValueError):
+            prod.himan_sale_price = None
+        # Sync categories: Woo category slugs -> HMA ProductCategoryLink
+        woo_cats = woo_prod.get("categories") or []
+        woo_slugs = [str(c.get("slug") or "").strip() for c in woo_cats if (c.get("slug") or "").strip()]
+        for link in session.exec(select(ProductCategoryLink).where(ProductCategoryLink.product_id == prod.id)).all():
+            session.delete(link)
+        for slug in woo_slugs:
+            if slug == "uncategorized":
+                continue
+            cat = session.exec(select(ProductCategory).where(ProductCategory.slug == slug)).first()
+            if cat:
+                session.add(ProductCategoryLink(product_id=prod.id, category_id=cat.id))
+        session.add(prod)
+    return RedirectResponse(url=f"/ig/ai/products?focus={focus_s}", status_code=303)
 
 
 @router.get("/categories")

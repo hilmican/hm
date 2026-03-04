@@ -26,9 +26,17 @@
     </div>
 
     <h2 style="margin-top:24px;">Ürün detayları</h2>
-    <p class="meta">Ürün adı, fiyat, renk, birim ve maliyet. Slug, isimden otomatik türetilir.</p>
+    <p class="meta">Ürün adı, açıklama, fiyat, renk, birim ve maliyet. Slug, isimden otomatik türetilir. himan.com.tr fiyatı sitedeki satış/indirimli fiyatı belirler; kaydedince sitede de güncellenir.</p>
+    <p style="margin-top:8px;">
+      <a href="/ig/ai/products/pull-from-himan?focus={{ focus }}" class="himan-pull-btn" style="display:inline-block; background:#059669; color:#fff; padding:8px 14px; border-radius:8px; text-decoration:none; font-weight:600;">himan.com.tr'den veri al</a>
+      <span class="meta" style="margin-left:8px;">Güncel açıklama, fiyat, indirim ve kategorileri siteden çeker.</span>
+    </p>
     <form method="post" action="/ig/ai/products/details/save" style="margin-top:12px;">
       <input type="hidden" name="focus" value="{{ focus }}" />
+      <div class="field">
+        <label>Ürün açıklaması</label>
+        <textarea name="description" placeholder="Ürün açıklaması (HTML olabilir)" style="min-height:80px;">{{ description or '' }}</textarea>
+      </div>
       <div class="row" style="grid-template-columns: 1fr 1fr 1fr; gap:12px;">
         <div class="field">
           <label>Ürün adı</label>
@@ -51,11 +59,24 @@
           <input type="text" name="default_cost" placeholder="opsiyonel" value="{{ default_cost or '' }}" />
         </div>
       </div>
+      <div class="row" style="grid-template-columns: 1fr 1fr; gap:12px; margin-top:12px;">
+        <div class="field">
+          <label>himan.com.tr fiyatı (TL)</label>
+          <input type="text" name="himan_price" placeholder="Sitedeki normal satış fiyatı" value="{{ himan_price or '' }}" />
+        </div>
+        <div class="field">
+          <label>himan.com.tr indirimli fiyat (TL)</label>
+          <input type="text" name="himan_sale_price" placeholder="İndirim varsa" value="{{ himan_sale_price or '' }}" />
+          {% if himan_sale_price and himan_price and himan_sale_price < himan_price %}
+          <span class="meta" style="color:#059669; font-weight:600;">İndirimli: {{ himan_sale_price }} TL</span>
+          {% endif %}
+        </div>
+      </div>
       <button type="submit" style="margin-top:10px;">Detayları kaydet</button>
     </form>
 
     <h2 style="margin-top:24px;">Kategoriler</h2>
-    <p class="meta">Ürünü birden fazla kategoride gösterebilirsiniz. Kategoriler himan.com.tr senkronu ile de doldurulabilir.</p>
+    <p class="meta">Ürünü birden fazla kategoride gösterebilirsiniz. Kategoriler himan.com.tr senkronu ile doldurulabilir. Burada yaptığınız kategori seçimi kaydedildiğinde himan.com.tr'deki ürün kategorileri de güncellenir.</p>
     {% if categories %}
     <form method="post" action="/ig/ai/products/categories/save" style="margin-top:12px;">
       <input type="hidden" name="focus" value="{{ focus }}" />

@@ -971,6 +971,12 @@ def init_db() -> None:
                             conn.exec_driver_sql("CREATE INDEX idx_product_category ON product(category)")
                         except Exception:
                             pass
+                    if 'description' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN description LONGTEXT NULL")
+                    if 'himan_price' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN himan_price DOUBLE NULL")
+                    if 'himan_sale_price' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN himan_sale_price DOUBLE NULL")
                 except Exception:
                     pass
                 # Product categories (multi-select); sync from himan.com.tr possible

@@ -144,6 +144,9 @@ class Product(SQLModel, table=True):
         description="Fallback unit cost when no stock movement cost exists",
         index=True,
     )
+    description: Optional[str] = Field(default=None, sa_column=Column(Text), description="Ürün açıklaması")
+    himan_price: Optional[float] = Field(default=None, description="himan.com.tr satış fiyatı (normal)")
+    himan_sale_price: Optional[float] = Field(default=None, description="himan.com.tr indirimli fiyat (varsa)")
     # AI prompt fields (optional, per-product overrides)
     ai_system_msg: Optional[str] = Field(default=None, sa_column=Column(Text))
     ai_prompt_msg: Optional[str] = Field(default=None, sa_column=Column(Text))
