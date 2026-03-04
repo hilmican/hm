@@ -611,6 +611,15 @@ def _woo_get_product_prices(base_url: str, auth: tuple, woo_prod: dict) -> tuple
     return regular_float, sale_float
 
 
+def _woo_format_price(value: Optional[float]) -> str:
+    """WooCommerce'a gönderilecek fiyat string'i; virgülden sonrasız tam sayı ise '778' gibi."""
+    if value is None:
+        return ""
+    if value == int(value):
+        return str(int(value))
+    return str(round(value, 2))
+
+
 def _woo_update_product(base_url: str, auth: tuple, woo_id: int, payload: dict) -> bool:
     """PATCH product on WooCommerce. Returns True on success."""
     import httpx
@@ -620,6 +629,42 @@ def _woo_update_product(base_url: str, auth: tuple, woo_id: int, payload: dict) 
         if r.status_code not in (200, 201):
             return False
         return True
+
+
+def _woo_update_variations_prices(
+    base_url: str, auth: tuple, parent_woo_id: int, regular_price: Optional[float], sale_price: Optional[str]
+) -> None:
+    """Variable ürünün tüm varyasyonlarının fiyatını günceller; sitede görünen fiyat varyasyondan gelir."""
+    import httpx
+    base = base_url.rstrip("/")
+    reg_str = _woo_format_price(regular_price) if regular_price is not None else ""
+    with httpx.Client(timeout=30.0) as client:
+        page = 1
+        per_page = 100
+        while True:
+            r = client.get(
+                f"{base}/wp-json/wc/v3/products/{parent_woo_id}/variations",
+                auth=auth,
+                params={"per_page": per_page, "page": page},
+            )
+            if r.status_code != 200:
+                break
+            variations = r.json()
+            if not variations:
+                break
+            for v in variations:
+                vid = v.get("id")
+                if not vid:
+                    continue
+                patch = {}
+                if reg_str:
+                    patch["regular_price"] = reg_str
+                patch["sale_price"] = sale_price if sale_price else ""
+                if patch:
+                    client.patch(f"{base}/wp-json/wc/v3/products/{parent_woo_id}/variations/{vid}", auth=auth, json=patch)
+            if len(variations) < per_page:
+                break
+            page += 1
 
 
 @router.post("/products/details/save")
@@ -689,21 +734,27 @@ def save_product_details(
             auth = (key, secret)
             try:
                 woo_prod = _woo_get_product_by_slug(base_url, auth, new_slug)
-                if woo_prod:
-                    woo_id = woo_prod.get("id")
+                if woo_prod and woo_prod.get("id"):
+                    woo_id = woo_prod["id"]
+                    # Fiyatı tam sayı ise "778" gönder (778.0 değil), sitede 778,70 görünmesin
+                    reg_str = _woo_format_price(prod.himan_price)
+                    sale_str = _woo_format_price(prod.himan_sale_price) if prod.himan_sale_price is not None else ""
+                    if prod.himan_price is not None and not sale_str:
+                        sale_str = ""
                     patch_payload = {}
                     if prod.description is not None:
                         patch_payload["description"] = prod.description or ""
+                    if reg_str:
+                        patch_payload["regular_price"] = reg_str
                     if prod.himan_price is not None:
-                        patch_payload["regular_price"] = str(prod.himan_price)
-                    if prod.himan_sale_price is not None:
-                        patch_payload["sale_price"] = str(prod.himan_sale_price)
-                    elif prod.himan_price is not None:
-                        patch_payload["sale_price"] = ""
-                    if patch_payload and woo_id:
+                        patch_payload["sale_price"] = sale_str
+                    if patch_payload:
                         _woo_update_product(base_url, auth, woo_id, patch_payload)
-            except Exception:
-                pass
+                    # Variable ürünlerde sitede görünen fiyat varyasyonlardan gelir; hepsini güncelle
+                    if woo_prod.get("type") == "variable" and (reg_str or sale_str is not None):
+                        _woo_update_variations_prices(base_url, auth, woo_id, prod.himan_price, sale_str)
+            except Exception as e:
+                log.warning("himan.com.tr fiyat push failed: %s", e)
     return RedirectResponse(url=f"/ig/ai/products?focus={new_slug}", status_code=303)
 
 
