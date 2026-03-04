@@ -537,6 +537,65 @@ def _woo_get_product_by_slug(base_url: str, auth: tuple, slug: str) -> Optional[
         return items[0] if items else None
 
 
+def _woo_parse_price(s: str) -> Optional[float]:
+    """Parse WooCommerce price string (e.g. '944.27' or '944,27')."""
+    if not s or not isinstance(s, str):
+        return None
+    s = s.strip().replace(",", ".")
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def _woo_get_product_prices(base_url: str, auth: tuple, woo_prod: dict) -> tuple[Optional[float], Optional[float]]:
+    """
+    Resolve regular_price and sale_price from WooCommerce product.
+    Variable products often have empty regular_price/sale_price on parent; then use 'price' or first variation.
+    Returns (regular_price, sale_price).
+    """
+    import httpx
+    reg = (woo_prod.get("regular_price") or "").strip()
+    sale = (woo_prod.get("sale_price") or "").strip()
+    price_display = (woo_prod.get("price") or "").strip()
+    regular_float = _woo_parse_price(reg) if reg else None
+    sale_float = _woo_parse_price(sale) if sale else None
+    if regular_float is not None and sale_float is not None:
+        return regular_float, sale_float
+    if regular_float is not None and sale_float is None:
+        return regular_float, None
+    # Variable product: parent often has empty regular_price; use "price" or fetch variations
+    if price_display:
+        fallback = _woo_parse_price(price_display)
+        if fallback is not None:
+            if regular_float is None:
+                regular_float = fallback
+            if sale_float is None and sale:
+                sale_float = _woo_parse_price(sale)
+            return regular_float, sale_float
+    # Fetch first variation for variable products
+    woo_id = woo_prod.get("id")
+    if woo_id and (woo_prod.get("type") == "variable" or (regular_float is None and not price_display)):
+        base = base_url.rstrip("/")
+        with httpx.Client(timeout=15.0) as client:
+            r = client.get(
+                f"{base}/wp-json/wc/v3/products/{woo_id}/variations",
+                auth=auth,
+                params={"per_page": 1},
+            )
+            if r.status_code == 200:
+                variations = r.json()
+                if variations:
+                    v = variations[0]
+                    reg_v = (v.get("regular_price") or v.get("price") or "").strip()
+                    sale_v = (v.get("sale_price") or "").strip()
+                    if regular_float is None:
+                        regular_float = _woo_parse_price(reg_v) or _woo_parse_price(v.get("price"))
+                    if sale_float is None and sale_v:
+                        sale_float = _woo_parse_price(sale_v)
+    return regular_float, sale_float
+
+
 def _woo_update_product(base_url: str, auth: tuple, woo_id: int, payload: dict) -> bool:
     """PATCH product on WooCommerce. Returns True on success."""
     import httpx
@@ -755,14 +814,10 @@ def pull_product_from_himan(focus: str):
         # Woo description (can be HTML)
         desc = (woo_prod.get("description") or "").strip()
         prod.description = desc or None
-        try:
-            prod.himan_price = float(woo_prod["regular_price"]) if woo_prod.get("regular_price") else None
-        except (TypeError, ValueError):
-            prod.himan_price = None
-        try:
-            prod.himan_sale_price = float(woo_prod["sale_price"]) if woo_prod.get("sale_price") else None
-        except (TypeError, ValueError):
-            prod.himan_sale_price = None
+        # Fiyat: variable ürünlerde ana üründe boş olabilir; helper price veya varyasyon kullanır
+        regular_price, sale_price = _woo_get_product_prices(base_url, auth, woo_prod)
+        prod.himan_price = regular_price
+        prod.himan_sale_price = sale_price
         # Sync categories: Woo category slugs -> HMA ProductCategoryLink
         woo_cats = woo_prod.get("categories") or []
         woo_slugs = [str(c.get("slug") or "").strip() for c in woo_cats if (c.get("slug") or "").strip()]
