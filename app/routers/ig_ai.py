@@ -742,7 +742,9 @@ def save_product_details(
                         sale_str = ""
                     patch_payload = {}
                     if prod.description is not None:
-                        patch_payload["description"] = prod.description or ""
+                        desc_text = prod.description or ""
+                        patch_payload["description"] = desc_text
+                        patch_payload["short_description"] = desc_text  # Tema bazen short_description kullanir (Aciklama sekmesi)
                     if reg_str:
                         patch_payload["regular_price"] = reg_str
                     if prod.himan_price is not None:
@@ -750,7 +752,14 @@ def save_product_details(
                     if patch_payload:
                         ok, status, body = _woo_update_product(base_url, auth, woo_id, patch_payload)
                         if ok:
-                            log.info("himan push ok slug=%s woo_id=%s payload=%s", new_slug, woo_id, patch_payload)
+                            # Log payload keys; for description/short_description log length only
+                            plog = {}
+                            for k, v in patch_payload.items():
+                                if k in ("description", "short_description"):
+                                    plog[k] = f"<len={len(str(v))}>"
+                                else:
+                                    plog[k] = v
+                            log.info("himan push ok slug=%s woo_id=%s payload=%s", new_slug, woo_id, plog)
                         else:
                             log.warning("himan push failed slug=%s woo_id=%s status=%s body=%s", new_slug, woo_id, status, body)
                     # Variable ürünlerde sitede görünen fiyat varyasyonlardan gelir; hepsini güncelle
