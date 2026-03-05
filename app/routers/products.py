@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import logging
+
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Form, Request
 from fastapi.encoders import jsonable_encoder
 from sqlmodel import select
@@ -10,6 +14,114 @@ from ..utils.slugify import slugify
 
 
 router = APIRouter(prefix="/products", tags=["products"])
+log = logging.getLogger(__name__)
+
+
+def _woo_client():
+	"""Return (base_url, consumer_key, consumer_secret) if WooCommerce API is configured."""
+	base_url = (os.getenv("HIMAN_WOO_BASE_URL") or "").strip()
+	key = (os.getenv("HIMAN_WOO_CONSUMER_KEY") or "").strip()
+	secret = (os.getenv("HIMAN_WOO_CONSUMER_SECRET") or "").strip()
+	if not (base_url and key and secret):
+		return None
+	return base_url.rstrip("/"), key, secret
+
+
+def _woo_get_product_by_slug(base_url: str, auth: tuple, slug: str) -> dict | None:
+	base = base_url.rstrip("/")
+	with httpx.Client(timeout=12.0) as client:
+		r = client.get(
+			f"{base}/wp-json/wc/v3/products",
+			auth=auth,
+			params={"slug": slug, "per_page": 1},
+		)
+		r.raise_for_status()
+		rows = r.json() or []
+		return rows[0] if rows else None
+
+
+def _woo_update_product(base_url: str, auth: tuple, woo_id: int, payload: dict) -> tuple[bool, int, str]:
+	base = base_url.rstrip("/")
+	with httpx.Client(timeout=15.0) as client:
+		r = client.patch(f"{base}/wp-json/wc/v3/products/{woo_id}", auth=auth, json=payload)
+		ok = 200 <= r.status_code < 300
+		return ok, r.status_code, r.text[:400]
+
+
+def _sync_product_upsells_to_himan_woo(session, product_id: int) -> dict:
+	"""Push active HMA upsells to WooCommerce `upsell_ids` of the main product."""
+	woo = _woo_client()
+	if not woo:
+		return {"ok": False, "skipped": "woo_not_configured"}
+
+	product = session.exec(select(Product).where(Product.id == product_id)).first()
+	if not product:
+		return {"ok": False, "error": "product_not_found"}
+	slug = (product.slug or "").strip()
+	if not slug:
+		return {"ok": False, "error": "product_slug_empty"}
+
+	rows = (
+		session.exec(
+			select(ProductUpsell, Product)
+			.join(Product, ProductUpsell.upsell_product_id == Product.id)
+			.where(ProductUpsell.product_id == product_id, ProductUpsell.is_active == True)
+			.order_by(ProductUpsell.position.asc(), ProductUpsell.id.asc())
+		).all()
+		or []
+	)
+
+	base_url, key, secret = woo
+	auth = (key, secret)
+
+	try:
+		main_woo = _woo_get_product_by_slug(base_url, auth, slug)
+		if not main_woo or not main_woo.get("id"):
+			return {"ok": False, "error": "main_product_not_found_in_woo", "slug": slug}
+		main_woo_id = int(main_woo["id"])
+
+		upsell_ids: list[int] = []
+		missing_slugs: list[str] = []
+		for _, upsell_prod in rows:
+			if not upsell_prod:
+				continue
+			upsell_slug = (upsell_prod.slug or "").strip()
+			if not upsell_slug:
+				continue
+			woo_prod = _woo_get_product_by_slug(base_url, auth, upsell_slug)
+			if woo_prod and woo_prod.get("id"):
+				upsell_ids.append(int(woo_prod["id"]))
+			else:
+				missing_slugs.append(upsell_slug)
+		# Deduplicate and preserve order.
+		seen = set()
+		ordered_ids: list[int] = []
+		for wid in upsell_ids:
+			if wid in seen:
+				continue
+			seen.add(wid)
+			ordered_ids.append(wid)
+
+		ok, status, body = _woo_update_product(base_url, auth, main_woo_id, {"upsell_ids": ordered_ids})
+		if not ok:
+			return {
+				"ok": False,
+				"error": "woo_patch_failed",
+				"status": status,
+				"body": body,
+				"main_woo_id": main_woo_id,
+				"upsell_ids": ordered_ids,
+				"missing_slugs": missing_slugs,
+			}
+		return {
+			"ok": True,
+			"main_woo_id": main_woo_id,
+			"upsell_ids": ordered_ids,
+			"missing_slugs": missing_slugs,
+		}
+	except Exception as e:
+		log.warning("upsell sync to himan woo failed product_id=%s err=%s", product_id, e)
+		return {"ok": False, "error": str(e)}
 
 
 @router.get("")
@@ -322,6 +434,7 @@ def create_product_upsell(product_id: int, body: dict):
 		)
 		session.add(pu)
 		session.flush()
+		woo_sync = _sync_product_upsells_to_himan_woo(session, product_id)
 		return {
 			"id": pu.id,
 			"product_id": pu.product_id,
@@ -329,6 +442,7 @@ def create_product_upsell(product_id: int, body: dict):
 			"copy": pu.copy_text,
 			"position": pu.position,
 			"is_active": pu.is_active,
+			"woo_sync": woo_sync,
 		}
 
 
@@ -354,7 +468,8 @@ def update_product_upsell(upsell_id: int, body: dict):
 				pu.is_active = val.strip().lower() in {"1", "true", "yes", "on"}
 			else:
 				pu.is_active = bool(val)
-		return {"status": "ok", "id": pu.id}
+		woo_sync = _sync_product_upsells_to_himan_woo(session, int(pu.product_id))
+		return {"status": "ok", "id": pu.id, "woo_sync": woo_sync}
 
 
 @router.delete("/upsells/{upsell_id}")
@@ -363,8 +478,10 @@ def delete_product_upsell(upsell_id: int):
 		pu = session.exec(select(ProductUpsell).where(ProductUpsell.id == upsell_id)).first()
 		if not pu:
 			raise HTTPException(status_code=404, detail="Upsell not found")
+		product_id = int(pu.product_id)
 		session.delete(pu)
-		return {"status": "ok"}
+		woo_sync = _sync_product_upsells_to_himan_woo(session, product_id)
+		return {"status": "ok", "woo_sync": woo_sync}
 
 
 @router.put("/{product_id}")

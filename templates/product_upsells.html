@@ -109,6 +109,17 @@
       setTimeout(() => { toast.style.display = 'none'; }, 2500);
     }
 
+    function showWooSyncResult(payload) {
+      const sync = payload && payload.woo_sync ? payload.woo_sync : null;
+      if (!sync) return;
+      if (sync.ok) {
+        showToast('WordPress upsell baglantisi guncellendi');
+        return;
+      }
+      const reason = sync.error || sync.skipped || 'bilinmeyen_hata';
+      showToast(`WordPress sync uyarisi: ${reason}`, 'error');
+    }
+
     function populateProductSelects() {
       const opts = products.slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
       productSelect.innerHTML = opts.map(p => `<option value="${p.id}">${p.name} (#${p.id})</option>`).join('');
@@ -192,7 +203,9 @@
       try {
         const res = await fetch(`/products/upsells/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
         if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
         showToast('Güncellendi');
+        showWooSyncResult(data);
         loadUpsells(productSelect.value);
       } catch (e) {
         showToast('Kaydedilemedi', 'error');
@@ -203,7 +216,9 @@
       try {
         const res = await fetch(`/products/upsells/${id}`, { method:'DELETE' });
         if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
         showToast('Silindi');
+        showWooSyncResult(data);
         loadUpsells(productSelect.value);
       } catch (e) {
         showToast('Silinemedi', 'error');
@@ -223,10 +238,12 @@
       try {
         const res = await fetch(`/products/${productId}/upsells`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
         if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
         copyInput.value = '';
         positionInput.value = '1';
         activeInput.checked = true;
         showToast('Eklendi');
+        showWooSyncResult(data);
         loadUpsells(productId);
       } catch (e) {
         showToast('Eklenemedi: aynı ürün için olabilir', 'error');
