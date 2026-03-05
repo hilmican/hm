@@ -445,6 +445,7 @@ def product_ai_page(request: Request, focus: str):
             "default_unit": row.default_unit or "adet",
             "default_cost": row.default_cost,
             "description": getattr(row, "description", None) or "",
+            "short_description": getattr(row, "short_description", None) or "",
             "himan_price": getattr(row, "himan_price", None),
             "himan_sale_price": getattr(row, "himan_sale_price", None),
             "ai_system_msg": row.ai_system_msg or "",
@@ -675,6 +676,7 @@ def save_product_details(
     default_unit: str = Form(default="adet"),
     default_cost: str = Form(default=""),
     description: str = Form(default=""),
+    short_description: str = Form(default=""),
     himan_price: str = Form(default=""),
     himan_sale_price: str = Form(default=""),
 ):
@@ -716,6 +718,7 @@ def save_product_details(
         except ValueError:
             prod.default_cost = None
         prod.description = description.strip() or None
+        prod.short_description = short_description.strip() or None
         try:
             prod.himan_price = float(himan_price) if himan_price and himan_price.strip() else None
         except ValueError:
@@ -742,9 +745,9 @@ def save_product_details(
                         sale_str = ""
                     patch_payload = {}
                     if prod.description is not None:
-                        desc_text = prod.description or ""
-                        patch_payload["description"] = desc_text
-                        patch_payload["short_description"] = desc_text  # Tema bazen short_description kullanir (Aciklama sekmesi)
+                        patch_payload["description"] = prod.description or ""
+                    if prod.short_description is not None:
+                        patch_payload["short_description"] = prod.short_description or ""
                     if reg_str:
                         patch_payload["regular_price"] = reg_str
                     if prod.himan_price is not None:
@@ -890,9 +893,11 @@ def pull_product_from_himan(focus: str):
         ).first()
         if not prod:
             raise HTTPException(status_code=404, detail="HMA'da ürün bulunamadı")
-        # Woo description (can be HTML)
+        # Woo description ve short_description (can be HTML)
         desc = (woo_prod.get("description") or "").strip()
         prod.description = desc or None
+        short_desc = (woo_prod.get("short_description") or "").strip()
+        prod.short_description = short_desc or None
         # Fiyat: variable ürünlerde ana üründe boş olabilir; helper price veya varyasyon kullanır
         regular_price, sale_price = _woo_get_product_prices(base_url, auth, woo_prod)
         prod.himan_price = regular_price
@@ -969,6 +974,8 @@ def sync_all_products_from_himan(
                     continue
                 desc = (woo_prod.get("description") or "").strip()
                 prod.description = desc or None
+                short_desc = (woo_prod.get("short_description") or "").strip()
+                prod.short_description = short_desc or None
                 # Toplu senkron: ek HTTP (varyasyon) isteği atma; sadece ürün cevabındaki price kullan (timeout önlenir)
                 regular_price, sale_price = _woo_get_product_prices_light(woo_prod)
                 prod.himan_price = regular_price

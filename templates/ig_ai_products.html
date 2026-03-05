@@ -37,8 +37,12 @@
     <form method="post" action="/ig/ai/products/details/save" style="margin-top:12px;">
       <input type="hidden" name="focus" value="{{ focus }}" />
       <div class="field">
-        <label>Ürün açıklaması</label>
-        <textarea name="description" placeholder="Ürün açıklaması (HTML olabilir)" style="min-height:80px;">{{ description or '' }}</textarea>
+        <label>Kısa açıklama</label>
+        <textarea name="short_description" placeholder="Liste ve özet için kısa açıklama (HTML olabilir)" style="min-height:60px;">{{ short_description or '' }}</textarea>
+      </div>
+      <div class="field">
+        <label>Uzun açıklama (detay)</label>
+        <textarea name="description" placeholder="Ürün detay sayfası açıklaması (HTML olabilir)" style="min-height:120px;">{{ description or '' }}</textarea>
       </div>
       <div class="row" style="grid-template-columns: 1fr 1fr 1fr; gap:12px;">
         <div class="field">

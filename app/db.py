@@ -973,6 +973,8 @@ def init_db() -> None:
                             pass
                     if 'description' not in have_cols:
                         conn.exec_driver_sql("ALTER TABLE product ADD COLUMN description LONGTEXT NULL")
+                    if 'short_description' not in have_cols:
+                        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN short_description LONGTEXT NULL")
                     if 'himan_price' not in have_cols:
                         conn.exec_driver_sql("ALTER TABLE product ADD COLUMN himan_price DOUBLE NULL")
                     if 'himan_sale_price' not in have_cols:

@@ -186,7 +186,8 @@ class Product(SQLModel, table=True):
         description="Fallback unit cost when no stock movement cost exists",
         index=True,
     )
-    description: Optional[str] = Field(default=None, sa_column=Column(Text), description="Ürün açıklaması")
+    description: Optional[str] = Field(default=None, sa_column=Column(Text), description="Ürün uzun açıklaması (detay)")
+    short_description: Optional[str] = Field(default=None, sa_column=Column(Text), description="Ürün kısa açıklaması (liste/özet)")
     himan_price: Optional[float] = Field(default=None, description="himan.com.tr satış fiyatı (normal)")
     himan_sale_price: Optional[float] = Field(default=None, description="himan.com.tr indirimli fiyat (varsa)")
     himan_status: Optional[str] = Field(default=None, description="himan.com.tr satış durumu: publish=Satışta, draft=Taslak, private=Gizli")
