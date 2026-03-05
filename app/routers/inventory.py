@@ -348,6 +348,30 @@ def stock_requests_table(
             )
         rows = session.exec(qry.order_by(StockRequest.id.desc()).limit(limit)).all()
 
+        # Grupla: ürün -> renk -> beden; her seviyede toplam ve alt elemanlar
+        from collections import defaultdict
+        tree = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+        for r in rows:
+            pname = (r.product_name or r.sku or "Bilinmeyen").strip() or "Bilinmeyen"
+            cname = (r.color or "-").strip() or "-"
+            sname = (r.size or "-").strip() or "-"
+            tree[pname][cname][sname].append(r)
+        grouped = []
+        for pname in sorted(tree.keys()):
+            colors_list = []
+            product_total = 0
+            for cname in sorted(tree[pname].keys()):
+                sizes_list = []
+                color_total = 0
+                for sname in sorted(tree[pname][cname].keys()):
+                    reqs = tree[pname][cname][sname]
+                    cnt = len(reqs)
+                    color_total += cnt
+                    product_total += cnt
+                    sizes_list.append({"name": sname, "count": cnt, "requests": reqs})
+                colors_list.append({"name": cname, "total": color_total, "sizes": sizes_list})
+            grouped.append({"name": pname, "total": product_total, "colors": colors_list})
+
         summary_q = select(
             func.date(StockRequest.created_at).label("req_date"),
             func.coalesce(StockRequest.product_name, StockRequest.sku, "Bilinmeyen").label("product_label"),
@@ -395,6 +419,7 @@ def stock_requests_table(
             {
                 "request": request,
                 "rows": rows,
+                "grouped": grouped,
                 "status": status or "",
                 "q": query_text,
                 "start": start_date,

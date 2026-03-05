@@ -18,6 +18,12 @@
         .status-fulfilled { color:#166534; font-weight:600; }
         .status-rejected { color:#b91c1c; font-weight:600; }
         .small { color:#64748b; font-size:12px; }
+        .accordion-product { margin-bottom:8px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; }
+        .accordion-product summary { padding:10px 14px; background:#f8fafc; font-weight:600; cursor:pointer; }
+        .accordion-product details details summary { padding:8px 12px; background:#f1f5f9; font-weight:500; }
+        .accordion-product details details details summary { padding:6px 12px; background:#fff; font-weight:400; }
+        .accordion-inner { padding:8px 12px 12px 24px; }
+        .accordion-total { color:#64748b; font-weight:500; margin-left:8px; }
     </style>
 </head>
 <body>
@@ -48,64 +54,70 @@
         <a href="/inventory/stock-requests/hits" style="margin-left:8px;display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none;font-weight:600;">Istek sayilari (gunluk)</a>
     </form>
 
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Tarih</th>
-                <th>Urun</th>
-                <th>SKU / Varyant</th>
-                <th>Istenen</th>
-                <th>Kaynak</th>
-                <th>Durum</th>
-                <th>Aksiyon</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for r in rows %}
-            <tr>
-                <td>#{{ r.id }}</td>
-                <td>
-                    {{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '-' }}
-                    {% if r.processed_at %}
-                    <div class="small">islem: {{ r.processed_at.strftime('%Y-%m-%d %H:%M') }}</div>
-                    {% endif %}
-                </td>
-                <td>
-                    {{ r.product_name or '-' }}
-                    <div class="small">item_id={{ r.item_id or '-' }} / product_id={{ r.product_id or '-' }}</div>
-                </td>
-                <td>
-                    {{ r.sku or '-' }}
-                    <div class="small">{{ r.size or '-' }} / {{ r.color or '-' }}</div>
-                </td>
-                <td>{{ r.requested_qty }}</td>
-                <td>
-                    {{ r.source_site or '-' }}
-                    {% if r.source_url %}
-                    <div><a href="{{ r.source_url }}" target="_blank" rel="noopener noreferrer">Kaynak Link</a></div>
-                    {% endif %}
-                    {% if r.reason %}
-                    <div class="small">neden: {{ r.reason }}</div>
-                    {% endif %}
-                </td>
-                <td>
-                    <span class="status-{{ r.status }}">{{ r.status }}</span>
-                </td>
-                <td>
-                    <select id="status-{{ r.id }}">
-                        <option value="new" {% if r.status == 'new' %}selected{% endif %}>new</option>
-                        <option value="reviewed" {% if r.status == 'reviewed' %}selected{% endif %}>reviewed</option>
-                        <option value="fulfilled" {% if r.status == 'fulfilled' %}selected{% endif %}>fulfilled</option>
-                        <option value="rejected" {% if r.status == 'rejected' %}selected{% endif %}>rejected</option>
-                    </select>
-                    <button type="button" onclick="saveStatus({{ r.id }})">Kaydet</button>
-                    <button type="button" onclick="deleteRequest({{ r.id }})" style="margin-left:6px;background:#b91c1c;color:#fff;">Sil</button>
-                </td>
-            </tr>
+    <p class="small" style="margin-bottom:10px;">Istekler urun &rarr; renk &rarr; beden olarak gruplanmistir. Her satirda o grubun toplam istek sayisi yazar. Ici acilinca alt gruplar ve tek tek kayitlar gorunur.</p>
+
+    {% if grouped %}
+    <div class="accordion-product">
+    {% for prod in grouped %}
+    <details>
+        <summary>{{ prod.name }} <span class="accordion-total">(toplam {{ prod.total }} istek)</span></summary>
+        <div class="accordion-inner">
+        {% for col in prod.colors %}
+        <details>
+            <summary>{{ col.name }} <span class="accordion-total">({{ col.total }} istek)</span></summary>
+            <div class="accordion-inner">
+            {% for sz in col.sizes %}
+            <details>
+                <summary>Beden {{ sz.name }} <span class="accordion-total">({{ sz.count }} istek)</span></summary>
+                <div class="accordion-inner">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Tarih</th>
+                            <th>Istenen</th>
+                            <th>Kaynak</th>
+                            <th>Durum</th>
+                            <th>Aksiyon</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in sz.requests %}
+                        <tr>
+                            <td>#{{ r.id }}</td>
+                            <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '-' }}</td>
+                            <td>{{ r.requested_qty }}</td>
+                            <td>
+                                {% if r.source_url %}<a href="{{ r.source_url }}" target="_blank" rel="noopener noreferrer">Link</a>{% else %}{{ r.source_site or '-' }}{% endif %}
+                            </td>
+                            <td><span class="status-{{ r.status }}">{{ r.status }}</span></td>
+                            <td>
+                                <select id="status-{{ r.id }}">
+                                    <option value="new" {% if r.status == 'new' %}selected{% endif %}>new</option>
+                                    <option value="reviewed" {% if r.status == 'reviewed' %}selected{% endif %}>reviewed</option>
+                                    <option value="fulfilled" {% if r.status == 'fulfilled' %}selected{% endif %}>fulfilled</option>
+                                    <option value="rejected" {% if r.status == 'rejected' %}selected{% endif %}>rejected</option>
+                                </select>
+                                <button type="button" onclick="saveStatus({{ r.id }})">Kaydet</button>
+                                <button type="button" onclick="deleteRequest({{ r.id }})" style="margin-left:6px;background:#b91c1c;color:#fff;">Sil</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                </div>
+            </details>
             {% endfor %}
-        </tbody>
-    </table>
+            </div>
+        </details>
+        {% endfor %}
+        </div>
+    </details>
+    {% endfor %}
+    </div>
+    {% else %}
+    <p class="small">Kayit yok.</p>
+    {% endif %}
 
     <h3 style="margin-top:20px;">Gunluk Urun Bazli Ozet</h3>
     <table>
