@@ -692,13 +692,16 @@ def save_product_details(
         raise HTTPException(status_code=400, detail="focus is required")
     if not name_s:
         raise HTTPException(status_code=400, detail="name is required")
+
+    # Önce sadece DB kaydı: transaction kısa tutulur, böylece MySQL bağlantısı WooCommerce
+    # çağrıları sırasında açık kalmadığı için "Lost connection during query (timed out)" riski azalır.
+    new_slug = slugify(name_s)
     with get_session() as session:
         prod = session.exec(
             select(Product).where((Product.slug == focus_s) | (Product.name == focus_s)).limit(1)
         ).first()
         if not prod:
             raise HTTPException(status_code=404, detail="Product not found for focus")
-        new_slug = slugify(name_s)
         if new_slug != (prod.slug or ""):
             existing = session.exec(
                 select(Product).where(Product.slug == new_slug, Product.id != prod.id)
@@ -727,50 +730,53 @@ def save_product_details(
             prod.himan_sale_price = float(himan_sale_price) if himan_sale_price and himan_sale_price.strip() else None
         except ValueError:
             prod.himan_sale_price = None
+        # WooCommerce push session dışında yapılacak; commit öncesi değerleri sakla
+        himan_price_val = prod.himan_price
+        himan_sale_price_val = prod.himan_sale_price
+        desc_val = prod.description
+        short_desc_val = prod.short_description
         session.add(prod)
-        session.flush()
-        # Push fiyat (ve açıklama) to himan.com.tr if WooCommerce API configured
-        woo = _woo_client()
-        if woo:
-            base_url, key, secret = woo
-            auth = (key, secret)
-            try:
-                woo_prod = _woo_get_product_by_slug(base_url, auth, new_slug)
-                if woo_prod and woo_prod.get("id"):
-                    woo_id = woo_prod["id"]
-                    # Fiyatı tam sayı ise "778" gönder (778.0 değil), sitede 778,70 görünmesin
-                    reg_str = _woo_format_price(prod.himan_price)
-                    sale_str = _woo_format_price(prod.himan_sale_price) if prod.himan_sale_price is not None else ""
-                    if prod.himan_price is not None and not sale_str:
-                        sale_str = ""
-                    patch_payload = {}
-                    if prod.description is not None:
-                        patch_payload["description"] = prod.description or ""
-                    if prod.short_description is not None:
-                        patch_payload["short_description"] = prod.short_description or ""
-                    if reg_str:
-                        patch_payload["regular_price"] = reg_str
-                    if prod.himan_price is not None:
-                        patch_payload["sale_price"] = sale_str
-                    if patch_payload:
-                        ok, status, body = _woo_update_product(base_url, auth, woo_id, patch_payload)
-                        if ok:
-                            # Log payload keys; for description/short_description log length only
-                            plog = {}
-                            for k, v in patch_payload.items():
-                                if k in ("description", "short_description"):
-                                    plog[k] = f"<len={len(str(v))}>"
-                                else:
-                                    plog[k] = v
-                            log.info("himan push ok slug=%s woo_id=%s payload=%s", new_slug, woo_id, plog)
-                        else:
-                            log.warning("himan push failed slug=%s woo_id=%s status=%s body=%s", new_slug, woo_id, status, body)
-                    # Variable ürünlerde sitede görünen fiyat varyasyonlardan gelir; hepsini güncelle
-                    if woo_prod.get("type") == "variable" and (reg_str or sale_str is not None):
-                        _woo_update_variations_prices(base_url, auth, woo_id, prod.himan_price, sale_str)
-                        log.info("himan variations updated slug=%s woo_id=%s", new_slug, woo_id)
-            except Exception as e:
-                log.warning("himan.com.tr fiyat push failed: %s", e)
+        session.commit()
+
+    # WooCommerce push session dışında: DB bağlantısı kapalı, uzun süren HTTP çağrıları timeout’a yol açmaz
+    woo = _woo_client()
+    if woo:
+        base_url, key, secret = woo
+        auth = (key, secret)
+        try:
+            woo_prod = _woo_get_product_by_slug(base_url, auth, new_slug)
+            if woo_prod and woo_prod.get("id"):
+                woo_id = woo_prod["id"]
+                reg_str = _woo_format_price(himan_price_val)
+                sale_str = _woo_format_price(himan_sale_price_val) if himan_sale_price_val is not None else ""
+                if himan_price_val is not None and not sale_str:
+                    sale_str = ""
+                patch_payload = {}
+                if desc_val is not None:
+                    patch_payload["description"] = desc_val or ""
+                if short_desc_val is not None:
+                    patch_payload["short_description"] = short_desc_val or ""
+                if reg_str:
+                    patch_payload["regular_price"] = reg_str
+                if himan_price_val is not None:
+                    patch_payload["sale_price"] = sale_str
+                if patch_payload:
+                    ok, status, body = _woo_update_product(base_url, auth, woo_id, patch_payload)
+                    if ok:
+                        plog = {}
+                        for k, v in patch_payload.items():
+                            if k in ("description", "short_description"):
+                                plog[k] = f"<len={len(str(v))}>"
+                            else:
+                                plog[k] = v
+                        log.info("himan push ok slug=%s woo_id=%s payload=%s", new_slug, woo_id, plog)
+                    else:
+                        log.warning("himan push failed slug=%s woo_id=%s status=%s body=%s", new_slug, woo_id, status, body)
+                if woo_prod.get("type") == "variable" and (reg_str or sale_str is not None):
+                    _woo_update_variations_prices(base_url, auth, woo_id, himan_price_val, sale_str)
+                    log.info("himan variations updated slug=%s woo_id=%s", new_slug, woo_id)
+        except Exception as e:
+            log.warning("himan.com.tr fiyat push failed: %s", e)
     return RedirectResponse(url=f"/ig/ai/products?focus={new_slug}", status_code=303)
 
 

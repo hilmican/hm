@@ -22,8 +22,8 @@ max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "5"))
 pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "30"))
 pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "3600"))  # Recycle connections after 1 hour
 
-# Query timeout in seconds (default 30 seconds)
-query_timeout = int(os.getenv("DB_QUERY_TIMEOUT", "30"))
+# Query timeout in seconds (default 60; uzun LONGTEXT update'leri için 30 yetersiz kalabiliyor)
+query_timeout = int(os.getenv("DB_QUERY_TIMEOUT", "60"))
 
 # Transaction isolation level (READ COMMITTED reduces lock contention)
 isolation_level = os.getenv("DB_ISOLATION_LEVEL", "READ COMMITTED")
