@@ -311,7 +311,6 @@ def stock_requests_table(
     start: Optional[str] = Query(default=None),
     end: Optional[str] = Query(default=None),
     limit: int = Query(default=500, ge=1, le=5000),
-    sort: Optional[str] = Query(default="most_requested", description="most_requested | name"),
 ):
     _ensure_authenticated(request)
 
@@ -361,31 +360,17 @@ def stock_requests_table(
         for pname in sorted(tree.keys()):
             colors_list = []
             product_total = 0
-            product_ids: list[int] = []
             for cname in sorted(tree[pname].keys()):
                 sizes_list = []
                 color_total = 0
-                color_ids: list[int] = []
                 for sname in sorted(tree[pname][cname].keys()):
                     reqs = tree[pname][cname][sname]
                     cnt = len(reqs)
-                    ids = [int(r.id) for r in reqs if r.id is not None]
                     color_total += cnt
                     product_total += cnt
-                    color_ids.extend(ids)
-                    product_ids.extend(ids)
-                    sizes_list.append({"name": sname, "count": cnt, "requests": reqs, "ids": ids})
-                # Renkleri toplam istek sayısına göre azalan sırala (en çok istek alan önce)
-                sizes_list.sort(key=lambda x: (-x["count"], x["name"]))
-                colors_list.append({"name": cname, "total": color_total, "sizes": sizes_list, "ids": color_ids})
-            # Renkleri toplam istek sayısına göre azalan sırala
-            colors_list.sort(key=lambda x: (-x["total"], x["name"]))
-            grouped.append({"name": pname, "total": product_total, "colors": colors_list, "ids": product_ids})
-        # Ürünleri sırala: sort=most_requested (varsayılan) ise toplam istek azalan, name ise ada göre
-        if (sort or "").strip().lower() == "name":
-            grouped.sort(key=lambda x: (x["name"].lower(),))
-        else:
-            grouped.sort(key=lambda x: (-x["total"], x["name"]))
+                    sizes_list.append({"name": sname, "count": cnt, "requests": reqs})
+                colors_list.append({"name": cname, "total": color_total, "sizes": sizes_list})
+            grouped.append({"name": pname, "total": product_total, "colors": colors_list})
 
         summary_q = select(
             func.date(StockRequest.created_at).label("req_date"),
@@ -440,7 +425,6 @@ def stock_requests_table(
                 "start": start_date,
                 "end": end_date,
                 "limit": limit,
-                "sort": (sort or "most_requested").strip() or "most_requested",
                 "summary": summary,
                 "sync_success": sync_success,
                 "sync_error": sync_error,
@@ -482,24 +466,6 @@ def delete_stock_request(stock_request_id: int, request: Request):
             raise HTTPException(status_code=404, detail="Stock request not found")
         session.delete(row)
         return {"status": "ok"}
-
-
-@router.post("/stock-requests/bulk-delete")
-def bulk_delete_stock_requests(body: Dict[str, Any], request: Request):
-    """Ürün / renk / beden grubu için toplu silme. Body: {"ids": [1, 2, 3]}"""
-    _ensure_authenticated(request)
-    ids = body.get("ids")
-    if not isinstance(ids, list):
-        raise HTTPException(status_code=400, detail="ids must be an array")
-    ids = [int(x) for x in ids if isinstance(x, (int, float, str)) and str(x).isdigit()]
-    if not ids:
-        return {"status": "ok", "deleted": 0}
-    with get_session() as session:
-        for sid in ids:
-            row = session.exec(select(StockRequest).where(StockRequest.id == sid)).first()
-            if row:
-                session.delete(row)
-        return {"status": "ok", "deleted": len(ids)}
 
 
 @router.post("/stock-requests/record-hit")

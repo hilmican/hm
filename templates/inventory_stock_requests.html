@@ -24,9 +24,6 @@
         .accordion-product details details details summary { padding:6px 12px; background:#fff; font-weight:400; }
         .accordion-inner { padding:8px 12px 12px 24px; }
         .accordion-total { color:#64748b; font-weight:500; margin-left:8px; }
-        summary { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
-        .btn-delete-group { margin-left:auto; padding:4px 10px; font-size:12px; background:#b91c1c; color:#fff; border:none; border-radius:6px; cursor:pointer; }
-        .btn-delete-group:hover { background:#991b1b; }
     </style>
 </head>
 <body>
@@ -42,11 +39,6 @@
     {% endif %}
     <form class="toolbar" method="get" action="/inventory/stock-requests/table">
         <input type="search" name="q" value="{{ q }}" placeholder="urun, sku, beden, renk" />
-        <label class="small">Sıra:</label>
-        <select name="sort">
-            <option value="most_requested" {% if sort == 'most_requested' %}selected{% endif %}>En çok istek alan</option>
-            <option value="name" {% if sort == 'name' %}selected{% endif %}>Ürün adı</option>
-        </select>
         <select name="status">
             <option value="">Durum (tum)</option>
             <option value="new" {% if status == 'new' %}selected{% endif %}>new</option>
@@ -68,24 +60,15 @@
     <div class="accordion-product">
     {% for prod in grouped %}
     <details>
-        <summary>
-            {{ prod.name }} <span class="accordion-total">(toplam {{ prod.total }} istek)</span>
-            <button type="button" class="btn-delete-group" onclick="event.preventDefault(); event.stopPropagation(); deleteGroup({{ prod.ids | tojson }}, 'Bu urune ait {{ prod.total }} stok istegini silmek istediginize emin misiniz?');" title="Bu urun grubundaki tum istekleri sil">Sil</button>
-        </summary>
+        <summary>{{ prod.name }} <span class="accordion-total">(toplam {{ prod.total }} istek)</span></summary>
         <div class="accordion-inner">
         {% for col in prod.colors %}
         <details>
-            <summary>
-                {{ col.name }} <span class="accordion-total">({{ col.total }} istek)</span>
-                <button type="button" class="btn-delete-group" onclick="event.preventDefault(); event.stopPropagation(); deleteGroup({{ col.ids | tojson }}, 'Bu renge ait {{ col.total }} stok istegini silmek istediginize emin misiniz?');" title="Bu renk grubundaki tum istekleri sil">Sil</button>
-            </summary>
+            <summary>{{ col.name }} <span class="accordion-total">({{ col.total }} istek)</span></summary>
             <div class="accordion-inner">
             {% for sz in col.sizes %}
             <details>
-                <summary>
-                    Beden {{ sz.name }} <span class="accordion-total">({{ sz.count }} istek)</span>
-                    <button type="button" class="btn-delete-group" onclick="event.preventDefault(); event.stopPropagation(); deleteGroup({{ sz.ids | tojson }}, 'Bu bedene ait {{ sz.count }} stok istegini silmek istediginize emin misiniz?');" title="Bu beden grubundaki tum istekleri sil">Sil</button>
-                </summary>
+                <summary>Beden {{ sz.name }} <span class="accordion-total">({{ sz.count }} istek)</span></summary>
                 <div class="accordion-inner">
                 <table>
                     <thead>
@@ -177,20 +160,6 @@
         const res = await fetch('/inventory/stock-requests/' + id, { method: 'DELETE' });
         if (!res.ok){
             alert('Silme hatasi');
-            return;
-        }
-        location.reload();
-    }
-    async function deleteGroup(ids, confirmMessage){
-        if (!ids || !ids.length) return;
-        if (!confirm(confirmMessage || 'Bu gruptaki ' + ids.length + ' stok istegini silmek istediginize emin misiniz?')) return;
-        const res = await fetch('/inventory/stock-requests/bulk-delete', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ ids: ids })
-        });
-        if (!res.ok){
-            alert('Toplu silme hatasi');
             return;
         }
         location.reload();
