@@ -584,10 +584,11 @@ async def send_message(conversation_id: str, text: str, image_urls: Optional[Lis
             (image_urls[0][:120] if image_urls else ""),
         )
     results: Dict[str, Any] = {"message_ids": [], "status": "ok"}
-    # Görseller arası gecikme (rate limit / "1 gönderiyor 1 göndermiyor" azaltmak için). Varsayılan 1.2s.
-    image_delay_sec = float(os.getenv("IG_IMAGE_SEND_DELAY_SEC", "1.2"))
+    # Görseller arası gecikme: Meta her görseli URL'den çekip önbelleğe alıyor; çok hızlı art arda
+    # gönderimde bazen "gönderildi" görünüp görsel boş kalabiliyor. Varsayılan 2.0s.
+    image_delay_sec = float(os.getenv("IG_IMAGE_SEND_DELAY_SEC", "2.0"))
     # Başarısız gönderimden sonra ek bekleme (rate limit toparlanması)
-    image_delay_after_fail_sec = float(os.getenv("IG_IMAGE_DELAY_AFTER_FAIL_SEC", "2.5"))
+    image_delay_after_fail_sec = float(os.getenv("IG_IMAGE_DELAY_AFTER_FAIL_SEC", "3.0"))
 
     async def _send_one_image(img_url: str) -> bool:
         img_payload = {

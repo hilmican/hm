@@ -18,6 +18,7 @@ async def inbox(
     request: Request,
     limit: int = 25,
     q: str | None = None,
+    search_in: str | None = None,
     has_ad: str | None = None,
     ad_product: str | None = None,
     platform: str | None = None,
@@ -99,46 +100,57 @@ async def inbox(
         if platform_s in ("instagram", "whatsapp"):
             where_parts.append("COALESCE(c.platform, 'instagram') = :platform")
             params["platform"] = platform_s
+        search_in_s = (search_in or "all").strip().lower()
         if q and isinstance(q, str) and q.strip():
-            qq = f"%{q.lower().strip()}%"
+            q_trim = q.strip()
+            qq = f"%{q_trim.lower()}%"
             params["qq"] = qq
-            # Resolve matching ig_user_ids once (avoids slow correlated EXISTS per row)
-            q_matching_ids: list[str] = []
-            try:
-                q_id_rows = session.exec(
-                    _text("""
-                        SELECT ig_user_id FROM ig_users
-                        WHERE (username IS NOT NULL AND LOWER(username) LIKE :qq)
-                           OR (name IS NOT NULL AND LOWER(name) LIKE :qq)
-                        LIMIT 500
-                    """).params(qq=qq)
-                ).all()
-                for row in q_id_rows:
-                    uid = row.ig_user_id if hasattr(row, "ig_user_id") else (row[0] if len(row) > 0 else None)
-                    if uid:
-                        q_matching_ids.append(str(uid))
-            except Exception:
-                q_matching_ids = []
-            if q_matching_ids:
-                placeholders = ",".join([":qid" + str(i) for i in range(len(q_matching_ids))])
-                for i, uid in enumerate(q_matching_ids):
-                    params["qid" + str(i)] = uid
-                where_parts.append(f"""
-                    (
-                        (c.last_message_text IS NOT NULL AND LOWER(c.last_message_text) LIKE :qq)
-                        OR (c.last_sender_username IS NOT NULL AND LOWER(c.last_sender_username) LIKE :qq)
-                        OR c.ig_user_id IN ({placeholders})
-                        OR c.ig_sender_id IN ({placeholders})
-                        OR c.ig_recipient_id IN ({placeholders})
-                    )
-                """)
-            else:
-                where_parts.append("""
-                    (
-                        (c.last_message_text IS NOT NULL AND LOWER(c.last_message_text) LIKE :qq)
-                        OR (c.last_sender_username IS NOT NULL AND LOWER(c.last_sender_username) LIKE :qq)
-                    )
-                """)
+            q_numeric = q_trim.isdigit()
+            q_exact_id = int(q_trim) if q_numeric else None
+            q_conditions: list[str] = []
+            # Konuşma ID (c.id) - tam eşleşme
+            if search_in_s == "all" or search_in_s == "conversation_id":
+                if q_numeric:
+                    q_conditions.append("c.id = :q_convo_id")
+                    params["q_convo_id"] = q_exact_id
+            # Reklam ID (last_ad_id, last_link_id) - tam eşleşme
+            if search_in_s == "all" or search_in_s == "ad_id":
+                if q_numeric or len(q_trim) >= 5:
+                    q_conditions.append("(c.last_ad_id = :q_ad_str OR c.last_link_id = :q_ad_str)")
+                    params["q_ad_str"] = q_trim
+            # Kullanıcı ID (ig_user_id, ig_sender_id, ig_recipient_id)
+            if search_in_s == "all" or search_in_s == "ig_user_id":
+                q_conditions.append("(c.ig_user_id = :q_uid_str OR c.ig_sender_id = :q_uid_str OR c.ig_recipient_id = :q_uid_str)")
+                params["q_uid_str"] = q_trim
+            # Mesaj metni
+            if search_in_s == "all" or search_in_s == "message":
+                q_conditions.append("(c.last_message_text IS NOT NULL AND LOWER(c.last_message_text) LIKE :qq)")
+            # Kullanıcı adı (username/name -> ig_users'tan gelen id'ler + last_sender_username)
+            if search_in_s == "all" or search_in_s == "username":
+                q_matching_ids: list[str] = []
+                try:
+                    q_id_rows = session.exec(
+                        _text("""
+                            SELECT ig_user_id FROM ig_users
+                            WHERE (username IS NOT NULL AND LOWER(username) LIKE :qq)
+                               OR (name IS NOT NULL AND LOWER(name) LIKE :qq)
+                            LIMIT 500
+                        """).params(qq=qq)
+                    ).all()
+                    for row in q_id_rows:
+                        uid = row.ig_user_id if hasattr(row, "ig_user_id") else (row[0] if len(row) > 0 else None)
+                        if uid:
+                            q_matching_ids.append(str(uid))
+                except Exception:
+                    q_matching_ids = []
+                if q_matching_ids:
+                    placeholders = ",".join([":qid" + str(i) for i in range(len(q_matching_ids))])
+                    for i, uid in enumerate(q_matching_ids):
+                        params["qid" + str(i)] = uid
+                    q_conditions.append(f"(c.ig_user_id IN ({placeholders}) OR c.ig_sender_id IN ({placeholders}) OR c.ig_recipient_id IN ({placeholders}))")
+                q_conditions.append("(c.last_sender_username IS NOT NULL AND LOWER(c.last_sender_username) LIKE :qq)")
+            if q_conditions:
+                where_parts.append("(" + " OR ".join(q_conditions) + ")")
         # Optional filter: restrict to conversations with ads/posts / unlinked ads/posts
         has_ad_s = (has_ad or "").strip().lower()
         if has_ad_s in ("yes", "true", "1", "any"):
@@ -502,6 +514,7 @@ async def inbox(
             "ad_map": ad_map,
             "escalation_map": escalation_map,
             "q": (q or ""),
+            "search_in": search_in_s or "all",
             "platform": platform_s,
             "has_ad": has_ad_s,
             "ad_product": ad_product_s,

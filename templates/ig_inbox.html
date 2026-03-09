@@ -25,8 +25,16 @@
       {% else %}
       <a href="/ig/inbox" class="meta-link">Tüm Konuşmalar</a>
       {% endif %}
-      <form method="get" action="/ig/inbox" style="display:flex;gap:8px;align-items:center;">
-        <input type="text" name="q" placeholder="Mesajlarda ara..." value="{{ q or '' }}" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;min-width:280px" />
+      <form method="get" action="/ig/inbox" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="text" name="q" placeholder="Ara..." value="{{ q or '' }}" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;min-width:220px" />
+        <select name="search_in" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;min-width:160px" title="Ne ile aranacak">
+          <option value="all" {% if (search_in or 'all') == 'all' %}selected{% endif %}>Tümü (hepsinde ara)</option>
+          <option value="conversation_id" {% if search_in == 'conversation_id' %}selected{% endif %}>Konuşma ID</option>
+          <option value="ad_id" {% if search_in == 'ad_id' %}selected{% endif %}>Reklam ID</option>
+          <option value="ig_user_id" {% if search_in == 'ig_user_id' %}selected{% endif %}>Kullanıcı ID (IG/WA)</option>
+          <option value="message" {% if search_in == 'message' %}selected{% endif %}>Mesaj metni</option>
+          <option value="username" {% if search_in == 'username' %}selected{% endif %}>Kullanıcı adı</option>
+        </select>
         <select name="platform" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;">
           <option value="" {% if not platform %}selected{% endif %}>Tüm platformlar</option>
           <option value="instagram" {% if platform == 'instagram' %}selected{% endif %}>📸 Instagram</option>
