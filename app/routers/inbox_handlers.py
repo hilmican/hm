@@ -607,6 +607,7 @@ async def ai_replied_messages(
     """List of conversations where AI has automatically replied."""
     with get_session() as session:
         from sqlalchemy import text as _text
+        # Sıralama: son mesaj saatine göre (conversations.last_message_timestamp_ms). Gösterilen tarih de aynı alan (anlamlı).
         rows = session.exec(
             _text(
                 """
@@ -625,7 +626,7 @@ async def ai_replied_messages(
                 FROM conversations c
                 INNER JOIN ai_shadow_reply r ON r.conversation_id = c.id AND r.status = 'sent'
                 LEFT JOIN ig_users u ON u.ig_user_id = c.ig_user_id AND COALESCE(u.platform, 'instagram') = COALESCE(c.platform, 'instagram')
-                ORDER BY (SELECT MAX(r.created_at) FROM ai_shadow_reply r WHERE r.conversation_id = c.id AND r.status = 'sent') DESC
+                ORDER BY c.last_message_timestamp_ms DESC
                 LIMIT :n
                 """
             ).params(n=int(limit))
