@@ -809,15 +809,16 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
                         usernames[str(uid)] = str(un)
                     elif uid:
                         ids_without_username.append(str(uid))
+                # Enrich kuyruğuna az sayıda ekle (sayfa yükü gecikmesin; geri kalanı başka tetiklemede dolar)
                 try:
-                    for uid in ids_without_username[: min(50, len(ids_without_username))]:
+                    for uid in ids_without_username[:5]:
                         enqueue("enrich_user", key=str(uid), payload={"ig_user_id": str(uid)})
                 except Exception:
                     pass
         except Exception:
             usernames = {}
 
-        # Detect focus product for this conversation (for UI + AI hints)
+        # Detect focus product once and reuse for UI + inline_drafts below
         try:
             focus_slug, focus_conf = _detect_focus_product(str(conversation_id))
         except Exception:
@@ -1115,11 +1116,7 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
         # If inline drafts enabled, merge all suggestions as virtual messages and resort by timestamp
         inline_drafts = (_os.getenv("IG_INLINE_DRAFTS", "1") not in ("0", "false", "False"))
         if inline_drafts and rows_shadow:
-            # Determine product focus once for this thread (fallback to None)
-            try:
-                focus_slug, _ = _detect_focus_product(conversation_id)
-            except Exception:
-                focus_slug = None
+            # Reuse focus_slug already computed above (no second _detect_focus_product call)
             vms: list[dict] = []
             for rr in rows_shadow:
                 try:
@@ -1270,23 +1267,24 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
             "linked_order_id": linked_order_id,
         }
 
-        # Brand snapshot: use cache only (max 24h) to avoid blocking thread load on Graph API.
+        # Brand snapshot: cache-only (no Graph API on thread load; refresh is done elsewhere).
         brand_profile = None
         try:
-            from ..services.ig_profile import ensure_profile_snapshot as _ensure_profile_snapshot
+            from ..services.ig_profile import get_cached_profile as _get_cached_profile
 
-            snap = _ensure_profile_snapshot(max_age_seconds=86400)
-            brand_profile = {
-                "username": snap.username,
-                "name": snap.name,
-                "profile_picture_url": snap.profile_picture_url,
-                "biography": snap.biography,
-                "followers_count": snap.followers_count,
-                "follows_count": snap.follows_count,
-                "media_count": snap.media_count,
-                "website": snap.website,
-                "refreshed_at": snap.refreshed_at.isoformat() if snap.refreshed_at else None,
-            }
+            snap = _get_cached_profile(max_age_seconds=86400)
+            if snap:
+                brand_profile = {
+                    "username": snap.username,
+                    "name": snap.name,
+                    "profile_picture_url": snap.profile_picture_url,
+                    "biography": snap.biography,
+                    "followers_count": snap.followers_count,
+                    "follows_count": snap.follows_count,
+                    "media_count": snap.media_count,
+                    "website": snap.website,
+                    "refreshed_at": snap.refreshed_at.isoformat() if snap.refreshed_at else None,
+                }
         except Exception:
             brand_profile = None
 
