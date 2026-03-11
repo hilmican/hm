@@ -191,6 +191,10 @@ class Product(SQLModel, table=True):
     himan_price: Optional[float] = Field(default=None, description="himan.com.tr satış fiyatı (normal)")
     himan_sale_price: Optional[float] = Field(default=None, description="himan.com.tr indirimli fiyat (varsa)")
     himan_status: Optional[str] = Field(default=None, description="himan.com.tr satış durumu: publish=Satışta, draft=Taslak, private=Gizli")
+    himan_tedarik_edilebilir: bool = Field(
+        default=False,
+        description="If true, himan.com.tr stock sync keeps all variants available with fixed stock",
+    )
     # AI prompt fields (optional, per-product overrides)
     ai_system_msg: Optional[str] = Field(default=None, sa_column=Column(Text))
     ai_prompt_msg: Optional[str] = Field(default=None, sa_column=Column(Text))

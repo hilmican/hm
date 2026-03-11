@@ -17,6 +17,18 @@ router = APIRouter(prefix="/products", tags=["products"])
 log = logging.getLogger(__name__)
 
 
+def _to_bool(value, default: bool = False) -> bool:
+	if value is None:
+		return default
+	if isinstance(value, bool):
+		return value
+	if isinstance(value, (int, float)):
+		return value != 0
+	if isinstance(value, str):
+		return value.strip().lower() in {"1", "true", "yes", "on"}
+	return bool(value)
+
+
 def _woo_client():
 	"""Return (base_url, consumer_key, consumer_secret) if WooCommerce API is configured."""
 	base_url = (os.getenv("HIMAN_WOO_BASE_URL") or "").strip()
@@ -141,7 +153,8 @@ def list_products(limit: int = Query(default=500, ge=1, le=5000)):
 					"default_unit": p.default_unit,
 					"default_color": p.default_color,
 					"default_price": p.default_price,
-			"default_cost": p.default_cost,
+					"default_cost": p.default_cost,
+					"himan_tedarik_edilebilir": getattr(p, "himan_tedarik_edilebilir", False),
 					"ai_variant_exclusions": p.ai_variant_exclusions,
 					"size_chart_id": assignment_map.get(p.id or 0),
 				}
@@ -157,6 +170,7 @@ def create_product(
     default_unit: str = Form("adet"),
     default_price: float | None = Form(None),
     default_cost: float | None = Form(None),
+    himan_tedarik_edilebilir: str | None = Form(None),
     default_color: str | None = Form(None),
     ai_variant_exclusions: str | None = Form(None),
 	size_chart_id: int | None = Form(None),
@@ -175,6 +189,7 @@ def create_product(
 			default_unit=default_unit,
 			default_price=default_price,
 			default_cost=default_cost,
+			himan_tedarik_edilebilir=_to_bool(himan_tedarik_edilebilir),
 			default_color=default_color,
 			ai_variant_exclusions=ai_variant_exclusions,
 		)
@@ -195,6 +210,7 @@ def create_product(
 			"default_unit": p.default_unit,
 			"default_price": p.default_price,
 			"default_cost": p.default_cost,
+			"himan_tedarik_edilebilir": p.himan_tedarik_edilebilir,
 			"default_color": p.default_color,
 			"ai_variant_exclusions": p.ai_variant_exclusions,
 			"size_chart_id": size_chart_id,
@@ -486,7 +502,7 @@ def delete_product_upsell(upsell_id: int):
 
 @router.put("/{product_id}")
 def update_product(product_id: int, body: dict):
-    allowed = {"name", "category", "default_unit", "default_price", "default_cost", "default_color", "ai_variant_exclusions", "size_chart_id", "ai_reply_sending_enabled"}
+    allowed = {"name", "category", "default_unit", "default_price", "default_cost", "default_color", "ai_variant_exclusions", "size_chart_id", "ai_reply_sending_enabled", "himan_tedarik_edilebilir"}
     with get_session() as session:
         p = session.exec(select(Product).where(Product.id == product_id)).first()
         if not p:
@@ -517,6 +533,8 @@ def update_product(product_id: int, body: dict):
                 p.default_cost = float(val) if val is not None else None
             except Exception:
                 raise HTTPException(status_code=400, detail="Invalid default_cost")
+        if "himan_tedarik_edilebilir" in body:
+            p.himan_tedarik_edilebilir = _to_bool(body.get("himan_tedarik_edilebilir"))
         if "default_color" in body:
             p.default_color = body.get("default_color") or None
         if "ai_variant_exclusions" in body:

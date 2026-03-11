@@ -510,6 +510,9 @@ def debug_reset_conversation(
 
 @router.get("/inbox/{conversation_id}")
 def thread(request: Request, conversation_id: int, limit: int = 500):
+    import logging
+    _log = logging.getLogger("instagram.inbox")
+    t0 = time.perf_counter()
     with get_session() as session:
         from sqlmodel import select
         # Load conversation row (for basic metadata) and messages for this internal id
@@ -818,9 +821,9 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
         except Exception:
             usernames = {}
 
-        # Detect focus product once and reuse for UI + inline_drafts below
+        # Detect focus product once (reuse session to avoid extra connection)
         try:
-            focus_slug, focus_conf = _detect_focus_product(str(conversation_id))
+            focus_slug, focus_conf = _detect_focus_product(str(conversation_id), session=session)
         except Exception:
             focus_slug, focus_conf = (None, 0.0)
         if focus_slug:
@@ -1299,6 +1302,11 @@ def thread(request: Request, conversation_id: int, limit: int = 500):
             assignable_users = []
             current_assignment = None
 
+        duration_sec = time.perf_counter() - t0
+        try:
+            _log.info("thread load conversation_id=%s duration_sec=%.2f", conversation_id, duration_sec)
+        except Exception:
+            pass
         return templates.TemplateResponse(
             "ig_thread.html",
             {

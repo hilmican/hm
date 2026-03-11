@@ -85,14 +85,21 @@ def get_stock_snapshot(sku: str) -> Optional[dict]:
 		return None
 
 
-def _detect_focus_product(conversation_id: str) -> Tuple[Optional[str], float]:
+def _detect_focus_product(conversation_id: str, session=None) -> Tuple[Optional[str], float]:
 	"""Best-effort focus product detection.
-	Returns (sku_or_slug, confidence). Currently a lightweight heuristic:
-	- check conversation's last_link_id/last_link_type (supports posts via ads_products)
-	- use ad_id→sku mapping if present (ads_products table optional)
-	- keyword match against Product.ai_tags on last N inbound messages
+	Returns (sku_or_slug, confidence). Caller can pass session to reuse (thread load performance).
 	"""
+	def _run(sess):
+		return _detect_focus_product_impl(sess, str(conversation_id))
+	if session is not None:
+		return _run(session)
 	with get_session() as session:
+		return _run(session)
+
+
+def _detect_focus_product_impl(session, conversation_id: str) -> Tuple[Optional[str], float]:
+	"""Implementation of focus product detection; uses provided session."""
+	try:
 		# Check conversation's last_link_id/last_link_type first (includes posts)
 		try:
 			stmt_conv = _text(
@@ -191,10 +198,11 @@ def _detect_focus_product(conversation_id: str) -> Tuple[Optional[str], float]:
 						return str(pname), 0.85
 		except Exception:
 			pass
-		# keyword match
+		# keyword match (conversation_id from URL is str; message.conversation_id is int)
 		try:
+			cid_int = int(conversation_id)
 			msgs = session.exec(
-				select(Message).where(Message.conversation_id == conversation_id).order_by(Message.timestamp_ms.desc()).limit(30)
+				select(Message).where(Message.conversation_id == cid_int).order_by(Message.timestamp_ms.desc()).limit(30)
 			).all()
 			texts = " ".join([(m.text or "") for m in msgs if (m.direction or "in") == "in"])
 			if texts.strip():
@@ -218,6 +226,8 @@ def _detect_focus_product(conversation_id: str) -> Tuple[Optional[str], float]:
 				return best
 		except Exception:
 			pass
+	except Exception:
+		pass
 	return (None, 0.0)
 
 
