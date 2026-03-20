@@ -7,10 +7,14 @@ class OrderCompleteScreen extends StatefulWidget {
     super.key,
     required this.orderId,
     required this.trackingNo,
+    this.prefillTotalAmount,
+    this.prefillNotes,
   });
 
   final int orderId;
   final String trackingNo;
+  final double? prefillTotalAmount;
+  final String? prefillNotes;
 
   @override
   State<OrderCompleteScreen> createState() => _OrderCompleteScreenState();
@@ -24,6 +28,19 @@ class _OrderCompleteScreenState extends State<OrderCompleteScreen> {
   bool _submitting = false;
 
   @override
+  void initState() {
+    super.initState();
+    final p = widget.prefillTotalAmount;
+    if (p != null) {
+      _totalCtrl.text = p.toStringAsFixed(2);
+    }
+    final n = widget.prefillNotes;
+    if (n != null && n.isNotEmpty) {
+      _notesCtrl.text = n;
+    }
+  }
+
+  @override
   void dispose() {
     _totalCtrl.dispose();
     _notesCtrl.dispose();
@@ -31,12 +48,19 @@ class _OrderCompleteScreenState extends State<OrderCompleteScreen> {
   }
 
   Future<void> _submit() async {
-    final total = double.tryParse(_totalCtrl.text.replaceAll(',', '.')) ?? -1;
-    if (total < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Geçerli tutar girin')),
-      );
-      return;
+    final raw = _totalCtrl.text.replaceAll(',', '.').trim();
+    double? total;
+    if (raw.isEmpty) {
+      total = null;
+    } else {
+      total = double.tryParse(raw);
+      if (total == null || total < 0) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Geçerli tutar girin veya boş bırakın (etiket tutarı kullanılır)')),
+        );
+        return;
+      }
     }
     setState(() => _submitting = true);
     try {
@@ -76,7 +100,7 @@ class _OrderCompleteScreenState extends State<OrderCompleteScreen> {
               controller: _totalCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
-                labelText: 'Toplam tahsilat (TL)',
+                labelText: 'Toplam tahsilat (TL) — boşsa etiket tutarı',
                 border: OutlineInputBorder(),
               ),
             ),

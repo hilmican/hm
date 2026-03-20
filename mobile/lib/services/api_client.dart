@@ -125,11 +125,28 @@ class HmaApiClient {
 
   Future<Map<String, dynamic>> orderFromKargoQr({
     required String qrContent,
-    Map<String, String>? fields,
+    Map<String, dynamic>? fields,
   }) async {
     return await postJson('/magaza-satis/api/order-from-kargo-qr', {
       'qr_content': qrContent,
       if (fields != null && fields.isNotEmpty) 'fields': fields,
+    }) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> fetchKargoQrOrder(int orderId) async {
+    return await getJson('/magaza-satis/api/kargo-qr-order/$orderId')
+        as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> orderRemoveItem({
+    required int orderId,
+    required int itemId,
+    int quantity = 1,
+  }) async {
+    return await postJson('/magaza-satis/api/order-remove-item', {
+      'order_id': orderId,
+      'item_id': itemId,
+      'quantity': quantity,
     }) as Map<String, dynamic>;
   }
 
@@ -147,13 +164,13 @@ class HmaApiClient {
 
   Future<Map<String, dynamic>> orderComplete({
     required int orderId,
-    required double totalAmount,
+    double? totalAmount,
     required String paymentMethod,
     String? notes,
   }) async {
     return await postJson('/magaza-satis/api/order-complete', {
       'order_id': orderId,
-      'total_amount': totalAmount,
+      if (totalAmount != null) 'total_amount': totalAmount,
       'payment_method': paymentMethod,
       if (notes != null && notes.isNotEmpty) 'notes': notes,
     }) as Map<String, dynamic>;

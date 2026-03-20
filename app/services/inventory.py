@@ -247,6 +247,7 @@ def adjust_stock(
 	unit_cost: Optional[float] = None,
 	supplier_id: Optional[int] = None,
 	consume_unit_ids: Optional[List[int]] = None,
+	restore_unit_ids: Optional[List[int]] = None,
 ) -> Optional[StockMovement]:
     """Record a stock movement for the given item.
 
@@ -254,12 +255,14 @@ def adjust_stock(
     unit_cost: Purchase cost per unit (only used for "in" movements when buying from producer)
 
     consume_unit_ids: Outbound only, HMA_STOCK_UNIT_TRACKING=1 iken bu parça id'leri satılır (QR hma:unit:).
+
+    restore_unit_ids: Inbound only, mevcut sold parçaları stoka geri alır (yeni parça oluşturmaz).
     """
     direction = "in" if int(delta) >= 0 else "out"
     qty = abs(int(delta))
     if qty <= 0:
         return None
-    if direction == "in":
+    if direction == "in" and not restore_unit_ids:
         try:
             if unit_cost is None or float(unit_cost) <= 0:
                 raise ValueError("unit_cost must be provided and > 0 for inbound stock")
@@ -276,7 +279,12 @@ def adjust_stock(
     )
     session.add(mv)
     session.flush()
-    sync_units_after_movement(session, mv, consume_unit_ids=consume_unit_ids)
+    sync_units_after_movement(
+        session,
+        mv,
+        consume_unit_ids=consume_unit_ids,
+        restore_unit_ids=restore_unit_ids,
+    )
     return mv
 
 

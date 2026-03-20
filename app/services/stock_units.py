@@ -68,6 +68,33 @@ def allocate_units_fifo(
     return list(rows)
 
 
+def restore_units_to_in_stock(
+    session: Session,
+    *,
+    unit_ids: Sequence[int],
+) -> None:
+    """Kargo QR vb. satır iptalinde: satılmış parçaları tekrar stoka al (hareket kaydı ayrıca yazılır)."""
+    ids = [int(x) for x in unit_ids]
+    if not ids:
+        return
+    rows = session.exec(select(StockUnit).where(StockUnit.id.in_(ids))).all()  # type: ignore[arg-type]
+    by_id = {int(r.id): r for r in rows if r.id is not None}
+    missing = [i for i in ids if i not in by_id]
+    if missing:
+        raise ValueError(f"stock_unit_not_found: {missing}")
+    now = dt.datetime.utcnow()
+    for i in ids:
+        u = by_id[i]
+        if (u.status or "") != "sold":
+            raise ValueError(f"stock_unit_not_sold: id={u.id} status={u.status}")
+        u.status = "in_stock"
+        u.outbound_movement_id = None
+        u.order_id = None
+        u.updated_at = now
+        session.add(u)
+    session.flush()
+
+
 def consume_specific_units(
     session: Session,
     *,
@@ -105,6 +132,7 @@ def sync_units_after_movement(
     mv: StockMovement,
     *,
     consume_unit_ids: Optional[Sequence[int]] = None,
+    restore_unit_ids: Optional[Sequence[int]] = None,
 ) -> None:
     if not stock_unit_tracking_enabled():
         return
@@ -115,13 +143,21 @@ def sync_units_after_movement(
     if qty <= 0:
         return
     if direction == "in":
-        create_units_for_inbound(
-            session,
-            item_id=int(mv.item_id),
-            quantity=qty,
-            inbound_movement_id=int(mv.id),
-            source="live",
-        )
+        if restore_unit_ids is not None:
+            rids = [int(x) for x in restore_unit_ids]
+            if len(rids) != qty:
+                raise ValueError(
+                    f"restore_unit_ids length {len(rids)} must match movement_qty={qty}"
+                )
+            restore_units_to_in_stock(session, unit_ids=rids)
+        else:
+            create_units_for_inbound(
+                session,
+                item_id=int(mv.item_id),
+                quantity=qty,
+                inbound_movement_id=int(mv.id),
+                source="live",
+            )
         return
     if direction == "out":
         if consume_unit_ids is not None:

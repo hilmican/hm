@@ -61,6 +61,12 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Kargo etiketi ve stok QR/barkod okutmak için kamera gerekir.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Geliştirme sırasında hata ayıklama ve cihaz bağlantısı için yerel ağ kullanılır.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_dartVmService._tcp</string>
+	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

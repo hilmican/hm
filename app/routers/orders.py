@@ -292,7 +292,11 @@ def list_orders_table(
                 if bool(o.paid_by_bank_transfer):
                     status_map[oid] = "paid"
                 else:
-                    status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
+                    # Avoid treating total=0, paid=0 as "paid" (placeholder / in-progress kargo_qr)
+                    if total > 0 and paid > 0 and paid >= total:
+                        status_map[oid] = "paid"
+                    else:
+                        status_map[oid] = "unpaid"
 
         # Optional status filter — ignored for quicksearch presets
         if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "partial_paid", "cancelled", "iade_bekliyor", "tanzim_bekliyor", "tanzim_basari", "tanzim_basarisiz"):
@@ -702,14 +706,20 @@ def export_orders(
                 status_map[oid] = primary_status
             elif primary_status == "iade_bekliyor":
                 status_map[oid] = "iade_bekliyor"
+            elif primary_status == "paid":
+                status_map[oid] = "paid"
+            elif primary_status == "partial_paid":
+                status_map[oid] = "partial_paid"
             elif primary_status in ("tanzim_bekliyor", "tanzim_basari", "tanzim_basarisiz"):
                 status_map[oid] = primary_status
             else:
                 # Treat IBAN (bank transfer) as paid/completed
                 if bool(o.paid_by_bank_transfer):
                     status_map[oid] = "paid"
+                elif total > 0 and paid > 0 and paid >= total:
+                    status_map[oid] = "paid"
                 else:
-                    status_map[oid] = "paid" if (paid > 0 and paid >= total) else "unpaid"
+                    status_map[oid] = "unpaid"
         if (preset not in ("overdue_unpaid_7", "all")) and status in ("paid", "unpaid", "refunded", "switched", "cancelled", "iade_bekliyor", "tanzim_bekliyor", "tanzim_basari", "tanzim_basarisiz"):
             rows = [o for o in rows if status_map.get(o.id or 0) == status]
         if preset == "overdue_unpaid_7":

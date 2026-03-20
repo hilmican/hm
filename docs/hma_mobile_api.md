@@ -12,9 +12,11 @@ If `HMA_MOBILE_API_KEY` is empty/unset, auth is disabled (development only).
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/magaza-satis/api/order-from-kargo-qr` | Start/resume draft order from carrier label QR |
+| POST | `/magaza-satis/api/order-from-kargo-qr` | Start/resume open `kargo_qr` cart from label (Excel kargo ile uyumlu `placeholder`) |
+| GET | `/magaza-satis/api/kargo-qr-order/{order_id}` | Sepet satırları + `prefill_total_amount` / `prefill_notes` |
 | POST | `/magaza-satis/api/order-add-item` | Add line + stock out (scan `hma:item:` QR) |
-| POST | `/magaza-satis/api/order-complete` | Set total, payment, mark paid |
+| POST | `/magaza-satis/api/order-remove-item` | Satır azalt / sil + stok iadesi (QR ile eklenen satırlar) |
+| POST | `/magaza-satis/api/order-complete` | Tahsilat, ödeme, `paid` |
 | POST | `/magaza-satis/api/series-print-and-stock` | Seri stok girişi + QR payload listesi |
 
 Supporting public JSON (no mobile key required unless globally enforced elsewhere):
@@ -25,23 +27,41 @@ Supporting public JSON (no mobile key required unless globally enforced elsewher
 
 ## order-from-kargo-qr
 
+Yeni sipariş satırı **Excel kargo import’taki placeholder** ile aynı mantıkta oluşturulur: `source=kargo`, `status=placeholder`, `channel=kargo_qr`. Tamamlanınca (`order-complete`) `paid` olur.
+
+QR / JSON / URL / ayraçlı metinden okunabilen alanlar (özet):
+
+- `tracking_no`, `name`, `phone`, `address`, `city`
+- `total_amount` (veya `total`, `tutar`, `toplam`, `payment_amount`)
+- `unit_price` / `fiyat` / `price`
+- `quantity` / `adet`
+- `notes` / `description` / `aciklama` / `urun` / `item_name`
+- `shipping_company` / `kargo`
+
+Ayraçlı format (opsiyonel genişletme):  
+`takip|ad|tel|adres|şehir|tutar|açıklama|birim_fiyat`
+
 ```json
 {
   "qr_content": "<raw string from label>",
-  "notes": "optional",
+  "notes": "optional — etiket notlarına eklenir",
   "fields": {
     "tracking_no": "...",
     "name": "...",
     "phone": "...",
     "address": "...",
-    "city": "..."
+    "city": "...",
+    "total_amount": 1499.90,
+    "unit_price": null,
+    "description": "Ürün / açıklama",
+    "quantity": 1
   }
 }
 ```
 
-`fields` overrides parsed values when QR is partial.
+`fields`, QR kısmi kaldığında parse edilen değerlerin üzerine yazar.
 
-Response includes `order_item_count` (0 for new, or sum of quantities when `resumed: true`).
+Yanıt: `order_item_count`, `lines[]` (mobil liste), `prefill_total_amount`, `prefill_notes`, `resumed`.
 
 ## order-add-item
 
@@ -53,6 +73,20 @@ Response includes `order_item_count` (0 for new, or sum of quantities when `resu
 }
 ```
 
+Yanıtta güncel `lines`, `order_item_count`, `prefill_*` döner.
+
+## order-remove-item
+
+```json
+{
+  "order_id": 123,
+  "item_id": 456,
+  "quantity": 1
+}
+```
+
+Stoku geri yükler (`HMA_STOCK_UNIT_TRACKING=1` iken satılan parçalar siparişe göre geri alınır).
+
 ## order-complete
 
 ```json
@@ -63,6 +97,8 @@ Response includes `order_item_count` (0 for new, or sum of quantities when `resu
   "notes": "optional"
 }
 ```
+
+`total_amount` gönderilmezse veya boşsa, siparişteki `total_amount` (ör. etiketten) kullanılır.
 
 `payment_method`: `cash` | `bank_transfer`
 

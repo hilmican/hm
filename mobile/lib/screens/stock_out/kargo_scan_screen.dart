@@ -27,6 +27,15 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
       if (!mounted) return;
       final initialCount =
           (res['order_item_count'] as num?)?.toInt() ?? 0;
+      final rawLines = res['lines'] as List<dynamic>? ?? [];
+      final initialLines = rawLines
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      final preNum = res['prefill_total_amount'];
+      final prefillTotal =
+          preNum is num ? preNum.toDouble() : null;
+      final prefillNotes = res['prefill_notes'] as String?;
+
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
           builder: (_) => CartScanScreen(
@@ -34,6 +43,9 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
             trackingNo: res['tracking_no'] as String? ?? '',
             resumed: res['resumed'] == true,
             initialLineUnits: initialCount,
+            initialLines: initialLines,
+            prefillTotalAmount: prefillTotal,
+            prefillNotes: prefillNotes,
           ),
         ),
       );
@@ -91,7 +103,8 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
                     maxLines: 4,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
-                      hintText: 'JSON, URL veya takip numarası',
+                      hintText:
+                        'JSON (takip, fiyat, açıklama), URL veya takip|ad|tel|...',
                     ),
                   ),
                   const SizedBox(height: 12),

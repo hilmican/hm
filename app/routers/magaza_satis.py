@@ -9,7 +9,9 @@ import os
 from ..db import get_session
 from ..models import Client, Item, Order, OrderItem, Payment, PaymentHistoryLog, Product, SystemSetting, Income, StockUnit
 from ..services.inventory import adjust_stock, get_stock_map
-from ..services.stock_units import get_units_for_movement
+from ..services.stock_units import get_units_for_movement, stock_unit_tracking_enabled
+from ..services.shipping import compute_shipping_fee
+from ..services.importer.committers import _normalize_shipping_company
 from ..services.finance import ensure_iban_income
 from ..services.mobile_qr import parse_kargo_qr, parse_stock_qr, merge_kargo_fields
 from ..utils.normalize import normalize_phone, client_unique_key
@@ -181,6 +183,42 @@ def _ensure_client_for_kargo(
 	session.add(client)
 	session.flush()
 	return client
+
+
+def _kargo_qr_open_statuses() -> Tuple[str, ...]:
+	"""Excel kargo placeholder ile uyumlu; eski mobil taslaklar için draft."""
+	return ("draft", "placeholder")
+
+
+def _is_open_kargo_qr_order(order: Order) -> bool:
+	return (order.channel or "") == "kargo_qr" and (order.status or "") in _kargo_qr_open_statuses()
+
+
+def _order_kargo_cart_payload(session, order_id: int) -> Dict[str, Any]:
+	order = session.get(Order, order_id)
+	line_rows = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
+	items_out: List[Dict[str, Any]] = []
+	for oi in line_rows:
+		it = session.get(Item, oi.item_id) if oi.item_id else None
+		items_out.append(
+			{
+				"order_item_id": oi.id,
+				"item_id": oi.item_id,
+				"quantity": oi.quantity,
+				"sku": it.sku if it else None,
+				"name": it.name if it else None,
+				"size": it.size if it else None,
+				"color": it.color if it else None,
+			}
+		)
+	total_q = sum(int(x.quantity or 0) for x in line_rows)
+	prefill_total = float(order.total_amount) if order and order.total_amount is not None else None
+	return {
+		"lines": items_out,
+		"order_item_count": total_q,
+		"prefill_total_amount": prefill_total,
+		"prefill_notes": (order.notes if order else None) or None,
+	}
 
 
 def _resolve_item_from_stock_qr(
@@ -470,7 +508,8 @@ def checkout(payload: dict = Body(...)):
 @router.post("/api/order-from-kargo-qr")
 def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 	"""
-	Start or resume a draft order from a carrier label QR (or explicit fields).
+	Start or resume a kargo_qr order from a carrier label QR (or explicit fields).
+	Mirrors Excel kargo placeholder row: source=kargo, status=optional placeholder, totals/notes from label.
 	Auth: X-Mobile-API-Key when HMA_MOBILE_API_KEY is set.
 	"""
 	_require_mobile_api_key(request)
@@ -491,17 +530,76 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 	city = merged.get("city")
 	address = merged.get("address")
 
+	qty_val = int(merged.get("quantity") or 1)
+	if qty_val <= 0:
+		qty_val = 1
+
+	derived_total = merged.get("total_amount")
+	try:
+		if derived_total is not None:
+			derived_total = float(derived_total)
+	except Exception:
+		derived_total = None
+	if derived_total is None:
+		pay = merged.get("payment_amount")
+		try:
+			if pay is not None and float(pay) > 0:
+				derived_total = float(pay)
+		except Exception:
+			pass
+
+	derived_unit_price = merged.get("unit_price")
+	try:
+		if derived_unit_price is not None:
+			derived_unit_price = float(derived_unit_price)
+	except Exception:
+		derived_unit_price = None
+	if derived_unit_price is None and derived_total is not None and qty_val:
+		try:
+			derived_unit_price = round(float(derived_total) / float(qty_val), 2)
+		except Exception:
+			derived_unit_price = None
+	if derived_total is None and derived_unit_price is not None and qty_val:
+		try:
+			derived_total = round(float(derived_unit_price) * float(qty_val), 2)
+		except Exception:
+			pass
+
+	desc_raw = (merged.get("notes") or "").strip() or None
+	payload_notes = (payload.get("notes") or "").strip() or None
+	if desc_raw and payload_notes:
+		order_notes = f"{desc_raw} | {payload_notes}"
+	elif desc_raw:
+		order_notes = desc_raw
+	else:
+		order_notes = payload_notes
+
+	company_code = _normalize_shipping_company(merged.get("shipping_company") or "surat")
+	shipping_fee = None
+	if derived_total is not None:
+		try:
+			shipping_fee = compute_shipping_fee(
+				float(derived_total or 0.0),
+				company_code=company_code,
+				paid_by_bank_transfer=False,
+			)
+		except Exception:
+			shipping_fee = None
+
 	with get_session() as session:
-		# Resume draft kargo_qr order
+		# Resume open kargo_qr order (draft legacy or placeholder aligned with Excel)
 		draft = session.exec(
 			select(Order)
-			.where(Order.tracking_no == tracking, Order.channel == "kargo_qr", Order.status == "draft")
+			.where(
+				Order.tracking_no == tracking,
+				Order.channel == "kargo_qr",
+				or_(Order.status == "draft", Order.status == "placeholder"),
+			)
 			.order_by(Order.id.desc())
 		).first()
 		if draft and draft.id:
 			client = session.get(Client, draft.client_id)
-			line_rows = session.exec(select(OrderItem).where(OrderItem.order_id == draft.id)).all()
-			order_item_count = sum(int(x.quantity or 0) for x in line_rows)
+			cart = _order_kargo_cart_payload(session, int(draft.id))
 			return {
 				"status": "ok",
 				"order_id": draft.id,
@@ -509,7 +607,10 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 				"tracking_no": tracking,
 				"client": _serialize_client(client) if client else None,
 				"resumed": True,
-				"order_item_count": order_item_count,
+				"order_item_count": cart["order_item_count"],
+				"lines": cart["lines"],
+				"prefill_total_amount": cart["prefill_total_amount"],
+				"prefill_notes": cart["prefill_notes"],
 			}
 
 		# Block if paid order already has this tracking (avoid duplicate sales)
@@ -536,19 +637,21 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 		order = Order(
 			client_id=client.id,  # type: ignore[arg-type]
 			item_id=None,
-			quantity=0,
-			unit_price=0.0,
-			total_amount=0.0,
-			source="bizim",
+			quantity=qty_val,
+			unit_price=derived_unit_price,
+			total_amount=derived_total,
+			source="kargo",
 			channel="kargo_qr",
-			status="draft",
+			status="placeholder",
 			tracking_no=tracking,
-			shipping_company="surat",
+			shipping_company=company_code,
+			shipping_fee=shipping_fee,
 			data_date=dt.date.today(),
-			notes=(payload.get("notes") or "").strip() or None,
+			notes=order_notes,
 		)
 		session.add(order)
 		session.flush()
+		cart = _order_kargo_cart_payload(session, int(order.id))
 
 		return {
 			"status": "ok",
@@ -558,6 +661,9 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 			"client": _serialize_client(client),
 			"resumed": False,
 			"order_item_count": 0,
+			"lines": cart["lines"],
+			"prefill_total_amount": cart["prefill_total_amount"],
+			"prefill_notes": cart["prefill_notes"],
 		}
 
 
@@ -588,8 +694,8 @@ def order_add_item(request: Request, payload: dict = Body(...)):
 		order = session.get(Order, order_id)
 		if not order:
 			raise HTTPException(status_code=404, detail="Order not found")
-		if (order.channel or "") != "kargo_qr" or (order.status or "") != "draft":
-			raise HTTPException(status_code=400, detail="Order must be draft kargo_qr")
+		if not _is_open_kargo_qr_order(order):
+			raise HTTPException(status_code=400, detail="Order must be open kargo_qr (placeholder/draft)")
 
 		item, consume_unit_id = _resolve_item_from_stock_qr(session, str(qr_content), item_id_opt)
 		if not item or not item.id:
@@ -652,6 +758,7 @@ def order_add_item(request: Request, payload: dict = Body(...)):
 		session.add(order)
 
 		stock_after = get_stock_map(session)
+		cart = _order_kargo_cart_payload(session, order_id)
 		return {
 			"status": "ok",
 			"order_id": order_id,
@@ -659,7 +766,105 @@ def order_add_item(request: Request, payload: dict = Body(...)):
 			"quantity_added": qty,
 			"on_hand_after": stock_after.get(item.id or 0, 0),
 			"order_item_count": total_q,
+			**cart,
 		}
+
+
+@router.post("/api/order-remove-item")
+def order_remove_item(request: Request, payload: dict = Body(...)):
+	"""Remove quantity from a kargo_qr line and restore stock (inverse of order-add-item)."""
+	_require_mobile_api_key(request)
+	try:
+		order_id = int(payload.get("order_id") or 0)
+		item_id = int(payload.get("item_id") or 0)
+	except Exception:
+		raise HTTPException(status_code=400, detail="order_id and item_id must be integers")
+	qty_remove = int(payload.get("quantity") or 1)
+	if order_id <= 0 or item_id <= 0 or qty_remove <= 0:
+		raise HTTPException(status_code=400, detail="order_id, item_id, quantity>0 required")
+
+	with get_session() as session:
+		order = session.get(Order, order_id)
+		if not order or not _is_open_kargo_qr_order(order):
+			raise HTTPException(status_code=400, detail="Order must be open kargo_qr")
+
+		oi = session.exec(
+			select(OrderItem).where(OrderItem.order_id == order_id, OrderItem.item_id == item_id)
+		).first()
+		if not oi or int(oi.quantity or 0) < qty_remove:
+			raise HTTPException(status_code=400, detail="Line not found or quantity too small")
+
+		restore_ids: List[int] = []
+		if stock_unit_tracking_enabled():
+			units = session.exec(
+				select(StockUnit)
+				.where(
+					StockUnit.order_id == order_id,
+					StockUnit.item_id == item_id,
+					StockUnit.status == "sold",
+				)
+				.order_by(StockUnit.id.desc())
+				.limit(qty_remove)
+			).all()
+			restore_ids = [int(u.id) for u in units if u.id is not None]
+			if len(restore_ids) < qty_remove:
+				raise HTTPException(
+					status_code=400,
+					detail="Stok parçası bu sipariş için eşleşmedi; satır kaldırılamıyor.",
+				)
+
+		try:
+			adjust_stock(
+				session,
+				item_id=item_id,
+				delta=qty_remove,
+				related_order_id=order_id,
+				reason="kargo_qr_remove",
+				restore_unit_ids=restore_ids if restore_ids else None,
+			)
+		except ValueError as e:
+			raise HTTPException(status_code=400, detail=str(e)) from e
+
+		newq = int(oi.quantity or 0) - qty_remove
+		if newq <= 0:
+			session.delete(oi)
+		else:
+			oi.quantity = newq
+			session.add(oi)
+
+		lines = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
+		total_q = sum(int(x.quantity or 0) for x in lines)
+		if lines:
+			order.item_id = lines[0].item_id
+			order.quantity = total_q
+		else:
+			order.item_id = None
+			order.quantity = 0
+		session.add(order)
+
+		cart = _order_kargo_cart_payload(session, order_id)
+		stock_after = get_stock_map(session)
+		return {
+			"status": "ok",
+			"order_id": order_id,
+			"item_id": item_id,
+			"quantity_removed": qty_remove,
+			"on_hand_after": stock_after.get(item_id, 0),
+			**cart,
+		}
+
+
+@router.get("/api/kargo-qr-order/{order_id}")
+def kargo_qr_order_detail(request: Request, order_id: int):
+	"""Cart lines + prefilled totals for mobile UI."""
+	_require_mobile_api_key(request)
+	with get_session() as session:
+		order = session.get(Order, order_id)
+		if not order or (order.channel or "") != "kargo_qr":
+			raise HTTPException(status_code=404, detail="Order not found")
+		if not _is_open_kargo_qr_order(order):
+			raise HTTPException(status_code=400, detail="Order is not an open kargo_qr cart")
+		return {"status": "ok", "order_id": order_id, **_order_kargo_cart_payload(session, order_id)}
 
 
 @router.post("/api/order-complete")
@@ -678,18 +883,25 @@ def order_complete(request: Request, payload: dict = Body(...)):
 	if payment_method not in ("cash", "bank_transfer"):
 		raise HTTPException(status_code=400, detail="payment_method must be cash or bank_transfer")
 
-	total_amount = float(payload.get("total_amount") or 0.0)
-	if total_amount < 0:
-		raise HTTPException(status_code=400, detail="total_amount invalid")
-
 	notes = (payload.get("notes") or "").strip() or None
 
 	with get_session() as session:
 		order = session.get(Order, order_id)
 		if not order:
 			raise HTTPException(status_code=404, detail="Order not found")
-		if (order.channel or "") != "kargo_qr" or (order.status or "") != "draft":
-			raise HTTPException(status_code=400, detail="Order must be draft kargo_qr")
+		if not _is_open_kargo_qr_order(order):
+			raise HTTPException(status_code=400, detail="Order must be open kargo_qr (placeholder/draft)")
+
+		raw_total = payload.get("total_amount")
+		if raw_total is None or raw_total == "":
+			total_amount = float(order.total_amount or 0.0)
+		else:
+			try:
+				total_amount = float(raw_total)
+			except Exception:
+				raise HTTPException(status_code=400, detail="total_amount invalid")
+		if total_amount < 0:
+			raise HTTPException(status_code=400, detail="total_amount invalid")
 
 		lines = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
 		if not lines:
