@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../services/api_client.dart';
+import '../../services/kargo_label_ocr.dart';
 import '../../widgets/qr_scanner_widget.dart';
 import 'cart_scan_screen.dart';
 
@@ -16,15 +18,64 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
   final _manualCtrl = TextEditingController();
   bool _busy = false;
 
+  Future<String?> _optionalOcrText() async {
+    if (!mounted) return null;
+    final choice = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Etiket OCR'),
+        content: const Text(
+          'Alıcı, telefon, adres, içerik ve tahsilat bilgisi için etiketin '
+          'tamamının fotoğrafını çekebilir veya galeriden seçebilirsiniz. '
+          'Atlayıp yalnızca okuttuğunuz kod ile de devam edebilirsiniz.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'skip'),
+            child: const Text('Atla'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'gallery'),
+            child: const Text('Galeri'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'camera'),
+            child: const Text('Kamera'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null || choice == 'skip') return null;
+
+    final picker = ImagePicker();
+    final file = await picker.pickImage(
+      source: choice == 'camera' ? ImageSource.camera : ImageSource.gallery,
+      imageQuality: 88,
+      maxWidth: 2000,
+    );
+    if (file == null) return null;
+    final text = await recognizeTextFromImagePath(file.path);
+    final t = text.trim();
+    return t.isEmpty ? null : t;
+  }
+
   Future<void> _startOrder(String raw) async {
     final trimmed = raw.trim();
     if (trimmed.isEmpty) return;
     setState(() => _busy = true);
     try {
-      final res = await _api.orderFromKargoQr(qrContent: trimmed);
+      final ocrText = await _optionalOcrText();
+      if (!mounted) return;
+
+      final res = await _api.orderFromKargoQr(
+        qrContent: trimmed,
+        ocrText: ocrText,
+      );
       final orderId = res['order_id'] as int?;
       if (orderId == null) throw Exception('order_id yok');
       if (!mounted) return;
+
       final initialCount =
           (res['order_item_count'] as num?)?.toInt() ?? 0;
       final rawLines = res['lines'] as List<dynamic>? ?? [];
@@ -35,6 +86,11 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
       final prefillTotal =
           preNum is num ? preNum.toDouble() : null;
       final prefillNotes = res['prefill_notes'] as String?;
+      Map<String, dynamic>? labelFields;
+      final lf = res['label_fields'];
+      if (lf is Map) {
+        labelFields = Map<String, dynamic>.from(lf);
+      }
 
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
@@ -46,6 +102,7 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
             initialLines: initialLines,
             prefillTotalAmount: prefillTotal,
             prefillNotes: prefillNotes,
+            labelFields: labelFields,
           ),
         ),
       );
@@ -104,7 +161,7 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                       hintText:
-                        'JSON (takip, fiyat, açıklama), URL veya takip|ad|tel|...',
+                          'JSON (takip, fiyat, açıklama), URL veya takip|ad|tel|...',
                     ),
                   ),
                   const SizedBox(height: 12),

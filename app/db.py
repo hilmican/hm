@@ -1383,6 +1383,24 @@ def init_db() -> None:
                         conn.exec_driver_sql("CREATE INDEX idx_order_channel ON `order`(channel)")
                 except Exception:
                     pass
+                # kargo_qr mobile cart closed marker
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'kargo_qr_closed_at'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql(
+                            "ALTER TABLE `order` ADD COLUMN kargo_qr_closed_at DATETIME NULL"
+                        )
+                        conn.exec_driver_sql(
+                            "CREATE INDEX idx_order_kargo_qr_closed_at ON `order`(kargo_qr_closed_at)"
+                        )
+                except Exception:
+                    pass
                 # Ensure income.deleted_at exists for soft delete
                 try:
                     row = conn.exec_driver_sql(

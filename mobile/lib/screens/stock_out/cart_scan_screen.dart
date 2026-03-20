@@ -14,6 +14,7 @@ class CartScanScreen extends StatefulWidget {
     this.initialLines = const [],
     this.prefillTotalAmount,
     this.prefillNotes,
+    this.labelFields,
   });
 
   final int orderId;
@@ -23,6 +24,7 @@ class CartScanScreen extends StatefulWidget {
   final List<Map<String, dynamic>> initialLines;
   final double? prefillTotalAmount;
   final String? prefillNotes;
+  final Map<String, dynamic>? labelFields;
 
   @override
   State<CartScanScreen> createState() => _CartScanScreenState();
@@ -33,12 +35,14 @@ class _CartScanScreenState extends State<CartScanScreen> {
   late int _lineUnits;
   late List<Map<String, dynamic>> _lines;
   bool _loadingCart = false;
+  Map<String, dynamic>? _labelFields;
 
   @override
   void initState() {
     super.initState();
     _lineUnits = widget.initialLineUnits;
     _lines = List<Map<String, dynamic>>.from(widget.initialLines);
+    _labelFields = widget.labelFields;
     _refreshCart();
   }
 
@@ -48,10 +52,14 @@ class _CartScanScreenState extends State<CartScanScreen> {
       final res = await _api.fetchKargoQrOrder(widget.orderId);
       final raw = res['lines'] as List<dynamic>? ?? [];
       if (!mounted) return;
+      final lf = res['label_fields'];
       setState(() {
         _lines = raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         _lineUnits = (res['order_item_count'] as num?)?.toInt() ?? 0;
         _loadingCart = false;
+        if (lf is Map) {
+          _labelFields = Map<String, dynamic>.from(lf);
+        }
       });
     } catch (_) {
       if (mounted) setState(() => _loadingCart = false);
@@ -150,6 +158,45 @@ class _CartScanScreenState extends State<CartScanScreen> {
     }
   }
 
+  Widget _labelCard(BuildContext context) {
+    final f = _labelFields;
+    if (f == null || f.isEmpty) return const SizedBox.shrink();
+    String? s(dynamic v) => v == null ? null : v.toString().trim();
+    final name = s(f['recipient_name']);
+    final phone = s(f['phone']);
+    final addr = s(f['address']);
+    final content = s(f['content']);
+    final cod = f['cod_amount'];
+    final codStr = cod is num
+        ? '${cod.toDouble().toStringAsFixed(2)} TL'
+        : (cod != null ? cod.toString() : null);
+    if (name == null &&
+        phone == null &&
+        addr == null &&
+        content == null &&
+        codStr == null) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Etiket (OCR)', style: theme.textTheme.titleSmall),
+            if (name != null && name.isNotEmpty) Text('Alıcı: $name'),
+            if (phone != null && phone.isNotEmpty) Text('Tel: $phone'),
+            if (addr != null && addr.isNotEmpty) Text('Adres: $addr'),
+            if (content != null && content.isNotEmpty) Text('İçerik: $content'),
+            if (codStr != null) Text('Tahsilat: $codStr'),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -162,6 +209,7 @@ class _CartScanScreenState extends State<CartScanScreen> {
             if (widget.resumed) const Chip(label: Text('Taslak devam ediyor')),
             Text('Takip: ${widget.trackingNo}'),
             const SizedBox(height: 8),
+            _labelCard(context),
             Row(
               children: [
                 Text('Sepet: $_lineUnits birim',
@@ -252,6 +300,7 @@ class _CartScanScreenState extends State<CartScanScreen> {
                       trackingNo: widget.trackingNo,
                       prefillTotalAmount: widget.prefillTotalAmount,
                       prefillNotes: widget.prefillNotes,
+                      labelFields: _labelFields ?? widget.labelFields,
                     ),
                   ),
                 );

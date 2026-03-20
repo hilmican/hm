@@ -16,7 +16,7 @@ If `HMA_MOBILE_API_KEY` is empty/unset, auth is disabled (development only).
 | GET | `/magaza-satis/api/kargo-qr-order/{order_id}` | Sepet satırları + `prefill_total_amount` / `prefill_notes` |
 | POST | `/magaza-satis/api/order-add-item` | Add line + stock out (scan `hma:item:` QR) |
 | POST | `/magaza-satis/api/order-remove-item` | Satır azalt / sil + stok iadesi (QR ile eklenen satırlar) |
-| POST | `/magaza-satis/api/order-complete` | Tahsilat, ödeme, `paid` |
+| POST | `/magaza-satis/api/order-complete` | Sepeti kapat: `cod` (kapıda ödeme, placeholder) veya `store_paid` (nakit/IBAN, `paid` + `payment`) |
 | POST | `/magaza-satis/api/series-print-and-stock` | Seri stok girişi + QR payload listesi |
 
 Supporting public JSON (no mobile key required unless globally enforced elsewhere):
@@ -27,7 +27,8 @@ Supporting public JSON (no mobile key required unless globally enforced elsewher
 
 ## order-from-kargo-qr
 
-Yeni sipariş satırı **Excel kargo import’taki placeholder** ile aynı mantıkta oluşturulur: `source=kargo`, `status=placeholder`, `channel=kargo_qr`. Tamamlanınca (`order-complete`) `paid` olur.
+Yeni sipariş satırı **Excel kargo import’taki placeholder** ile aynı mantıkta oluşturulur: `source=kargo`, `status=placeholder`, `channel=kargo_qr`.  
+Tamamlanınca varsayılan mobil akış **kapıda ödeme** (`checkout_mode: cod`): sipariş **ödenmemiş** kalır (`placeholder`, `payment` yok). Mağaza anında tahsilat için `order-complete` içinde `checkout_mode: store_paid` + `payment_method` kullanın.
 
 QR / JSON / URL / ayraçlı metinden okunabilen alanlar (özet):
 
@@ -41,9 +42,13 @@ QR / JSON / URL / ayraçlı metinden okunabilen alanlar (özet):
 Ayraçlı format (opsiyonel genişletme):  
 `takip|ad|tel|adres|şehir|tutar|açıklama|birim_fiyat`
 
+- **`ocr_text`** (opsiyonel): Mobil ML Kit vb. ile etiketten okunan **ham metin**. Sunucu Sürat/Focus tarzı düzende alıcı, adres, içerik, tahsilat çıkarır; QR parse ile birleştirilir (takip numarası QR’dan önceliklidir).  
+- Öncelik: `fields` > OCR > `qr_content` parse.
+
 ```json
 {
   "qr_content": "<raw string from label>",
+  "ocr_text": "optional — etiket OCR çıktısı (çok satır metin)",
   "notes": "optional — etiket notlarına eklenir",
   "fields": {
     "tracking_no": "...",
@@ -61,7 +66,9 @@ Ayraçlı format (opsiyonel genişletme):
 
 `fields`, QR kısmi kaldığında parse edilen değerlerin üzerine yazar.
 
-Yanıt: `order_item_count`, `lines[]` (mobil liste), `prefill_total_amount`, `prefill_notes`, `resumed`.
+Yanıt: `order_item_count`, `lines[]` (mobil liste), `prefill_total_amount`, `prefill_notes`, `resumed`, **`label_fields`**:
+
+`label_fields`: `{ "recipient_name", "phone", "address", "content", "cod_amount", "tracking_no" }` — UI özeti için (GET `kargo-qr-order` ile de güncellenir).
 
 ## order-add-item
 
@@ -93,14 +100,31 @@ Stoku geri yükler (`HMA_STOCK_UNIT_TRACKING=1` iken satılan parçalar sipariş
 {
   "order_id": 123,
   "total_amount": 1499.90,
-  "payment_method": "cash",
+  "checkout_mode": "cod",
   "notes": "optional"
 }
 ```
 
 `total_amount` gönderilmezse veya boşsa, siparişteki `total_amount` (ör. etiketten) kullanılır.
 
-`payment_method`: `cash` | `bank_transfer`
+**`checkout_mode`**
+
+- **`cod`** (önerilen varsayılan — mobil yeni sürüm): Kapıda ödeme. **`payment_method` gerekmez.** Sipariş `placeholder` kalır, `Payment` / gelir oluşturulmaz, `shipment_date` bugüne set edilir, sepet `kargo_qr_closed_at` ile kilitlenir (stok çıkışı yapılmış ürün satırları korunur).
+- **`store_paid`**: Mağaza anında tahsilat. **`payment_method`** zorunlu: `cash` | `bank_transfer`. Sipariş `paid`, `Payment` + mevcut POS gelir mantığı (nakit/IBAN ayarları).
+
+**Geriye uyumluluk:** `checkout_mode` gönderilmez ve `payment_method` `cash` / `bank_transfer` ise sunucu **`store_paid`** kabul eder (eski mobil istemciler).
+
+```json
+{
+  "order_id": 123,
+  "total_amount": 1499.90,
+  "checkout_mode": "store_paid",
+  "payment_method": "cash",
+  "notes": "optional"
+}
+```
+
+Yanıtta `checkout_mode` yansıtılır; `cod` için `payment_id` `null` olabilir.
 
 ## series-print-and-stock
 

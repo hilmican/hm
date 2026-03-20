@@ -14,6 +14,7 @@ from ..services.shipping import compute_shipping_fee
 from ..services.importer.committers import _normalize_shipping_company
 from ..services.finance import ensure_iban_income
 from ..services.mobile_qr import parse_kargo_qr, parse_stock_qr, merge_kargo_fields
+from ..services.kargo_label_text_parse import parse_kargo_label_ocr_text, ocr_to_label_fields
 from ..utils.normalize import normalize_phone, client_unique_key
 
 
@@ -191,7 +192,27 @@ def _kargo_qr_open_statuses() -> Tuple[str, ...]:
 
 
 def _is_open_kargo_qr_order(order: Order) -> bool:
-	return (order.channel or "") == "kargo_qr" and (order.status or "") in _kargo_qr_open_statuses()
+	if (order.channel or "") != "kargo_qr":
+		return False
+	if (order.status or "") not in _kargo_qr_open_statuses():
+		return False
+	if order.kargo_qr_closed_at is not None:
+		return False
+	return True
+
+
+def _label_fields_snapshot(order: Order, client: Optional[Client]) -> Dict[str, Any]:
+	merged: Dict[str, Any] = {
+		"tracking_no": order.tracking_no,
+		"name": client.name if client else None,
+		"phone": client.phone if client else None,
+		"address": client.address if client else None,
+		"city": client.city if client else None,
+		"notes": order.notes,
+		"total_amount": order.total_amount,
+		"payment_amount": order.total_amount,
+	}
+	return ocr_to_label_fields(merged)
 
 
 def _order_kargo_cart_payload(session, order_id: int) -> Dict[str, Any]:
@@ -514,12 +535,19 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 	"""
 	_require_mobile_api_key(request)
 	qr_content = payload.get("qr_content")
-	fields = payload.get("fields") or {}
-	if isinstance(fields, dict) and fields:
-		parsed = parse_kargo_qr(str(qr_content or ""))
-		merged = merge_kargo_fields(parsed, fields)
-	else:
-		merged = parse_kargo_qr(str(qr_content or ""))
+	fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
+	if fields is None:
+		fields = {}
+
+	parsed = parse_kargo_qr(str(qr_content or ""))
+	ocr_raw = (payload.get("ocr_text") or "").strip()
+	ocr_dict = parse_kargo_label_ocr_text(ocr_raw) if ocr_raw else {}
+	if (parsed.get("tracking_no") or "").strip():
+		ocr_dict = dict(ocr_dict)
+		ocr_dict.pop("tracking_no", None)
+	merged = merge_kargo_fields(parsed, ocr_dict)
+	if fields:
+		merged = merge_kargo_fields(merged, fields)
 
 	tracking = (merged.get("tracking_no") or "").strip()
 	if not tracking:
@@ -594,6 +622,7 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 				Order.tracking_no == tracking,
 				Order.channel == "kargo_qr",
 				or_(Order.status == "draft", Order.status == "placeholder"),
+				Order.kargo_qr_closed_at.is_(None),
 			)
 			.order_by(Order.id.desc())
 		).first()
@@ -611,6 +640,7 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 				"lines": cart["lines"],
 				"prefill_total_amount": cart["prefill_total_amount"],
 				"prefill_notes": cart["prefill_notes"],
+				"label_fields": _label_fields_snapshot(draft, client),
 			}
 
 		# Block if paid order already has this tracking (avoid duplicate sales)
@@ -668,6 +698,7 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 			"lines": cart["lines"],
 			"prefill_total_amount": cart["prefill_total_amount"],
 			"prefill_notes": cart["prefill_notes"],
+			"label_fields": _label_fields_snapshot(order, client),
 		}
 
 
@@ -868,12 +899,18 @@ def kargo_qr_order_detail(request: Request, order_id: int):
 			raise HTTPException(status_code=404, detail="Order not found")
 		if not _is_open_kargo_qr_order(order):
 			raise HTTPException(status_code=400, detail="Order is not an open kargo_qr cart")
-		return {"status": "ok", "order_id": order_id, **_order_kargo_cart_payload(session, order_id)}
+		client = session.get(Client, order.client_id) if order.client_id else None
+		return {
+			"status": "ok",
+			"order_id": order_id,
+			"label_fields": _label_fields_snapshot(order, client),
+			**_order_kargo_cart_payload(session, order_id),
+		}
 
 
 @router.post("/api/order-complete")
 def order_complete(request: Request, payload: dict = Body(...)):
-	"""Finalize draft kargo_qr order: set total, create payment (and income if configured)."""
+	"""Finalize kargo_qr cart: cod = placeholder, no Payment; store_paid = nakit/havale + Payment."""
 	_require_mobile_api_key(request)
 	order_id = payload.get("order_id")
 	if not order_id:
@@ -883,11 +920,26 @@ def order_complete(request: Request, payload: dict = Body(...)):
 	except Exception:
 		raise HTTPException(status_code=400, detail="order_id must be integer")
 
-	payment_method = (payload.get("payment_method") or "").lower()
-	if payment_method not in ("cash", "bank_transfer"):
-		raise HTTPException(status_code=400, detail="payment_method must be cash or bank_transfer")
+	payment_method = (payload.get("payment_method") or "").strip().lower()
+	checkout_mode = (payload.get("checkout_mode") or "").strip().lower()
+	if checkout_mode not in ("", "cod", "store_paid"):
+		raise HTTPException(status_code=400, detail="checkout_mode must be cod or store_paid")
+	if not checkout_mode:
+		# Eski mobil: payment_method gönderilmişse mağaza ödemesi say
+		checkout_mode = "store_paid" if payment_method in ("cash", "bank_transfer") else "cod"
 
 	notes = (payload.get("notes") or "").strip() or None
+
+	def _refresh_shipping_fee(o: Order, total: float) -> None:
+		company_code = _normalize_shipping_company(o.shipping_company or "surat")
+		try:
+			o.shipping_fee = compute_shipping_fee(
+				float(total),
+				company_code=company_code,
+				paid_by_bank_transfer=bool(o.paid_by_bank_transfer),
+			)
+		except Exception:
+			pass
 
 	with get_session() as session:
 		order = session.get(Order, order_id)
@@ -919,17 +971,44 @@ def order_complete(request: Request, payload: dict = Body(...)):
 			order.unit_price = round(total_amount / total_q, 2)
 		else:
 			order.unit_price = 0.0
+		order.notes = notes or order.notes
+		now = dt.datetime.utcnow()
+		today = dt.date.today()
+
+		if checkout_mode == "cod":
+			order.status = "placeholder"
+			order.payment_date = None
+			order.paid_by_bank_transfer = False
+			order.shipment_date = today
+			_refresh_shipping_fee(order, total_amount)
+			order.kargo_qr_closed_at = now
+			session.add(order)
+			return {
+				"status": "ok",
+				"order_id": order.id,
+				"payment_id": None,
+				"total_amount": total_amount,
+				"checkout_mode": "cod",
+			}
+
+		if payment_method not in ("cash", "bank_transfer"):
+			raise HTTPException(
+				status_code=400,
+				detail="store_paid için payment_method: cash veya bank_transfer gerekli",
+			)
+
 		order.status = "paid"
 		order.paid_by_bank_transfer = payment_method == "bank_transfer"
-		order.payment_date = dt.date.today()
-		order.notes = notes or order.notes
+		order.payment_date = today
+		_refresh_shipping_fee(order, total_amount)
+		order.kargo_qr_closed_at = now
 		session.add(order)
 
 		payment = Payment(
 			client_id=order.client_id,  # type: ignore[arg-type]
 			order_id=order.id,  # type: ignore[arg-type]
 			amount=total_amount,
-			payment_date=dt.date.today(),
+			payment_date=today,
 			method="bank_transfer" if payment_method == "bank_transfer" else "cash",
 			net_amount=total_amount,
 			reference=order.tracking_no,
@@ -961,7 +1040,7 @@ def order_complete(request: Request, payload: dict = Body(...)):
 					income = Income(
 						account_id=acc_id,
 						amount=total_amount,
-						date=dt.date.today(),
+						date=today,
 						source="pos_cash_kargo_qr",
 						reference=f"POS order {order.id}",
 						notes=notes,
@@ -975,7 +1054,7 @@ def order_complete(request: Request, payload: dict = Body(...)):
 						income = Income(
 							account_id=acc_id,
 							amount=total_amount,
-							date=dt.date.today(),
+							date=today,
 							source="pos_bank_kargo_qr",
 							reference=f"POS order {order.id}",
 							notes=notes,
@@ -992,6 +1071,7 @@ def order_complete(request: Request, payload: dict = Body(...)):
 			"order_id": order.id,
 			"payment_id": payment.id,
 			"total_amount": total_amount,
+			"checkout_mode": "store_paid",
 		}
 
 

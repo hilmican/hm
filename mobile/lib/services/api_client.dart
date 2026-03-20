@@ -126,10 +126,12 @@ class HmaApiClient {
   Future<Map<String, dynamic>> orderFromKargoQr({
     required String qrContent,
     Map<String, dynamic>? fields,
+    String? ocrText,
   }) async {
     return await postJson('/magaza-satis/api/order-from-kargo-qr', {
       'qr_content': qrContent,
       if (fields != null && fields.isNotEmpty) 'fields': fields,
+      if (ocrText != null && ocrText.isNotEmpty) 'ocr_text': ocrText,
     }) as Map<String, dynamic>;
   }
 
@@ -162,17 +164,25 @@ class HmaApiClient {
     }) as Map<String, dynamic>;
   }
 
+  /// [checkoutMode]: `cod` (kapıda ödeme, varsayılan) veya `store_paid` (mağaza anında ödeme).
+  /// Mağaza ödemesinde [paymentMethod] `cash` veya `bank_transfer` olmalı.
   Future<Map<String, dynamic>> orderComplete({
     required int orderId,
     double? totalAmount,
-    required String paymentMethod,
+    String? paymentMethod,
     String? notes,
+    String? checkoutMode,
   }) async {
-    return await postJson('/magaza-satis/api/order-complete', {
+    final body = <String, dynamic>{
       'order_id': orderId,
       if (totalAmount != null) 'total_amount': totalAmount,
-      'payment_method': paymentMethod,
       if (notes != null && notes.isNotEmpty) 'notes': notes,
-    }) as Map<String, dynamic>;
+      if (checkoutMode != null && checkoutMode.isNotEmpty)
+        'checkout_mode': checkoutMode,
+      if (paymentMethod != null && paymentMethod.isNotEmpty)
+        'payment_method': paymentMethod,
+    };
+    return await postJson('/magaza-satis/api/order-complete', body)
+        as Map<String, dynamic>;
   }
 }

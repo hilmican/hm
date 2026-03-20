@@ -73,6 +73,12 @@ class Order(SQLModel, table=True):
     merged_into_order_id: Optional[int] = Field(default=None, foreign_key="order.id", index=True, description="If set, this order was merged into the referenced order")
     is_partial_payment: Optional[bool] = Field(default=False, index=True, description="True if this order is part of a partial payment group")
     partial_payment_group_id: Optional[int] = Field(default=None, foreign_key="order.id", index=True, description="ID of the primary order in this partial payment group")
+    # Mobil kargo_qr: sepet tamamlandığında set; Excel shipment_date ile karışmaz
+    kargo_qr_closed_at: Optional[dt.datetime] = Field(
+        default=None,
+        index=True,
+        description="kargo_qr checkout done at (COD or mağaza); blocks further order-add-item",
+    )
 
 
 class OrderItem(SQLModel, table=True):
