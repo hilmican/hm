@@ -340,7 +340,9 @@
                         </button>
                         {% set _st = (o.status or '')|lower %}
                         {% set _ch = (o.channel or '')|lower %}
-                        {% if _st == 'cancelled' or (_ch == 'kargo_qr' and _st in ['placeholder','draft']) %}
+                        {% set _so = (o.source or '')|lower %}
+                        {% set _tn = (o.tracking_no or '')|trim %}
+                        {% if _st == 'cancelled' or _ch == 'kargo_qr' or (_so == 'kargo' and _tn) %}
                         <button class="icon-btn danger" title="Kalıcı sil (takip no tekrar kullanılabilir)" aria-label="Kalıcı sil" onclick="hardDeleteOrder({{ o.id }})">
                             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                         </button>

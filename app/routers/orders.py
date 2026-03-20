@@ -17,6 +17,7 @@ from ..models import (
     Product,
     Client,
     OrderEditLog,
+    OrderDeletionLog,
     ShippingCompanyRate,
     Income,
     Account,
@@ -608,24 +609,94 @@ def cancel_order(order_id: int, body: dict = Body(default={})):
         return {"status": "ok", "restore_inventory": restore_inventory}
 
 
+def _sqlmodel_row_dict(obj) -> dict:
+    """Tablo satırını JSON-safe dict yap (silme snapshot için)."""
+    if obj is None:
+        return {}
+    try:
+        d: dict = {}
+        for col in obj.__table__.columns:
+            v = getattr(obj, col.name, None)
+            if isinstance(v, dt.datetime):
+                d[col.name] = v.isoformat()
+            elif isinstance(v, dt.date):
+                d[col.name] = v.isoformat()
+            else:
+                d[col.name] = v
+        return d
+    except Exception:
+        return {"error": "serialize_failed", "repr": repr(obj)}
+
+
+def _build_order_deletion_snapshot(session, order_id: int, o: Order) -> dict:
+    client = session.get(Client, o.client_id) if o.client_id else None
+    oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
+    items_detail: list = []
+    for oi in oitems:
+        row = _sqlmodel_row_dict(oi)
+        it = session.get(Item, oi.item_id) if oi.item_id else None
+        row["item_snapshot"] = _sqlmodel_row_dict(it) if it else None
+        items_detail.append(row)
+    pays = session.exec(select(Payment).where(Payment.order_id == order_id)).all()
+    logs = session.exec(select(OrderEditLog).where(OrderEditLog.order_id == order_id)).all()
+    movs = session.exec(
+        select(StockMovement)
+        .where(StockMovement.related_order_id == order_id)
+        .order_by(StockMovement.id)
+    ).all()
+    units = session.exec(select(StockUnit).where(StockUnit.order_id == order_id)).all()
+    opays = session.exec(select(OrderPayment).where(OrderPayment.order_id == order_id)).all()
+    incs = session.exec(select(Income).where(Income.reference == f"POS order {order_id}")).all()
+    return {
+        "captured_at_utc": dt.datetime.utcnow().isoformat() + "Z",
+        "order": _sqlmodel_row_dict(o),
+        "client": _sqlmodel_row_dict(client),
+        "order_items": items_detail,
+        "payments": [_sqlmodel_row_dict(p) for p in pays],
+        "order_payments": [_sqlmodel_row_dict(p) for p in opays],
+        "order_edit_logs": [_sqlmodel_row_dict(x) for x in logs],
+        "stock_movements": [_sqlmodel_row_dict(m) for m in movs],
+        "stock_units_linked_order": [_sqlmodel_row_dict(u) for u in units],
+        "income_pos_reference": [_sqlmodel_row_dict(x) for x in incs],
+    }
+
+
 def _order_eligible_for_hard_delete(o: Order) -> bool:
+    """
+    Kalıcı sil:
+    - İptal edilmiş her sipariş
+    - Mobil kargo QR akışı (kargo_qr) — ödendi dahil (takip no tekrar test)
+    - Excel kaynaklı kargo satırı (source=kargo + takip no) — çakışma temizliği
+    Bizim (instagram) canlı siparişler: silinmez (önce iptal).
+    """
     st = (o.status or "").lower()
     ch = (o.channel or "").lower()
+    src = (o.source or "").lower()
     if st == "cancelled":
         return True
-    if ch == "kargo_qr" and st in ("placeholder", "draft"):
+    if ch == "kargo_qr":
+        return True
+    if src == "kargo" and (o.tracking_no or "").strip():
         return True
     return False
 
 
 @router.post("/{order_id}/delete")
-def delete_order_hard(order_id: int, body: dict = Body(default={})):
+def delete_order_hard(order_id: int, request: Request, body: dict = Body(default={})):
     """
-    Kalıcı sil (test / temizlik): yalnızca iptal edilmiş veya açık kargo_qr sepeti.
-    Takip no mobil tarafta tekrar kullanılabilir. Body: {"confirm": "DELETE"}
+    Kalıcı sil: önce order_deletion_log'a tam JSON snapshot, sonra ilişkiler + order satırı.
+    Body: {"confirm": "DELETE", "reason": "opsiyonel not"}
     """
     if (body.get("confirm") or "") != "DELETE":
         raise HTTPException(status_code=400, detail='Gövde: {"confirm": "DELETE"} gerekli')
+    reason_note = (body.get("reason") or "").strip() or None
+    actor_uid = None
+    try:
+        actor_uid = request.session.get("uid") if hasattr(request, "session") else None
+        if actor_uid is not None:
+            actor_uid = int(actor_uid)
+    except Exception:
+        actor_uid = None
 
     with get_session() as session:
         o = session.exec(select(Order).where(Order.id == order_id)).first()
@@ -634,18 +705,49 @@ def delete_order_hard(order_id: int, body: dict = Body(default={})):
         if not _order_eligible_for_hard_delete(o):
             raise HTTPException(
                 status_code=400,
-                detail="Yalnızca iptal (cancelled) veya açık mobil kargo sepeti (kargo_qr + placeholder/draft) silinebilir",
+                detail=(
+                    "Bu sipariş kalıcı silinebilir değil. İzin verilenler: "
+                    "iptal (cancelled), mobil kargo (channel=kargo_qr, tüm durumlar), "
+                    "veya source=kargo ve takip no dolu. Bizim siparişler için önce iptal edin."
+                ),
             )
 
-        st = (o.status or "").lower()
-        ch = (o.channel or "").lower()
-        if ch == "kargo_qr" and st in ("placeholder", "draft"):
-            has_lines = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).first()
-            if has_lines:
-                try:
-                    restore_order_stock_lines(session, order_id=order_id, reason=f"order-delete:{order_id}")
-                except ValueError as e:
-                    raise HTTPException(status_code=400, detail=str(e)) from e
+        snapshot = _build_order_deletion_snapshot(session, order_id, o)
+        if reason_note:
+            snapshot["delete_reason_from_user"] = reason_note
+        try:
+            snap_text = json.dumps(snapshot, ensure_ascii=False, default=str)
+        except Exception:
+            snap_text = json.dumps({"error": "snapshot_json_failed", "order_id": order_id}, default=str)
+
+        log_row = OrderDeletionLog(
+            original_order_id=int(order_id),
+            tracking_no=o.tracking_no,
+            channel=o.channel,
+            source=o.source,
+            status=o.status,
+            snapshot_json=snap_text,
+            reason=reason_note,
+            actor_user_id=actor_uid,
+        )
+        session.add(log_row)
+        session.flush()
+
+        has_lines = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).first()
+        if has_lines:
+            try:
+                restore_order_stock_lines(session, order_id=order_id, reason=f"order-delete:{order_id}")
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
+
+        try:
+            ref = f"POS order {order_id}"
+            incs = session.exec(select(Income).where(Income.reference == ref).where(Income.deleted_at.is_(None))).all()
+            for inc in incs:
+                inc.deleted_at = dt.datetime.utcnow()
+                session.add(inc)
+        except Exception:
+            pass
 
         pays = session.exec(select(Payment).where(Payment.order_id == order_id)).all()
         for p in pays:
@@ -692,7 +794,66 @@ def delete_order_hard(order_id: int, body: dict = Body(default={})):
         except Exception:
             pass
 
-        return {"status": "ok", "deleted_order_id": order_id}
+        return {
+            "status": "ok",
+            "deleted_order_id": order_id,
+            "deletion_log_id": log_row.id,
+        }
+
+
+@router.get("/deletion-logs/recent")
+def order_deletion_logs_recent(request: Request, limit: int = Query(50, ge=1, le=200)):
+    """Silinen sipariş yedekleri (debug). Giriş yapmış kullanıcı."""
+    if not request.session.get("uid"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    with get_session() as session:
+        rows = (
+            session.exec(select(OrderDeletionLog).order_by(OrderDeletionLog.id.desc()).limit(limit))
+            .all()
+        )
+        return {
+            "logs": [
+                {
+                    "id": r.id,
+                    "original_order_id": r.original_order_id,
+                    "tracking_no": r.tracking_no,
+                    "channel": r.channel,
+                    "source": r.source,
+                    "status": r.status,
+                    "reason": r.reason,
+                    "actor_user_id": r.actor_user_id,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ],
+        }
+
+
+@router.get("/deletion-logs/{log_id}")
+def order_deletion_log_detail(request: Request, log_id: int):
+    """Tek silme kaydının tam snapshot JSON'u."""
+    if not request.session.get("uid"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    with get_session() as session:
+        r = session.get(OrderDeletionLog, log_id)
+        if not r:
+            raise HTTPException(status_code=404, detail="Not found")
+        try:
+            payload = json.loads(r.snapshot_json)
+        except Exception:
+            payload = {"raw": r.snapshot_json}
+        return {
+            "id": r.id,
+            "original_order_id": r.original_order_id,
+            "tracking_no": r.tracking_no,
+            "channel": r.channel,
+            "source": r.source,
+            "status": r.status,
+            "reason": r.reason,
+            "actor_user_id": r.actor_user_id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "snapshot": payload,
+        }
 
 
 @router.get("/export")

@@ -111,6 +111,25 @@ class OrderEditLog(SQLModel, table=True):
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
 
 
+class OrderDeletionLog(SQLModel, table=True):
+    """
+    Sipariş kalıcı silinmeden önce tam yedek (debug). Satır order tablosunda silinir; bu tabloda kalır.
+    """
+
+    __tablename__ = "order_deletion_log"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    original_order_id: int = Field(index=True, description="Silinen order.id")
+    tracking_no: Optional[str] = Field(default=None, index=True)
+    channel: Optional[str] = Field(default=None, index=True)
+    source: Optional[str] = Field(default=None, index=True)
+    status: Optional[str] = Field(default=None, index=True)
+    snapshot_json: str = Field(sa_column=Column(Text), description="Order, client, satırlar, ödemeler, hareketler… JSON")
+    reason: Optional[str] = Field(default=None, sa_column=Column(Text))
+    actor_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow, index=True)
+
+
 class StockMovement(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     item_id: int = Field(foreign_key="item.id")
