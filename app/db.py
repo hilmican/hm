@@ -1049,6 +1049,44 @@ def init_db() -> None:
                     )
                 except Exception:
                     pass
+                # Parça bazlı stok (StockUnit) — HMA_STOCK_UNIT_TRACKING=1 ile adjust_stock birlikte doldurulur
+                try:
+                    conn.exec_driver_sql(
+                        """
+                        CREATE TABLE IF NOT EXISTS stock_unit (
+                            id INT PRIMARY KEY AUTO_INCREMENT,
+                            item_id INT NOT NULL,
+                            status VARCHAR(32) NOT NULL DEFAULT 'in_stock',
+                            inbound_movement_id INT NULL,
+                            outbound_movement_id INT NULL,
+                            order_id INT NULL,
+                            public_code VARCHAR(128) NULL,
+                            source VARCHAR(32) NOT NULL DEFAULT 'live',
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            INDEX idx_stock_unit_item (item_id),
+                            INDEX idx_stock_unit_status (status),
+                            INDEX idx_stock_unit_item_status (item_id, status),
+                            INDEX idx_stock_unit_inbound (inbound_movement_id),
+                            INDEX idx_stock_unit_outbound (outbound_movement_id),
+                            INDEX idx_stock_unit_order (order_id),
+                            INDEX idx_stock_unit_public_code (public_code),
+                            INDEX idx_stock_unit_source (source),
+                            CONSTRAINT fk_stock_unit_item FOREIGN KEY (item_id) REFERENCES item(id) ON DELETE CASCADE,
+                            CONSTRAINT fk_stock_unit_inbound FOREIGN KEY (inbound_movement_id) REFERENCES stockmovement(id) ON DELETE SET NULL,
+                            CONSTRAINT fk_stock_unit_outbound FOREIGN KEY (outbound_movement_id) REFERENCES stockmovement(id) ON DELETE SET NULL,
+                            CONSTRAINT fk_stock_unit_order FOREIGN KEY (order_id) REFERENCES `order`(id) ON DELETE SET NULL
+                        )
+                        """
+                    )
+                except Exception as _stock_unit_err:
+                    try:
+                        print(
+                            f"[db.init] WARNING: stock_unit table CREATE failed: {_stock_unit_err!r}",
+                            flush=True,
+                        )
+                    except Exception:
+                        pass
                 # Ensure ai_pretext table exists
                 try:
                     conn.exec_driver_sql(

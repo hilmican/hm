@@ -409,16 +409,18 @@ def dashboard(request: Request, days: int = 30):
 				is_cancelled = status == "cancelled"
 				is_refund = status in ("refunded", "iade_bekliyor")
 				is_skip = status in ("switched", "stitched")
+				# Taslaklar (kargo_qr mobil vb.) gerçek satış değil; grafikte satış sayısına dahil etme
+				is_draft = status == "draft"
 
 				if is_cancelled:
 					count_map[day]["cancelled"] += 1
 				elif is_refund:
 					count_map[day]["refunded"] += 1
-				elif not is_skip:
+				elif not is_skip and not is_draft:
 					count_map[day]["sales"] += 1
 
-				# Financials: include only active sales (exclude cancelled/refunded/degisim)
-				if is_cancelled or is_refund or is_skip:
+				# Financials: include only active sales (exclude cancelled/refunded/degisim/taslak)
+				if is_cancelled or is_refund or is_skip or is_draft:
 					continue
 				try:
 					revenue = float(get_effective_total(o) or 0.0)

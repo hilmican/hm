@@ -12,6 +12,7 @@ from sqlalchemy import func
 from ..db import get_session
 from ..models import Item, Product, StockMovement, StockRequest, StockRequestHit, Order, ProductSizeChart, Supplier
 from ..services.inventory import get_stock_map, recalc_orders_from_mappings, adjust_stock
+from ..services.stock_units import sync_units_after_movement
 
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -195,6 +196,8 @@ def create_movement(body: Dict[str, Any]):
             supplier_id=supplier_id if direction == "in" else None,
         )
         session.add(mv)
+        session.flush()
+        sync_units_after_movement(session, mv)
         return {"status": "ok", "movement_id": mv.id or 0}
 
 
@@ -794,6 +797,8 @@ def series_add(body: Dict[str, Any]):
 					supplier_id=supplier_id,
 				)
 				session.add(mv)
+				session.flush()
+				sync_units_after_movement(session, mv)
 				created.append(it.id or 0)
 		return {"status": "ok", "created_item_ids": created}
 

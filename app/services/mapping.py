@@ -14,18 +14,29 @@ class MappingResult(Tuple[List[Dict[str, Any]], Optional[str]]):
 	pass
 
 
-def find_or_create_variant(session: Session, *, product: Product, size: Optional[str], color: Optional[str]) -> Item:
-    sku_parts = [product.slug]
+def build_variant_sku(product: Product, size: Optional[str], color: Optional[str]) -> str:
+    """Deterministic SKU string for product+size+color (same as stored on Item)."""
+    sku_parts = [product.slug or ""]
     if size:
         sku_parts.append(slugify(size))
     if color:
         sku_parts.append(slugify(color))
-    sku = "-".join([p for p in sku_parts if p]) or product.slug
+    return "-".join([p for p in sku_parts if p]) or (product.slug or "item")
 
-    item = session.exec(select(Item).where(Item.sku == sku)).first()
+
+def find_variant_if_exists(
+    session: Session, *, product: Product, size: Optional[str], color: Optional[str]
+) -> Optional[Item]:
+    sku = build_variant_sku(product, size, color)
+    return session.exec(select(Item).where(Item.sku == sku)).first()
+
+
+def find_or_create_variant(session: Session, *, product: Product, size: Optional[str], color: Optional[str]) -> Item:
+    item = find_variant_if_exists(session, product=product, size=size, color=color)
     if item:
         return item
 
+    sku = build_variant_sku(product, size, color)
     name_parts = [product.name]
     if size:
         name_parts.append(size)

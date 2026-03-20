@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..models import Item, StockMovement, Product, ImportRow, ImportRun, Order, OrderItem
 from .mapping import find_or_create_variant, resolve_mapping
+from .stock_units import sync_units_after_movement
 from sqlmodel import select as _select
 
 
@@ -245,16 +246,19 @@ def adjust_stock(
 	reason: Optional[str] = None,
 	unit_cost: Optional[float] = None,
 	supplier_id: Optional[int] = None,
-) -> None:
+	consume_unit_ids: Optional[List[int]] = None,
+) -> Optional[StockMovement]:
     """Record a stock movement for the given item.
 
     Positive delta => direction "in"; Negative delta => direction "out".
     unit_cost: Purchase cost per unit (only used for "in" movements when buying from producer)
+
+    consume_unit_ids: Outbound only, HMA_STOCK_UNIT_TRACKING=1 iken bu parça id'leri satılır (QR hma:unit:).
     """
     direction = "in" if int(delta) >= 0 else "out"
     qty = abs(int(delta))
     if qty <= 0:
-        return
+        return None
     if direction == "in":
         try:
             if unit_cost is None or float(unit_cost) <= 0:
@@ -271,6 +275,9 @@ def adjust_stock(
 		supplier_id=supplier_id if direction == "in" else None,
     )
     session.add(mv)
+    session.flush()
+    sync_units_after_movement(session, mv, consume_unit_ids=consume_unit_ids)
+    return mv
 
 
 def _parse_mapped_json(s: Optional[str]) -> Dict:

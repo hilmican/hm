@@ -1,0 +1,69 @@
+# ML Kit (mobile_scanner) bazı Xcode/iOS sim kombinasyonlarında arm64 sim slice eksik;
+# simülatör derlemesi x86_64 (+ Rosetta) ile bağlanır. Gerçek cihaz etkilenmez.
+platform :ios, '15.0'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+# Bazı Google pod'ları IPHONEOS_DEPLOYMENT_TARGET=9.0/10.0 bırakıyor; Xcode 26 uyarı veriyor.
+def _pod_ios_min_12(config)
+  t = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+  if t.nil? || t.to_s.strip.empty?
+    config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
+    return
+  end
+  begin
+    return if Gem::Version.new(t) >= Gem::Version.new('12.0')
+  rescue ArgumentError
+    # geçersiz sürüm string'i → 12.0
+  end
+  config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
+end
+
+target 'Runner' do
+  # Dinamik framework + ML Kit (mobile_scanner static_framework) bazı cihazlarda
+  # açılışta dyld/çökme riski; Flutter önerisi: static linkage.
+  use_frameworks! :linkage => :static
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.build_configurations.each do |config|
+    _pod_ios_min_12(config)
+  end
+
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      _pod_ios_min_12(config)
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
+    end
+  end
+end

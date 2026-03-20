@@ -1,0 +1,26 @@
+name: hma_stock
+description: HMA stok giriş/çıkış ve QR akışı
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+  mobile_scanner: ^5.2.3
+  qr_flutter: ^4.1.0
+  pdf: ^3.11.1
+  printing: ^5.14.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

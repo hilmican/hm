@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import FileResponse
@@ -115,6 +116,32 @@ def create_app() -> FastAPI:
 	# simple session middleware for cookie-based auth (HTTPOnly cookies)
 	import os as _os
 	app.add_middleware(SessionMiddleware, secret_key=_os.getenv("SESSION_SECRET", "dev-secret-change"))
+
+	# CORS: Flutter web / tarayıcıdan hma.cdn.com.tr API çağrıları (localhost her port).
+	# HMA_CORS_ORIGINS: virgülle ayrılmış tam origin listesi (örn. https://app.example.com)
+	# HMA_CORS_ORIGIN_REGEX: ek eşleşme (varsayılan: localhost, LAN ve özel ağ + port)
+	_cors_extra = [
+		o.strip()
+		for o in (_os.getenv("HMA_CORS_ORIGINS") or "").split(",")
+		if o.strip()
+	]
+	_cors_origins = list(dict.fromkeys(["https://hma.cdn.com.tr", *_cors_extra]))
+	_cors_regex = (_os.getenv("HMA_CORS_ORIGIN_REGEX") or "").strip() or (
+		r"^https?://("
+		r"localhost|127\.0\.0\.1|\[::1\]"
+		r"|192\.168\.\d{1,3}\.\d{1,3}"
+		r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+		r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+		r")(:\d+)?$"
+	)
+	app.add_middleware(
+		CORSMiddleware,
+		allow_origins=_cors_origins,
+		allow_origin_regex=_cors_regex,
+		allow_credentials=True,
+		allow_methods=["*"],
+		allow_headers=["*"],
+	)
 
 	@app.on_event("startup")
 	def _startup() -> None:

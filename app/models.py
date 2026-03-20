@@ -131,6 +131,40 @@ class StockMovement(SQLModel, table=True):
     created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
 
+class StockUnit(SQLModel, table=True):
+    """Tek fiziksel adet (varyant satırı Item altında). Hareket kayıtları (StockMovement) muhasebe/FIFO için kalır."""
+
+    __tablename__ = "stock_unit"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    item_id: int = Field(foreign_key="item.id", index=True)
+    status: str = Field(
+        default="in_stock",
+        index=True,
+        description="in_stock|sold|reserved|void",
+    )
+    inbound_movement_id: Optional[int] = Field(
+        default=None,
+        foreign_key="stockmovement.id",
+        index=True,
+        description="Giriş hareketi (canlı girişlerde dolu; backfill NULL)",
+    )
+    outbound_movement_id: Optional[int] = Field(
+        default=None,
+        foreign_key="stockmovement.id",
+        index=True,
+    )
+    order_id: Optional[int] = Field(default=None, foreign_key="order.id", index=True)
+    public_code: Optional[str] = Field(default=None, index=True, description="Harici seri/barkod (opsiyonel)")
+    source: str = Field(
+        default="live",
+        index=True,
+        description="live|backfill",
+    )
+    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+
 class StockRequest(SQLModel, table=True):
     __tablename__ = "stock_request"
 
