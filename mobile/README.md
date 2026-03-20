@@ -25,6 +25,17 @@ Ayrıntı: `docs/stock_units.md` → *Etiket yazdırma*.
 **Kargo etiketi** akışında **Etiketi okut (kod + OCR)** tek kamera açılışında barkod/QR ve aynı kareden etiket metnini **ML Kit** okur; API’ye `ocr_text` gider. İsteğe bağlı **Sadece QR/barkod** (OCR yok). Sepet ve tamamlama ekranında alıcı / adres / içerik / tahsilat özeti gösterilir.  
 **Tamamla** ekranında varsayılan **kapıda ödeme** (sipariş ödenmemiş `placeholder`); **Mağaza: ödeme şimdi alındı** açılırsa nakit/havale ile `paid` + ödeme kaydı oluşturulur. Ayrıntı: `docs/hma_mobile_api.md`.
 
+## Kargo satışı — çevrimdışı kuyruk (iOS / Android)
+
+Ağ yokken **Stok çıkış — kargo + sepet** akışı yerelde devam eder: etiket barkod/OCR kaydı SQLite’a yazılır, sepet satırları cihazda tutulur, **Bedel belirle ve bitir** sonrası sipariş “gönderim bekleyen” kuyruğa alınır.
+
+- Ana ekranda kırmızı şerit: **İnternete gönderilmeyi bekleyen X sipariş** — dokununca kutu açılır; satırda **Gönder** veya **Tümünü gönder** ile manuel senkron.
+- Tamamlanmamış taslaklar (Tamamla’ya basılmadan çıkılan) ayrı sayılır; kutudan silinebilir.
+- Senkron sırası: sunucuda `order-from-kargo-qr` → mevcut sepet temizlenir (varsa) → yerel sepet `order-add-item` ile uygulanır → `order-complete`.
+- **Uçak modu testi:** Kargo etiketi okut → ürün QR ekle → Tamamla → ağı aç → Ana ekrandan gönder veya otomatik denemeyi bekle (bağlantı + uygulama ön planı).
+
+**Web:** Çevrimdışı kuyruk **yok** (`sqflite` mobil odaklıdır).
+
 ## Xcode uyarıları (sık görülenler)
 
 | Uyarı | Açıklama |

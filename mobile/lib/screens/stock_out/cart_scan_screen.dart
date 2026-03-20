@@ -1,13 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../services/api_client.dart';
+import '../../services/pending_kargo_models.dart';
+import '../../services/pending_kargo_store.dart';
 import '../../widgets/qr_scanner_widget.dart';
 import 'order_complete_screen.dart';
+
+const _uuid = Uuid();
 
 class CartScanScreen extends StatefulWidget {
   const CartScanScreen({
     super.key,
-    required this.orderId,
+    this.orderId,
+    this.localPendingId,
     required this.trackingNo,
     this.resumed = false,
     this.initialLineUnits = 0,
@@ -15,9 +21,17 @@ class CartScanScreen extends StatefulWidget {
     this.prefillTotalAmount,
     this.prefillNotes,
     this.labelFields,
-  });
+  }) : assert(
+          orderId != null || localPendingId != null,
+          'orderId veya localPendingId gerekli',
+        );
 
-  final int orderId;
+  /// Çevrimiçi sipariş; çevrimdışı modda null.
+  final int? orderId;
+
+  /// Yerel taslak kimliği (çevrimdışı).
+  final String? localPendingId;
+
   final String trackingNo;
   final bool resumed;
   final int initialLineUnits;
@@ -25,6 +39,8 @@ class CartScanScreen extends StatefulWidget {
   final double? prefillTotalAmount;
   final String? prefillNotes;
   final Map<String, dynamic>? labelFields;
+
+  bool get isOffline => localPendingId != null;
 
   @override
   State<CartScanScreen> createState() => _CartScanScreenState();
@@ -43,13 +59,70 @@ class _CartScanScreenState extends State<CartScanScreen> {
     _lineUnits = widget.initialLineUnits;
     _lines = List<Map<String, dynamic>>.from(widget.initialLines);
     _labelFields = widget.labelFields;
-    _refreshCart();
+    if (widget.isOffline) {
+      _loadOfflineCart();
+    } else {
+      _refreshCart();
+    }
+  }
+
+  Future<void> _loadOfflineCart() async {
+    final id = widget.localPendingId;
+    if (id == null) return;
+    final sale = await PendingKargoStore.instance.get(id);
+    if (!mounted || sale == null) return;
+    setState(() {
+      _lines = sale.desiredCart.map(_desiredLineToMap).toList();
+      _lineUnits = sale.itemUnitCount;
+      if (_labelFields == null || _labelFields!.isEmpty) {
+        _labelFields = sale.labelFieldsForOfflineCard();
+      }
+    });
+  }
+
+  Map<String, dynamic> _desiredLineToMap(DesiredCartLine L) {
+    final qr = L.qrContent;
+    final short = qr.length > 52 ? '${qr.substring(0, 52)}…' : qr;
+    return {
+      'name': short,
+      'sku': '',
+      'line_id': L.lineId,
+      'quantity': L.quantity,
+      'item_id': null,
+      'full_qr': qr,
+    };
+  }
+
+  List<DesiredCartLine> _mapsToDesired(List<Map<String, dynamic>> maps) {
+    final out = <DesiredCartLine>[];
+    for (final m in maps) {
+      final lid = m['line_id'] as String?;
+      final qr = m['full_qr'] as String? ?? m['name'] as String? ?? '';
+      final q = (m['quantity'] as num?)?.toInt() ?? 1;
+      if (lid != null && qr.isNotEmpty) {
+        out.add(DesiredCartLine(lineId: lid, qrContent: qr, quantity: q));
+      }
+    }
+    return out;
+  }
+
+  Future<void> _persistOfflineCart() async {
+    final id = widget.localPendingId;
+    if (id == null) return;
+    final desired = _mapsToDesired(_lines);
+    await PendingKargoStore.instance.updateDesiredCart(id, desired);
   }
 
   Future<void> _refreshCart() async {
+    if (widget.isOffline) {
+      await _loadOfflineCart();
+      return;
+    }
+    final oid = widget.orderId;
+    if (oid == null) return;
     setState(() => _loadingCart = true);
     try {
-      final res = await _api.fetchKargoQrOrder(widget.orderId);
+      final res = await _api.fetchKargoQrOrder(oid);
       final raw = res['lines'] as List<dynamic>? ?? [];
       if (!mounted) return;
       final lf = res['label_fields'];
@@ -75,9 +148,30 @@ class _CartScanScreenState extends State<CartScanScreen> {
       ),
     );
     if (code == null || code.isEmpty) return;
+    if (widget.isOffline) {
+      final trimmed = code.trim();
+      final line = DesiredCartLine(
+        lineId: _uuid.v4(),
+        qrContent: trimmed,
+        quantity: 1,
+      );
+      setState(() {
+        _lines = [..._lines, _desiredLineToMap(line)];
+        _lineUnits += 1;
+      });
+      await _persistOfflineCart();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Yerelde eklendi · toplam birim: $_lineUnits')),
+        );
+      }
+      return;
+    }
+    final oid = widget.orderId;
+    if (oid == null) return;
     try {
       final res = await _api.orderAddItem(
-        orderId: widget.orderId,
+        orderId: oid,
         qrContent: code,
         quantity: 1,
       );
@@ -104,8 +198,65 @@ class _CartScanScreenState extends State<CartScanScreen> {
 
   Future<void> _removeLine(Map<String, dynamic> line) async {
     final itemId = line['item_id'] as int?;
+    final lineId = line['line_id'] as String?;
+    final fullQr = line['full_qr'] as String? ?? line['name'] as String? ?? '';
     final q = (line['quantity'] as num?)?.toInt() ?? 0;
-    if (itemId == null || q <= 0) return;
+    if (q <= 0) return;
+
+    if (widget.isOffline) {
+      if (lineId == null) return;
+      final removeQty = await showDialog<int>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Satırı kaldır'),
+          content: Text(
+            '${line['name'] ?? fullQr} · adet: $q\nKaç adet çıkarılsın?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 0),
+              child: const Text('İptal'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 1),
+              child: const Text('1 adet'),
+            ),
+            if (q > 1)
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, q),
+                child: const Text('Tümünü'),
+              ),
+          ],
+        ),
+      );
+      if (removeQty == null || removeQty <= 0) return;
+
+      final list = <Map<String, dynamic>>[];
+      for (final m in _lines) {
+        if (m['line_id'] != lineId) {
+          list.add(m);
+          continue;
+        }
+        final remain = (m['quantity'] as num?)?.toInt() ?? 0;
+        final newQ = remain - removeQty;
+        if (newQ > 0) {
+          final copy = Map<String, dynamic>.from(m);
+          copy['quantity'] = newQ;
+          list.add(copy);
+        }
+      }
+      setState(() {
+        _lines = list;
+        _lineUnits = list.fold<int>(
+          0,
+          (s, m) => s + ((m['quantity'] as num?)?.toInt() ?? 0),
+        );
+      });
+      await _persistOfflineCart();
+      return;
+    }
+
+    if (itemId == null) return;
 
     final removeQty = await showDialog<int>(
       context: context,
@@ -134,9 +285,11 @@ class _CartScanScreenState extends State<CartScanScreen> {
     );
     if (removeQty == null || removeQty <= 0) return;
 
+    final oid = widget.orderId;
+    if (oid == null) return;
     try {
       final res = await _api.orderRemoveItem(
-        orderId: widget.orderId,
+        orderId: oid,
         itemId: itemId,
         quantity: removeQty,
       );
@@ -187,7 +340,10 @@ class _CartScanScreenState extends State<CartScanScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Etiket (OCR)', style: theme.textTheme.titleSmall),
+            Text(
+              widget.isOffline ? 'Etiket (çevrimdışı)' : 'Etiket (OCR)',
+              style: theme.textTheme.titleSmall,
+            ),
             if (track != null && track.isNotEmpty) Text('Takip no: $track'),
             if (name != null && name.isNotEmpty) Text('Alıcı: $name'),
             if (phone != null && phone.isNotEmpty) Text('Tel: $phone'),
@@ -200,16 +356,28 @@ class _CartScanScreenState extends State<CartScanScreen> {
     );
   }
 
+  String _title() {
+    if (widget.isOffline) {
+      return 'Yerel taslak';
+    }
+    return 'Sipariş #${widget.orderId}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Sipariş #${widget.orderId}')),
+      appBar: AppBar(title: Text(_title())),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (widget.resumed) const Chip(label: Text('Taslak devam ediyor')),
+            if (widget.isOffline)
+              const Chip(
+                avatar: Icon(Icons.cloud_off, size: 18),
+                label: Text('Çevrimdışı — internet gelince gönderilecek'),
+              ),
             Text('Takip: ${widget.trackingNo}'),
             const SizedBox(height: 8),
             _labelCard(context),
@@ -257,7 +425,7 @@ class _CartScanScreenState extends State<CartScanScreen> {
                         final line = _lines[i];
                         final name = line['name'] as String? ??
                             line['sku']?.toString() ??
-                            '#${line['item_id']}';
+                            '#${line['item_id'] ?? line['line_id']}';
                         final sku = line['sku'] as String? ?? '';
                         final sz = line['size'] as String?;
                         final col = line['color'] as String?;
@@ -300,6 +468,7 @@ class _CartScanScreenState extends State<CartScanScreen> {
                   MaterialPageRoute<void>(
                     builder: (_) => OrderCompleteScreen(
                       orderId: widget.orderId,
+                      localPendingId: widget.localPendingId,
                       trackingNo: widget.trackingNo,
                       prefillTotalAmount: widget.prefillTotalAmount,
                       prefillNotes: widget.prefillNotes,

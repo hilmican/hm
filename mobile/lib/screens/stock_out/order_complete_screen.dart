@@ -1,22 +1,32 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/api_client.dart';
+import '../../services/kargo_outbound_sync_service.dart';
+import '../../services/pending_kargo_store.dart';
 
 class OrderCompleteScreen extends StatefulWidget {
   const OrderCompleteScreen({
     super.key,
-    required this.orderId,
+    this.orderId,
+    this.localPendingId,
     required this.trackingNo,
     this.prefillTotalAmount,
     this.prefillNotes,
     this.labelFields,
-  });
+  }) : assert(
+          orderId != null || localPendingId != null,
+          'orderId veya localPendingId gerekli',
+        );
 
-  final int orderId;
+  final int? orderId;
+  final String? localPendingId;
   final String trackingNo;
   final double? prefillTotalAmount;
   final String? prefillNotes;
   final Map<String, dynamic>? labelFields;
+
+  bool get isOffline => localPendingId != null;
 
   @override
   State<OrderCompleteScreen> createState() => _OrderCompleteScreenState();
@@ -27,6 +37,7 @@ class _OrderCompleteScreenState extends State<OrderCompleteScreen> {
   final _totalCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   String _method = 'cash';
+
   /// Mağaza: ödeme şimdi alındı. Kapalı = kapıda ödeme (sipariş ödenmemiş placeholder).
   bool _storePaid = false;
   bool _submitting = false;
@@ -103,7 +114,9 @@ class _OrderCompleteScreenState extends State<OrderCompleteScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Geçerli tutar girin veya boş bırakın (etiket tutarı kullanılır)'),
+            content: Text(
+              'Geçerli tutar girin veya boş bırakın (etiket tutarı kullanılır)',
+            ),
           ),
         );
         return;
@@ -116,8 +129,37 @@ class _OrderCompleteScreenState extends State<OrderCompleteScreen> {
 
     setState(() => _submitting = true);
     try {
+      if (widget.isOffline) {
+        final pid = widget.localPendingId!;
+        if (kIsWeb || !PendingKargoStore.instance.isReady) {
+          throw Exception('Çevrimdışı kayıt bu ortamda desteklenmiyor');
+        }
+        final completePayload = <String, dynamic>{
+          if (total != null) 'total_amount': total,
+          if (_notesCtrl.text.trim().isNotEmpty) 'notes': _notesCtrl.text.trim(),
+          'checkout_mode': _storePaid ? 'store_paid' : 'cod',
+          if (_storePaid) 'payment_method': _method,
+        };
+        await PendingKargoStore.instance.setFinalized(
+          pid,
+          completePayload: completePayload,
+        );
+        await KargoOutboundSyncService.maybeAutoSyncAll();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Yerelde kaydedildi. İnternet gelince Ana ekrandan veya bildirimden gönderebilirsiniz.',
+            ),
+          ),
+        );
+        Navigator.of(context).popUntil((r) => r.isFirst);
+        return;
+      }
+
+      final oid = widget.orderId!;
       await _api.orderComplete(
-        orderId: widget.orderId,
+        orderId: oid,
         totalAmount: total,
         paymentMethod: _storePaid ? _method : null,
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
@@ -142,6 +184,13 @@ class _OrderCompleteScreenState extends State<OrderCompleteScreen> {
     }
   }
 
+  String _headerLine() {
+    if (widget.isOffline) {
+      return 'Yerel taslak · ${widget.trackingNo}';
+    }
+    return 'Sipariş #${widget.orderId} · ${widget.trackingNo}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -151,7 +200,12 @@ class _OrderCompleteScreenState extends State<OrderCompleteScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Sipariş #${widget.orderId} · ${widget.trackingNo}'),
+            if (widget.isOffline)
+              const Chip(
+                avatar: Icon(Icons.cloud_off, size: 18),
+                label: Text('Çevrimdışı tamamlama — sonra senkron'),
+              ),
+            Text(_headerLine()),
             const SizedBox(height: 12),
             _labelSummary(),
             TextField(

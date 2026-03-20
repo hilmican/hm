@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'screens/home_screen.dart';
+import 'services/pending_kargo_store.dart';
 import 'services/settings_service.dart';
 
 Future<void> main() async {
@@ -20,6 +21,12 @@ Future<void> main() async {
       await SettingsService.instance.load();
     } catch (e, st) {
       debugPrint('Ayarlar yüklenemedi (ilk açılışta normal olabilir): $e\n$st');
+    }
+
+    try {
+      await PendingKargoStore.instance.init();
+    } catch (e, st) {
+      debugPrint('Offline kargo store açılamadı: $e\n$st');
     }
 
     runApp(const HmaStockApp());

@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/api_client.dart';
+import '../../services/kargo_tracking_hint.dart';
+import '../../services/pending_kargo_store.dart';
 import '../../widgets/qr_scanner_widget.dart';
 import 'cart_scan_screen.dart';
 import 'kargo_label_scanner_screen.dart';
@@ -32,15 +35,13 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
       if (orderId == null) throw Exception('order_id yok');
       if (!mounted) return;
 
-      final initialCount =
-          (res['order_item_count'] as num?)?.toInt() ?? 0;
+      final initialCount = (res['order_item_count'] as num?)?.toInt() ?? 0;
       final rawLines = res['lines'] as List<dynamic>? ?? [];
       final initialLines = rawLines
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
       final preNum = res['prefill_total_amount'];
-      final prefillTotal =
-          preNum is num ? preNum.toDouble() : null;
+      final prefillTotal = preNum is num ? preNum.toDouble() : null;
       final prefillNotes = res['prefill_notes'] as String?;
       Map<String, dynamic>? labelFields;
       final lf = res['label_fields'];
@@ -48,6 +49,8 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
         labelFields = Map<String, dynamic>.from(lf);
       }
 
+      setState(() => _busy = false);
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
           builder: (_) => CartScanScreen(
@@ -62,6 +65,51 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
           ),
         ),
       );
+    } on ApiException catch (e) {
+      if (e.statusCode == 0 &&
+          !kIsWeb &&
+          PendingKargoStore.instance.isReady &&
+          trimmed.isNotEmpty) {
+        try {
+          final localId = await PendingKargoStore.instance.insertDraft(
+            qrContent: trimmed,
+            ocrText: ocrText,
+          );
+          final hint = kargoTrackingHintFromQr(trimmed) ??
+              kargoTrackingHintFromQr(ocrText ?? '') ??
+              trimmed;
+          final lf = <String, dynamic>{
+            if (hint.isNotEmpty) 'tracking_no': hint,
+            if (ocrText != null && ocrText.isNotEmpty)
+              'content': ocrText.length > 280
+                  ? '${ocrText.substring(0, 280)}…'
+                  : ocrText,
+          };
+          if (!mounted) return;
+          setState(() => _busy = false);
+          if (!mounted) return;
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute<void>(
+              builder: (_) => CartScanScreen(
+                localPendingId: localId,
+                trackingNo: hint.length > 40 ? '${hint.substring(0, 40)}…' : hint,
+                initialLineUnits: 0,
+                initialLines: const [],
+                labelFields: lf,
+              ),
+            ),
+          );
+          return;
+        } catch (_) {
+          // yerel kuyruk açılamadı — aşağıda genel hata
+        }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Hata: $e')),
+        );
+        setState(() => _busy = false);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
