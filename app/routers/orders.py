@@ -754,12 +754,16 @@ def delete_order_hard(order_id: int, request: Request, body: dict = Body(default
             pass
 
         pays = session.exec(select(Payment).where(Payment.order_id == order_id)).all()
+        pay_ids = [int(p.id) for p in pays if p.id is not None]
+        if pay_ids:
+            # FK: paymenthistorylog.payment_id → payment.id
+            # Tek tek döngüde autoflush, DELETE sırasını bozup 1451 verebilir; önce tüm loglar DB'den gitsin.
+            for lg in session.exec(
+                select(PaymentHistoryLog).where(PaymentHistoryLog.payment_id.in_(pay_ids))
+            ).all():
+                session.delete(lg)
+            session.flush()
         for p in pays:
-            if p.id is not None:
-                for lg in session.exec(
-                    select(PaymentHistoryLog).where(PaymentHistoryLog.payment_id == int(p.id))
-                ).all():
-                    session.delete(lg)
             session.delete(p)
 
         for op in session.exec(select(OrderPayment).where(OrderPayment.order_id == order_id)).all():
