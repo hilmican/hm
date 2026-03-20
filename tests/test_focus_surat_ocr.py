@@ -49,3 +49,37 @@ def test_parse_via_ocr_fingerprint_without_qr():
 	out = parse_kargo_label_ocr_text(_SAMPLE_OCR, tracking_hint="89070731395831", qr_content=None)
 	assert out.get("name") == "ZAKARIA OTHMAN"
 	assert out.get("total_amount") == 1530.0
+
+
+def test_focus_merged_gonderen_alici_single_line():
+	"""OCR iki sütunu tek satırda birleştirir."""
+	text = """
+FOCUS express
+TARİH: 2026-03-19 11:00:04
+Gönderen: FOCUS 543 / UMUTCAN KANSUZ Alıcı: ZAKARIA OTHMAN +90 5394963258
+Adres: CEDİT ALİ PAŞA MAH. ÇAYIR SOK. NO:16 İ.K.NO:5 Marmaraereğlisi / Tekirdağ
+İçerik: M-SİYAH DUBLE KUMAŞ TAKIM (170,70)
+Tahsilat: 1530.00 ₺
+"""
+	out = parse_kargo_label_ocr_text(text, qr_content="?barkod=89070731395831")
+	assert out.get("name") == "ZAKARIA OTHMAN"
+	assert out.get("phone")
+	assert "539" in (out.get("phone") or "")
+
+
+def test_focus_missing_alici_label_name_before_phone():
+	"""Alıcı: satırı OCR'da yok; isim telefonun hemen üstünde."""
+	text = """
+FOCUS express
+TARİH: 2026-03-19 11:00:04
+Gönderen: FOCUS 543 / UMUTCAN KANSUZ
+ZAKARIA OTHMAN
++90 5394963258
+Adres: CEDİT ALİ PAŞA MAH. ÇAYIR SOK. NO:16 İ.K.NO:5 Marmaraereğlisi / Tekirdağ
+İçerik: M-SİYAH DUBLE KUMAŞ TAKIM (170,70)
+Tahsilat: 1530.00 ₺
+Sürat Kargo
+"""
+	out = parse_kargo_label_ocr_text(text, qr_content="?barkod=89070731395831")
+	assert out.get("name") == "ZAKARIA OTHMAN"
+	assert out.get("phone")

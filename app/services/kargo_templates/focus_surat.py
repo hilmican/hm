@@ -92,6 +92,107 @@ def _normalize_raw(ocr: str) -> str:
 	return re.sub(r"\r\n?", "\n", str(ocr))
 
 
+def _soft_fix_focus_ocr_typos(s: str) -> str:
+	"""Sık OCR karışıklıkları — yapısal parse öncesi hafif düzeltme."""
+	t = s
+	# Alıcı etiketi düşük kalite
+	t = re.sub(r"(?i)\bA1ici\s*:", "Alıcı:", t)
+	t = re.sub(r"(?i)\bAlici\s*:", "Alıcı:", t)
+	return t
+
+
+def _split_gonderen_alici_from_line(s: str) -> Optional[str]:
+	"""
+	Tek satırda 'Gönderen: ... Alıcı: İSİM' veya sadece 'Alıcı: ...' sağ parça.
+	"""
+	m = re.search(
+		r"(?is)\b(?:gönderen|gonderen)\s*:\s*.+?\b(?:alıcı|alici)\s*[:\.]?\s*(.+?)"
+		r"(?=\s*\+?\s*90\s*\d|\s*90\s*5\d{2}\s|\s*0\s*5\d{2}\s|\s*adres\s*[:\.]|\s*tarih\s*:|\Z)",
+		s,
+	)
+	if m:
+		cand = m.group(1).strip()
+		if cand:
+			return cand
+	m2 = re.search(
+		r"(?is)\b(?:alıcı|alici)\s*[:\.]?\s*(.+?)"
+		r"(?=\s*\+?\s*90\s*\d|\s*90\s*5\d{2}\s|\s*0\s*5\d{2}\s|\s*adres\s*[:\.]|\s*tarih\s*:|\Z)",
+		s,
+	)
+	if m2:
+		cand = m2.group(1).strip()
+		if cand and "gönderen" not in low_tr(cand) and "gonderen" not in low_tr(cand):
+			return cand
+	return None
+
+
+def _looks_like_recipient_name_line(line: str, tracking_hint: Optional[str]) -> bool:
+	s = (line or "").strip()
+	if len(s) < 4 or len(s) > 140:
+		return False
+	low = low_tr(s)
+	if any(
+		x in low
+		for x in (
+			"gönderen",
+			"gonderen",
+			"adres:",
+			"adres ",
+			"içerik",
+			"icerik",
+			"tahsilat",
+			"focus",
+			"express",
+			"mah.",
+			"mah ",
+			"sok.",
+			"sürat",
+			"surat",
+			"tarih:",
+		)
+	):
+		return False
+	if tracking_hint and tracking_hint.replace(" ", "") in s.replace(" ", ""):
+		return False
+	if re.search(r"\d{12,16}", s.replace(" ", "")):
+		return False
+	parts = re.findall(r"[A-Za-zğüşıöçĞÜŞİÖÇ]{2,}", s)
+	if len(parts) >= 2:
+		return True
+	if len(parts) == 1 and 8 <= len(parts[0]) <= 40:
+		return True
+	return False
+
+
+def _name_line_before_phone(lines: list[str], tracking_hint: Optional[str]) -> Optional[str]:
+	"""Telefon satırının hemen üstünde genelde alıcı adı (Alıcı etiketi OCR'da yoksa)."""
+	for i, ln in enumerate(lines):
+		if not re.search(
+			r"(?:\+?\s*90\s*5\d|\+90\s*\d{10}|\+90\d{10}|905\d{9,10}|0\s*5\d{2}\s*\d{3})",
+			ln,
+		):
+			continue
+		if i == 0:
+			continue
+		prev = lines[i - 1].strip()
+		if _looks_like_recipient_name_line(prev, tracking_hint):
+			return prev
+	return None
+
+
+def _extract_phone_loose(big: str) -> Optional[str]:
+	"""Boşluklu/birleşik cep telefonu."""
+	for pat in (
+		r"\+?\s*90\s*5\d{2}\s*\d{3}\s*\d{2}\s*\d{2}",
+		r"90\s*5\d{2}\s*\d{3}\s*\d{2}\s*\d{2}",
+		r"0\s*5\d{2}\s*\d{3}\s*\d{2}\s*\d{2}",
+	):
+		m = re.search(pat, big)
+		if m:
+			return normalize_phone(re.sub(r"\s+", "", m.group(0)))
+	return None
+
+
 def parse_focus_surat_label(ocr: str, *, tracking_hint: Optional[str] = None) -> Dict[str, Any]:
 	"""
 	Etiket satır düzeni: Gönderen | Alıcı (+tel), Adres, İçerik, Tahsilat, barkod.
@@ -100,6 +201,7 @@ def parse_focus_surat_label(ocr: str, *, tracking_hint: Optional[str] = None) ->
 	out = empty_label_dict()
 	out["shipping_company"] = "surat"
 	raw = _normalize_raw(ocr)
+	raw = _soft_fix_focus_ocr_typos(raw)
 	lines = [re.sub(r"\s+", " ", ln.strip()) for ln in raw.split("\n") if ln.strip()]
 	big = " ".join(lines)
 
@@ -244,6 +346,34 @@ def parse_focus_surat_label(ocr: str, *, tracking_hint: Optional[str] = None) ->
 				if ic:
 					out["notes"] = ic
 				break
+
+	# OCR bazen gönderen satırını alıcı sanır veya alıcı/telefon bloğunu düşürür.
+	if out.get("name"):
+		lnm = low_tr(out["name"])
+		if "focus" in lnm or "kansuz" in lnm or "umutcan" in lnm:
+			out["name"] = None
+
+	if not out.get("name"):
+		for block in (big,):
+			cand = _split_gonderen_alici_from_line(block)
+			if cand:
+				out["name"] = reject_bad_name(cand, tracking_hint)
+				break
+	if not out.get("name"):
+		for ln in lines:
+			cand = _split_gonderen_alici_from_line(ln)
+			if cand:
+				out["name"] = reject_bad_name(cand, tracking_hint)
+				break
+	if not out.get("name"):
+		fb = _name_line_before_phone(lines, tracking_hint)
+		if fb:
+			out["name"] = reject_bad_name(fb, tracking_hint)
+
+	if not out.get("phone"):
+		ph = _extract_phone_loose(big)
+		if ph:
+			out["phone"] = ph
 
 	return out
 

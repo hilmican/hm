@@ -9,6 +9,11 @@ String postProcessTurkishOcr(String raw) {
   s = s.replaceAll(RegExp(r'[ \t]{2,}'), ' ');
   s = s.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).join('\n');
 
+  // FOCUS / Sürat: "Alıcı" etiketi ve sütun kayması
+  s = s.replaceAll(RegExp(r'\bA1ici\s*:', caseSensitive: false), 'Alıcı:');
+  s = s.replaceAll(RegExp(r'\bAl1ci\s*:', caseSensitive: false), 'Alıcı:');
+  s = s.replaceAll(RegExp(r'\bAlici\s*:', caseSensitive: false), 'Alıcı:');
+
   // Sık görülen şehir/ilçe OCR hataları (kargo etiketi bağlamı)
   final wordFixes = <RegExp, String>{
     RegExp(r'Marmaraeresi', caseSensitive: false): 'Marmaraereğlisi',
@@ -54,5 +59,15 @@ int turkishOcrScore(String s) {
   if (low.contains('tahsilat')) sc += 10;
   if (low.contains('adres')) sc += 6;
   if (low.contains('içerik') || low.contains('icerik')) sc += 6;
+  return sc;
+}
+
+/// ML Kit vs Tesseract seçimi: alıcı satırı + telefon ipuçlarına bonus (mobil kargo etiketi).
+int kargoLabelOcrScore(String s) {
+  var sc = turkishOcrScore(s);
+  final low = s.toLowerCase();
+  if (low.contains('alıcı') || low.contains('alici')) sc += 25;
+  if (low.contains('gönderen') || low.contains('gonderen')) sc += 6;
+  if (RegExp(r'\+?\s*90\s*5\d|905\d{9}|\+90\d{10}').hasMatch(s)) sc += 18;
   return sc;
 }

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tesseract_ocr/flutter_tesseract_ocr.dart';
@@ -36,12 +37,69 @@ Future<String> _preprocessToTempJpeg(String inputPath) async {
   }
 }
 
+double _rowTopKey(List<TextLine> row) =>
+    row.map((l) => l.boundingBox.top).reduce(math.min);
+
+/// ML Kit’in düz [text] birleşimi, iki sütunlu (Gönderen | Alıcı) etikette sırayı bozabiliyor.
+/// Tüm satırları geometrik olarak yatay bant + soldan sağa sıralayıp yeniden üretir.
+String _mlKitReadingOrderText(RecognizedText recognized) {
+  final lines = <TextLine>[];
+  for (final block in recognized.blocks) {
+    lines.addAll(block.lines);
+  }
+  if (lines.isEmpty) return recognized.text;
+  if (lines.length == 1) return lines.first.text.trim();
+
+  final heights = lines.map((l) => l.boundingBox.height).toList()..sort();
+  final medH = heights[heights.length ~/ 2];
+  final tol = math.max(medH * 0.35, 8.0);
+
+  final rows = <List<TextLine>>[];
+  final byTop = [...lines]..sort((a, b) => a.boundingBox.top.compareTo(b.boundingBox.top));
+  for (final line in byTop) {
+    final cy = line.boundingBox.center.dy;
+    var placed = false;
+    for (final row in rows) {
+      final rowCy =
+          row.map((l) => l.boundingBox.center.dy).reduce((a, b) => a + b) / row.length;
+      if ((cy - rowCy).abs() <= tol) {
+        row.add(line);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) rows.add([line]);
+  }
+  for (final row in rows) {
+    row.sort((a, b) => a.boundingBox.left.compareTo(b.boundingBox.left));
+  }
+  rows.sort((a, b) => _rowTopKey(a).compareTo(_rowTopKey(b)));
+
+  final buf = StringBuffer();
+  for (var i = 0; i < rows.length; i++) {
+    if (i > 0) buf.writeln();
+    final parts = rows[i]
+        .map((l) => l.text.trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
+    buf.write(parts.join(' '));
+  }
+  return buf.toString();
+}
+
 Future<String> _mlKitLatin(String path) async {
   final input = InputImage.fromFilePath(path);
   final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
   try {
     final recognized = await recognizer.processImage(input);
-    return recognized.text;
+    final ordered = _mlKitReadingOrderText(recognized).trim();
+    final plain = recognized.text.trim();
+    final hasAlici =
+        RegExp(r'alıcı|alici', caseSensitive: false).hasMatch(ordered);
+    if (ordered.length >= plain.length * 0.85 || hasAlici) {
+      return ordered;
+    }
+    return plain.isNotEmpty ? plain : ordered;
   } finally {
     await recognizer.close();
   }
@@ -80,9 +138,12 @@ Future<String> recognizeTextFromImagePath(String path) async {
     }
 
     String best;
+    final mlScore = kargoLabelOcrScore(mlRaw);
+    final tessScore =
+        tessRaw != null && tessRaw.length >= 8 ? kargoLabelOcrScore(tessRaw) : -1;
     if (tessRaw != null &&
         tessRaw.length >= 8 &&
-        (turkishOcrScore(tessRaw) > turkishOcrScore(mlRaw) || mlRaw.length < 12)) {
+        (tessScore > mlScore || mlRaw.length < 12)) {
       best = tessRaw;
     } else {
       best = mlRaw;
