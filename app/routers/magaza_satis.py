@@ -622,7 +622,11 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 		if paid_conflict:
 			raise HTTPException(
 				status_code=409,
-				detail=f"An order with this tracking_no is already completed (order_id={paid_conflict.id})",
+				detail=(
+					f"Bu takip no ile ödenmiş sipariş var (order_id={paid_conflict.id}). "
+					f"Web: Siparişler → iptal (stok geri gelsin) → aynı satırda 'Kalıcı sil' ile kaydı kaldırın; "
+					f"veya POST /orders/{paid_conflict.id}/delete body {{\"confirm\":\"DELETE\"}} (yalnızca cancelled / açık kargo_qr)."
+				),
 			)
 
 		client = _ensure_client_for_kargo(

@@ -66,7 +66,9 @@
         .icon-btn { width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border); border-radius:8px; background:#fff; cursor:pointer; }
         .icon-btn.warn { color:#b91c1c; border-color:#ef4444; }
         .icon-btn.accent { color:#92400e; border-color:#92400e; }
+        .icon-btn.danger { color:#991b1b; border-color:#dc2626; background: #fff5f5; }
         .icon-btn:hover { background:#f8fafc; }
+        .icon-btn.danger:hover { background:#fee2e2; }
         .icon-btn svg { width:16px; height:16px; }
         th { background: #fafafa; position: sticky; top: 0; cursor: pointer; user-select: none; z-index: 1; }
         
@@ -336,6 +338,13 @@
                         <button class="icon-btn warn" title="İptal Et" aria-label="İptal Et" onclick="cancelOrder({{ o.id }})">
                             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
                         </button>
+                        {% set _st = (o.status or '')|lower %}
+                        {% set _ch = (o.channel or '')|lower %}
+                        {% if _st == 'cancelled' or (_ch == 'kargo_qr' and _st in ['placeholder','draft']) %}
+                        <button class="icon-btn danger" title="Kalıcı sil (takip no tekrar kullanılabilir)" aria-label="Kalıcı sil" onclick="hardDeleteOrder({{ o.id }})">
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                        </button>
+                        {% endif %}
                         <button class="icon-btn warn" title="İade" aria-label="İade" onclick="refund({{ o.id }})">
                             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5l-5 5 5 5V5z"></path><path d="M9 7h5a5 5 0 1 1 0 10H9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
                         </button>
@@ -539,6 +548,25 @@ filtersForm?.addEventListener('submit', ()=>{
             cancelError.textContent = 'Ağ hatası: ' + e;
         }
     });
+    async function hardDeleteOrder(id){
+        if(!id) return;
+        if(!confirm('Sipariş #' + id + ' kalıcı silinsin mi? Geri alınamaz; aynı takip no ile yeni kayıt açılabilir.\n\nOnay için sonraki kutuya DELETE yazın.')) return;
+        const typed = prompt('Onay: DELETE yazın');
+        if(typed !== 'DELETE') return;
+        try{
+            const res = await fetch(`/orders/${id}/delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirm: 'DELETE' })
+            });
+            if(!res.ok){
+                const t = await res.text();
+                alert('Silme hatası: ' + (t || res.status));
+                return;
+            }
+            location.reload();
+        }catch(e){ alert('Ağ hatası: ' + e); }
+    }
     // Inline modal state/handlers
     const overlay = document.getElementById('editOverlay');
     const epTotal = document.getElementById('epTotal');

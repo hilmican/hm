@@ -9,7 +9,7 @@ from sqlalchemy import and_
 from sqlalchemy import func, case, delete
 from sqlalchemy.exc import IntegrityError
 
-from ..models import Item, StockMovement, Product, ImportRow, ImportRun, Order, OrderItem
+from ..models import Item, StockMovement, Product, ImportRow, ImportRun, Order, OrderItem, StockUnit
 from .mapping import find_or_create_variant, resolve_mapping
 from .stock_units import sync_units_after_movement
 from sqlmodel import select as _select
@@ -286,6 +286,58 @@ def adjust_stock(
         restore_unit_ids=restore_unit_ids,
     )
     return mv
+
+
+def restore_order_stock_lines(
+    session: Session,
+    *,
+    order_id: int,
+    reason: str = "order-restore",
+) -> None:
+    """
+    Reverse outbound stock for this order's lines (cancel / refund / switch / purge).
+    When HMA_STOCK_UNIT_TRACKING is on, restores the same sold StockUnit rows via restore_unit_ids.
+    """
+    from .stock_units import stock_unit_tracking_enabled
+
+    pairs: List[Tuple[int, int]] = []
+    oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
+    for oi in oitems:
+        if oi.item_id and int(oi.quantity or 0) > 0:
+            pairs.append((int(oi.item_id), int(oi.quantity)))
+    if not pairs:
+        ord_row = session.exec(select(Order).where(Order.id == order_id)).first()
+        if ord_row and ord_row.item_id and int(ord_row.quantity or 0) > 0:
+            pairs.append((int(ord_row.item_id), int(ord_row.quantity)))
+
+    tracking = stock_unit_tracking_enabled()
+    for item_id, qty in pairs:
+        restore_ids: List[int] = []
+        if tracking:
+            units = session.exec(
+                select(StockUnit)
+                .where(
+                    StockUnit.order_id == order_id,
+                    StockUnit.item_id == item_id,
+                    StockUnit.status == "sold",
+                )
+                .order_by(StockUnit.id.desc())
+                .limit(qty)
+            ).all()
+            restore_ids = [int(u.id) for u in units if u.id is not None]
+            if len(restore_ids) < qty:
+                raise ValueError(
+                    f"stock_restore_units_mismatch: order_id={order_id} item_id={item_id} "
+                    f"need={qty} have_sold_units_linked={len(restore_ids)}"
+                )
+        adjust_stock(
+            session,
+            item_id=item_id,
+            delta=qty,
+            related_order_id=order_id,
+            reason=reason,
+            restore_unit_ids=restore_ids if restore_ids else None,
+        )
 
 
 def _parse_mapped_json(s: Optional[str]) -> Dict:

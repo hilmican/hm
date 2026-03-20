@@ -23,9 +23,12 @@ from ..models import (
     ImportRow,
     ImportRun,
     User,
+    OrderPayment,
+    StockMovement,
+    StockUnit,
 )
 from ..services.inventory import get_or_create_item as _get_or_create_item
-from ..services.inventory import adjust_stock
+from ..services.inventory import adjust_stock, restore_order_stock_lines
 from ..services.shipping import compute_shipping_fee
 from ..services.finance import get_effective_total, ensure_iban_income
 from fastapi.responses import StreamingResponse, RedirectResponse
@@ -525,14 +528,10 @@ def refund_order(order_id: int):
         # idempotent: if already refunded/switched/cancelled, do nothing
         if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
             return {"status": "ok", "message": "already_processed"}
-        # add stock back for all order items
-        oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
-        for oi in oitems:
-            if oi.item_id is None:
-                continue
-            qty = int(oi.quantity or 0)
-            if qty > 0:
-                adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order_id)
+        try:
+            restore_order_stock_lines(session, order_id=order_id, reason=f"order-refund:{order_id}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         o.status = "refunded"
         o.return_or_switch_date = dt.date.today()
         # cost should be zero for refunds
@@ -550,9 +549,7 @@ def cancel_order(order_id: int, body: dict = Body(default={})):
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
-        # Allow re-processing cancelled orders to fix financials
-        # Only skip if already refunded/switched/stitched (those are final states)
-        if (o.status or "") in ("refunded", "switched", "stitched"):
+        if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
             return {"status": "ok", "message": "already_processed"}
 
         # Check if we should restore inventory (default: True)
@@ -560,21 +557,11 @@ def cancel_order(order_id: int, body: dict = Body(default={})):
         if isinstance(restore_inventory, str):
             restore_inventory = restore_inventory.lower() in ("true", "1", "yes", "on")
 
-        # Restore inventory if requested
         if restore_inventory:
-            oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
-            for oi in oitems:
-                if oi.item_id is None:
-                    continue
-                qty = int(oi.quantity or 0)
-                if qty > 0:
-                    adjust_stock(
-                        session,
-                        item_id=int(oi.item_id),
-                        delta=qty,
-                        related_order_id=order_id,
-                        reason=f"order-cancel:{order_id}",
-                    )
+            try:
+                restore_order_stock_lines(session, order_id=order_id, reason=f"order-cancel:{order_id}")
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
 
         # Mark as cancelled and zero out financial impact
         o.status = "cancelled"
@@ -619,6 +606,93 @@ def cancel_order(order_id: int, body: dict = Body(default={})):
             pass
 
         return {"status": "ok", "restore_inventory": restore_inventory}
+
+
+def _order_eligible_for_hard_delete(o: Order) -> bool:
+    st = (o.status or "").lower()
+    ch = (o.channel or "").lower()
+    if st == "cancelled":
+        return True
+    if ch == "kargo_qr" and st in ("placeholder", "draft"):
+        return True
+    return False
+
+
+@router.post("/{order_id}/delete")
+def delete_order_hard(order_id: int, body: dict = Body(default={})):
+    """
+    Kalıcı sil (test / temizlik): yalnızca iptal edilmiş veya açık kargo_qr sepeti.
+    Takip no mobil tarafta tekrar kullanılabilir. Body: {"confirm": "DELETE"}
+    """
+    if (body.get("confirm") or "") != "DELETE":
+        raise HTTPException(status_code=400, detail='Gövde: {"confirm": "DELETE"} gerekli')
+
+    with get_session() as session:
+        o = session.exec(select(Order).where(Order.id == order_id)).first()
+        if not o:
+            raise HTTPException(status_code=404, detail="Order not found")
+        if not _order_eligible_for_hard_delete(o):
+            raise HTTPException(
+                status_code=400,
+                detail="Yalnızca iptal (cancelled) veya açık mobil kargo sepeti (kargo_qr + placeholder/draft) silinebilir",
+            )
+
+        st = (o.status or "").lower()
+        ch = (o.channel or "").lower()
+        if ch == "kargo_qr" and st in ("placeholder", "draft"):
+            has_lines = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).first()
+            if has_lines:
+                try:
+                    restore_order_stock_lines(session, order_id=order_id, reason=f"order-delete:{order_id}")
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e)) from e
+
+        pays = session.exec(select(Payment).where(Payment.order_id == order_id)).all()
+        for p in pays:
+            if p.id is not None:
+                for lg in session.exec(
+                    select(PaymentHistoryLog).where(PaymentHistoryLog.payment_id == int(p.id))
+                ).all():
+                    session.delete(lg)
+            session.delete(p)
+
+        for op in session.exec(select(OrderPayment).where(OrderPayment.order_id == order_id)).all():
+            session.delete(op)
+
+        for oi in session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all():
+            session.delete(oi)
+
+        for lg in session.exec(select(OrderEditLog).where(OrderEditLog.order_id == order_id)).all():
+            session.delete(lg)
+
+        for mv in session.exec(select(StockMovement).where(StockMovement.related_order_id == order_id)).all():
+            mv.related_order_id = None
+            session.add(mv)
+
+        for u in session.exec(select(StockUnit).where(StockUnit.order_id == order_id)).all():
+            u.order_id = None
+            session.add(u)
+
+        for ir in session.exec(select(ImportRow).where(ImportRow.matched_order_id == order_id)).all():
+            ir.matched_order_id = None
+            session.add(ir)
+
+        for other in session.exec(select(Order).where(Order.merged_into_order_id == order_id)).all():
+            other.merged_into_order_id = None
+            session.add(other)
+        for other in session.exec(select(Order).where(Order.partial_payment_group_id == order_id)).all():
+            other.partial_payment_group_id = None
+            session.add(other)
+
+        session.delete(o)
+        try:
+            from ..services.cache import bump_namespace
+
+            bump_namespace()
+        except Exception:
+            pass
+
+        return {"status": "ok", "deleted_order_id": order_id}
 
 
 @router.get("/export")
@@ -1157,14 +1231,10 @@ def switch_order(order_id: int):
         # idempotent: if already refunded/switched/cancelled, do nothing
         if (o.status or "") in ("refunded", "switched", "stitched", "cancelled"):
             return {"status": "ok", "message": "already_processed"}
-        # add stock back for all order items
-        oitems = session.exec(select(OrderItem).where(OrderItem.order_id == order_id)).all()
-        for oi in oitems:
-            if oi.item_id is None:
-                continue
-            qty = int(oi.quantity or 0)
-            if qty > 0:
-                adjust_stock(session, item_id=int(oi.item_id), delta=qty, related_order_id=order_id)
+        try:
+            restore_order_stock_lines(session, order_id=order_id, reason=f"order-switch:{order_id}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         o.status = "switched"
         o.return_or_switch_date = dt.date.today()
         # cost should be zero for switches
