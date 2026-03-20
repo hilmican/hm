@@ -156,7 +156,7 @@ def _ensure_client_for_kargo(
 				client.address = address
 			return client
 
-	display_name = (name or "").strip() or f"Kargo {track or 'müşteri'}"
+	display_name = (name or "").strip() or "Alıcı bilinmiyor"
 
 	if phone_norm:
 		base_key = client_unique_key(display_name, phone_norm)
@@ -202,6 +202,14 @@ def _is_open_kargo_qr_order(order: Order) -> bool:
 
 
 def _label_fields_snapshot(order: Order, client: Optional[Client]) -> Dict[str, Any]:
+	raw_snap = getattr(order, "kargo_label_snapshot_json", None) or ""
+	if raw_snap.strip():
+		try:
+			obj = json.loads(raw_snap)
+			if isinstance(obj, dict):
+				return obj
+		except Exception:
+			pass
 	merged: Dict[str, Any] = {
 		"tracking_no": order.tracking_no,
 		"name": client.name if client else None,
@@ -541,7 +549,10 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 
 	parsed = parse_kargo_qr(str(qr_content or ""))
 	ocr_raw = (payload.get("ocr_text") or "").strip()
-	ocr_dict = parse_kargo_label_ocr_text(ocr_raw) if ocr_raw else {}
+	_track_hint = (parsed.get("tracking_no") or "").strip() or None
+	ocr_dict = (
+		parse_kargo_label_ocr_text(ocr_raw, tracking_hint=_track_hint) if ocr_raw else {}
+	)
 	if (parsed.get("tracking_no") or "").strip():
 		ocr_dict = dict(ocr_dict)
 		ocr_dict.pop("tracking_no", None)
@@ -685,6 +696,10 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 		)
 		session.add(order)
 		session.flush()
+		lf_store = ocr_to_label_fields(merged)
+		order.kargo_label_snapshot_json = json.dumps(lf_store, ensure_ascii=False)
+		session.add(order)
+		session.flush()
 		cart = _order_kargo_cart_payload(session, int(order.id))
 
 		return {
@@ -698,7 +713,7 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 			"lines": cart["lines"],
 			"prefill_total_amount": cart["prefill_total_amount"],
 			"prefill_notes": cart["prefill_notes"],
-			"label_fields": _label_fields_snapshot(order, client),
+			"label_fields": lf_store,
 		}
 
 

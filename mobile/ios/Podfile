@@ -1,5 +1,5 @@
-# mobile_scanner ^7 → Apple Vision (Google ML Kit yok); sim/cihaz arm64 uyumu daha iyi.
-platform :ios, '15.0'
+# mobile_scanner + google_mlkit_textRecognition (OCR) — ML Kit pod'ları ≥ iOS 16 gerektirir.
+platform :ios, '16.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -27,19 +27,18 @@ require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelpe
 
 flutter_ios_podfile_setup
 
-# Bazı Google pod'ları IPHONEOS_DEPLOYMENT_TARGET=9.0/10.0 bırakıyor; Xcode 26 uyarı veriyor.
-def _pod_ios_min_12(config)
+# Eski pod'ların düşük IPHONEOS_DEPLOYMENT_TARGET değerini platform ile hizala (ML Kit ile uyum).
+def _pod_ios_min_platform(config, min_ver)
   t = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
   if t.nil? || t.to_s.strip.empty?
-    config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
+    config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = min_ver
     return
   end
   begin
-    return if Gem::Version.new(t) >= Gem::Version.new('12.0')
+    return if Gem::Version.new(t) >= Gem::Version.new(min_ver)
   rescue ArgumentError
-    # geçersiz sürüm string'i → 12.0
   end
-  config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
+  config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = min_ver
 end
 
 target 'Runner' do
@@ -52,14 +51,15 @@ target 'Runner' do
 end
 
 post_install do |installer|
+  ios_min = '16.0'
   installer.pods_project.build_configurations.each do |config|
-    _pod_ios_min_12(config)
+    _pod_ios_min_platform(config, ios_min)
   end
 
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
-      _pod_ios_min_12(config)
+      _pod_ios_min_platform(config, ios_min)
     end
   end
 end

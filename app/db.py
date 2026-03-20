@@ -1401,6 +1401,22 @@ def init_db() -> None:
                         )
                 except Exception:
                     pass
+                # kargo_qr OCR etiket özeti (JSON)
+                try:
+                    row = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order'
+                          AND COLUMN_NAME = 'kargo_label_snapshot_json'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.exec_driver_sql(
+                            "ALTER TABLE `order` ADD COLUMN kargo_label_snapshot_json LONGTEXT NULL"
+                        )
+                except Exception:
+                    pass
                 # Ensure income.deleted_at exists for soft delete
                 try:
                     row = conn.exec_driver_sql(

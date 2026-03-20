@@ -22,7 +22,7 @@ Ayrıntı: `docs/stock_units.md` → *Etiket yazdırma*.
 
 ## Kargo etiketi (OCR + kapıda ödeme)
 
-**Kargo etiketi** akışında QR/barkod sonrası isteğe bağlı **kamera veya galeri** ile tam etiket fotoğrafı alınır; metin cihazda **ML Kit** ile okunup API’ye `ocr_text` olarak gider. Sepet ve tamamlama ekranında alıcı / adres / içerik / tahsilat özeti gösterilir.  
+**Kargo etiketi** akışında **Etiketi okut (kod + OCR)** tek kamera açılışında barkod/QR ve aynı kareden etiket metnini **ML Kit** okur; API’ye `ocr_text` gider. İsteğe bağlı **Sadece QR/barkod** (OCR yok). Sepet ve tamamlama ekranında alıcı / adres / içerik / tahsilat özeti gösterilir.  
 **Tamamla** ekranında varsayılan **kapıda ödeme** (sipariş ödenmemiş `placeholder`); **Mağaza: ödeme şimdi alındı** açılırsa nakit/havale ile `paid` + ödeme kaydı oluşturulur. Ayrıntı: `docs/hma_mobile_api.md`.
 
 ## Xcode uyarıları (sık görülenler)

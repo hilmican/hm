@@ -79,6 +79,12 @@ class Order(SQLModel, table=True):
         index=True,
         description="kargo_qr checkout done at (COD or mağaza); blocks further order-add-item",
     )
+    # Mobil OCR sonrası etiket özeti (JSON); client adı yedek / bilinmiyor olsa bile UI doğru kalır
+    kargo_label_snapshot_json: Optional[str] = Field(
+        default=None,
+        sa_column=Column(Text),
+        description="label_fields JSON — recipient, phone, address, content, cod_amount, tracking_no",
+    )
 
 
 class OrderItem(SQLModel, table=True):

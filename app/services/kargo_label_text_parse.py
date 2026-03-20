@@ -48,11 +48,47 @@ def _split_address_city(address: str) -> Tuple[str, Optional[str]]:
     return a, None
 
 
-def parse_kargo_label_ocr_text(text: str) -> Dict[str, Any]:
+def _strip_trailing_ic_from_blob(blob: str) -> Tuple[str, Optional[str]]:
+    """
+    OCR tek satırda '... Tekirdağ İçerik: ...' birleştirirse adres'ten içerik ayır.
+    Returns (clean_blob, ic_text_or_none).
+    """
+    b = (blob or "").strip()
+    if not b:
+        return "", None
+    m = re.split(r"(?is)\s+(?:i̇çerik|içerik|icerik)\s*[:\.]?\s*", b, maxsplit=1)
+    if len(m) == 2 and m[1].strip():
+        left, right = m[0].strip(), m[1].strip()
+        right = re.split(r"(?is)\s*tahsilat\s*[:\.]?", right, maxsplit=1)[0].strip()
+        return left, right or None
+    return b, None
+
+
+def _reject_bad_name(name: Optional[str], tracking_hint: Optional[str]) -> Optional[str]:
+    if not name:
+        return None
+    n = name.strip()
+    if len(n) < 2:
+        return None
+    low = _low_tr(n)
+    if tracking_hint and tracking_hint in n.replace(" ", ""):
+        return None
+    if re.fullmatch(r"[\d\s\-]+", n):
+        return None
+    if re.match(r"(?i)kargo\s*\d+", n):
+        return None
+    if "adres" in low and ":" in n:
+        return None
+    return n
+
+
+def parse_kargo_label_ocr_text(text: str, *, tracking_hint: Optional[str] = None) -> Dict[str, Any]:
     """
     Return keys compatible with merge_kargo_fields:
     name, phone, address, city, notes (içerik), total_amount, payment_amount,
     tracking_no (if visible under barcode).
+
+    tracking_hint: QR'dan bilinen takip no; OCR'da yanlış isme düşmesini engellemek için.
     """
     out: Dict[str, Any] = {
         "tracking_no": None,
@@ -73,7 +109,7 @@ def parse_kargo_label_ocr_text(text: str) -> Dict[str, Any]:
     lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
     big = " ".join(lines)
 
-    # Tahsilat : 1530.00 ₺
+    # —— Tahsilat
     for m in re.finditer(
         r"Tahsilat\s*:?\s*([\d]+(?:[.,][\d]+)?)\s*(?:₺|TL)?", big, re.IGNORECASE
     ):
@@ -83,30 +119,77 @@ def parse_kargo_label_ocr_text(text: str) -> Dict[str, Any]:
             out["payment_amount"] = amt
             break
 
-    # Alıcı: NAME (same line or next)
-    for i, ln in enumerate(lines):
-        low = _low_tr(ln)
-        if "alıcı" in low or "alici:" in low:
-            if ":" in ln:
-                rest = ln.split(":", 1)[1].strip()
-                if rest and len(rest) > 2:
-                    out["name"] = rest
-                elif i + 1 < len(lines):
+    # —— İçerik (tüm metin üzerinde; tek satırlık OCR için)
+    ic_m = re.search(
+        r"(?is)(?:i̇çerik|içerik|icerik)\s*[:\.]?\s*(.+?)(?=\s*tahsilat\s*[:\.]?|tahsilat\s*\d|₺\s*\d|$)",
+        raw,
+    )
+    if ic_m:
+        ic_raw = ic_m.group(1).strip()
+        ic_raw = re.split(r"(?is)\s*tahsilat\s*", ic_raw, maxsplit=1)[0].strip()
+        if ic_raw:
+            out["notes"] = ic_raw
+
+    # —— Alıcı adı (full text; telefon/adres/gönderenden önce kes)
+    name_m = re.search(
+        r"(?is)(?:alıcı|alici)\s*[:\.]?\s*(.+?)(?=\s*\+?\s*90\s*\d|\s*0\s*5\d{2}\s*\d{3}|\badres\s*[:\.]|\bgönderen\s*[:\.]|\btelefon\b|\btar[iı]h\s*[:\.])",
+        raw,
+    )
+    if name_m:
+        out["name"] = _reject_bad_name(name_m.group(1).strip(), tracking_hint)
+
+    # —— Satır tabanlı alıcı (OCR ':'' kaybederse)
+    if not out.get("name"):
+        for i, ln in enumerate(lines):
+            low = _low_tr(ln)
+            if "alıcı" in low or low.startswith("alici"):
+                if ":" in ln:
+                    rest = ln.split(":", 1)[1].strip()
+                    out["name"] = _reject_bad_name(rest, tracking_hint)
+                if not out.get("name") and i + 1 < len(lines):
                     cand = lines[i + 1].strip()
                     clow = _low_tr(cand)
-                    if cand and "adres" not in clow and "gönderen" not in clow:
-                        out["name"] = cand
-            break
+                    if (
+                        cand
+                        and "adres" not in clow
+                        and "gönderen" not in clow
+                        and "alıcı" not in clow
+                    ):
+                        out["name"] = _reject_bad_name(cand, tracking_hint)
+                break
 
-    # Phone +90 / 05xx
+    # —— Telefon
     pm = re.search(r"(\+90\s*[\d\s]{10,14}|0\s*5\d{2}\s*\d{3}\s*\d{2}\s*\d{2})", big)
     if pm:
         out["phone"] = _normalize_phone(re.sub(r"\s+", "", pm.group(1)))
 
-    # Adres: ... until İçerik: or Tahsilat or Gönderen block
+    # —— Adres (tek satırlık OCR: "Adres: ... İçerik:")
+    if not out.get("address"):
+        adr_m = re.search(
+            r"(?is)\badres\s*[:\.]?\s*(.+?)(?=\s*(?:i̇çerik|içerik|icerik)\s*[:\.]?|\s*tahsilat\s*[:\.]?\s*\d|tahsilat\s*\d)",
+            raw,
+        )
+        if adr_m:
+            addr_blob = adr_m.group(1).strip()
+            addr_clean, ic_from_addr = _strip_trailing_ic_from_blob(addr_blob)
+            if ic_from_addr and not out.get("notes"):
+                out["notes"] = ic_from_addr
+            if addr_clean:
+                street, city = _split_address_city(addr_clean)
+                if city:
+                    city2, ic_from_city = _strip_trailing_ic_from_blob(city)
+                    if ic_from_city and not out.get("notes"):
+                        out["notes"] = ic_from_city
+                    city = city2
+                out["address"] = street or addr_clean
+                out["city"] = city
+
+    # —— Adres (satır satır)
     addr_start = None
     for i, ln in enumerate(lines):
         low = _low_tr(ln)
+        if out.get("address"):
+            break
         if addr_start is None and ("adres:" in low or low.startswith("adres")):
             addr_start = i
             first = ln.split(":", 1)[1].strip() if ":" in ln else ""
@@ -115,36 +198,46 @@ def parse_kargo_label_ocr_text(text: str) -> Dict[str, Any]:
                 l2 = lines[j]
                 l2l = _low_tr(l2)
                 if any(
-                    l2l.startswith(x) or x in l2l
-                    for x in ("içerik:", "icerik:", "tahsilat", "gönderen:", "gonderen:", "sürat", "surat")
+                    l2l.startswith(x) or (x in l2l and x.endswith(":"))
+                    for x in ("içerik:", "icerik:", "tahsilat", "gönderen:", "gonderen:")
                 ):
+                    break
+                if "tahsilat" in l2l and "adres" not in l2l:
                     break
                 chunks.append(l2)
             addr_full = " ".join(chunks).strip()
-            if addr_full:
-                street, city = _split_address_city(addr_full)
-                out["address"] = street or addr_full
+            addr_clean, ic_from_addr = _strip_trailing_ic_from_blob(addr_full)
+            if ic_from_addr and not out.get("notes"):
+                out["notes"] = ic_from_addr
+            if addr_clean:
+                street, city = _split_address_city(addr_clean)
+                if city:
+                    city2, ic_from_city = _strip_trailing_ic_from_blob(city)
+                    if ic_from_city and not out.get("notes"):
+                        out["notes"] = ic_from_city
+                    city = city2
+                out["address"] = street or addr_clean
                 out["city"] = city
             break
 
-    # İçerik: ...
-    for i, ln in enumerate(lines):
-        low = _low_tr(ln)
-        if "içerik:" in low or "icerik:" in low:
-            rest = ln.split(":", 1)[1].strip()
-            parts = [rest] if rest else []
-            for j in range(i + 1, len(lines)):
-                l2 = lines[j]
-                l2l = _low_tr(l2)
-                if "tahsilat" in l2l or "sürat" in l2l or "surat" in l2l:
-                    break
-                parts.append(l2)
-            ic = " ".join(parts).strip()
-            if ic:
-                out["notes"] = ic
-            break
+    # İçerik bloğu satır bazlı (full-text kaçırdıysa)
+    if not out.get("notes"):
+        for i, ln in enumerate(lines):
+            low = _low_tr(ln)
+            if "içerik:" in low or "icerik:" in low:
+                rest = ln.split(":", 1)[1].strip()
+                parts = [rest] if rest else []
+                for j in range(i + 1, len(lines)):
+                    l2 = lines[j]
+                    l2l = _low_tr(l2)
+                    if "tahsilat" in l2l or "sürat" in l2l or "surat" in l2l:
+                        break
+                    parts.append(l2)
+                ic = " ".join(parts).strip()
+                if ic:
+                    out["notes"] = ic
+                break
 
-    # Long digit string as tracking (barcode under label)
     if not out.get("tracking_no"):
         tm = re.search(r"\b(\d{12,16})\b", big)
         if tm:
@@ -164,6 +257,10 @@ def ocr_to_label_fields(merged: Dict[str, Any]) -> Dict[str, Any]:
     full_addr = addr
     if city and city not in addr:
         full_addr = f"{addr} / {city}" if addr else str(city)
+    full_addr, ic_tail = _strip_trailing_ic_from_blob(full_addr)
+    content = (merged.get("notes") or "") or None
+    if ic_tail and not (content and ic_tail in content):
+        content = f"{content} | {ic_tail}" if content else ic_tail
     tot = merged.get("total_amount")
     if tot is None:
         tot = merged.get("payment_amount")
@@ -175,7 +272,7 @@ def ocr_to_label_fields(merged: Dict[str, Any]) -> Dict[str, Any]:
         "recipient_name": (merged.get("name") or "") or None,
         "phone": merged.get("phone"),
         "address": full_addr or None,
-        "content": (merged.get("notes") or "") or None,
+        "content": (content or "") or None,
         "cod_amount": cod,
         "tracking_no": (merged.get("tracking_no") or "") or None,
     }

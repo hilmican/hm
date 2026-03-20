@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../../services/api_client.dart';
-import '../../services/kargo_label_ocr.dart';
 import '../../widgets/qr_scanner_widget.dart';
 import 'cart_scan_screen.dart';
+import 'kargo_label_scanner_screen.dart';
 
 class KargoScanScreen extends StatefulWidget {
   const KargoScanScreen({super.key});
@@ -18,54 +17,11 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
   final _manualCtrl = TextEditingController();
   bool _busy = false;
 
-  Future<String?> _optionalOcrText() async {
-    if (!mounted) return null;
-    final choice = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Etiket OCR'),
-        content: const Text(
-          'Alıcı, telefon, adres, içerik ve tahsilat bilgisi için etiketin '
-          'tamamının fotoğrafını çekebilir veya galeriden seçebilirsiniz. '
-          'Atlayıp yalnızca okuttuğunuz kod ile de devam edebilirsiniz.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, 'skip'),
-            child: const Text('Atla'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, 'gallery'),
-            child: const Text('Galeri'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, 'camera'),
-            child: const Text('Kamera'),
-          ),
-        ],
-      ),
-    );
-    if (!mounted || choice == null || choice == 'skip') return null;
-
-    final picker = ImagePicker();
-    final file = await picker.pickImage(
-      source: choice == 'camera' ? ImageSource.camera : ImageSource.gallery,
-      imageQuality: 88,
-      maxWidth: 2000,
-    );
-    if (file == null) return null;
-    final text = await recognizeTextFromImagePath(file.path);
-    final t = text.trim();
-    return t.isEmpty ? null : t;
-  }
-
-  Future<void> _startOrder(String raw) async {
+  Future<void> _startOrder(String raw, {String? ocrText}) async {
     final trimmed = raw.trim();
     if (trimmed.isEmpty) return;
     setState(() => _busy = true);
     try {
-      final ocrText = await _optionalOcrText();
       if (!mounted) return;
 
       final res = await _api.orderFromKargoQr(
@@ -134,24 +90,48 @@ class _KargoScanScreenState extends State<KargoScanScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    'Gönderi etiketindeki QR veya 1D barkod (ör. Code 128) okutun. '
-                    'Takip no / müşteri bilgisi etikette veya ham metin olarak aşağıya yapıştırın.',
+                    'Gönderi etiketindeki QR veya barkodu okutun; aynı kare üzerinde '
+                    'etiket metni (alıcı, adres, içerik, tahsilat) de işlenir. '
+                    'Alternatif: ham metin / takip no aşağıya.',
                   ),
                   const SizedBox(height: 16),
                   FilledButton.icon(
                     onPressed: () async {
                       if (!context.mounted) return;
+                      final result = await Navigator.of(context)
+                          .push<KargoScanResult>(
+                        MaterialPageRoute(
+                          builder: (_) => const KargoLabelScannerScreen(),
+                        ),
+                      );
+                      if (result != null &&
+                          result.barcode.trim().isNotEmpty) {
+                        await _startOrder(
+                          result.barcode,
+                          ocrText: result.ocrText,
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Etiketi okut (kod + OCR)'),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      if (!context.mounted) return;
                       final code = await Navigator.of(context).push<String>(
                         MaterialPageRoute(
                           builder: (_) => const QrScannerWidget(
-                            title: 'Kargo etiketi — QR / barkod',
+                            title: 'Yalnızca kod (OCR yok)',
                           ),
                         ),
                       );
-                      if (code != null && code.isNotEmpty) _startOrder(code);
+                      if (code != null && code.isNotEmpty) {
+                        await _startOrder(code);
+                      }
                     },
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('QR / barkod okut'),
+                    icon: const Icon(Icons.qr_code_2),
+                    label: const Text('Sadece QR / barkod'),
                   ),
                   const SizedBox(height: 24),
                   const Text('Veya ham metin / takip no'),

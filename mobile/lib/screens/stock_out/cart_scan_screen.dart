@@ -170,11 +170,13 @@ class _CartScanScreenState extends State<CartScanScreen> {
     final codStr = cod is num
         ? '${cod.toDouble().toStringAsFixed(2)} TL'
         : (cod != null ? cod.toString() : null);
+    final track = s(f['tracking_no']);
     if (name == null &&
         phone == null &&
         addr == null &&
         content == null &&
-        codStr == null) {
+        codStr == null &&
+        (track == null || track.isEmpty)) {
       return const SizedBox.shrink();
     }
     final theme = Theme.of(context);
@@ -186,6 +188,7 @@ class _CartScanScreenState extends State<CartScanScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Etiket (OCR)', style: theme.textTheme.titleSmall),
+            if (track != null && track.isNotEmpty) Text('Takip no: $track'),
             if (name != null && name.isNotEmpty) Text('Alıcı: $name'),
             if (phone != null && phone.isNotEmpty) Text('Tel: $phone'),
             if (addr != null && addr.isNotEmpty) Text('Adres: $addr'),
