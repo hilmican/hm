@@ -22,7 +22,10 @@ Ayrıntı: `docs/stock_units.md` → *Etiket yazdırma*.
 
 ## Kargo etiketi (OCR + kapıda ödeme)
 
-**Kargo etiketi** akışında **Etiketi okut (kod + OCR)** görüntü önce kontrast + ölçek ile iyileştirilir; **Android ve iOS**’ta **Tesseract `tur+eng`** ile ML Kit birleştirilir (`assets/tessdata/`). **iOS:** `Runner/tessdata` Xcode’da **mavi klasör (folder reference)** olarak projede; `Sync tessdata for OCR` derleme adımı `assets/tessdata/*.traineddata` dosyalarını oraya kopyalar (SwiftyTesseract init için gerekli). API’ye `ocr_text` gider. İsteğe bağlı **Sadece QR/barkod** (OCR yok). Sepet ve tamamlama ekranında alıcı / adres / içerik / tahsilat özeti gösterilir.  
+**Kargo etiketi** akışında **Etiketi okut (kod + OCR)** iki ön-işlem varyantı (standart + keskinleştirilmiş / daha geniş), **ML Kit** satır sırası düzeltmesi ve **Tesseract** çoklu PSM (`6`, `11`, `3`) sonucunun satır bazında birleştirilmesiyle çalışır; **Android**’de tarayıcı önizlemesi için **1920×1080** hedef çözünürlük istenir (cihaz desteklerse). **iOS + Android:** Tesseract `tur+eng` (`assets/tessdata/`). **iOS:** `Runner/tessdata` Xcode’da **mavi klasör (folder reference)** olarak projede; `Sync tessdata for OCR` derleme adımı `assets/tessdata/*.traineddata` dosyalarını oraya kopyalar. API’ye `ocr_text` gider. İsteğe bağlı **Sadece QR/barkod** (OCR yok). Sepet ve tamamlama ekranında alıcı / adres / içerik / tahsilat özeti gösterilir.
+
+- **Debug:** Hata ayıklama derlemesinde konsolda `[kargo_ocr]` ile ML / Tesseract / birleşik metin özetleri görünür.
+- **Alıcı sütunu ek OCR (deneysel):** `flutter run --dart-define=HMA_OCR_RECIPIENT_CROP=true` (etiket ortalanmış kadraj varsayımıyla sağ bant kırpması).  
 **Tamamla** ekranında varsayılan **kapıda ödeme** (sipariş ödenmemiş `placeholder`); **Mağaza: ödeme şimdi alındı** açılırsa nakit/havale ile `paid` + ödeme kaydı oluşturulur. Ayrıntı: `docs/hma_mobile_api.md`.
 
 ## Kargo satışı — çevrimdışı kuyruk (iOS / Android)

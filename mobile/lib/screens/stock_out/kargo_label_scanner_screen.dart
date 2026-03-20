@@ -40,6 +40,9 @@ class _KargoLabelScannerScreenState extends State<KargoLabelScannerScreen> {
       /// Aynı kod tekrar tekrar okunabilsin; son kare sürekli güncellensin.
       detectionSpeed: DetectionSpeed.unrestricted,
       returnImage: true,
+      /// Android: düşük önizleme (640x480) OCR için çoğu zaman yetersiz; mümkün olan en yakın çözünürlük.
+      /// iOS: eklenti şu an bu alanı yok sayabilir; yine de zararsız iletilir.
+      cameraResolution: Platform.isAndroid ? const Size(1920, 1080) : null,
     );
   }
 
