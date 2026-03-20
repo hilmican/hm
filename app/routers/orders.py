@@ -27,6 +27,7 @@ from ..models import (
     OrderPayment,
     StockMovement,
     StockUnit,
+    IGUser,
 )
 from ..services.inventory import get_or_create_item as _get_or_create_item
 from ..services.inventory import adjust_stock, restore_order_stock_lines
@@ -699,6 +700,9 @@ def delete_order_hard(order_id: int, request: Request, body: dict = Body(default
         actor_uid = None
 
     with get_session() as session:
+        # actor_user_id FK: oturumdaki uid DB'de yoksa log insert 500 verir
+        if actor_uid is not None and session.get(User, actor_uid) is None:
+            actor_uid = None
         o = session.exec(select(Order).where(Order.id == order_id)).first()
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
@@ -785,6 +789,11 @@ def delete_order_hard(order_id: int, request: Request, body: dict = Body(default
         for other in session.exec(select(Order).where(Order.partial_payment_group_id == order_id)).all():
             other.partial_payment_group_id = None
             session.add(other)
+
+        # ig_users.linked_order_id -> order.id (FK); yoksa DELETE commit IntegrityError / 500
+        for igu in session.exec(select(IGUser).where(IGUser.linked_order_id == order_id)).all():
+            igu.linked_order_id = None
+            session.add(igu)
 
         session.delete(o)
         try:

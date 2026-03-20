@@ -1708,6 +1708,43 @@ def init_db() -> None:
                 except Exception:
                     pass
 
+                # Kalıcı sipariş silme snapshot (order satırı silinir; bu tablo kalır)
+                try:
+                    row_odl = conn.exec_driver_sql(
+                        """
+                        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order_deletion_log'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    if row_odl is None:
+                        conn.exec_driver_sql(
+                            """
+                            CREATE TABLE order_deletion_log (
+                                id INT PRIMARY KEY AUTO_INCREMENT,
+                                original_order_id INT NOT NULL,
+                                tracking_no VARCHAR(255) NULL,
+                                channel VARCHAR(64) NULL,
+                                source VARCHAR(64) NULL,
+                                status VARCHAR(64) NULL,
+                                snapshot_json LONGTEXT NOT NULL,
+                                reason TEXT NULL,
+                                actor_user_id INT NULL,
+                                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                INDEX idx_odl_original_order (original_order_id),
+                                INDEX idx_odl_tracking (tracking_no),
+                                INDEX idx_odl_channel (channel),
+                                INDEX idx_odl_source (source),
+                                INDEX idx_odl_status (status),
+                                INDEX idx_odl_actor (actor_user_id),
+                                INDEX idx_odl_created (created_at),
+                                FOREIGN KEY (actor_user_id) REFERENCES user(id) ON DELETE SET NULL
+                            )
+                            """
+                        )
+                except Exception:
+                    pass
+
                 # Ensure incomehistorylog table exists
                 try:
                     row = conn.exec_driver_sql(
