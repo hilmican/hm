@@ -550,8 +550,15 @@ def order_from_kargo_qr(request: Request, payload: dict = Body(...)):
 	parsed = parse_kargo_qr(str(qr_content or ""))
 	ocr_raw = (payload.get("ocr_text") or "").strip()
 	_track_hint = (parsed.get("tracking_no") or "").strip() or None
+	_qr_for_ocr = str(qr_content or "").strip() or None
 	ocr_dict = (
-		parse_kargo_label_ocr_text(ocr_raw, tracking_hint=_track_hint) if ocr_raw else {}
+		parse_kargo_label_ocr_text(
+			ocr_raw,
+			tracking_hint=_track_hint,
+			qr_content=_qr_for_ocr,
+		)
+		if ocr_raw
+		else {}
 	)
 	if (parsed.get("tracking_no") or "").strip():
 		ocr_dict = dict(ocr_dict)

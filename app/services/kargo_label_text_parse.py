@@ -4,6 +4,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional, Tuple
 
+from .kargo_templates.focus_surat import maybe_parse_focus_surat
+
 
 def _low_tr(s: str) -> str:
     """Lowercase with Turkish İ/I → i/ı so keyword checks work after OCR."""
@@ -82,7 +84,12 @@ def _reject_bad_name(name: Optional[str], tracking_hint: Optional[str]) -> Optio
     return n
 
 
-def parse_kargo_label_ocr_text(text: str, *, tracking_hint: Optional[str] = None) -> Dict[str, Any]:
+def parse_kargo_label_ocr_text(
+    text: str,
+    *,
+    tracking_hint: Optional[str] = None,
+    qr_content: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Return keys compatible with merge_kargo_fields:
     name, phone, address, city, notes (içerik), total_amount, payment_amount,
@@ -104,6 +111,14 @@ def parse_kargo_label_ocr_text(text: str, *, tracking_hint: Optional[str] = None
     }
     if not text or not str(text).strip():
         return out
+
+    specialized = maybe_parse_focus_surat(
+        str(text).strip(),
+        qr_content=(str(qr_content).strip() if qr_content else None),
+        tracking_hint=tracking_hint,
+    )
+    if specialized is not None:
+        return specialized
 
     raw = re.sub(r"\r\n?", "\n", str(text))
     lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
