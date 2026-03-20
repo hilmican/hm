@@ -22,7 +22,7 @@ Ayrıntı: `docs/stock_units.md` → *Etiket yazdırma*.
 
 ## Kargo etiketi (OCR + kapıda ödeme)
 
-**Kargo etiketi** akışında **Etiketi okut (kod + OCR)** tek kamera açılışında barkod/QR ve aynı kareden etiket metnini **ML Kit** okur; API’ye `ocr_text` gider. İsteğe bağlı **Sadece QR/barkod** (OCR yok). Sepet ve tamamlama ekranında alıcı / adres / içerik / tahsilat özeti gösterilir.  
+**Kargo etiketi** akışında **Etiketi okut (kod + OCR)** görüntü önce kontrast + ölçek ile iyileştirilir; **Android ve iOS**’ta **Tesseract `tur+eng`** ile ML Kit birleştirilir (`assets/tessdata/`). **iOS:** `Runner/tessdata` Xcode’da **mavi klasör (folder reference)** olarak projede; `Sync tessdata for OCR` derleme adımı `assets/tessdata/*.traineddata` dosyalarını oraya kopyalar (SwiftyTesseract init için gerekli). API’ye `ocr_text` gider. İsteğe bağlı **Sadece QR/barkod** (OCR yok). Sepet ve tamamlama ekranında alıcı / adres / içerik / tahsilat özeti gösterilir.  
 **Tamamla** ekranında varsayılan **kapıda ödeme** (sipariş ödenmemiş `placeholder`); **Mağaza: ödeme şimdi alındı** açılırsa nakit/havale ile `paid` + ödeme kaydı oluşturulur. Ayrıntı: `docs/hma_mobile_api.md`.
 
 ## Kargo satışı — çevrimdışı kuyruk (iOS / Android)
